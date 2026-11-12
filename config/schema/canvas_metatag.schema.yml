@@ -1,0 +1,123 @@
+canvas_metatag.values:
+  type: mapping
+  label: 'SEO values'
+  mapping:
+    title:
+      type: string
+      label: 'Title'
+      requiredKey: false
+    description:
+      type: string
+      label: 'Description'
+      requiredKey: false
+    social:
+      type: mapping
+      label: 'Social'
+      requiredKey: false
+      mapping:
+        title:
+          type: string
+          label: 'Social title'
+          requiredKey: false
+        description:
+          type: string
+          label: 'Social description'
+          requiredKey: false
+        image:
+          type: string
+          label: 'Social image (media UUID or image token)'
+          requiredKey: false
+    robots:
+      type: mapping
+      label: 'Robots'
+      requiredKey: false
+      mapping:
+        noindex:
+          type: boolean
+          label: 'Hide from search engines'
+          requiredKey: false
+        nofollow:
+          type: boolean
+          label: 'Do not follow links'
+          requiredKey: false
+        nosnippet:
+          type: boolean
+          label: 'No text preview'
+          requiredKey: false
+        max_snippet:
+          type: integer
+          label: 'Text preview length (-1: no limit)'
+          requiredKey: false
+          constraints:
+            Range:
+              min: -1
+              max: 1000
+        max_image_preview:
+          type: string
+          label: 'Image preview size'
+          requiredKey: false
+          constraints:
+            Choice: [none, standard, large]
+    schema:
+      type: mapping
+      label: 'Structured data'
+      requiredKey: false
+      mapping:
+        type:
+          type: string
+          label: 'Type'
+          requiredKey: false
+        props:
+          type: sequence
+          label: 'Property values'
+          requiredKey: false
+          sequence:
+            type: string
+            label: 'Value'
+        custom:
+          type: string
+          label: 'Custom JSON-LD'
+          requiredKey: false
+
+canvas_metatag.site:
+  type: config_object
+  label: 'SEO site settings'
+  mapping:
+    identity:
+      type: mapping
+      label: 'Site identity'
+      mapping:
+        kind:
+          type: string
+          label: 'Kind'
+          constraints:
+            Choice: [organization, person]
+        name:
+          type: string
+          label: 'Name (empty: the site name)'
+        separator:
+          type: string
+          label: 'Title separator'
+        logo:
+          type: string
+          label: 'Logo media UUID'
+        default_image:
+          type: string
+          label: 'Default social image media UUID'
+        same_as:
+          type: sequence
+          label: 'Profiles'
+          sequence:
+            type: uri
+            label: 'Profile URL'
+    values:
+      type: canvas_metatag.values
+      label: 'Site defaults'
+
+canvas.content_template.*.*.*.third_party.canvas_metatag:
+  type: mapping
+  label: 'SEO defaults for this content type'
+  mapping:
+    values:
+      type: canvas_metatag.values
+      label: 'Values'

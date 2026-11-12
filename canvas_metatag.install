@@ -1,0 +1,82 @@
+<?php
+
+/**
+ * @file
+ * Install and uninstall hooks for Canvas Metatag.
+ */
+
+declare(strict_types=1);
+
+use Drupal\canvas\AutoSave\AutoSaveManager;
+use Drupal\canvas\Entity\ContentTemplate;
+use Drupal\Core\Cache\Cache;
+use Drupal\Core\Config\Entity\ConfigEntityStorageInterface;
+use Drupal\Core\Entity\ContentEntityInterface;
+
+/**
+ * Implements hook_install().
+ */
+function canvas_metatag_install(bool $is_syncing): void {
+  // Core does not clear render caches on install, and the alter that removes
+  // core's canonical and shortlink does not run on a render cache hit.
+  Cache::invalidateTags(['rendered']);
+  if (!$is_syncing && \Drupal::moduleHandler()->moduleExists('metatag')) {
+    \Drupal::messenger()->addStatus(t('SEO now provides the head tags for Canvas pages and for content shown through a Canvas content template. Values from the Metatag module are no longer used there.'));
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ *
+ * Core strips our third-party setting from stored templates after this hook
+ * and saves them, and Canvas deletes a template's draft whenever such a
+ * property changes. So the removal happens here, and each draft is written
+ * back without the setting: unpublished layout work survives, and a later
+ * publish cannot store a setting of a module that is gone.
+ */
+function canvas_metatag_uninstall(bool $is_syncing): void {
+  $auto_save = \Drupal::service(AutoSaveManager::class);
+  $storage = \Drupal::entityTypeManager()->getStorage(ContentTemplate::ENTITY_TYPE_ID);
+  assert($storage instanceof ConfigEntityStorageInterface);
+  foreach ($storage->loadMultipleOverrideFree() as $template) {
+    assert($template instanceof ContentTemplate);
+    $draft = $auto_save->getAutoSaveEntity($template, TRUE);
+    // During a configuration import the stored templates are the import's.
+    $stored = !$is_syncing && $template->getThirdPartySettings('canvas_metatag');
+    if ($stored) {
+      $template->unsetThirdPartySetting('canvas_metatag', 'values')->save();
+    }
+    $entity = $draft->entity;
+    if ($entity instanceof ContentTemplate && ($stored || $entity->getThirdPartySettings('canvas_metatag'))) {
+      $entity->unsetThirdPartySetting('canvas_metatag', 'values');
+      $auto_save->saveEntity($entity, $draft->clientId);
+    }
+  }
+
+  // Page drafts keep their layout work too, but not our value: after a
+  // reinstall it would be live in the draft again, and the next publish of an
+  // unrelated change would store it. The field still exists at this point.
+  $pages = \Drupal::entityTypeManager()->getStorage('canvas_page');
+  foreach ($auto_save->getAllAutoSaveList(FALSE, FALSE) as $entry) {
+    if ($entry['entity_type'] !== 'canvas_page' || empty($entry['data']['canvas_metatag'])) {
+      continue;
+    }
+    $page = $pages->load($entry['entity_id']);
+    $langcode = (string) $entry['langcode'];
+    if (!$page instanceof ContentEntityInterface) {
+      continue;
+    }
+    try {
+      // A draft of a translation that was never published has no stored one.
+      $page = $page->hasTranslation($langcode) ? $page->getTranslation($langcode) : (clone $page)->addTranslation($langcode);
+    }
+    catch (\InvalidArgumentException) {
+      continue;
+    }
+    $draft = $auto_save->getAutoSaveEntity($page, TRUE);
+    if ($draft->entity instanceof ContentEntityInterface) {
+      $draft->entity->set('canvas_metatag', NULL);
+      $auto_save->saveEntity($draft->entity, $draft->clientId);
+    }
+  }
+}

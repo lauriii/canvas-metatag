@@ -1,0 +1,7 @@
+name: Canvas Metatag
+type: module
+description: 'Search, social and structured data settings for Canvas pages, content templates and the site.'
+package: Canvas
+core_version_requirement: ^11.3
+dependencies:
+  - canvas:canvas

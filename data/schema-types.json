@@ -1,0 +1,67 @@
+{
+  "WebPage": { "label": "Web page", "group": "Web page", "hint": "The default. Right for most pages.", "page_type": "WebPage" },
+  "AboutPage": { "label": "About page", "group": "Web page", "hint": "About the organization or person behind the site.", "page_type": "AboutPage" },
+  "ContactPage": { "label": "Contact page", "group": "Web page", "hint": "How to get in touch.", "page_type": "ContactPage" },
+  "CollectionPage": { "label": "Collection page", "group": "Web page", "hint": "A list of other pages, such as a blog index.", "page_type": "CollectionPage" },
+  "Article": {
+    "label": "Article", "group": "Article", "hint": "Editorial content with an author and a date.",
+    "primary_type": "Article", "og_type": "article",
+    "refs": { "publisher": "identity" },
+    "nested": { "author": "Person" },
+    "props": [
+      { "key": "headline", "label": "Headline", "kind": "text", "default": "{title}", "level": "recommended" },
+      { "key": "description", "label": "Summary", "kind": "text", "default": "{description}" },
+      { "key": "image", "label": "Image", "kind": "image", "default": "{image}", "level": "recommended" },
+      { "key": "datePublished", "label": "Published", "kind": "date", "default": "{published}", "level": "recommended" },
+      { "key": "dateModified", "label": "Updated", "kind": "date", "default": "{modified}", "level": "recommended" },
+      { "key": "author_name", "label": "Author name", "kind": "text", "default": "{author}", "level": "recommended" },
+      { "key": "author_url", "label": "Author page", "kind": "url" }
+    ]
+  },
+  "BlogPosting": { "extends": "Article", "label": "Blog post", "hint": "A post in a blog.", "primary_type": "BlogPosting" },
+  "NewsArticle": { "extends": "Article", "label": "News article", "hint": "Reporting on a current event.", "primary_type": "NewsArticle" },
+  "Event": {
+    "label": "Event", "group": "Event", "hint": "Something that happens at a time and a place.",
+    "primary_type": "Event",
+    "nested": { "location": "Place", "location_address": "PostalAddress" },
+    "props": [
+      { "key": "name", "label": "Event name", "kind": "text", "default": "{title}", "level": "required" },
+      { "key": "startDate", "label": "Starts", "kind": "date", "level": "required" },
+      { "key": "endDate", "label": "Ends", "kind": "date", "level": "recommended" },
+      { "key": "location_name", "label": "Venue", "kind": "text", "level": "recommended" },
+      { "key": "location_address_streetAddress", "label": "Street address", "kind": "text", "level": "required" },
+      { "key": "location_address_addressLocality", "label": "City", "kind": "text" },
+      { "key": "location_address_postalCode", "label": "Postal code", "kind": "text" },
+      { "key": "location_address_addressCountry", "label": "Country", "kind": "text" },
+      { "key": "description", "label": "Summary", "kind": "text", "default": "{description}", "level": "recommended" },
+      { "key": "image", "label": "Image", "kind": "image", "default": "{image}", "level": "recommended" },
+      { "key": "eventStatus", "label": "Status", "kind": "enum", "options": ["EventScheduled", "EventCancelled", "EventPostponed", "EventRescheduled"], "ai": false }
+    ]
+  },
+  "Product": {
+    "label": "Product", "group": "Product", "hint": "One product with a price.",
+    "primary_type": "Product",
+    "nested": { "offers": "Offer", "brand": "Brand" },
+    "props": [
+      { "key": "name", "label": "Product name", "kind": "text", "default": "{title}", "level": "required" },
+      { "key": "description", "label": "Summary", "kind": "text", "default": "{description}", "level": "recommended" },
+      { "key": "image", "label": "Image", "kind": "image", "default": "{image}", "level": "recommended" },
+      { "key": "offers_price", "label": "Price", "kind": "number", "level": "required", "ai": false },
+      { "key": "offers_priceCurrency", "label": "Currency code", "kind": "text", "pattern": "^[A-Z]{3}$", "level": "required", "ai": false },
+      { "key": "offers_availability", "label": "Availability", "kind": "enum", "options": ["InStock", "OutOfStock", "PreOrder", "BackOrder", "SoldOut", "Discontinued"], "level": "recommended", "ai": false },
+      { "key": "brand_name", "label": "Brand", "kind": "text" },
+      { "key": "sku", "label": "SKU", "kind": "text", "pattern": "^\\S+$", "ai": false }
+    ]
+  },
+  "ProfilePage": {
+    "label": "Profile", "group": "Profile", "hint": "A page about one person.",
+    "page_type": "ProfilePage", "primary_type": "Person", "og_type": "profile",
+    "props": [
+      { "key": "name", "label": "Name", "kind": "text", "default": "{title}", "level": "required" },
+      { "key": "description", "label": "About", "kind": "text", "default": "{description}", "level": "recommended" },
+      { "key": "image", "label": "Photo", "kind": "image", "default": "{image}", "level": "recommended" },
+      { "key": "jobTitle", "label": "Role", "kind": "text" },
+      { "key": "sameAs", "label": "Profile elsewhere", "kind": "url" }
+    ]
+  }
+}

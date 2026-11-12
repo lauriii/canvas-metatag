@@ -1,0 +1,12 @@
+langcode: en
+identity:
+  kind: organization
+  name: ''
+  separator: '|'
+  logo: ''
+  default_image: ''
+  same_as: {  }
+values:
+  title: '{title} {sep} {site}'
+  robots:
+    max_image_preview: large

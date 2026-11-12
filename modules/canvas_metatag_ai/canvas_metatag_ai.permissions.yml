@@ -1,0 +1,3 @@
+use canvas metatag ai:
+  title: 'Use AI suggestions for SEO'
+  description: 'Ask the site''s AI provider for suggestions in the SEO dialog. Each request is a paid call and sends the page''s current text, including unpublished draft text, to the AI provider. Also needs the permission to edit SEO settings in Canvas.'

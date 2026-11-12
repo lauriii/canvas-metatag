@@ -1,0 +1,18 @@
+{
+  "name": "canvas-metatag-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "End-to-end Playwright tests for the Canvas Metatag module.",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit",
+    "install:browsers": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.10.0",
+    "@drupal/playwright": "^1.1.1",
+    "@playwright/test": "^1.47.0",
+    "typescript": "^5.6.0"
+  }
+}

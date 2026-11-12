@@ -1,0 +1,76 @@
+canvas_metatag.api.state:
+  path: '/canvas-metatag/api/state'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::state'
+  methods: [GET]
+  requirements:
+    _permission: 'edit canvas metatag+administer canvas metatag'
+  options:
+    no_cache: 'TRUE'
+    # The dialog runs in a signed-in browser. A bearer token would skip the
+    # CSRF check, which core applies to cookie sessions only.
+    _auth: ['cookie']
+
+canvas_metatag.api.page:
+  path: '/canvas-metatag/api/draft/canvas_page/{canvas_page}'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::putPage'
+  methods: [PUT]
+  requirements:
+    _permission: 'edit canvas metatag'
+    _entity_access: 'canvas_page.update'
+    _csrf_request_header_token: 'TRUE'
+    canvas_page: \d+
+  options:
+    no_cache: 'TRUE'
+    # The dialog runs in a signed-in browser. A bearer token would skip the
+    # CSRF check, which core applies to cookie sessions only.
+    _auth: ['cookie']
+    parameters:
+      canvas_page:
+        type: entity:canvas_page
+
+canvas_metatag.api.template:
+  path: '/canvas-metatag/api/draft/content_template/{content_template}'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::putTemplate'
+  methods: [PUT]
+  requirements:
+    _permission: 'edit canvas metatag'
+    _entity_access: 'content_template.update'
+    _csrf_request_header_token: 'TRUE'
+  options:
+    no_cache: 'TRUE'
+    # The dialog runs in a signed-in browser. A bearer token would skip the
+    # CSRF check, which core applies to cookie sessions only.
+    _auth: ['cookie']
+    parameters:
+      content_template:
+        type: entity:content_template
+
+canvas_metatag.api.site:
+  path: '/canvas-metatag/api/site'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::putSite'
+  methods: [PUT]
+  requirements:
+    _permission: 'administer canvas metatag'
+    _csrf_request_header_token: 'TRUE'
+  options:
+    no_cache: 'TRUE'
+    # The dialog runs in a signed-in browser. A bearer token would skip the
+    # CSRF check, which core applies to cookie sessions only.
+    _auth: ['cookie']
+
+canvas_metatag.api.media:
+  path: '/canvas-metatag/api/media'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::media'
+  methods: [GET]
+  requirements:
+    _permission: 'edit canvas metatag+administer canvas metatag'
+  options:
+    no_cache: 'TRUE'
+    # The dialog runs in a signed-in browser. A bearer token would skip the
+    # CSRF check, which core applies to cookie sessions only.
+    _auth: ['cookie']

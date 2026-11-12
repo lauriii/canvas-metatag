@@ -1,0 +1,7 @@
+canvas_metatag:
+  name: 'SEO'
+  description: 'How pages appear in search results, on social cards and to answer engines.'
+  url: extension/index.html
+  icon: extension/icon.svg
+  type: 'canvas'
+  api_version: '1.0'

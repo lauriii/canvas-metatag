@@ -1,0 +1,196 @@
+import AxeBuilder from '@axe-core/playwright';
+
+import { PAGES, SITE_NAME, TEST_ID, UI, USERS } from './constants';
+import {
+  SEO_IFRAME,
+  button,
+  expect,
+  isLayoutSave,
+  openPage,
+  openSeo,
+  pageQuery,
+  seoState,
+  status,
+  tab,
+  test,
+  textbox,
+  writeDraft,
+} from './fixture';
+
+/**
+ * Who may do what, what the dialog does when it cannot save safely, and
+ * whether everyone can use it: keyboard, assistive technology, zoom.
+ */
+
+test.describe.configure({ mode: 'serial' });
+
+const pricing = PAGES.pricing;
+
+test('without the permission the dialog says so and offers nothing', async ({ drupal, page }) => {
+  await drupal.login(USERS.noSeo);
+  await openPage(page, pricing.id);
+  const frame = await openSeo(page);
+  await expect(frame.getByRole('heading', { name: UI.noAccess.heading })).toBeVisible();
+  await expect(frame.getByText(UI.noAccess.text)).toBeVisible();
+  await expect(frame.getByRole('tab')).toHaveCount(0);
+  await expect(frame.getByRole('textbox')).toHaveCount(0);
+});
+
+test('with "edit" only, site settings can be read and not changed', async ({ drupal, page }) => {
+  await drupal.login(USERS.editor);
+  await openPage(page, pricing.id);
+  const frame = await openSeo(page);
+  await expect(textbox(frame, UI.field.title)).toBeEnabled();
+
+  await frame.getByRole('radio', { name: UI.scope.site }).click();
+  // Each site tab carries the note; the hidden tabs stay mounted.
+  await expect(frame.getByRole('tabpanel').getByText(UI.site.readOnly)).toBeVisible();
+  await expect(textbox(frame, UI.field.name)).toBeDisabled();
+  await expect(button(frame, UI.action.save)).toHaveCount(0);
+
+  // The server agrees.
+  const token = await (await page.request.get('./session/token')).text();
+  const refused = await page.request.put('./canvas-metatag/api/site', {
+    headers: { 'X-CSRF-Token': token },
+    data: { identity: {}, values: {} },
+  });
+  expect(refused.status()).toBe(403);
+});
+
+test('someone who may view a page but not edit it never receives its draft', async ({ drupal, page }) => {
+  const { id, seoTitle } = PAGES.stored;
+  await drupal.login(USERS.editor);
+  await writeDraft(page, `canvas_page/${id}`, `layout/canvas_page/${id}`, { title: 'Draft title {sep} {site}' });
+  expect(await seoState(page, pageQuery(id))).toMatchObject({
+    can: { target: true },
+    target: { has_draft: true, values: { title: 'Draft title {sep} {site}' } },
+  });
+
+  await drupal.logout();
+  await drupal.login(USERS.viewer);
+  const state = await seoState(page, pageQuery(id));
+  expect(state.can).toEqual({ target: false, site: false });
+  expect(state.target).toMatchObject({ has_draft: false, values: { title: seoTitle } });
+  expect(state.resolved?.head.title).toBe(`Published title | ${SITE_NAME}`);
+});
+
+test('when the editor cannot be read the page is read-only, and the site still saves', async ({ drupal, page }) => {
+  await drupal.login(USERS.admin);
+  await openPage(page, pricing.id);
+  await page.evaluate(() => {
+    delete window.drupalSettings.canvas.store;
+  });
+  const frame = await openSeo(page);
+
+  // Reading still works; nothing can be typed into the page's settings.
+  await expect(frame.getByRole('alert').filter({ hasText: UI.strip.cannotSave })).toBeVisible();
+  await expect(button(frame, UI.action.reload)).toBeVisible();
+  await expect(frame.getByTestId(TEST_ID.search)).toContainText(`${pricing.title} | ${SITE_NAME}`);
+  await expect(textbox(frame, UI.field.title)).toBeDisabled();
+  await expect(status(frame)).toContainText(UI.footer.readOnly);
+
+  // Site settings do not go through the editor, so they still save.
+  await frame.getByRole('radio', { name: UI.scope.site }).click();
+  const profiles = textbox(frame, UI.field.profiles);
+  await profiles.fill('https://social.example/example');
+  await profiles.blur();
+  await button(frame, UI.action.save).click();
+  await expect
+    .poll(async () => (await seoState(page, '')).site.identity.same_as, { timeout: 30_000 })
+    .toEqual(['https://social.example/example']);
+  await expect(status(frame)).toContainText(UI.footer.siteLive, { timeout: 30_000 });
+});
+
+test('a save from another session is shown as a conflict, not written over', async ({ drupal, page }) => {
+  const { id } = PAGES.about;
+  await drupal.login(USERS.admin);
+  await openPage(page, id);
+  const frame = await openSeo(page);
+  await expect(textbox(frame, UI.field.title)).toBeEnabled();
+
+  // Another session takes over the page's draft; the editor's next save is
+  // then refused by Canvas.
+  await writeDraft(page, `canvas_page/${id}`, `layout/canvas_page/${id}`, { robots: { nofollow: true } });
+  const refused = page.waitForResponse(isLayoutSave(id));
+  await page.locator('[data-drupal-selector="edit-title-0-value"]').fill('About us, edited');
+  expect((await refused).status()).toBe(409);
+
+  await expect(frame.getByRole('alert').filter({ hasText: UI.strip.conflict })).toBeVisible();
+  await expect(button(frame, UI.action.reload)).toBeVisible();
+  await expect(textbox(frame, UI.field.title)).toBeDisabled();
+});
+
+test('the four tabs work by keyboard, pass an accessibility scan and reflow at 200% zoom', async ({
+  drupal,
+  page,
+}) => {
+  // A page with issues, so that every tab has something on it.
+  await drupal.login(USERS.editor);
+  await openPage(page, PAGES.checks.id);
+  const frame = await openSeo(page);
+  const tabs = [UI.tab.search, UI.tab.social, UI.tab.schema, UI.tab.checks];
+  const title = textbox(frame, UI.field.title);
+  await expect(title).toBeEnabled();
+
+  await test.step('keyboard only', async () => {
+    // The tab list is one stop; arrows choose a tab, Home returns to the first.
+    await tab(frame, UI.tab.search).focus();
+    for (const [index, name] of tabs.entries()) {
+      if (index > 0) {
+        await page.keyboard.press('ArrowRight');
+      }
+      await expect(tab(frame, name)).toBeFocused();
+      await expect(tab(frame, name)).toHaveAttribute('aria-selected', 'true');
+      await expect(frame.getByRole('tabpanel', { name })).toBeVisible();
+    }
+    await page.keyboard.press('Home');
+    await expect(tab(frame, UI.tab.search)).toBeFocused();
+
+    // Tab moves on into the panel; the title field is reached and typed in.
+    for (let presses = 0; presses < 12; presses++) {
+      if (await title.evaluate((element) => element === document.activeElement)) {
+        break;
+      }
+      await page.keyboard.press('Tab');
+    }
+    await expect(title).toBeFocused();
+    const before = await title.inputValue();
+    await page.keyboard.type('K');
+    await expect(title).not.toHaveValue(before);
+  });
+
+  await test.step('no serious accessibility violation on any tab', async () => {
+    for (const name of tabs) {
+      await tab(frame, name).click();
+      await expect(frame.getByRole('tabpanel', { name })).toBeVisible();
+      const { violations } = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
+      const serious = violations.filter(({ impact }) => impact === 'serious' || impact === 'critical');
+      expect(
+        serious.map(({ id, help, nodes }) => `${id}: ${help} (${nodes.length})`),
+        `${String(name)} tab`,
+      ).toEqual([]);
+    }
+  });
+
+  await test.step('at 200% zoom nothing scrolls sideways', async () => {
+    // The frame keeps its size when the browser zooms, so zooming to 200%
+    // gives the dialog half the width to lay its content out in.
+    await page.locator(SEO_IFRAME).evaluate((element) => {
+      (element as HTMLElement).style.width = '50%';
+    });
+    for (const name of tabs) {
+      await tab(frame, name).click();
+      await expect(frame.getByRole('tabpanel', { name })).toBeVisible();
+      const overflowing = await frame.locator('html').evaluate((html) =>
+        [html, ...html.querySelectorAll('*')]
+          .filter(
+            (element) =>
+              element.scrollWidth > element.clientWidth + 1 &&
+              (element === html || ['auto', 'scroll'].includes(getComputedStyle(element).overflowX)),
+          )
+          .map((element) => `${element.tagName.toLowerCase()}.${element.className}`),
+      );
+      expect(overflowing, `${String(name)} tab`).toEqual([]);
+    }
+  });
+});

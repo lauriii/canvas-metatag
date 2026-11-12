@@ -1,0 +1,11 @@
+services:
+  _defaults:
+    autowire: true
+    autoconfigure: true
+  Drupal\canvas_metatag_ai\Assistant:
+    arguments:
+      $aiProvider: '@ai.provider'
+      $jsonDecoder: '@ai.prompt_json_decode'
+  logger.channel.canvas_metatag_ai:
+    parent: logger.channel_base
+    arguments: ['canvas_metatag_ai']

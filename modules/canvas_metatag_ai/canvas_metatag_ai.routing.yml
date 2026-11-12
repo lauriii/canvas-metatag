@@ -1,0 +1,15 @@
+# Returns suggestions for the SEO dialog. It never changes stored content.
+canvas_metatag_ai.suggest:
+  path: '/canvas-metatag/api/ai/suggest'
+  defaults:
+    _controller: '\Drupal\canvas_metatag_ai\Controller\AiController::suggest'
+  requirements:
+    # A comma means both permissions are needed.
+    _permission: 'use canvas metatag ai,edit canvas metatag'
+    _csrf_request_header_token: 'TRUE'
+  methods: [POST]
+  options:
+    no_cache: 'TRUE'
+    # The dialog runs in a signed-in browser. A bearer token would skip the
+    # CSRF check, which core applies to cookie sessions only.
+    _auth: ['cookie']

@@ -1,0 +1,8 @@
+name: Canvas Metatag AI test
+type: module
+description: 'A chat provider with fixed answers, for the tests of Canvas Metatag AI.'
+package: Testing
+core_version_requirement: ^11.3
+dependencies:
+  - canvas_metatag:canvas_metatag_ai
+  - ai:ai_test

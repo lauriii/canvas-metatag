@@ -1,0 +1,8 @@
+name: Canvas Metatag AI
+type: module
+description: 'AI suggestions for search and social text and for structured data in the SEO dialog. Suggestions only: nothing is applied without the editor.'
+package: Canvas
+core_version_requirement: ^11.3
+dependencies:
+  - canvas_metatag:canvas_metatag
+  - ai:ai

@@ -1,0 +1,11 @@
+services:
+  _defaults:
+    autowire: true
+    autoconfigure: true
+  Drupal\canvas_metatag\Resolver: {}
+  # Removed from the container when canvas_headless is not installed.
+  Drupal\canvas_metatag\Controller\HeadlessContentController:
+    decorates: Drupal\canvas_headless\Controller\CanvasContentController
+    decoration_on_invalid: ignore
+    arguments:
+      $inner: '@.inner'

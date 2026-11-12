@@ -1,0 +1,7 @@
+edit canvas metatag:
+  title: 'Edit SEO settings in Canvas'
+  description: 'Use the SEO dialog for Canvas pages and content templates. Each page or template also needs update access. The canonical address may point at another site, and search engines and social shares then follow it: grant this to people you trust with the page''s address.'
+administer canvas metatag:
+  title: 'Administer SEO site settings'
+  description: 'Change the site identity and the site-wide SEO defaults. Changes apply to the whole site immediately.'
+  restrict access: true

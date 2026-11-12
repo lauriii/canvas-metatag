@@ -1,0 +1,932 @@
+/* Additions to Radix Themes. Radix tokens only. */
+
+/* The frame: fixed header and footer, one scroll area between them. */
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: transparent;
+}
+.radix-themes {
+  height: 100%;
+  min-height: 0;
+  /* 20 px between fields; it is not on the space scale. */
+  --seo-gap: calc(var(--space-4) + var(--space-1));
+}
+.seo-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* The theme's focus ring is 2.3:1 on white; 3:1 is the minimum. */
+  --focus-8: var(--blue-10);
+}
+/* 12 px white text needs a darker fill than step 9 for 4.5:1. */
+.seo-footer .rt-Button.rt-variant-solid {
+  background-color: var(--accent-11);
+}
+.seo-footer .rt-Button.rt-variant-solid:hover {
+  background-color: var(--accent-12);
+}
+/* Reset and suggest sit side by side: each target at least 24 × 24. */
+.seo-label-row .rt-IconButton {
+  min-width: 24px;
+  min-height: 24px;
+}
+/* An inherited address is information, not a faint hint. */
+.seo-inherited-input input::placeholder {
+  color: var(--gray-11);
+}
+.seo-scope {
+  flex: none;
+  min-height: 44px;
+  /* The vertical padding only shows when the language button wraps under the
+     scope switch (200% zoom); at full width the min-height decides. */
+  padding: var(--space-1) var(--space-4);
+  row-gap: var(--space-1);
+}
+/* The heading only takes focus on load and is no tab stop: no ring. */
+.seo-scope h1[tabindex="-1"]:focus {
+  outline: none;
+}
+.seo-tabs {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+.seo-tabs > .rt-TabsList {
+  flex: none;
+  /* Tabs wrap at 200 % zoom; nothing scrolls sideways. */
+  flex-wrap: wrap;
+  height: auto;
+  min-height: 36px;
+  padding: 0 var(--space-2);
+  overflow: visible;
+  box-shadow: inset 0 -1px 0 0 var(--gray-a4);
+}
+.seo-tabs > .rt-TabsList > .rt-TabsTrigger {
+  height: 36px;
+}
+.seo-panel {
+  flex: 1;
+  min-height: 0;
+}
+/* scrollIntoView() and focus() also scroll overflow-hidden ancestors, which
+   pushed the top of the viewport (and the sticky compact preview) under the
+   tabs. A clipped root is not a scroll container, so only the viewport moves. */
+.seo-app .rt-ScrollAreaRoot {
+  overflow: clip;
+}
+/* Panels stay mounted when hidden: behind another tab, or behind Output. */
+.seo-panel[data-state="inactive"],
+.seo-tabs[data-output] > .seo-panel[role="tabpanel"] {
+  display: none;
+}
+/* Content is as wide as the frame, never as wide as its longest word. */
+.seo-panel .rt-ScrollAreaViewport > * {
+  width: 100%;
+  min-width: 0;
+}
+.seo-panel-body {
+  padding: var(--space-4);
+}
+.seo-panel-body > * + * {
+  margin-top: var(--seo-gap);
+}
+.seo-panel-body > .rt-CalloutRoot + * {
+  margin-top: var(--space-3);
+}
+.seo-footer {
+  flex: none;
+  min-height: 36px;
+  padding: var(--space-1) var(--space-4);
+  border-top: 1px solid var(--gray-a4);
+}
+.seo-footer[data-rows] {
+  min-height: 56px;
+}
+.seo-footer[data-rows] [role="status"] {
+  flex-basis: 100%;
+}
+.seo-footer [role="status"] {
+  min-height: 24px;
+  min-width: 0;
+}
+
+/* Site scope looks different on purpose: one line with a bar at its left edge. */
+.seo-band {
+  flex: none;
+  padding: var(--space-2) var(--space-4) var(--space-2) calc(var(--space-4) - 3px);
+  border-left: 3px solid var(--amber-9);
+  background: var(--amber-a2);
+}
+.seo-strips {
+  flex: none;
+  padding: var(--space-2) var(--space-4) 0;
+}
+/* One line with trailing buttons; wraps to two at 200 % zoom. */
+.seo-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1) var(--space-3);
+  padding: var(--space-2) var(--space-3);
+}
+.seo-strip .rt-CalloutText {
+  flex: 1 1 60%;
+}
+
+/* "Previewing: <label> · estimate" stays on one line; the label is cut. */
+.seo-label-row > :has(> .seo-previewing) {
+  min-width: 0;
+}
+.seo-previewing {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+.seo-previewing > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seo-previewing > :last-child {
+  flex: none;
+}
+
+.seo-image-text {
+  display: flex;
+  max-width: 100%;
+  white-space: nowrap;
+}
+.seo-image-text > :first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Status dots: gray (settled), blue (draft, unsaved), amber (something is missing). */
+.seo-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gray-9);
+}
+.seo-dot[data-tone="blue"] {
+  background: var(--accent-9);
+}
+.seo-dot[data-tone="amber"] {
+  background: var(--amber-11);
+}
+.seo-progress .seo-dot {
+  margin-top: 5px;
+}
+
+/* Whole-app messages. */
+.seo-message {
+  flex: 1;
+  padding: var(--space-5);
+  text-align: center;
+}
+/* No skeleton for a load that takes under 150 ms. */
+.seo-loading {
+  padding: var(--space-3) var(--space-4);
+  animation: seo-appear 0s 150ms both;
+}
+@keyframes seo-appear {
+  from {
+    visibility: hidden;
+  }
+  to {
+    visibility: visible;
+  }
+}
+
+.seo-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.seo-wrap {
+  overflow-wrap: anywhere;
+}
+.seo-code,
+.seo-mono textarea {
+  font-family: var(--code-font-family);
+}
+.seo-group-label {
+  color: var(--gray-11);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.seo-panel-body > .seo-suggest {
+  margin-top: var(--space-2);
+}
+
+/* Fields: 6 px label to control, 4 px control to meter. */
+.seo-field {
+  min-width: 0;
+  border-radius: var(--radius-2);
+}
+.seo-label-row {
+  margin-bottom: var(--space-1);
+}
+.seo-label-row label:focus-visible,
+.seo-field [tabindex="-1"]:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+  border-radius: var(--radius-1);
+}
+/* "From Site ›" lands here: the field is outlined for 1.5 s. */
+.seo-field[data-marked] {
+  outline: 2px solid var(--accent-8);
+  outline-offset: 6px;
+  animation: seo-fade 1.5s ease-out forwards;
+}
+@keyframes seo-fade {
+  to {
+    outline-color: transparent;
+  }
+}
+.seo-error {
+  margin-top: var(--space-1);
+  color: var(--red-11);
+}
+.seo-error svg {
+  flex: none;
+  margin-top: 1px;
+}
+.seo-select {
+  min-width: 180px;
+}
+.seo-select[data-compact] {
+  min-width: 140px;
+}
+.seo-number {
+  width: 72px;
+}
+.seo-grow {
+  flex: 1 1 160px;
+}
+.seo-textarea textarea {
+  /* Grows with its text where the browser can. */
+  field-sizing: content;
+  min-height: calc(2 * var(--line-height-2) + 2 * var(--space-1));
+}
+.seo-inline-radios {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-5);
+}
+/* Runs of short details share a row and stack where there is no room. */
+.seo-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  gap: var(--space-4) var(--space-3);
+  align-items: start;
+}
+
+/* The meter: a 3 px rail and one sentence. Never red, never green. */
+.seo-meter-line {
+  margin-top: var(--space-1);
+  min-width: 0;
+}
+.seo-quote {
+  display: inline-block;
+}
+.seo-meter {
+  flex: none;
+  width: 72px;
+  height: 3px;
+  margin-top: 7px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--gray-a4);
+}
+.seo-meter > span {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--gray-9);
+  transition: width 120ms ease-out;
+}
+.seo-meter[data-state="long"] > span {
+  background: var(--amber-11);
+}
+
+/* Collapsible sections: a button row with a chevron and a summary. */
+.seo-panel-body > .seo-section {
+  margin-top: var(--space-3);
+}
+.seo-section + .seo-section {
+  margin-top: var(--space-1);
+}
+.seo-section-row {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  width: 100%;
+  min-height: 28px;
+  padding: var(--space-1) 0;
+  border-radius: var(--radius-2);
+  cursor: default;
+}
+.seo-section-row > svg {
+  flex: none;
+  align-self: center;
+  color: var(--gray-11);
+}
+.seo-section-row:hover > svg {
+  color: var(--gray-12);
+}
+.seo-section-row:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 1px;
+}
+.seo-section-summary {
+  flex: 1;
+  min-width: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.seo-section-body {
+  padding: var(--space-2) 0 var(--space-3);
+}
+.seo-section-body > * + * {
+  margin-top: var(--space-4);
+}
+
+/* Template fields: a native textarea over a mirror that paints the chips. */
+.seo-template {
+  position: relative;
+}
+.seo-template-box {
+  position: relative;
+  display: grid;
+  min-height: var(--space-6);
+  border-radius: var(--radius-2);
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--gray-a7);
+}
+.seo-template-anchor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.seo-template-box:focus-within {
+  outline: 2px solid var(--focus-8);
+  outline-offset: -1px;
+}
+.seo-template-box[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--red-a8);
+}
+.seo-template-box[data-disabled] {
+  background: var(--gray-a2);
+}
+/* The two layers share every metric, so the chips sit under their text. */
+.seo-template-mirror,
+.seo-template-box textarea {
+  grid-area: 1 / 1;
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: 6px var(--space-2);
+  border: 0;
+  font-family: var(--default-font-family);
+  font-size: var(--font-size-2);
+  font-weight: var(--font-weight-regular);
+  line-height: var(--line-height-2);
+  letter-spacing: var(--letter-spacing-2);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.seo-template-mirror {
+  color: var(--gray-12);
+  pointer-events: none;
+}
+.seo-template-box[data-disabled] .seo-template-mirror {
+  color: var(--gray-a11);
+}
+.seo-template-box textarea {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  resize: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: var(--gray-12);
+}
+/* The mirror paints the inherited text; the attribute stays for assistive technology. */
+.seo-template-box textarea::placeholder {
+  color: transparent;
+}
+.seo-template-box textarea::selection {
+  background: var(--focus-a5);
+}
+.seo-inherited {
+  color: var(--gray-11);
+}
+.seo-inherited-tag {
+  float: right;
+  margin-left: var(--space-3);
+  color: var(--gray-11);
+  font-size: var(--font-size-1);
+}
+/* A chip is a background and an inset line: no padding, margin or border of its own. */
+.seo-chip {
+  border-radius: 4px;
+  background: var(--accent-a3);
+  box-shadow: inset 0 0 0 1px var(--accent-a5);
+  /* 4.5:1 on the tinted background. */
+  color: var(--accent-12);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+.seo-chip[data-empty] {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed var(--amber-11);
+  outline-offset: -1px;
+}
+.seo-brace {
+  color: transparent;
+}
+.seo-chip-tip {
+  position: absolute;
+  z-index: 1;
+  max-width: 280px;
+  padding: var(--space-1) var(--space-2);
+  overflow: hidden;
+  border-radius: var(--radius-2);
+  background: var(--gray-12);
+  color: var(--gray-1);
+  font-size: var(--font-size-1);
+  line-height: var(--line-height-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(calc(-100% - 4px));
+}
+.seo-template-under {
+  align-items: flex-start;
+  min-height: 24px;
+}
+.seo-template-under > .seo-meter-line,
+.seo-template-under > .seo-error,
+.seo-template-under > .seo-becomes {
+  flex: 1;
+}
+/* Centred on the first text line beside it (16 px line, 24 px button). */
+.seo-template-under > .seo-insert {
+  margin-top: 0;
+}
+.seo-insert {
+  flex: none;
+  margin-top: var(--space-1);
+}
+/* No line to share: the button sits in the gap under the field. */
+.seo-insert-float {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  height: var(--seo-gap);
+  display: flex;
+  align-items: center;
+}
+.seo-insert-float .seo-insert {
+  margin-top: 0;
+}
+.seo-becomes {
+  margin-top: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+/* The insert menu: fits 436 px by at most 260 px. */
+.seo-menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(320px, calc(100vw - 2 * var(--space-4)));
+  max-height: min(260px, var(--radix-popover-content-available-height));
+}
+.seo-menu-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+.seo-menu-list .seo-group-label {
+  padding: var(--space-1) var(--space-2);
+}
+.seo-menu-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-2);
+  outline: none;
+  cursor: default;
+}
+.seo-menu-item > :first-child {
+  flex: none;
+}
+.seo-menu-item > :last-child {
+  margin-left: auto;
+  min-width: 0;
+}
+.seo-menu-item[data-active] {
+  background: var(--accent-9);
+}
+.seo-menu-item[data-active] > * {
+  color: var(--accent-contrast);
+}
+
+/* Previews. The card is the only element with a shadow. */
+.seo-card {
+  --card-background-color: var(--color-panel-solid);
+  box-shadow: var(--shadow-2);
+}
+.seo-hint {
+  border-bottom: 1px dotted var(--gray-a9);
+  border-radius: 1px;
+  cursor: help;
+}
+.seo-hint:focus-visible {
+  outline: 2px solid var(--focus-8);
+  outline-offset: 2px;
+}
+/* Result-like type in a generic face: it reads as "not our UI". */
+.seo-result,
+.seo-compact-bar,
+.seo-social-text {
+  font-family: sans-serif;
+  overflow-wrap: anywhere;
+}
+.seo-result[data-dimmed],
+.seo-compact-bar[data-dimmed] > * {
+  opacity: 0.5;
+}
+.seo-result-icon {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 13px;
+  font-weight: 600;
+}
+.seo-result-site {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--gray-12);
+  font-size: 14px;
+  line-height: 18px;
+}
+.seo-result-address {
+  overflow: hidden;
+  color: var(--gray-11);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-result-title {
+  color: var(--blue-11);
+  font-size: 18px;
+  line-height: 24px;
+}
+.seo-result-text {
+  margin-top: 2px;
+  color: var(--gray-12);
+  font-size: 14px;
+  line-height: 20px;
+}
+.seo-result-text[data-muted] {
+  color: var(--gray-11);
+  font-style: italic;
+}
+.seo-hidden-band {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: calc(-1 * var(--card-padding)) calc(-1 * var(--card-padding)) var(--card-padding);
+  padding: var(--space-1) var(--card-padding);
+  background: var(--amber-3);
+  /* Full contrast: this is what the preview is about. */
+  color: var(--amber-12);
+  font-size: var(--font-size-1);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-1);
+}
+/* The two-line form: it takes no room and lies over the top of the scroll area. */
+.seo-compact {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  height: 0;
+  visibility: hidden;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+.seo-compact[data-show] {
+  visibility: visible;
+  opacity: 1;
+}
+.seo-compact + * {
+  margin-top: 0;
+}
+.seo-compact-bar {
+  position: absolute;
+  top: 0;
+  right: calc(-1 * var(--space-4));
+  left: calc(-1 * var(--space-4));
+  display: flex;
+  flex-direction: column;
+  padding: var(--space-1) var(--space-4);
+  background: var(--color-panel-solid);
+  box-shadow:
+    0 1px 0 0 var(--gray-a4),
+    var(--shadow-2);
+}
+.seo-compact-bar > * {
+  margin: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The social card: image at 1.91:1, or a small square when there is no large image. */
+.seo-social {
+  padding: 0;
+  overflow: hidden;
+}
+.seo-social-image {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1.91;
+  background: var(--gray-a3);
+  color: var(--gray-9);
+}
+.seo-social-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.seo-social-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3) var(--space-3);
+}
+.seo-social-host {
+  text-transform: uppercase;
+  color: var(--gray-11);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-social-title {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--gray-12);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.seo-social-description {
+  overflow: hidden;
+  color: var(--gray-11);
+  font-size: 13px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-social[data-layout="compact"] {
+  display: flex;
+  align-items: stretch;
+}
+.seo-social[data-layout="compact"] .seo-social-image {
+  flex: none;
+  width: 96px;
+  aspect-ratio: 1;
+}
+.seo-social[data-layout="compact"] .seo-social-text {
+  justify-content: center;
+  padding: var(--space-2) var(--space-3);
+}
+
+/* Images: a 56 px thumbnail, the picker grid. */
+.rt-Flex + .seo-image {
+  margin-top: var(--space-2);
+}
+.seo-thumb {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border-radius: var(--radius-2);
+  background: var(--gray-a3);
+  color: var(--gray-9);
+}
+.seo-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.seo-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.seo-picker-item {
+  all: unset;
+  box-sizing: border-box;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: var(--space-1);
+  border-radius: var(--radius-2);
+  cursor: default;
+}
+.seo-picker-item:hover {
+  background: var(--gray-a3);
+}
+.seo-picker-item:focus-visible {
+  outline: 2px solid var(--focus-8);
+}
+.seo-picker-item[aria-pressed="true"] {
+  background: var(--accent-a3);
+  box-shadow: inset 0 0 0 1px var(--accent-a7);
+}
+.seo-picker-item .seo-thumb {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  margin-bottom: var(--space-1);
+}
+.seo-picker-item[data-small] .seo-thumb {
+  opacity: 0.5;
+}
+.seo-picker-mark,
+.seo-picker-small {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  display: flex;
+  padding: 1px var(--space-1);
+  border-radius: var(--radius-1);
+  background: var(--color-panel-solid);
+  color: var(--gray-12);
+  font-size: var(--font-size-1);
+  line-height: var(--line-height-1);
+}
+.seo-picker-mark {
+  right: auto;
+  left: var(--space-2);
+  padding: 1px;
+  background: var(--accent-9);
+  color: var(--accent-contrast);
+}
+.seo-picker-name,
+.seo-picker-size {
+  overflow: hidden;
+  font-size: var(--font-size-1);
+  line-height: var(--line-height-1);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-picker-size {
+  color: var(--gray-11);
+}
+
+/* Structured data: the type cards. */
+.seo-type {
+  justify-content: flex-start;
+  align-items: baseline;
+  gap: var(--space-3);
+  text-align: left;
+}
+.seo-type > :first-child {
+  flex: none;
+  width: 112px;
+}
+.seo-code-view {
+  max-height: 220px;
+  border-radius: var(--radius-2);
+  background: var(--gray-a2);
+}
+.seo-code-view pre {
+  margin: 0;
+  line-height: var(--line-height-1);
+  padding: var(--space-2) var(--space-3);
+  /* Long values wrap: nothing in the dialog scrolls sideways. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Checks: one sentence, an optional detail, at most one action. */
+.seo-issues {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+}
+.seo-issues li {
+  display: grid;
+  grid-template-columns: 15px minmax(0, 1fr);
+  gap: 0 var(--space-2);
+  padding: var(--space-2) 0;
+}
+.seo-issues li > svg {
+  margin-top: 3px;
+}
+.seo-issue-action {
+  grid-column: 2;
+  display: flex;
+  justify-content: flex-end;
+}
+.seo-issue-action:empty {
+  display: none;
+}
+
+/* Output. */
+.seo-rows {
+  row-gap: var(--space-2);
+}
+.seo-rows .rt-DataListValue > span {
+  display: block;
+  min-width: 0;
+}
+.seo-rows .rt-DataListLabel {
+  font-family: var(--code-font-family);
+}
+
+/* Suggestions. */
+.seo-under {
+  margin-top: var(--space-2);
+}
+.seo-suggest:focus-visible {
+  outline: 2px solid var(--focus-8);
+}
+.seo-variants {
+  gap: var(--space-2);
+}
+.seo-variant,
+.seo-proposal {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.seo-verdict {
+  align-self: flex-end;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rt-Skeleton {
+    animation: none;
+  }
+  * {
+    transition: none !important;
+  }
+  .seo-field[data-marked] {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  /* The mirror still paints the text: chips get a real outline. */
+  .seo-template-box textarea {
+    forced-color-adjust: none;
+    caret-color: CanvasText;
+  }
+  .seo-chip {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  .seo-template-box {
+    border: 1px solid CanvasText;
+  }
+}

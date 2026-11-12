@@ -1,0 +1,568 @@
+// The Checks rules: facts about this dialog's settings and the page preview.
+// No score. Rules fed by `resolved` describe the saved draft.
+import type { PageFacts } from './host';
+import { fill, meter, tokensIn, trimSeparators } from './model';
+import type {
+  Issue,
+  Jump,
+  Measurer,
+  Registry,
+  Resolved,
+  SeoValues,
+  SiteSettings,
+  Source,
+  Tab,
+  Texts,
+  TokenInfo,
+} from './types';
+
+export interface ChecksInput {
+  effective: SeoValues;
+  sources(path: string): Source;
+  texts: Texts;
+  /** With Canvas's live title and description laid over the server's. */
+  tokens: Record<string, TokenInfo>;
+  resolved: Resolved | null;
+  site: SiteSettings;
+  registry: Registry;
+  facts: PageFacts | null;
+  scope: 'page' | 'template';
+  can: { target: boolean; site: boolean };
+  langcode: string;
+  /** AI suggestions are available. */
+  ai: boolean;
+  /** The target is published. */
+  published: boolean;
+  /** The content type's name at template scope ("Article"). */
+  typeLabel: string;
+  /** The previewed page's label: "this page" at template scope. */
+  previewLabel: string;
+  /** The name of the default language, for a setting inherited from it. */
+  defaultLanguage: string;
+  measurer: Measurer;
+}
+
+const GENERIC = ['home', 'homepage', 'untitled', 'page', 'new page', 'welcome'];
+const FORMATS = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+/** Lower case, punctuation to spaces, whitespace collapsed. */
+const normal = (text: string) =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** The title with the site name and the separators around it taken out. */
+function withoutSite(title: string, site: string, sep: string): string {
+  const rest = site
+    ? title.replace(new RegExp(escape(site), 'gi'), ' ')
+    : title;
+  return trimSeparators(rest.replace(/ +/g, ' ').trim(), sep);
+}
+
+/** Words that carry meaning: 4 or more letters in Latin script, 2 or more characters otherwise. */
+function words(a: string, b: string): [string[], string[]] {
+  const latin = !/[^\p{Script=Latin}\p{N}\s]/u.test(`${a}${b}`);
+  const split = (text: string) =>
+    text
+      .split(' ')
+      .filter((word) => Array.from(word).length >= (latin ? 4 : 2));
+  return [split(a), split(b)];
+}
+
+const size = (bytes: number) =>
+  `${(bytes / 1048576).toFixed(1).replace(/\.0$/, '')} MB`;
+
+/** What is missing from the site identity, in words. Empty when complete. */
+export function identityGaps(
+  site: SiteSettings,
+  tokens: Record<string, TokenInfo>,
+): { field: string; text: string }[] {
+  const { identity } = site;
+  return [
+    !identity.name.trim() && !tokens.site?.value.trim()
+      ? { field: 'identity.name', text: 'no name' }
+      : null,
+    !identity.logo ? { field: 'identity.logo', text: 'no logo' } : null,
+    identity.same_as.length === 0
+      ? { field: 'identity.same_as', text: 'no profile link' }
+      : null,
+  ].filter((gap) => gap !== null);
+}
+
+/** The sentence of `identity-incomplete`; also the callout in Site › Identity. */
+export const identitySentence = (gaps: { text: string }[]) =>
+  `Search engines know little about who runs this site: ${gaps
+    .map((gap) => gap.text)
+    .join(', ')}.`;
+
+/** The issues that count: the badge shows them, and nothing else. */
+export const countIssues = (issues: Issue[]) =>
+  issues.filter((issue) => issue.severity !== 'info').length;
+
+export function checks(input: ChecksInput): Issue[] {
+  const { effective, texts, tokens, resolved, facts, registry } = input;
+  const issues: Issue[] = [];
+  const value = (name: string) => tokens[name]?.value ?? '';
+  const flat = Object.fromEntries(
+    Object.entries(tokens).map(([name, token]) => [name, token.value]),
+  );
+  const onPage = input.scope === 'page';
+  // "this page" is the previewed page's label at template scope.
+  const page = onPage ? 'this page' : input.previewLabel;
+  const Page = onPage ? 'This page' : input.previewLabel;
+  const jump = (tab: Tab, field: string): Jump => ({
+    scope: 'target',
+    tab,
+    field,
+  });
+  const suggest = (field: string) =>
+    input.ai && onPage ? { label: 'Suggest', suggest: field } : undefined;
+  const set = (path: string, to: unknown) => (values: SeoValues) => {
+    const [group, key] = path.split('.');
+    return {
+      ...values,
+      [group]: { ...(values as Record<string, object>)[group], [key]: to },
+    };
+  };
+
+  // Title.
+  const site = value('site');
+  const sep = value('sep');
+  const bare = withoutSite(texts.title, site, sep);
+  if (texts.title === '') {
+    issues.push({
+      id: 'title-empty',
+      severity: 'fix',
+      message: `${Page} has no title for search results.`,
+      jump: jump('search', 'title'),
+    });
+  } else if (
+    input.langcode.startsWith('en') &&
+    GENERIC.includes(normal(bare))
+  ) {
+    issues.push({
+      id: 'title-generic',
+      severity: 'improve',
+      message: `"${bare}" says little about ${page}.`,
+      jump: jump('search', 'title'),
+    });
+  }
+
+  const templates: [string, Tab, string | undefined][] = [
+    ['title', 'search', effective.title],
+    ['description', 'search', effective.description],
+    ['social.title', 'social', effective.social?.title],
+    ['social.description', 'social', effective.social?.description],
+  ];
+  const reported = new Set<string>();
+  for (const [field, tab, template] of templates) {
+    for (const name of tokensIn(template ?? '')) {
+      const token = tokens[name];
+      // A name that is not in the vocabulary (a deleted field) is blanked, not reported.
+      if (
+        !token ||
+        token.type === 'image' ||
+        token.value.trim() ||
+        reported.has(name)
+      ) {
+        continue;
+      }
+      reported.add(name);
+      issues.push({
+        id: `token-empty:${name}`,
+        severity: 'improve',
+        message: `"${token.label}" is empty for ${page}, so it is left out.`,
+        jump: jump(tab, field),
+      });
+    }
+  }
+
+  if (site && texts.title.toLowerCase().split(site.toLowerCase()).length > 2) {
+    const own =
+      input.sources('title') === 'target' ? (effective.title ?? '') : '';
+    const literal = new RegExp(escape(site), 'i');
+    // The {sep} token, or its value typed as a word.
+    const separates = (word: string | undefined) =>
+      word === '{sep}' || (sep !== '' && word === sep);
+    issues.push({
+      id: 'title-site-twice',
+      severity: 'improve',
+      message: 'The site name appears twice in the title.',
+      jump: jump('search', 'title'),
+      // Only a literal site name can be taken out; a token is the pattern's own.
+      fix: literal.test(own.replace(/\{[^{}]*\}/g, ' '))
+        ? {
+            label: 'Remove the repeat',
+            apply: (values) => {
+              // Odd parts are the tokens.
+              const parts = (values.title ?? '').split(/(\{[^{}]*\})/);
+              const at = parts.findIndex(
+                (part, index) => index % 2 === 0 && literal.test(part),
+              );
+              if (at < 0) {
+                return values;
+              }
+              parts[at] = parts[at].replace(literal, ' ');
+              // Then the separators the removal left with nothing to separate.
+              const kept: string[] = [];
+              for (const word of parts.join('').split(/\s+/).filter(Boolean)) {
+                if (
+                  !separates(word) ||
+                  (kept.length > 0 && !separates(kept.at(-1)))
+                ) {
+                  kept.push(word);
+                }
+              }
+              while (separates(kept.at(-1))) {
+                kept.pop();
+              }
+              return { ...values, title: kept.join(' ') };
+            },
+          }
+        : undefined,
+    });
+  }
+
+  if (facts?.h1.length === 1) {
+    const [title, heading] = [normal(texts.title), normal(facts.h1[0])];
+    const [mine, theirs] = words(title, heading);
+    if (
+      title &&
+      heading &&
+      !title.includes(heading) &&
+      !heading.includes(title) &&
+      !mine.some((word) => theirs.includes(word))
+    ) {
+      issues.push({
+        id: 'title-heading',
+        severity: 'improve',
+        message: 'The title and the main heading say different things.',
+        detail: `Title: "${texts.title}" · Heading: "${facts.h1[0]}"`,
+        jump: jump('search', 'title'),
+      });
+    }
+  }
+
+  const cut = (kind: 'title' | 'description', text: string) => {
+    const result = meter(kind, text, input.measurer);
+    return result.state === 'long'
+      ? `may be cut off${
+          result.where === 'both'
+            ? ''
+            : result.where === 'desktop'
+              ? ' on desktop'
+              : ' on phones'
+        } after "${result.after}".`
+      : null;
+  };
+  const titleCut = cut('title', texts.title);
+  if (titleCut) {
+    issues.push({
+      id: 'title-long',
+      severity: 'info',
+      message: `The title ${titleCut}`,
+      jump: jump('search', 'title'),
+    });
+  }
+
+  // Description.
+  if (texts.description === '') {
+    issues.push({
+      id: 'description-missing',
+      severity: 'improve',
+      message:
+        'There is no description. Search engines will pick text from the page.',
+      jump: jump('search', 'description'),
+      fix: suggest('description'),
+    });
+  } else {
+    const descriptionCut = cut('description', texts.description);
+    if (descriptionCut) {
+      issues.push({
+        id: 'description-long',
+        severity: 'info',
+        message: `The description ${descriptionCut}`,
+        jump: jump('search', 'description'),
+        fix: suggest('description'),
+      });
+    }
+    if (bare && normal(texts.description) === normal(bare)) {
+      issues.push({
+        id: 'description-title',
+        severity: 'improve',
+        message: 'The description repeats the title.',
+        jump: jump('search', 'description'),
+      });
+    }
+  }
+
+  // Visibility.
+  const robots = effective.robots ?? {};
+  const head = resolved?.head;
+  const emitted =
+    head?.meta.find((row) => row.name === 'robots')?.content ?? '';
+  const byConfig = !robots.noindex && /(^|,\s*)noindex\b/.test(emitted);
+  const noindex = robots.noindex === true || byConfig;
+  const on = (path: string) => input.sources(path) === 'target';
+  if (noindex && input.published) {
+    const from = byConfig ? 'config' : input.sources('robots.noindex');
+    issues.push({
+      id: 'noindex',
+      severity: 'improve',
+      message: `Hidden from search engines. Set ${
+        {
+          target: onPage ? 'on this page' : `for every ${input.typeLabel}`,
+          default: `on the ${input.defaultLanguage} version`,
+          site: 'for the whole site',
+          config: 'in site configuration outside SEO',
+          fallback: 'outside SEO',
+        }[from]
+      }.`,
+      jump:
+        from === 'site' && input.can.site
+          ? { scope: 'site', tab: 'defaults', field: 'values.robots.noindex' }
+          : from === 'target'
+            ? jump('search', 'robots.noindex')
+            : undefined,
+      fix:
+        from === 'target'
+          ? {
+              label: 'Show in search results',
+              apply: set('robots.noindex', false),
+            }
+          : undefined,
+    });
+  }
+  if (noindex && effective.canonical) {
+    issues.push({
+      id: 'noindex-canonical',
+      severity: 'improve',
+      message: `${Page} is hidden and also points search engines to another address. Use one or the other.`,
+      jump: jump('search', 'canonical'),
+    });
+  }
+  const canonical = head?.link.find((row) => row.rel === 'canonical')?.href;
+  if (canonical && value('url') && canonical !== value('url')) {
+    issues.push({
+      id: 'canonical-elsewhere',
+      severity: 'info',
+      message: `Search engines are asked to show ${canonical} instead of ${page}.`,
+      jump: jump('search', 'canonical'),
+    });
+  }
+  if (robots.nosnippet === true || robots.max_snippet === 0) {
+    const mine =
+      (robots.nosnippet === true && on('robots.nosnippet')) ||
+      (robots.max_snippet === 0 && on('robots.max_snippet'));
+    issues.push({
+      id: 'snippet-off',
+      severity: 'info',
+      message: `Text previews are off. Results show no description and answer engines cannot quote ${page}.`,
+      jump: jump('search', 'robots.nosnippet'),
+      fix: mine
+        ? {
+            label: 'Allow text previews',
+            apply: (values) =>
+              set(
+                'robots.max_snippet',
+                -1,
+              )(set('robots.nosnippet', false)(values)),
+          }
+        : undefined,
+    });
+  }
+  if ((robots.max_image_preview ?? 'standard') !== 'large') {
+    issues.push({
+      id: 'image-preview',
+      severity: 'info',
+      message: 'Large image previews are off.',
+      jump: jump('search', 'robots.max_image_preview'),
+      fix: on('robots.max_image_preview')
+        ? {
+            label: 'Allow large previews',
+            apply: set('robots.max_image_preview', 'large'),
+          }
+        : undefined,
+    });
+  }
+
+  // Social image. `resolved` is null when there is no page to resolve for.
+  if (resolved) {
+    const image = resolved.image;
+    const at = jump('social', 'social.image');
+    if (!image) {
+      issues.push({
+        id: 'image-missing',
+        severity: 'improve',
+        message: `No image for social cards. Links to ${page} will show without one.`,
+        jump: at,
+      });
+    } else {
+      const { width, height } = image;
+      if (width < 1200 || height < 630) {
+        issues.push({
+          id: 'image-small',
+          severity: 'improve',
+          message: `The social image is ${width} x ${height}. ${
+            width < 600 || height < 315
+              ? 'It will show as a small thumbnail.'
+              : 'Use at least 1200 x 630 for a large card.'
+          }`,
+          jump: at,
+        });
+      }
+      if (height > 0 && (width / height < 1.85 || width / height > 2)) {
+        issues.push({
+          id: 'image-ratio',
+          severity: 'info',
+          message: 'The social image will be cropped. About 1.91:1 fits best.',
+          jump: at,
+        });
+      }
+      if (image.bytes > 5 * 1048576) {
+        issues.push({
+          id: 'image-heavy',
+          severity: 'info',
+          message: `The social image is ${size(image.bytes)}. Some services skip images over 5 MB.`,
+          jump: at,
+        });
+      }
+      if (!FORMATS.includes(image.mime)) {
+        const type = image.mime.replace(/^image\/|\+.*$/g, '').toUpperCase();
+        issues.push({
+          id: 'image-format',
+          severity: 'improve',
+          message: `${type} images do not show on many services. Use JPEG, PNG or WebP.`,
+          jump: at,
+        });
+      }
+      if (!image.alt.trim()) {
+        issues.push({
+          id: 'image-alt',
+          severity: 'info',
+          message:
+            'The social image has no description for people who cannot see it.',
+          jump: at,
+        });
+      }
+    }
+  }
+
+  // The page content, read from the live preview.
+  if (!facts) {
+    issues.push({
+      id: 'content-unavailable',
+      severity: 'info',
+      message:
+        'Content checks need the page preview, which cannot be read here.',
+    });
+  } else {
+    if (facts.h1.length === 0) {
+      issues.push({
+        id: 'h1-missing',
+        severity: 'improve',
+        message: 'The page has no main heading.',
+        detail: onPage
+          ? 'Add a heading set to H1 in the page content.'
+          : 'Set a heading in this template to H1.',
+      });
+    }
+    const missing = facts.imagesWithoutAlt;
+    if (missing.length) {
+      issues.push({
+        id: 'img-alt',
+        severity: 'improve',
+        message:
+          missing.length === 1
+            ? '1 image on the page has no alternative text.'
+            : `${missing.length} images on the page have no alternative text.`,
+        detail: `${missing.slice(0, 3).join(', ')}${
+          missing.length > 3 ? ` and ${missing.length - 3} more` : ''
+        }`,
+      });
+    }
+  }
+
+  // Structured data.
+  const schema = effective.schema ?? {};
+  const type = registry[schema.type ?? 'WebPage'];
+  const props = type?.props ?? [];
+  const label = (key: string) =>
+    props.find((prop) => prop.key === key)?.label ?? key;
+  const prop = (key: string) => jump('schema', `schema.props.${key}`);
+  if (type && resolved) {
+    for (const key of resolved.schema.missing_required) {
+      issues.push({
+        id: `schema-required:${key}`,
+        severity: 'fix',
+        message: `${type.label} needs "${label(key)}". Until it is filled in, the ${type.label} details are left out.`,
+        jump: prop(key),
+      });
+    }
+    const recommended = resolved.schema.missing_recommended;
+    if (recommended.length) {
+      issues.push({
+        id: 'schema-recommended',
+        severity: 'improve',
+        message: `${type.label} is missing: ${recommended.map(label).join(', ')}.`,
+        jump: prop(recommended[0]),
+      });
+    }
+  }
+  const date = (key: string) => {
+    const template =
+      schema.props?.[key] ?? props.find((item) => item.key === key)?.default;
+    return template === undefined ? NaN : Date.parse(fill(template, flat));
+  };
+  for (const [later, earlier] of [
+    ['dateModified', 'datePublished'],
+    ['endDate', 'startDate'],
+  ]) {
+    if (date(later) < date(earlier)) {
+      issues.push({
+        id: `schema-dates:${later}`,
+        severity: 'improve',
+        message: `"${label(later)}" is before "${label(earlier)}".`,
+        jump: prop(later),
+      });
+    }
+  }
+  if (facts) {
+    const text = normal(facts.text);
+    for (const item of props) {
+      const stored = schema.props?.[item.key];
+      // Only a literal can be compared: a bound value is the page's own data.
+      // A code (a currency, a SKU) is rarely printed as written.
+      if (
+        item.kind === 'text' &&
+        !item.pattern &&
+        stored !== undefined &&
+        tokensIn(stored).length === 0 &&
+        normal(stored) &&
+        !text.includes(normal(stored))
+      ) {
+        issues.push({
+          id: `schema-not-on-page:${item.key}`,
+          severity: 'improve',
+          message: `"${item.label}" does not appear on the page. Structured data should match what visitors see.`,
+          jump: prop(item.key),
+        });
+      }
+    }
+  }
+
+  // Who runs the site: never counted, and only for people who can fix it.
+  const gaps = input.can.site ? identityGaps(input.site, tokens) : [];
+  if (gaps.length) {
+    issues.push({
+      id: 'identity-incomplete',
+      severity: 'info',
+      message: identitySentence(gaps),
+      jump: { scope: 'site', tab: 'identity', field: gaps[0].field },
+    });
+  }
+  return issues;
+}

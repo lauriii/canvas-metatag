@@ -1,0 +1,139 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "langcode": "en",
+        "published": "2026-03-02T09:00:00+02:00",
+        "modified": "2026-03-04T11:30:00+02:00",
+        "timezone": "Europe/Helsinki",
+        "url": "https://www.example.com/shop/desk",
+        "title": "Standing desk",
+        "description": "A desk that goes up and down.",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": [
+                "https://social.example.com/example"
+            ]
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/hello.jpg",
+            "width": 1200,
+            "height": 630,
+            "alt": "A waving hand"
+        }
+    },
+    "schema": {
+        "type": "Product",
+        "props": {
+            "name": "{title}, oak",
+            "image": "6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44",
+            "offers_price": "{field.field_price}",
+            "offers_priceCurrency": "EUR",
+            "offers_availability": "InStock",
+            "brand_name": "Example Works",
+            "sku": "DESK-1"
+        }
+    },
+    "tokens": {
+        "title": "Standing desk",
+        "description": "A desk that goes up and down.",
+        "field.field_price": "499.00"
+    },
+    "images": {
+        "{image}": {
+            "url": "https://cms.example.com/sites/default/files/hello.jpg",
+            "width": 1200,
+            "height": 630,
+            "alt": "A waving hand"
+        },
+        "6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44": {
+            "url": "https://cms.example.com/sites/default/files/desk.jpg",
+            "width": 800,
+            "height": 800,
+            "alt": ""
+        }
+    },
+    "report": {
+        "withheld": false,
+        "missing_required": [],
+        "missing_recommended": []
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/",
+                "sameAs": [
+                    "https://social.example.com/example"
+                ]
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "https://www.example.com/shop/desk#webpage",
+                "url": "https://www.example.com/shop/desk",
+                "name": "Standing desk",
+                "description": "A desk that goes up and down.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-03-02T09:00:00+02:00",
+                "dateModified": "2026-03-04T11:30:00+02:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/shop/desk#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/shop/desk#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/shop/desk#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/hello.jpg",
+                "contentUrl": "https://cms.example.com/sites/default/files/hello.jpg",
+                "width": 1200,
+                "height": 630,
+                "caption": "A waving hand"
+            },
+            {
+                "@type": "Product",
+                "@id": "https://www.example.com/shop/desk#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/shop/desk#webpage"
+                },
+                "name": "Standing desk, oak",
+                "description": "A desk that goes up and down.",
+                "image": {
+                    "@type": "ImageObject",
+                    "url": "https://cms.example.com/sites/default/files/desk.jpg",
+                    "width": 800,
+                    "height": 800
+                },
+                "offers": {
+                    "@type": "Offer",
+                    "price": "499.00",
+                    "priceCurrency": "EUR",
+                    "availability": "https://schema.org/InStock"
+                },
+                "brand": {
+                    "@type": "Brand",
+                    "name": "Example Works"
+                },
+                "sku": "DESK-1"
+            }
+        ]
+    }
+}
