@@ -1096,24 +1096,37 @@ function Ready(props: {
   // The bar floats over the body's end: the body makes room for its real
   // height, and what was in view (the end, or the control just used) stays.
   const barRef = useRef<HTMLDivElement>(null);
-  const atEnd = useRef(false);
-  const barHeight = useRef(0);
-  // Every render: the bar's words (and its height) change with the state.
+  const room = useRef(NaN);
+  /** The body was scrolled to its end, as of the last render or scroll. */
+  const atEnd = useRef<boolean | null>(null);
+  const endOf = (scroller: HTMLElement, less = 0) =>
+    scroller.scrollTop >=
+    scroller.scrollHeight - less - scroller.clientHeight - 2;
+  // Every render: the bar's words, and so its height, follow the state.
   useLayoutEffect(() => {
     const element = barRef.current;
     const scroller = body.current;
-    const height = element?.offsetHeight ?? 0;
-    if (!element || !scroller || height === barHeight.current) {
-      barHeight.current = height;
+    if (!scroller) {
       return;
     }
-    barHeight.current = height;
-    element.parentElement?.style.setProperty('--seo-bar-h', `${height}px`);
-    if (atEnd.current) {
-      scroller.scrollTop = scroller.scrollHeight;
-    } else if (scroller.contains(document.activeElement)) {
-      reveal(document.activeElement);
+    element?.parentElement?.style.setProperty(
+      '--seo-bar-h',
+      `${element.offsetHeight}px`,
+    );
+    const pad = parseFloat(getComputedStyle(scroller).paddingBottom);
+    // Before the first measure: the body's own end padding, 32.
+    const grew = pad - (Number.isNaN(room.current) ? 32 : room.current);
+    room.current = pad;
+    // At the end before the bar came or grew: still at the end. Else the
+    // control just used stays clear of it.
+    if (element && grew > 0) {
+      if (atEnd.current ?? endOf(scroller, grew)) {
+        scroller.scrollTop = scroller.scrollHeight;
+      } else if (scroller.contains(document.activeElement)) {
+        reveal(document.activeElement);
+      }
     }
+    atEnd.current = endOf(scroller);
   });
   const firstField = () =>
     document.querySelector<HTMLElement>(
@@ -1143,9 +1156,8 @@ function Ready(props: {
           className="seo-body"
           ref={body}
           onScroll={(event) => {
-            const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
-            setScrolled(scrollTop > 0);
-            atEnd.current = scrollHeight - scrollTop - clientHeight < 2;
+            setScrolled(event.currentTarget.scrollTop > 0);
+            atEnd.current = endOf(event.currentTarget);
           }}
         >
           {(props.strips.length > 0 || notes.length > 0) && !props.loading && (

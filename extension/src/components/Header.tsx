@@ -23,6 +23,18 @@ import type { Scope } from '../types';
 import { summary } from './ChecksSheet';
 import { IconBtn } from './ui';
 
+/**
+ * No ring on this control until the next key press in the frame. Not on blur:
+ * the frame losing and regaining focus would bring a ring back for a click.
+ */
+function quietUntilKey(element: HTMLElement) {
+  element.dataset.quiet = '';
+  window.addEventListener('keydown', () => delete element.dataset.quiet, {
+    once: true,
+    capture: true,
+  });
+}
+
 /** The dialog takes focus once per frame: never again when the editor moves on. */
 let focusedOnce = false;
 
@@ -50,7 +62,8 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
       return;
     }
     focusedOnce = true;
-    // The ring shows whenever the browser says focus should be visible.
+    // Arriving is not navigating: the ring waits for a key press in the frame.
+    quietUntilKey(element);
     element.focus();
   }, []);
 
@@ -111,16 +124,12 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
         onPointerDown={() => {
           // Chosen with a pointer: focus goes back without a ring.
           if (trigger.current) {
-            trigger.current.dataset.quiet = '';
+            quietUntilKey(trigger.current);
           }
         }}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          const element = trigger.current;
-          element?.focus();
-          const loud = () => element && delete element.dataset.quiet;
-          element?.addEventListener('blur', loud, { once: true });
-          window.addEventListener('keydown', loud, { once: true });
+          trigger.current?.focus();
         }}
       >
         <DropdownMenu.RadioGroup
@@ -313,13 +322,7 @@ function TabList(props: { value: string }) {
           value={value}
           className="seo-tab"
           // A click is not a key press: no ring, whatever came before it.
-          onPointerDown={(event) => {
-            const element = event.currentTarget;
-            element.dataset.quiet = '';
-            const loud = () => delete element.dataset.quiet;
-            element.addEventListener('blur', loud, { once: true });
-            window.addEventListener('keydown', loud, { once: true });
-          }}
+          onPointerDown={(event) => quietUntilKey(event.currentTarget)}
         >
           {label}
         </Tabs.Trigger>

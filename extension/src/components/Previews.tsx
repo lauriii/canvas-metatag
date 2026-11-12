@@ -297,7 +297,16 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
   const texts = { ...view.texts, ...trial };
   const { image } = socialImage(state, view, PICKED);
   const large = image !== null && image.width >= 600;
-  const src = image ? (large ? (image.url ?? image.thumb) : image.thumb) : '';
+  // The image on screen changes only once the next one has loaded, and
+  // a large card waits for the file itself rather than show its thumbnail.
+  const [front, setFront] = useState<{ src: string; prev?: string } | null>(
+    null,
+  );
+  const src = image
+    ? large
+      ? (image.url ?? (front ? front.src : image.thumb))
+      : image.thumb
+    : '';
   let host = '';
   try {
     // Upper case in CSS only: assistive technology reads the name as a word.
@@ -356,7 +365,24 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
       >
         <div className="seo-social-image">
           {src && src !== broken ? (
-            <img src={src} alt="" onError={() => setBroken(src)} />
+            <>
+              {front?.prev && <img key={front.prev} src={front.prev} alt="" />}
+              {front && front.src !== src && (
+                <img key={front.src} src={front.src} alt="" />
+              )}
+              <img
+                key={src}
+                src={src}
+                alt=""
+                data-front={front?.src === src || undefined}
+                onLoad={() =>
+                  setFront((last) =>
+                    last?.src === src ? last : { src, prev: last?.src },
+                  )
+                }
+                onError={() => setBroken(src)}
+              />
+            </>
           ) : (
             <ImageIcon aria-hidden />
           )}

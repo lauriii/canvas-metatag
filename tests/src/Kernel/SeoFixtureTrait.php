@@ -177,7 +177,8 @@ trait SeoFixtureTrait {
     $file = $item?->get('entity')->getValue();
     \assert($file instanceof File);
     $generator = $this->container->get('file_url_generator');
-    $style = $this->container->get('entity_type.manager')->getStorage('image_style')->load('thumbnail');
+    $styles = $this->container->get('entity_type.manager')->getStorage('image_style')->loadMultiple(['medium', 'thumbnail']);
+    $style = $styles['medium'] ?? $styles['thumbnail'];
     return [
       'url' => $generator->generateAbsoluteString($file->getFileUri()),
       'width' => (int) $item->get('width')->getValue(),

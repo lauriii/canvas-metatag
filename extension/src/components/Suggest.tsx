@@ -128,9 +128,16 @@ function Tray(props: {
   const { setTrial } = useApp();
   const tray = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    tray.current?.focus({ preventScroll: true });
-    reveal(tray.current);
+    const element = tray.current;
+    element?.focus({ preventScroll: true });
+    // It grows as it unfolds and when the options arrive: its last line,
+    // the AI disclosure, stays in view as it does.
+    const observer = new ResizeObserver(() => reveal(element));
+    if (element) {
+      observer.observe(element);
+    }
     return () => {
+      observer.disconnect();
       setTrial(null);
       const opener = document.getElementById(props.opener);
       opener?.focus({ preventScroll: true });

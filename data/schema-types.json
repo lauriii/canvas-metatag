@@ -43,11 +43,11 @@
     "primary_type": "Product",
     "nested": { "offers": "Offer", "brand": "Brand" },
     "props": [
-      { "key": "name", "label": "Product name", "kind": "text", "default": "{title}", "level": "required" },
+      { "key": "name", "label": "Name", "kind": "text", "default": "{title}", "level": "required" },
       { "key": "description", "label": "Summary", "kind": "text", "default": "{description}", "level": "recommended" },
       { "key": "image", "label": "Image", "kind": "image", "default": "{image}", "level": "recommended" },
       { "key": "offers_price", "label": "Price", "kind": "number", "level": "required", "ai": false },
-      { "key": "offers_priceCurrency", "label": "Currency code", "kind": "text", "pattern": "^[A-Z]{3}$", "level": "required", "ai": false },
+      { "key": "offers_priceCurrency", "label": "Currency", "kind": "text", "pattern": "^[A-Z]{3}$", "level": "required", "ai": false },
       { "key": "offers_availability", "label": "Availability", "kind": "enum", "options": ["InStock", "OutOfStock", "PreOrder", "BackOrder", "SoldOut", "Discontinued"], "level": "recommended", "ai": false },
       { "key": "brand_name", "label": "Brand", "kind": "text" },
       { "key": "sku", "label": "SKU", "kind": "text", "pattern": "^\\S+$", "ai": false }

@@ -187,7 +187,7 @@ final class ApiController implements ContainerInjectionInterface {
       foreach ($storage->loadMultiple(array_slice($ids, 0, self::PAGE_SIZE)) as $media) {
         $image = $media->access('view') ? $this->resolver->describe($media) : NULL;
         if ($image !== NULL) {
-          $items[] = ['uuid' => $media->uuid()] + self::pick($image, ['name', 'thumb', 'width', 'height', 'alt']);
+          $items[] = ['uuid' => $media->uuid()] + self::pick($image, ['name', 'thumb', 'width', 'height', 'bytes', 'alt']);
         }
       }
     }
@@ -499,7 +499,7 @@ final class ApiController implements ContainerInjectionInterface {
    * @param array<mixed> $references
    *   Stored values; anything that is not a media UUID is skipped.
    *
-   * @return array<string, array{name: string, thumb: string, width: int, height: int}>
+   * @return array<string, array{name: string, thumb: string, width: int, height: int, bytes: int}>
    *   By UUID. One that is not a viewable image media is absent.
    */
   private function describeMedia(array $references): array {
@@ -509,7 +509,7 @@ final class ApiController implements ContainerInjectionInterface {
       foreach ($this->entityTypeManager->getStorage('media')->loadByProperties(['uuid' => $uuids]) as $media) {
         $image = $media->access('view') ? $this->resolver->describe($media) : NULL;
         if ($image !== NULL) {
-          $described[(string) $media->uuid()] = self::pick($image, ['name', 'thumb', 'width', 'height']);
+          $described[(string) $media->uuid()] = self::pick($image, ['name', 'thumb', 'width', 'height', 'bytes']);
         }
       }
     }

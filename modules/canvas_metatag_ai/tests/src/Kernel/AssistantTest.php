@@ -341,7 +341,7 @@ final class AssistantTest extends CanvasKernelTestBase {
     $this->assertStringContainsString("WebPage. Types: \n- WebPage: The default. Right for most pages.\n", $system);
     $this->assertStringContainsString("\n- WebPage: none\n", $system);
     $this->assertStringContainsString("\n- Event: name (Event name), startDate (Starts), endDate (Ends), location_name (Venue), location_address_streetAddress (Street address), location_address_addressLocality (City), location_address_postalCode (Postal code), location_address_addressCountry (Country), description (Summary)\n", $system);
-    $this->assertStringContainsString("\n- Product: name (Product name), description (Summary), brand_name (Brand)\n", $system);
+    $this->assertStringContainsString("\n- Product: name (Name), description (Summary), brand_name (Brand)\n", $system);
     $this->assertStringContainsString("\n- NewsArticle: headline (Headline), description (Summary), datePublished (Published), dateModified (Updated), author_name (Author name)\n", $system);
     $this->assertStringEndsWith('Answer with JSON only, in this shape: {"type":"<type>","properties":[{"key":"<key>","value":"<text>"}]}', $system);
     $this->assertStringNotContainsString('%', $system);

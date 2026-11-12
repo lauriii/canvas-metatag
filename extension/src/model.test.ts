@@ -1557,7 +1557,7 @@ describe('what previews and rows say', () => {
             identity: { ...SITE.identity, default_image: 'uuid-site' },
           },
           media: {
-            'uuid-site': { name: 'Card', thumb: '/c.jpg', width: 1, height: 1 },
+            'uuid-site': { name: 'Card', thumb: '/c.jpg', width: 1, height: 1, bytes: 1 },
           },
         }),
       ),

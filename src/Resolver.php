@@ -693,7 +693,10 @@ final class Resolver {
     if (!Values::isHttpUrl($url)) {
       return NULL;
     }
-    $style = $this->entityTypeManager->getStorage('image_style')->load('thumbnail');
+    // Big enough for a picker tile at twice the pixel density; core's
+    // thumbnail where there is no medium.
+    $styles = $this->entityTypeManager->getStorage('image_style')->loadMultiple(['medium', 'thumbnail']);
+    $style = $styles['medium'] ?? $styles['thumbnail'] ?? NULL;
     return [
       'url' => $url,
       'width' => (int) $item->get('width')->getValue(),

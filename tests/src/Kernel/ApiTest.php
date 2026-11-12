@@ -294,12 +294,14 @@ final class ApiTest extends CanvasKernelTestBase {
           'thumb' => 1,
           'width' => 1,
           'height' => 1,
+          'bytes' => 1,
         ]),
         $logo->uuid() => array_intersect_key($this->imageOf($logo), [
           'name' => 1,
           'thumb' => 1,
           'width' => 1,
           'height' => 1,
+          'bytes' => 1,
         ]),
       ],
       'resolved' => json_decode((string) json_encode(array_diff_key($resolved, ['cacheability' => TRUE])), TRUE),
@@ -307,9 +309,9 @@ final class ApiTest extends CanvasKernelTestBase {
     foreach ($expected as $key => $value) {
       $key === 'media' ? self::assertEquals($value, $state[$key]) : self::assertSame($value, $state[$key], $key);
     }
-    self::assertSame(['name', 'thumb', 'width', 'height'], array_keys($state['media'][$picked->uuid()]));
-    // Core's thumbnail style, which may also convert the format.
-    self::assertMatchesRegularExpression('#/styles/thumbnail/public/picked\.png(\.[a-z]+)?\?itok=#', $state['media'][$picked->uuid()]['thumb']);
+    self::assertSame(['name', 'thumb', 'width', 'height', 'bytes'], array_keys($state['media'][$picked->uuid()]));
+    // Core's medium (else thumbnail) style, which may also convert the format.
+    self::assertMatchesRegularExpression('#/styles/(medium|thumbnail)/public/picked\.png(\.[a-z]+)?\?itok=#', $state['media'][$picked->uuid()]['thumb']);
     self::assertStringStartsWith('/', $state['media'][$picked->uuid()]['thumb']);
     // The output is that of the draft, in the documented shape.
     self::assertSame(['head', 'image', 'schema'], array_keys($state['resolved']));
@@ -742,6 +744,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'thumb' => $this->imageOf($special)['thumb'],
       'width' => 640,
       'height' => 480,
+      'bytes' => $this->imageOf($special)['bytes'],
       'alt' => 'Pricing table',
     ], $first['items'][0]);
     // The first page is page 0.

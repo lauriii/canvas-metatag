@@ -351,9 +351,9 @@ final class ResolverTest extends CanvasKernelTestBase {
       'field.field_old_topic' => '',
     ], $values);
     self::assertLessThanOrEqual(160, mb_strlen($values['description']));
-    // A plain image field is named after its file.
+    // A plain image field is named by its alt text (else after its file).
     self::assertSame(
-      ['width' => 640, 'height' => 480, 'alt' => 'A photo', 'name' => 'photo.png'],
+      ['width' => 640, 'height' => 480, 'alt' => 'A photo', 'name' => 'A photo'],
       array_intersect_key($tokens['field.field_photo']['image'], ['name' => 1, 'alt' => 1, 'width' => 1, 'height' => 1]),
     );
     // {image} is the first image in field-definition order.

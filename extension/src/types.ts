@@ -103,6 +103,7 @@ export interface MediaInfo {
   thumb: string;
   width: number;
   height: number;
+  bytes: number;
 }
 
 export interface Head {

@@ -138,8 +138,11 @@ body {
   outline: none;
   box-shadow: var(--seo-ring);
 }
-/* Labels and headings take focus for jumps only: no ring for a pointer. */
-.seo-app [tabindex="-1"]:focus:not(:focus-visible) {
+/* Labels, headings and panels take focus for jumps and screen readers only:
+   they are not controls, so they never wear a ring. */
+.seo-app [tabindex="-1"]:focus:not(:focus-visible),
+.seo-app :is(h2, h3, label, .seo-label, .seo-panel, .seo-glyph)[tabindex="-1"]:focus {
+  outline: none;
   box-shadow: none;
 }
 
@@ -483,7 +486,7 @@ h2.seo-scope {
 
 /* Scope menu */
 .seo-scope-menu.rt-DropdownMenuContent {
-  width: 320px;
+  width: 280px;
   max-width: calc(100vw - 8px);
   border-radius: var(--seo-radius-surface);
   box-shadow: var(--seo-shadow-pop);
@@ -533,6 +536,7 @@ h2.seo-scope {
 /* The menu is as wide as it says, never as wide as its longest line. */
 .seo-scope-menu .rt-ScrollAreaViewport > div {
   display: block !important;
+  width: auto !important;
   min-width: 0 !important;
 }
 .seo-scope-menu .rt-BaseMenuItem {
@@ -776,6 +780,7 @@ h2.seo-scope {
 
 /* The link card. */
 .seo-social {
+  container-type: inline-size;
   overflow: hidden;
   border-radius: var(--seo-radius-card);
   background: var(--color-panel-solid);
@@ -789,6 +794,13 @@ h2.seo-scope {
   background: var(--gray-4);
   color: var(--seo-ink-2);
 }
+/* Whole pixels, so every hairline below it stays crisp. */
+@supports (height: round(1px, 1px)) {
+  .seo-social-image {
+    aspect-ratio: auto;
+    height: round(100cqw / 1.91, 1px);
+  }
+}
 /* Out of flow: the image never sets the card's ratio, the crop does. */
 .seo-social-image img {
   position: absolute;
@@ -797,6 +809,18 @@ h2.seo-scope {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+/* The next image waits, unseen, until it has loaded; then it fades in. */
+.seo-social-image img:last-of-type:not([data-front]) {
+  opacity: 0;
+}
+.seo-social-image img[data-front]:not(:only-of-type) {
+  animation: seo-fade-in var(--seo-base) var(--seo-ease) both;
+}
+@keyframes seo-fade-in {
+  from {
+    opacity: 0;
+  }
 }
 .seo-social-image svg {
   width: 20px;
@@ -979,6 +1003,17 @@ h2.seo-scope {
 .seo-aside:empty {
   display: none;
 }
+/* Text, then an action: room for the action's focus ring. */
+.seo-aside > span + .seo-btn:not([data-accent]) {
+  margin-left: 4px;
+}
+/* The unit after a number box: "160 characters". */
+.seo-unit {
+  color: var(--seo-ink-2);
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+}
 .seo-field:hover > .seo-aside,
 .seo-field:focus-within > .seo-aside,
 .seo-aside[data-pinned],
@@ -1011,6 +1046,20 @@ h2.seo-scope {
   /* Room for a fix button's overhang and its focus ring. */
   margin: -6px;
   padding: 6px;
+}
+/* The insert menu covers the line under its field: the field's own asides
+   step back while it is open, so no fragment of them shows past its edge. */
+.seo-field:has(.seo-trail [aria-haspopup="menu"][aria-expanded="true"]) > :is(.seo-aside, .seo-guide-slot) {
+  visibility: hidden;
+  opacity: 0;
+}
+/* Label and control on one row: the line, when there is one, goes under both. */
+.seo-inline > .seo-guide-slot {
+  flex-basis: 100%;
+  order: 3;
+}
+.seo-inline > .seo-guide-slot:not([data-open]) {
+  display: none;
 }
 .seo-guide-slot:not([data-open]) > div {
   visibility: hidden;
@@ -1695,7 +1744,7 @@ button.seo-row:focus-visible {
 /* ── Site groups ── */
 .seo-group-title {
   margin: var(--seo-6) 0 0 !important;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 20px;
 }
@@ -1874,7 +1923,7 @@ button.seo-row:focus-visible {
   margin-left: auto;
 }
 .seo-tray-refine {
-  padding: 8px 4px 0 10px;
+  padding: 8px 0 0;
 }
 .seo-tray-note {
   margin: 0;
@@ -1994,7 +2043,9 @@ button.seo-row:focus-visible {
   display: flex;
   flex-direction: column;
   background: var(--color-panel-solid);
-  animation: seo-sheet-in var(--seo-sheet) var(--seo-ease) both;
+  /* Backwards only: at rest the sheet keeps no transform, so its text is not
+     rasterised on a layer of its own. */
+  animation: seo-sheet-in var(--seo-sheet) var(--seo-ease) backwards;
 }
 @keyframes seo-sheet-in {
   from {
@@ -2242,6 +2293,8 @@ button.seo-row:focus-visible {
 .seo-tiles {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  /* Whole-pixel columns where the browser can round: tiles on whole pixels. */
+  grid-template-columns: repeat(3, round(down, (100% - 24px) / 3, 1px));
   gap: 16px 12px;
   margin-top: 12px;
 }
@@ -2355,9 +2408,6 @@ button.seo-row:focus-visible {
 
 /* ── Small heights ── */
 @media (max-height: 420px) {
-  .seo-body {
-    padding-top: 4px;
-  }
   .seo-stage {
     padding: 10px 14px 12px;
   }
@@ -2386,17 +2436,15 @@ button.seo-row:focus-visible {
     padding: 6px 8px;
     gap: 2px 6px;
   }
-  .seo-scope {
-    margin-left: 0;
-  }
+  /* The controls' padding hangs past the gutter, as at 100%: their text
+     lines up with the content column. */
   .seo-tabs.rt-BaseTabList {
     order: 3;
-    width: 100%;
-    margin-left: 0;
+    width: calc(100% + 16px);
+    margin: 0 -8px;
   }
   .seo-header > .seo-checks-btn.seo-checks-btn {
     margin-left: auto;
-    margin-right: 0;
   }
   .seo-body {
     padding: 4px 8px 12px;
@@ -2414,6 +2462,21 @@ button.seo-row:focus-visible {
   .seo-row-end {
     /* Even, so an unwrapped control stays centred on its label. */
     padding: 6px 0;
+  }
+  button.seo-row {
+    flex-wrap: wrap;
+    gap: 0 12px;
+  }
+  button.seo-row .seo-row-label:has(+ .seo-row-value > span) {
+    padding-bottom: 0;
+  }
+  button.seo-row .seo-row-label + .seo-row-value:has(> span) {
+    flex: 1 1 100%;
+    padding-bottom: 12px;
+  }
+  button.seo-row .seo-row-label + .seo-row-value > span {
+    margin-right: auto;
+    white-space: normal;
   }
   .seo-bar {
     padding: 6px 6px 6px 14px;

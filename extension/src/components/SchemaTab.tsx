@@ -609,13 +609,23 @@ export function SchemaTab() {
                 <>
                   <Btn
                     variant="soft"
-                    onClick={() => setType(asking.to, true)}
+                    onClick={() => {
+                      // The notice goes with its buttons: focus goes back to the Type.
+                      document.getElementById(typeField.id)?.focus();
+                      setType(asking.to, true);
+                    }}
                   >
                     {asking.to === undefined
                       ? 'Reset'
                       : `Change to ${REGISTRY[asking.to].label}`}
                   </Btn>
-                  <Btn variant="outline" onClick={() => setAsking(null)}>
+                  <Btn
+                    variant="outline"
+                    onClick={() => {
+                      document.getElementById(typeField.id)?.focus();
+                      setAsking(null);
+                    }}
+                  >
                     Keep {type.label}
                   </Btn>
                 </>

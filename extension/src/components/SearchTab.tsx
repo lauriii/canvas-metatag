@@ -183,6 +183,11 @@ export function Visibility(props: { scope: Scope }) {
                   {...held}
                 />
               )}
+              {previews === 'limited' && (
+                <span className="seo-unit" aria-hidden>
+                  characters
+                </span>
+              )}
             </>
           )}
         />
