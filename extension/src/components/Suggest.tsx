@@ -1,21 +1,9 @@
-import { Cross2Icon, MagicWandIcon } from '@radix-ui/react-icons';
-import {
-  Button,
-  Card,
-  CheckboxGroup,
-  Flex,
-  IconButton,
-  RadioGroup,
-  Skeleton,
-  Text,
-  TextField,
-  Tooltip,
-} from '@radix-ui/themes';
+import { Pencil1Icon, ReloadIcon } from '@radix-ui/react-icons';
+import { CheckboxGroup, RadioGroup } from '@radix-ui/themes';
 import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
-  useId,
   useRef,
   useState,
 } from 'react';
@@ -37,6 +25,7 @@ import type {
   SuggestField,
   Texts,
 } from '../types';
+import { Btn, IconBtn, Sk, SparkleIcon, reveal } from './ui';
 
 const ERRORS: Record<string, string> = {
   ai_not_configured: "AI suggestions aren't set up on this site yet.",
@@ -51,6 +40,7 @@ const errorText = (error: unknown) =>
   "The AI service didn't answer. Try again.";
 
 const DISCLOSURE = "Written by AI from this page's text. Check the facts.";
+const TIP = "Suggest with AI · sends this page's text to the AI service";
 
 /** Suggestions are offered at page scope, to people who can use them, when AI can work. */
 export function useAi(): boolean {
@@ -62,8 +52,8 @@ export function useAi(): boolean {
   );
 }
 
-/** The one control that opens a suggestion panel. Not rendered when AI cannot work. */
-export function SuggestButton(props: {
+/** The sparkle in a field. Not rendered when AI cannot work. */
+export function SuggestIcon(props: {
   id: string;
   label: string;
   open: boolean;
@@ -73,19 +63,45 @@ export function SuggestButton(props: {
     return null;
   }
   return (
-    <Tooltip content={`${props.label} (sends this page's text to the AI service)`}>
-      <IconButton
-        id={props.id}
-        size="1"
-        variant="ghost"
-        aria-label={props.label}
-        aria-description="Sends this page's text to the AI service."
-        aria-expanded={props.open}
-        onClick={props.onClick}
-      >
-        <MagicWandIcon aria-hidden />
-      </IconButton>
-    </Tooltip>
+    <IconBtn
+      id={props.id}
+      label={props.label}
+      tip={TIP}
+      side="bottom"
+      ai
+      aria-description="Sends this page's text to the AI service."
+      aria-expanded={props.open}
+      onClick={props.onClick}
+    >
+      <SparkleIcon />
+    </IconBtn>
+  );
+}
+
+/** "✦ Suggest" as text: on the link preview and beside the page type. */
+export function SuggestButton(props: {
+  id: string;
+  label: string;
+  open: boolean;
+  variant?: 'ghost' | 'soft';
+  onClick(): void;
+}) {
+  if (!useAi()) {
+    return null;
+  }
+  return (
+    <Btn
+      id={props.id}
+      variant={props.variant ?? 'soft'}
+      size={props.variant === 'ghost' ? 24 : 32}
+      aria-label={props.label}
+      aria-description={TIP}
+      aria-expanded={props.open}
+      onClick={props.onClick}
+    >
+      <SparkleIcon />
+      Suggest
+    </Btn>
   );
 }
 
@@ -102,75 +118,65 @@ function usePage() {
   };
 }
 
-function Panel(props: {
-  title: string;
+/** The inline tray: it grows under its field and never covers the next one. */
+function Tray(props: {
   /** The control that opened it: closing returns focus there. */
   opener: string;
   onClose(): void;
   children: ReactNode;
 }) {
   const { setTrial } = useApp();
-  const panel = useRef<HTMLDivElement>(null);
-  const titleId = useId();
+  const tray = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    panel.current?.focus({ preventScroll: true });
-    panel.current?.scrollIntoView({ block: 'nearest' });
+    tray.current?.focus({ preventScroll: true });
+    reveal(tray.current);
     return () => {
       setTrial(null);
-      document.getElementById(props.opener)?.focus({ preventScroll: true });
+      const opener = document.getElementById(props.opener);
+      opener?.focus({ preventScroll: true });
+      // After the tray has gone: the opener may sit above the fold.
+      requestAnimationFrame(() => reveal(opener));
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
-    <Card
-      ref={panel}
-      className="seo-suggest"
-      role="group"
-      aria-labelledby={titleId}
-      tabIndex={-1}
-      onKeyDown={(event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          props.onClose();
-        }
-      }}
-    >
-      <Flex justify="between" align="center" mb="2">
-        <Text as="div" size="1" weight="medium" id={titleId}>
-          {props.title}
-        </Text>
-        <IconButton
-          size="1"
-          variant="ghost"
-          color="gray"
-          aria-label="Close suggestions"
-          onClick={props.onClose}
+    <div className="seo-tray-wrap">
+      <div>
+        <div
+          ref={tray}
+          className="seo-tray"
+          role="group"
+          aria-label="Suggestions"
+          tabIndex={-1}
+          onKeyDown={(event: KeyboardEvent) => {
+            if (event.key === 'Escape' && !event.defaultPrevented) {
+              event.stopPropagation();
+              props.onClose();
+            }
+          }}
         >
-          <Cross2Icon aria-hidden />
-        </IconButton>
-      </Flex>
-      {props.children}
-      <Text as="p" size="1" color="gray" mt="3">
-        {DISCLOSURE}
-      </Text>
-    </Card>
+          {props.children}
+          <p className="seo-tray-note">{DISCLOSURE}</p>
+        </div>
+      </div>
+    </div>
   );
 }
 
 const Working = () => (
-  <Flex direction="column" gap="2" aria-busy="true">
-    <Skeleton height="36px" />
-    <Skeleton height="36px" />
-    <Skeleton height="36px" />
-    <Text as="p" size="1" color="gray" role="status">
-      Writing suggestions from this page's text, sent to the AI service…
-    </Text>
-  </Flex>
+  <div className="seo-tray-working" aria-busy="true">
+    <Sk w="100%" h={20} />
+    <Sk w="86%" h={20} />
+    <Sk w="92%" h={20} />
+    <span className="seo-meta" role="status">
+      Writing suggestions from this page's text…
+    </span>
+  </div>
 );
 
 /**
- * Three variants for a title, a description, or a social card (title and
- * description together). Nothing is written until "Use this".
+ * Three variants for a title, a description, or a link card (title and
+ * description together). Nothing is written until "Use".
  */
 export function TextSuggest(props: {
   fields: SuggestField[];
@@ -190,9 +196,9 @@ export function TextSuggest(props: {
   const [message, setMessage] = useState('');
   const [selected, setSelected] = useState(0);
   const [hint, setHint] = useState('');
+  const [refining, setRefining] = useState(false);
   const calls = useRef(0);
   const list = useRef<HTMLDivElement>(null);
-  const hintId = useId();
   const pattern = String(inherited(server, 'target', 'title') ?? '');
 
   /** The four texts as they would read with a variant applied. */
@@ -274,54 +280,44 @@ export function TextSuggest(props: {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(ask, []);
 
-  // The previews show the highlighted variant, so it can be judged in place.
+  // The previews show the chosen variant, so it can be judged in place.
   const shown = phase === 'ready' ? variants[selected] : undefined;
   useEffect(() => {
-    setTrial(shown ? applied(shown) : null);
+    setTrial(shown ? { ...applied(shown), index: selected + 1 } : null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shown]);
-  // Focus goes to the variants when they arrive, unless the user went elsewhere.
+  // Focus goes to the options when they arrive, unless the user went elsewhere.
   useEffect(() => {
-    const panel = list.current?.closest('.seo-suggest');
-    if (phase === 'ready' && document.activeElement === panel) {
+    const tray = list.current?.closest('.seo-tray');
+    if (phase === 'ready' && document.activeElement === tray) {
       list.current
         ?.querySelector<HTMLElement>('[role="radio"][aria-checked="true"]')
         ?.focus({ preventScroll: true });
     }
   }, [phase]);
 
-  const verdict = (variant: Partial<Record<SuggestField, string>>) => {
+  const count = (variant: Partial<Record<SuggestField, string>>) => {
     const kind =
       variant.title !== undefined
         ? 'title'
         : variant.description !== undefined
           ? 'description'
           : null;
-    if (!kind) {
-      return '';
-    }
-    const result = meter(kind, applied(variant)[kind], measurer);
-    return `${result.chars}${
-      result.state === 'fits'
-        ? ' · fits'
-        : result.state === 'long'
-          ? ' · may be cut off'
-          : ''
-    }`;
+    return kind ? meter(kind, applied(variant)[kind], measurer) : null;
   };
 
   return (
-    <Panel title="Suggestions" opener={props.opener} onClose={props.onClose}>
+    <Tray opener={props.opener} onClose={props.onClose}>
       {(state.facts?.text.trim().length ?? 0) < 200 && (
-        <Text as="p" size="1" color="gray" mb="2">
+        <p className="seo-tray-note" data-tone="improve">
           There is not much text on this page yet, so these may be generic.
-        </Text>
+        </p>
       )}
       {phase === 'working' && <Working />}
       {phase === 'error' && (
-        <Text as="p" size="2" role="alert" mb="2">
+        <p className="seo-tray-message" data-tone="error" role="alert">
           {message}
-        </Text>
+        </p>
       )}
       {phase === 'ready' && (
         <RadioGroup.Root
@@ -330,72 +326,98 @@ export function TextSuggest(props: {
           aria-label="Suggestions"
           value={String(selected)}
           onValueChange={(value) => setSelected(Number(value))}
-          className="seo-variants"
+          // Selection follows focus: the arrows try each one in the preview.
+          onFocus={(event) => {
+            const value = (event.target as HTMLElement).getAttribute('value');
+            if (value !== null && Number(value) !== selected) {
+              setSelected(Number(value));
+            }
+          }}
+          className="seo-tray-options"
         >
-          {variants.map((variant, index) => (
-            <RadioGroup.Item key={index} value={String(index)}>
-              <span className="seo-variant" lang={server.langcode}>
-                {props.fields.map((field, at) => (
-                  <Text
-                    as="span"
-                    key={field}
-                    size="2"
-                    weight={
-                      props.fields.length > 1 && at === 0 ? 'medium' : 'regular'
-                    }
+          {variants.map((variant, index) => {
+            const result = count(variant);
+            return (
+              <RadioGroup.Item
+                key={index}
+                value={String(index)}
+                className="seo-tray-option"
+              >
+                <span className="seo-tray-text" lang={server.langcode}>
+                  {props.fields.map((field, at) =>
+                    props.fields.length > 1 && at === 0 ? (
+                      <b key={field}>{variant[field]}</b>
+                    ) : (
+                      <span key={field}>{variant[field]}</span>
+                    ),
+                  )}
+                </span>
+                {result && (
+                  <span
+                    className="seo-tray-count"
+                    data-long={result.state === 'long' || undefined}
                   >
-                    {variant[field]}
-                  </Text>
-                ))}
-                <Text as="span" size="1" color="gray" className="seo-verdict">
-                  {verdict(variant)}
-                </Text>
-              </span>
-            </RadioGroup.Item>
-          ))}
+                    {result.chars}
+                  </span>
+                )}
+              </RadioGroup.Item>
+            );
+          })}
         </RadioGroup.Root>
       )}
-      <Flex direction="column" gap="1" mt="3">
-        <Text as="label" size="1" color="gray" htmlFor={hintId}>
-          Steer it (optional)
-        </Text>
-        <TextField.Root
-          id={hintId}
-          size="2"
-          maxLength={200}
-          value={hint}
-          onChange={(event) => setHint(event.target.value)}
-          onKeyDown={(event) => event.key === 'Enter' && ask()}
-        />
-      </Flex>
-      <Flex gap="3" mt="3" align="center">
-        {phase === 'ready' && (
-          <Button
-            size="1"
-            onClick={() => {
-              if (props.onUse(variants[selected])) {
-                props.onClose();
-              } else {
-                setMessage("The editor didn't take the text. Try again.");
-                setPhase('error');
+      {refining && (
+        <div className="seo-tray-refine">
+          <input
+            className="seo-input"
+            aria-label="Refine"
+            placeholder="Shorter, mention the free pilot…"
+            maxLength={200}
+            autoFocus
+            value={hint}
+            onChange={(event) => setHint(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && phase !== 'working') {
+                ask();
               }
             }}
-          >
-            Use this
-          </Button>
+          />
+        </div>
+      )}
+      <div className="seo-tray-foot">
+        {!refining && (
+          <Btn variant="ghost" onClick={() => setRefining(true)}>
+            <Pencil1Icon aria-hidden />
+            Refine
+          </Btn>
         )}
-        <Button
-          size="1"
-          variant="soft"
-          color="gray"
-          // Not `disabled`: a disabled button drops the focus it has.
-          aria-disabled={phase === 'working'}
-          onClick={() => phase !== 'working' && ask()}
-        >
-          Try again
-        </Button>
-      </Flex>
-    </Panel>
+        <span className="seo-bar-actions">
+          <Btn
+            variant="soft"
+            // Not `disabled`: a disabled button drops the focus it has.
+            aria-disabled={phase === 'working'}
+            onClick={() => phase !== 'working' && ask()}
+          >
+            <ReloadIcon aria-hidden />
+            Try again
+          </Btn>
+          {phase === 'ready' && (
+            <Btn
+              variant="solid"
+              onClick={() => {
+                if (props.onUse(variants[selected])) {
+                  props.onClose();
+                } else {
+                  setMessage("The editor didn't take the text. Try again.");
+                  setPhase('error');
+                }
+              }}
+            >
+              Use
+            </Btn>
+          )}
+        </span>
+      </div>
+    </Tray>
   );
 }
 
@@ -439,6 +461,15 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(ask, []);
+
+  // Focus goes to the first detail when the proposal arrives, as with options.
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const tray = box.current?.closest('.seo-tray');
+    if (phase === 'ready' && document.activeElement === tray) {
+      box.current?.querySelector<HTMLElement>('button')?.focus();
+    }
+  }, [phase]);
 
   const type = proposal ? REGISTRY[proposal.type] : undefined;
   const props_ = type?.props ?? [];
@@ -486,33 +517,38 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
   };
 
   return (
-    <Panel title="Suggestion" opener={props.opener} onClose={props.onClose}>
+    <Tray opener={props.opener} onClose={props.onClose}>
       {phase === 'working' && <Working />}
       {phase === 'error' && (
         <>
-          <Text as="p" size="2" role="alert" mb="3">
+          <p className="seo-tray-message" data-tone="error" role="alert">
             {message}
-          </Text>
-          <Button size="1" variant="soft" color="gray" onClick={ask}>
-            Try again
-          </Button>
+          </p>
+          <div className="seo-tray-foot">
+            <Btn variant="soft" onClick={ask}>
+              <ReloadIcon aria-hidden />
+              Try again
+            </Btn>
+          </div>
         </>
       )}
       {nothing && (
         <>
-          <Text as="p" size="2" mb="3">
+          <p className="seo-tray-message">
             This already looks right: {type?.label ?? 'Web page'}.
-          </Text>
-          <Button size="1" variant="soft" color="gray" onClick={props.onClose}>
-            Dismiss
-          </Button>
+          </p>
+          <div className="seo-tray-foot">
+            <Btn variant="soft" onClick={props.onClose}>
+              Dismiss
+            </Btn>
+          </div>
         </>
       )}
       {phase === 'ready' && proposal && type && !nothing && (
-        <>
-          <Text as="p" size="2" mb="2">
+        <div className="seo-tray-proposal" ref={box}>
+          <p className="seo-tray-message">
             This looks like {article(type.label)} {type.label}.
-          </Text>
+          </p>
           <CheckboxGroup.Root
             size="2"
             value={ticked}
@@ -525,18 +561,16 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
               return (
                 <CheckboxGroup.Item key={key} value={key}>
                   <span className="seo-proposal">
-                    <Text as="span" size="2" weight="medium">
-                      {prop?.label ?? key}
-                    </Text>
-                    <Text as="span" size="2" lang={request.langcode}>
+                    <b>{prop?.label ?? key}</b>
+                    <span lang={request.langcode}>
                       {prop?.kind === 'date' ? dateText(value) : value}
-                    </Text>
+                    </span>
                     {proposal.unverified.includes(key) && (
-                      <Text as="span" size="1" color="gray">
+                      <small>
                         {prop?.kind === 'date'
                           ? "Dates can't be checked against the page."
                           : 'Not found on the page. Check before using.'}
-                      </Text>
+                      </small>
                     )}
                   </span>
                 </CheckboxGroup.Item>
@@ -544,26 +578,23 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
             })}
           </CheckboxGroup.Root>
           {dropping > 0 && (
-            <Text as="p" size="2" mt="3" role="alert">
+            <p className="seo-tray-note" data-tone="improve" role="alert">
               Using this removes {dropping} {current.label}{' '}
               {dropping === 1 ? 'detail' : 'details'}.
-            </Text>
+            </p>
           )}
-          <Flex gap="3" mt="3">
-            <Button size="1" onClick={() => use(dropping > 0)}>
-              Use selected
-            </Button>
-            <Button
-              size="1"
-              variant="soft"
-              color="gray"
-              onClick={props.onClose}
-            >
-              {dropping > 0 ? `Keep ${current.label}` : 'Dismiss'}
-            </Button>
-          </Flex>
-        </>
+          <div className="seo-tray-foot">
+            <span className="seo-bar-actions">
+              <Btn variant="soft" onClick={props.onClose}>
+                {dropping > 0 ? `Keep ${current.label}` : 'Dismiss'}
+              </Btn>
+              <Btn variant="solid" onClick={() => use(dropping > 0)}>
+                Use selected
+              </Btn>
+            </span>
+          </div>
+        </div>
       )}
-    </Panel>
+    </Tray>
   );
 }

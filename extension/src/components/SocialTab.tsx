@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 
 import { useApp } from '../App';
-import { socialImage, texts } from '../model';
+import { socialImage, texts, tokensIn } from '../model';
 import { Field } from './Field';
 import { ImageRow, PICKED } from './MediaPicker';
 import { SocialPreview } from './Previews';
@@ -23,6 +23,19 @@ export function SocialTab() {
   const { image, from } = socialImage(state, view, PICKED);
   // What the text fields show while nothing is stored for them.
   const unset = texts({ ...view.effective, social: {} }, view.values);
+  const fields = page
+    ? undefined
+    : Object.entries(view.tokens)
+        .filter(
+          ([name, token]) =>
+            token.type === 'image' && name.startsWith('field.'),
+        )
+        .map(([name, token]) => ({
+          value: `{${name}}`,
+          label: token.label,
+          image: token.image,
+        }));
+  const bound = social.image?.match(/^\{(field\..+)\}$/)?.[1];
 
   return (
     <>
@@ -31,6 +44,7 @@ export function SocialTab() {
           <SuggestButton
             id={suggestId}
             label="Suggest title and description"
+            variant="ghost"
             open={suggesting}
             onClick={() => setSuggesting(!suggesting)}
           />
@@ -65,47 +79,47 @@ export function SocialTab() {
         path="social.image"
         label="Image"
         group
-        source={from}
-        resetLabel="Use the default image"
+        source={
+          // The model's words, in the aside's family of source words.
+          from === 'Chosen here'
+            ? page
+              ? 'Set on this page'
+              : `Set for every ${target.label}`
+            : from === 'From the page image'
+              ? 'From the Image field'
+              : from === 'Site default'
+                ? 'Site default image'
+                : from.replace(/^From (?!the )(.+)$/, 'From the $1 field')
+        }
+        resetTip="the default image"
       >
         {(field) => (
-          <>
-            <ImageRow
-              describedBy={field.describedBy}
-              image={image}
-              empty={
-                page
-                  ? 'No image. Add one in Page data or choose one here.'
-                  : 'No image. Choose one here, or use one of the fields.'
-              }
-              disabled={field.disabled}
-              minWidth={600}
-              chosen={social.image}
-              fields={
-                page
-                  ? undefined
-                  : Object.entries(view.tokens)
-                      .filter(
-                        ([name, token]) =>
-                          token.type === 'image' && name.startsWith('field.'),
-                      )
-                      .map(([name, token]) => ({
-                        value: `{${name}}`,
-                        label: token.label,
-                      }))
-              }
-              onPick={(value) => edit('social.image', value)}
-            />
-            {field.status}
-          </>
+          <ImageRow
+            describedBy={field.describedBy}
+            image={image}
+            name={
+              bound && view.tokens[bound]
+                ? `From each ${target.label}'s ${view.tokens[bound].label} field`
+                : undefined
+            }
+            disabled={field.disabled}
+            minWidth={600}
+            chosen={social.image}
+            fields={fields}
+            onPick={(value) => edit('social.image', value)}
+          />
         )}
       </Field>
 
       <Field
         scope="target"
         path="social.title"
-        label="Social title"
-        fallback="Same as page title"
+        label="Title"
+        fallback="Same as search title"
+        resetTip="the search title"
+        resolved={
+          tokensIn(social.title ?? '').length ? view.texts.social_title : undefined
+        }
       >
         {(field) => (
           <TemplateInput
@@ -117,19 +131,24 @@ export function SocialTab() {
             value={social.title ?? ''}
             onChange={(value) => edit('social.title', value)}
             inherited={unset.social_title}
+            inheritedFrom="the search title"
             tokens={view.tokens}
             fields={!page}
-            alwaysInsert={!page}
-            becomes={view.texts.social_title}
-            status={field.status}
+            insert={page ? 'focus' : 'always'}
           />
         )}
       </Field>
       <Field
         scope="target"
         path="social.description"
-        label="Social description"
+        label="Description"
         fallback="Same as description"
+        resetTip="the description"
+        resolved={
+          tokensIn(social.description ?? '').length
+            ? view.texts.social_description
+            : undefined
+        }
       >
         {(field) => (
           <TemplateInput
@@ -141,12 +160,11 @@ export function SocialTab() {
             value={social.description ?? ''}
             onChange={(value) => edit('social.description', value)}
             inherited={unset.social_description}
+            inheritedFrom="the description"
             tokens={view.tokens}
             fields={!page}
             multiline
-            alwaysInsert={!page}
-            becomes={view.texts.social_description}
-            status={field.status}
+            insert={page ? 'focus' : 'always'}
           />
         )}
       </Field>

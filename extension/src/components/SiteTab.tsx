@@ -1,21 +1,15 @@
-import { InfoCircledIcon } from '@radix-ui/react-icons';
-import {
-  Callout,
-  Flex,
-  RadioGroup,
-  SegmentedControl,
-  Text,
-  TextArea,
-  TextField,
-} from '@radix-ui/themes';
+import { SegmentedControl } from '@radix-ui/themes';
+import { Fragment } from 'react';
 
 import { useApp } from '../App';
-import { identityGaps, identitySentence } from '../checks';
+import { identityGaps } from '../checks';
 import { siteTexts } from '../model';
-import { Field, Section, useHeld } from './Field';
-import { ImageRow, PICKED } from './MediaPicker';
+import { Field, useHeld } from './Field';
+import { ImageRow, PICKED, Thumb } from './MediaPicker';
+import { Stage } from './Previews';
 import { Visibility } from './SearchTab';
 import { TemplateInput } from './TemplateInput';
+import { InfoTip } from './ui';
 
 const SEPARATORS = ['|', '·', '–', '—'];
 /** What a screen reader says for each: punctuation is often skipped. */
@@ -26,30 +20,47 @@ const SEPARATOR_NAMES: Record<string, string> = {
   '—': 'Em dash',
 };
 
-const AI_REASONS = {
-  no_provider: 'AI suggestions need a default chat provider.',
-  not_usable: "The AI provider isn't ready to use.",
+const GAPS: Record<string, string> = {
+  'identity.name': 'Add a name',
+  'identity.logo': 'Add a logo',
+  'identity.same_as': 'Add a profile link',
 };
 
-function useSite() {
-  const { state, dispatch } = useApp();
-  const server = state.server!;
-  const { identity } = state.edits.site;
-  return {
-    server,
-    identity,
-    image: (uuid: string) => PICKED[uuid] ?? server.media[uuid] ?? null,
-    edit: (path: string, value: unknown) =>
-      dispatch({ type: 'edit', scope: 'site', path, value }),
-  };
-}
+const ORIGINS = {
+  settings: "The public address is set in the site's settings file.",
+  frontend:
+    "The public address is the headless frontend the editor previews with. If visitors use another one, set it in the site's settings file.",
+  request: "The public address comes from the site's base URL.",
+};
 
-/** Who runs the site: what search engines are told about its publisher. */
-export function IdentityTab() {
-  const { state, view } = useApp();
-  const { server, identity, image, edit } = useSite();
+const host = (url: string) => {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
+};
+
+/** An address that wraps only after a dot or a slash, never at its hyphen. */
+const breakable = (text: string) =>
+  text.split(/(?<=[./ ])/).map((part, index) => (
+    <Fragment key={index}>
+      {index > 0 && <wbr />}
+      <span className="seo-nowrap">{part}</span>
+    </Fragment>
+  ));
+
+/** Who runs the site, and what every page starts from. One calm scroll. */
+export function SiteView() {
+  const { state, dispatch, view } = useApp();
+  const server = state.server!;
+  const { identity, values } = state.edits.site;
+  const edit = (path: string, value: unknown) =>
+    dispatch({ type: 'edit', scope: 'site', path, value });
+  const image = (uuid: string) => PICKED[uuid] ?? server.media[uuid] ?? null;
   const gaps = identityGaps(state.edits.site, view?.tokens ?? {});
   const ai = server.capabilities.ai;
+  const name = identity.name.trim() || view?.tokens.site?.value || '';
   const profiles = useHeld(
     identity.same_as.join('\n'),
     (text) =>
@@ -62,160 +73,131 @@ export function IdentityTab() {
       ),
     true,
   );
-  const headless = server.origin.source === 'frontend';
+  // Everything an entity has; a content type's fields do not exist site-wide.
+  const tokens = Object.fromEntries(
+    Object.entries(view?.tokens ?? {}).filter(
+      ([token]) => !token.startsWith('field.'),
+    ),
+  );
+  const separators = SEPARATORS.includes(identity.separator)
+    ? SEPARATORS
+    : [...SEPARATORS, identity.separator].filter(Boolean);
+  const example = view ? siteTexts(state, view).title : '';
+
   return (
     <>
-      {server.can.site && gaps.length > 0 && (
-        <Callout.Root size="1" color="gray">
-          <Callout.Icon>
-            <InfoCircledIcon aria-hidden />
-          </Callout.Icon>
-          <Callout.Text>{identitySentence(gaps)}</Callout.Text>
-        </Callout.Root>
-      )}
-      {server.can.site && ai && !ai.available && ai.reason && (
-        <Callout.Root size="1" color="gray">
-          <Callout.Icon>
-            <InfoCircledIcon aria-hidden />
-          </Callout.Icon>
-          <Callout.Text>{AI_REASONS[ai.reason]}</Callout.Text>
-        </Callout.Root>
-      )}
-      <Field
-        scope="site"
-        path="identity.kind"
-        label="This site represents"
-        group
+      <Stage
+        caption={
+          <>
+            <span>Publisher</span>
+            {server.can.site && gaps.length > 0 && (
+              <span data-warn="">· {GAPS[gaps[0].field]}</span>
+            )}
+          </>
+        }
+        buttons={
+          <InfoTip
+            label="About the public address"
+            text={ORIGINS[server.origin.source]}
+          />
+        }
       >
+        <div className="seo-publisher">
+          <Thumb src={image(identity.logo)?.thumb} />
+          <div>
+            <b>{name}</b>
+            <small>
+              {identity.kind === 'person' ? 'Person' : 'Organization'} ·{' '}
+              {breakable(host(server.origin.url))}
+            </small>
+            {identity.same_as.length > 0 && (
+              <small>{breakable(identity.same_as.map(host).join(' · '))}</small>
+            )}
+          </div>
+        </div>
+      </Stage>
+
+      <h3 className="seo-group-title">Identity</h3>
+      <Field scope="site" path="identity.kind" label="Represents" group inline>
         {(field) => (
-          <RadioGroup.Root
+          <SegmentedControl.Root
             size="2"
+            className="seo-segmented"
+            role="radiogroup"
             aria-labelledby={field.labelId}
             value={identity.kind}
             disabled={field.disabled}
-            onValueChange={(kind) => edit('identity.kind', kind)}
-            className="seo-inline-radios"
+            onValueChange={(kind) => kind && edit('identity.kind', kind)}
           >
-            <RadioGroup.Item value="organization">
-              An organization
-            </RadioGroup.Item>
-            <RadioGroup.Item value="person">A person</RadioGroup.Item>
-          </RadioGroup.Root>
+            <SegmentedControl.Item value="organization">
+              Organization
+            </SegmentedControl.Item>
+            <SegmentedControl.Item value="person">Person</SegmentedControl.Item>
+          </SegmentedControl.Root>
         )}
       </Field>
       <Field
         scope="site"
         path="identity.name"
         label="Name"
-        source={identity.name.trim() === '' ? 'From the site name' : undefined}
+        source={identity.name === '' ? 'From the site name' : undefined}
       >
         {(field) => (
-          <>
-            <TextField.Root
-              id={field.id}
-              size="2"
-              value={identity.name}
-              placeholder={view?.tokens.site?.value}
-              disabled={field.disabled}
-              aria-invalid={field.invalid || undefined}
-              aria-describedby={field.describedBy}
-              onChange={(event) => edit('identity.name', event.target.value)}
-            >
-              {identity.name === '' && (
-                <TextField.Slot side="right">
-                  <Text size="1" color="gray" aria-hidden>
-                    (inherited)
-                  </Text>
-                </TextField.Slot>
-              )}
-            </TextField.Root>
-            {field.status}
-          </>
+          <input
+            id={field.id}
+            className="seo-input"
+            value={identity.name}
+            placeholder={view?.tokens.site?.value}
+            disabled={field.disabled}
+            aria-invalid={field.invalid || undefined}
+            aria-describedby={field.describedBy}
+            onChange={(event) => edit('identity.name', event.target.value)}
+          />
         )}
       </Field>
       <Field scope="site" path="identity.logo" label="Logo" group>
         {(field) => (
-          <>
-            <ImageRow
-              describedBy={field.describedBy}
-              image={image(identity.logo)}
-              empty="No logo. Choose a square image, at least 112 × 112."
-              disabled={field.disabled}
-              minWidth={112}
-              chosen={identity.logo}
-              onPick={(uuid) => edit('identity.logo', uuid)}
-              onClear={() => edit('identity.logo', '')}
-            />
-            {field.status}
-          </>
+          <ImageRow
+            describedBy={field.describedBy}
+            image={image(identity.logo)}
+            noun="logo"
+            disabled={field.disabled}
+            minWidth={112}
+            chosen={identity.logo}
+            onPick={(uuid) => edit('identity.logo', uuid)}
+            onClear={() => edit('identity.logo', '')}
+          />
         )}
       </Field>
-      <Field
-        scope="site"
-        path="identity.same_as"
-        label="Profiles elsewhere (one address per line)"
-        help="Pages about this organization or person on other sites."
-      >
+      <Field scope="site" path="identity.same_as" label="Profiles">
         {(field) => (
-          <>
-            <TextArea
-              id={field.id}
-              size="2"
-              rows={3}
-              spellCheck={false}
-              className="seo-textarea"
-              placeholder="https://"
-              disabled={field.disabled}
-              aria-invalid={field.invalid || undefined}
-              aria-describedby={field.describedBy}
-              {...profiles}
-            />
-            {field.status}
-          </>
+          <textarea
+            id={field.id}
+            rows={2}
+            spellCheck={false}
+            className="seo-input"
+            placeholder="One address per line"
+            disabled={field.disabled}
+            aria-invalid={field.invalid || undefined}
+            aria-describedby={field.describedBy}
+            {...profiles}
+          />
         )}
       </Field>
-      <div className="seo-field">
-        <Flex gap="3" align="baseline" wrap="wrap">
-          <Text size="2" weight="medium">
-            Public address
-          </Text>
-          <Text size="2" className="seo-wrap">
-            {server.origin.url}
-          </Text>
-        </Flex>
-        <Text as="p" size="1" color="gray" mt="1">
-          {server.origin.source === 'settings'
-            ? "Set in the site's settings file. Links and structured data use this address."
-            : headless
-              ? "The headless frontend the editor previews with. Links and structured data use this address. If visitors use another one, set it in the site's settings file."
-              : "This site's own address, as you are signed in."}
-        </Text>
-      </div>
-    </>
-  );
-}
 
-/** What every page starts from: the title pattern, its separator, the fallback image, visibility. */
-export function DefaultsTab() {
-  const { state, view } = useApp();
-  const { server, identity, image, edit } = useSite();
-  const { values } = state.edits.site;
-  // Everything an entity has; a content type's fields do not exist site-wide.
-  const tokens = Object.fromEntries(
-    Object.entries(view?.tokens ?? {}).filter(
-      ([name]) => !name.startsWith('field.'),
-    ),
-  );
-  const separators = SEPARATORS.includes(identity.separator)
-    ? SEPARATORS
-    : [...SEPARATORS, identity.separator].filter(Boolean);
-  return (
-    <>
+      <h3 className="seo-group-title">Titles</h3>
       <Field
         scope="site"
         path="values.title"
         label="Title pattern"
-        help="Used by every page that does not set its own title."
+        note={
+          view && (
+            <>
+              For {view.values.title ?? ''}:{' '}
+              <span className="seo-guide-example">{example}</span>
+            </>
+          )
+        }
       >
         {(field) => (
           <TemplateInput
@@ -236,82 +218,75 @@ export function DefaultsTab() {
                 ? { site: { ...tokens.site, value: identity.name } }
                 : {}),
             }}
-            alwaysInsert
-            // An example: the page in context may set a title of its own.
-            becomes={
-              view
-                ? `${siteTexts(state, view).title} (for a page titled "${view.values.title ?? ''}")`
-                : ''
-            }
-            status={field.status}
+            insert="always"
           />
         )}
       </Field>
       <Field
         scope="site"
         path="identity.separator"
-        label="Title separator"
+        label="Separator"
         group
+        inline
       >
         {(field) => (
-          <>
-            <SegmentedControl.Root
-              size="2"
-              role="radiogroup"
-              aria-labelledby={field.labelId}
-              value={identity.separator}
-              disabled={field.disabled}
-              onValueChange={(value) =>
-                value && edit('identity.separator', value)
-              }
-            >
-              {separators.map((separator) => (
-                <SegmentedControl.Item
-                  key={separator}
-                  value={separator}
-                  aria-label={SEPARATOR_NAMES[separator] ?? separator}
-                >
-                  {separator}
-                </SegmentedControl.Item>
-              ))}
-            </SegmentedControl.Root>
-            {field.status}
-          </>
+          <SegmentedControl.Root
+            size="2"
+            className="seo-segmented"
+            data-glyphs=""
+            role="radiogroup"
+            aria-labelledby={field.labelId}
+            value={identity.separator}
+            disabled={field.disabled}
+            onValueChange={(value) =>
+              value && edit('identity.separator', value)
+            }
+          >
+            {separators.map((separator) => (
+              <SegmentedControl.Item
+                key={separator}
+                value={separator}
+                aria-label={SEPARATOR_NAMES[separator] ?? separator}
+              >
+                {separator}
+              </SegmentedControl.Item>
+            ))}
+          </SegmentedControl.Root>
         )}
       </Field>
+
+      <h3 className="seo-group-title">Sharing</h3>
       <Field
         scope="site"
         path="identity.default_image"
         label="Default image"
         group
-        help="Used for social cards when a page has no image."
       >
         {(field) => (
-          <>
-            <ImageRow
-              describedBy={field.describedBy}
-              image={image(identity.default_image)}
-              empty="No default image."
-              disabled={field.disabled}
-              minWidth={600}
-              chosen={identity.default_image}
-              onPick={(uuid) => edit('identity.default_image', uuid)}
-              onClear={() => edit('identity.default_image', '')}
-            />
-            {field.status}
-          </>
+          <ImageRow
+            describedBy={field.describedBy}
+            image={image(identity.default_image)}
+            noun="default image"
+            disabled={field.disabled}
+            minWidth={600}
+            chosen={identity.default_image}
+            onPick={(uuid) => edit('identity.default_image', uuid)}
+            onClear={() => edit('identity.default_image', '')}
+          />
         )}
       </Field>
-      <Section
-        title="Search visibility for the whole site"
-        summary={
-          values.robots?.noindex === true
-            ? 'Hidden from search engines'
-            : 'Shown in search results'
-        }
-      >
-        <Visibility scope="site" />
-      </Section>
+
+      <h3 className="seo-group-title">Visibility</h3>
+      <Visibility scope="site" />
+
+      {server.can.site && ai && !ai.available && (
+        <p className="seo-quiet">
+          AI suggestions are off:{' '}
+          {ai.reason === 'not_usable'
+            ? "the AI provider isn't ready to use."
+            : 'no AI provider is set up.'}
+        </p>
+      )}
     </>
   );
 }

@@ -601,7 +601,8 @@ final class Resolver {
       // With the digits the field stores, whatever the database hands back.
       'decimal' => number_format((float) $value, (int) $definition->getSetting('scale'), '.', ''),
       'link' => $item instanceof LinkItemInterface ? $this->link($item, $cacheability) : '',
-      'image' => $this->usable($item, $cacheability) ? $this->fileImage($item) : NULL,
+      // Named by its alt text, as a media item is by its label; else the file name.
+      'image' => $this->usable($item, $cacheability) ? $this->fileImage($item, Values::plain((string) $item->get('alt')->getValue(), 255) ?: NULL) : NULL,
       'entity_reference' => $type === 'image'
         ? $this->mediaImage($reference, $langcode, $cacheability)
         : $this->label($reference, $langcode, $cacheability),

@@ -9,7 +9,9 @@ import {
   openPage,
   openSeo,
   pageQuery,
+  scope,
   seoState,
+  sheet,
   status,
   tab,
   test,
@@ -42,9 +44,8 @@ test('with "edit" only, site settings can be read and not changed', async ({ dru
   const frame = await openSeo(page);
   await expect(textbox(frame, UI.field.title)).toBeEnabled();
 
-  await frame.getByRole('radio', { name: UI.scope.site }).click();
-  // Each site tab carries the note; the hidden tabs stay mounted.
-  await expect(frame.getByRole('tabpanel').getByText(UI.site.readOnly)).toBeVisible();
+  await scope(frame, UI.scope.site);
+  await expect(frame.getByText(UI.site.readOnly)).toBeVisible();
   await expect(textbox(frame, UI.field.name)).toBeDisabled();
   await expect(button(frame, UI.action.save)).toHaveCount(0);
 
@@ -90,7 +91,7 @@ test('when the editor cannot be read the page is read-only, and the site still s
   await expect(status(frame)).toContainText(UI.footer.readOnly);
 
   // Site settings do not go through the editor, so they still save.
-  await frame.getByRole('radio', { name: UI.scope.site }).click();
+  await scope(frame, UI.scope.site);
   const profiles = textbox(frame, UI.field.profiles);
   await profiles.fill('https://social.example/example');
   await profiles.blur();
@@ -120,17 +121,32 @@ test('a save from another session is shown as a conflict, not written over', asy
   await expect(textbox(frame, UI.field.title)).toBeDisabled();
 });
 
-test('the four tabs work by keyboard, pass an accessibility scan and reflow at 200% zoom', async ({
+test('the three tabs and the Checks sheet work by keyboard, pass an accessibility scan and reflow at 200% zoom', async ({
   drupal,
   page,
 }) => {
-  // A page with issues, so that every tab has something on it.
+  // A page with issues, so that every view has something on it.
   await drupal.login(USERS.editor);
   await openPage(page, PAGES.checks.id);
   const frame = await openSeo(page);
-  const tabs = [UI.tab.search, UI.tab.social, UI.tab.schema, UI.tab.checks];
+  const tabs = [UI.tab.search, UI.tab.social, UI.tab.schema];
   const title = textbox(frame, UI.field.title);
+  const checks = button(frame, UI.tab.checks);
   await expect(title).toBeEnabled();
+
+  /** Each tab in turn, then the Checks sheet over the last one. */
+  async function eachView(run: (name: string) => Promise<void>) {
+    for (const name of tabs) {
+      await tab(frame, name).click();
+      await expect(frame.getByRole('tabpanel', { name })).toBeVisible();
+      await run(`${name} tab`);
+    }
+    await checks.click();
+    await expect(sheet(frame, 'Checks')).toBeVisible();
+    await run('Checks sheet');
+    await button(frame, UI.action.back).click();
+    await expect(sheet(frame, 'Checks')).toHaveCount(0);
+  }
 
   await test.step('keyboard only', async () => {
     // The tab list is one stop; arrows choose a tab, Home returns to the first.
@@ -146,6 +162,16 @@ test('the four tabs work by keyboard, pass an accessibility scan and reflow at 2
     await page.keyboard.press('Home');
     await expect(tab(frame, UI.tab.search)).toBeFocused();
 
+    // The next stop is the Checks count; Enter opens the sheet and Escape
+    // closes it, back on the button.
+    await page.keyboard.press('Tab');
+    await expect(checks).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(sheet(frame, 'Checks')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(sheet(frame, 'Checks')).toHaveCount(0);
+    await expect(checks).toBeFocused();
+
     // Tab moves on into the panel; the title field is reached and typed in.
     for (let presses = 0; presses < 12; presses++) {
       if (await title.evaluate((element) => element === document.activeElement)) {
@@ -159,17 +185,15 @@ test('the four tabs work by keyboard, pass an accessibility scan and reflow at 2
     await expect(title).not.toHaveValue(before);
   });
 
-  await test.step('no serious accessibility violation on any tab', async () => {
-    for (const name of tabs) {
-      await tab(frame, name).click();
-      await expect(frame.getByRole('tabpanel', { name })).toBeVisible();
+  await test.step('no serious accessibility violation on any view', async () => {
+    await eachView(async (view) => {
       const { violations } = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
       const serious = violations.filter(({ impact }) => impact === 'serious' || impact === 'critical');
       expect(
         serious.map(({ id, help, nodes }) => `${id}: ${help} (${nodes.length})`),
-        `${String(name)} tab`,
+        view,
       ).toEqual([]);
-    }
+    });
   });
 
   await test.step('at 200% zoom nothing scrolls sideways', async () => {
@@ -178,9 +202,7 @@ test('the four tabs work by keyboard, pass an accessibility scan and reflow at 2
     await page.locator(SEO_IFRAME).evaluate((element) => {
       (element as HTMLElement).style.width = '50%';
     });
-    for (const name of tabs) {
-      await tab(frame, name).click();
-      await expect(frame.getByRole('tabpanel', { name })).toBeVisible();
+    await eachView(async (view) => {
       const overflowing = await frame.locator('html').evaluate((html) =>
         [html, ...html.querySelectorAll('*')]
           .filter(
@@ -190,7 +212,7 @@ test('the four tabs work by keyboard, pass an accessibility scan and reflow at 2
           )
           .map((element) => `${element.tagName.toLowerCase()}.${element.className}`),
       );
-      expect(overflowing, `${String(name)} tab`).toEqual([]);
-    }
+      expect(overflowing, view).toEqual([]);
+    });
   });
 });

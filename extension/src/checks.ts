@@ -136,7 +136,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'title-empty',
       severity: 'fix',
-      message: `${Page} has no title for search results.`,
+      message: 'Add a title',
+      detail: `${Page} has no title for search results.`,
       jump: jump('search', 'title'),
     });
   } else if (
@@ -146,7 +147,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'title-generic',
       severity: 'improve',
-      message: `"${bare}" says little about ${page}.`,
+      message: 'Make the title specific',
+      detail: `"${bare}" says little about ${page}.`,
       jump: jump('search', 'title'),
     });
   }
@@ -174,7 +176,8 @@ export function checks(input: ChecksInput): Issue[] {
       issues.push({
         id: `token-empty:${name}`,
         severity: 'improve',
-        message: `"${token.label}" is empty for ${page}, so it is left out.`,
+        message: `Fill in ${token.label} or remove it`,
+        detail: `"${token.label}" is empty for ${page}, so it is left out.`,
         jump: jump(tab, field),
       });
     }
@@ -190,7 +193,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'title-site-twice',
       severity: 'improve',
-      message: 'The site name appears twice in the title.',
+      message: 'Remove the repeated site name',
+      detail: 'The site name appears twice in the title.',
       jump: jump('search', 'title'),
       // Only a literal site name can be taken out; a token is the pattern's own.
       fix: literal.test(own.replace(/\{[^{}]*\}/g, ' '))
@@ -239,8 +243,8 @@ export function checks(input: ChecksInput): Issue[] {
       issues.push({
         id: 'title-heading',
         severity: 'improve',
-        message: 'The title and the main heading say different things.',
-        detail: `Title: "${texts.title}" · Heading: "${facts.h1[0]}"`,
+        message: 'Match the title to the main heading',
+        detail: 'The title and the main heading say different things.',
         jump: jump('search', 'title'),
       });
     }
@@ -249,13 +253,7 @@ export function checks(input: ChecksInput): Issue[] {
   const cut = (kind: 'title' | 'description', text: string) => {
     const result = meter(kind, text, input.measurer);
     return result.state === 'long'
-      ? `may be cut off${
-          result.where === 'both'
-            ? ''
-            : result.where === 'desktop'
-              ? ' on desktop'
-              : ' on phones'
-        } after "${result.after}".`
+      ? `May be cut off after “…${result.after}”.`
       : null;
   };
   const titleCut = cut('title', texts.title);
@@ -263,7 +261,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'title-long',
       severity: 'info',
-      message: `The title ${titleCut}`,
+      message: 'Shorten the title',
+      detail: titleCut,
       jump: jump('search', 'title'),
     });
   }
@@ -273,8 +272,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'description-missing',
       severity: 'improve',
-      message:
-        'There is no description. Search engines will pick text from the page.',
+      message: 'Add a description',
+      detail: 'Without one, search engines pick text from the page.',
       jump: jump('search', 'description'),
       fix: suggest('description'),
     });
@@ -284,7 +283,8 @@ export function checks(input: ChecksInput): Issue[] {
       issues.push({
         id: 'description-long',
         severity: 'info',
-        message: `The description ${descriptionCut}`,
+        message: 'Shorten the description',
+        detail: descriptionCut,
         jump: jump('search', 'description'),
         fix: suggest('description'),
       });
@@ -293,7 +293,8 @@ export function checks(input: ChecksInput): Issue[] {
       issues.push({
         id: 'description-title',
         severity: 'improve',
-        message: 'The description repeats the title.',
+        message: 'Make the description say more',
+        detail: 'It repeats the title.',
         jump: jump('search', 'description'),
       });
     }
@@ -312,7 +313,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'noindex',
       severity: 'improve',
-      message: `Hidden from search engines. Set ${
+      message: 'Show this page in search',
+      detail: `Hidden from search engines. Set ${
         {
           target: onPage ? 'on this page' : `for every ${input.typeLabel}`,
           default: `on the ${input.defaultLanguage} version`,
@@ -360,7 +362,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'snippet-off',
       severity: 'info',
-      message: `Text previews are off. Results show no description and answer engines cannot quote ${page}.`,
+      message: 'Text previews are off',
+      detail: `Results show no description and answer engines cannot quote ${page}.`,
       jump: jump('search', 'robots.nosnippet'),
       fix: mine
         ? {
@@ -378,7 +381,8 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'image-preview',
       severity: 'info',
-      message: 'Large image previews are off.',
+      message: 'Large image previews are off',
+      detail: 'Results show a standard-size image at most.',
       jump: jump('search', 'robots.max_image_preview'),
       fix: on('robots.max_image_preview')
         ? {
@@ -397,7 +401,8 @@ export function checks(input: ChecksInput): Issue[] {
       issues.push({
         id: 'image-missing',
         severity: 'improve',
-        message: `No image for social cards. Links to ${page} will show without one.`,
+        message: 'Add a social image',
+        detail: `Links to ${page} will show without one.`,
         jump: at,
       });
     } else {
@@ -406,7 +411,8 @@ export function checks(input: ChecksInput): Issue[] {
         issues.push({
           id: 'image-small',
           severity: 'improve',
-          message: `The social image is ${width} x ${height}. ${
+          message: 'Use a larger social image',
+          detail: `The social image is ${width} x ${height}. ${
             width < 600 || height < 315
               ? 'It will show as a small thumbnail.'
               : 'Use at least 1200 x 630 for a large card.'
@@ -418,7 +424,8 @@ export function checks(input: ChecksInput): Issue[] {
         issues.push({
           id: 'image-ratio',
           severity: 'info',
-          message: 'The social image will be cropped. About 1.91:1 fits best.',
+          message: 'The social image will be cropped',
+          detail: 'About 1.91:1 fits best.',
           jump: at,
         });
       }
@@ -426,7 +433,8 @@ export function checks(input: ChecksInput): Issue[] {
         issues.push({
           id: 'image-heavy',
           severity: 'info',
-          message: `The social image is ${size(image.bytes)}. Some services skip images over 5 MB.`,
+          message: `The social image is ${size(image.bytes)}`,
+          detail: 'Some services skip images over 5 MB.',
           jump: at,
         });
       }
@@ -435,7 +443,8 @@ export function checks(input: ChecksInput): Issue[] {
         issues.push({
           id: 'image-format',
           severity: 'improve',
-          message: `${type} images do not show on many services. Use JPEG, PNG or WebP.`,
+          message: 'Use JPEG, PNG or WebP',
+          detail: `${type} images do not show on many services.`,
           jump: at,
         });
       }
@@ -443,8 +452,8 @@ export function checks(input: ChecksInput): Issue[] {
         issues.push({
           id: 'image-alt',
           severity: 'info',
-          message:
-            'The social image has no description for people who cannot see it.',
+          message: 'The social image has no alt text',
+          detail: 'People who cannot see it get no description.',
           jump: at,
         });
       }
@@ -464,10 +473,10 @@ export function checks(input: ChecksInput): Issue[] {
       issues.push({
         id: 'h1-missing',
         severity: 'improve',
-        message: 'The page has no main heading.',
+        message: 'Add a main heading',
         detail: onPage
-          ? 'Add a heading set to H1 in the page content.'
-          : 'Set a heading in this template to H1.',
+          ? 'Set one heading in the page to Heading 1. This is done in the page, not here.'
+          : 'Set one heading in this template to Heading 1. This is done in the template, not here.',
       });
     }
     const missing = facts.imagesWithoutAlt;
@@ -498,7 +507,8 @@ export function checks(input: ChecksInput): Issue[] {
       issues.push({
         id: `schema-required:${key}`,
         severity: 'fix',
-        message: `${type.label} needs "${label(key)}". Until it is filled in, the ${type.label} details are left out.`,
+        message: `Add ${label(key)}`,
+        detail: `${type.label} details are left out until it is filled in.`,
         jump: prop(key),
       });
     }
@@ -547,7 +557,8 @@ export function checks(input: ChecksInput): Issue[] {
         issues.push({
           id: `schema-not-on-page:${item.key}`,
           severity: 'improve',
-          message: `"${item.label}" does not appear on the page. Structured data should match what visitors see.`,
+          message: `Check ${item.label}`,
+          detail: 'It does not appear on the page. Structured data should match what visitors see.',
           jump: prop(item.key),
         });
       }

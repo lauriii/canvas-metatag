@@ -1,17 +1,9 @@
-import { CheckIcon, ChevronLeftIcon, CopyIcon } from '@radix-ui/react-icons';
-import {
-  Button,
-  Code,
-  DataList,
-  Flex,
-  Heading,
-  ScrollArea,
-  Text,
-} from '@radix-ui/themes';
-import { useEffect, useRef, useState } from 'react';
+import { CheckIcon, CopyIcon } from '@radix-ui/react-icons';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import type { Head } from '../types';
+import type { Head, StatePayload } from '../types';
+import { Btn, reveal } from './ui';
 
 /** Text to the clipboard; the frame may not hold the clipboard permission. */
 async function copy(text: string): Promise<boolean> {
@@ -37,7 +29,7 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-export function CopyButton(props: { text: string; label: string }) {
+function CopyButton(props: { text: string; label: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) {
@@ -47,40 +39,19 @@ export function CopyButton(props: { text: string; label: string }) {
     return () => clearTimeout(timer);
   }, [copied]);
   return (
-    <Button
-      size="1"
+    <Btn
       variant="ghost"
       aria-label={props.label}
       onClick={async () => setCopied(await copy(props.text))}
     >
       {copied ? <CheckIcon aria-hidden /> : <CopyIcon aria-hidden />}
       <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
-    </Button>
-  );
-}
-
-/** Pretty-printed, read-only JSON-LD. */
-export function CodeView(props: { text: string }) {
-  return (
-    <ScrollArea
-      type="auto"
-      scrollbars="vertical"
-      className="seo-code-view"
-      tabIndex={0}
-      role="group"
-      aria-label="Structured data"
-    >
-      <pre>
-        <Code variant="ghost" size="1">
-          {props.text}
-        </Code>
-      </pre>
-    </ScrollArea>
+    </Btn>
   );
 }
 
 /** The JSON-LD of a head as text, or '' when there is none. */
-export const jsonLd = (head: Head | undefined): string => {
+const jsonLd = (head: Head | undefined): string => {
   const data = head?.script.find(
     (script) => script.type === 'application/ld+json',
   )?.textContent;
@@ -90,6 +61,24 @@ export const jsonLd = (head: Head | undefined): string => {
       ? data
       : JSON.stringify(data, null, 2);
 };
+
+/** One line of JSON with its keys and strings tinted. */
+function tint(line: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  let at = 0;
+  for (const match of line.matchAll(/("(?:[^"\\]|\\.)*")(\s*:)?/g)) {
+    parts.push(
+      line.slice(at, match.index),
+      <span key={match.index} data-tint={match[2] ? 'key' : 'string'}>
+        {match[1]}
+      </span>,
+      match[2],
+    );
+    at = match.index + match[0].length;
+  }
+  parts.push(line.slice(at));
+  return parts;
+}
 
 const escape = (text: string) =>
   text.replace(
@@ -130,97 +119,88 @@ function rows(head: Head): { name: string; value: string; tag: string }[] {
   ];
 }
 
+/** Where addresses come from: the Output sheet's ⓘ. */
+export function originNote(server: StatePayload): string {
+  return server.origin.source === 'settings'
+    ? `Addresses use the public address set for this site: ${server.origin.url}`
+    : server.origin.source === 'frontend'
+      ? `Addresses use your frontend: ${server.origin.url}`
+      : `Addresses use ${server.origin.url.replace(/^https?:\/\//, '')}, the address you are signed in at.`;
+}
+
 /** The exact tags for the page: what the server resolved, drafts included. */
-export function Output() {
-  const { state, setOutput } = useApp();
+export function OutputSheet(props: { section?: 'schema' }) {
+  const { state } = useApp();
   const server = state.server!;
   const head = server.resolved?.head;
-  const back = useRef<HTMLButtonElement>(null);
-  useEffect(() => back.current?.focus(), []);
-  const close = () => {
-    setOutput(false);
-    // Back to the control that opened it.
-    requestAnimationFrame(() =>
-      document
-        .querySelector<HTMLElement>('.seo-footer button')
-        ?.focus({ preventScroll: true }),
-    );
-  };
   const list = head ? rows(head) : [];
   const graph = jsonLd(head);
-  const headless = server.origin.source === 'frontend';
+  const schema = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (props.section === 'schema') {
+      reveal(schema.current, 'start');
+    }
+  }, [props.section]);
   const what =
     server.target?.scope === 'page'
-      ? 'this page'
+      ? server.target.label
       : (server.preview?.label ?? 'this page');
   return (
-    <div
-      className="seo-output"
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          close();
-        }
-      }}
-    >
-      <Flex align="center" gap="3" mb="3">
-        <Button ref={back} size="1" variant="ghost" onClick={close}>
-          <ChevronLeftIcon aria-hidden />
-          Back
-        </Button>
-        <Heading as="h2" size="2" weight="medium">
-          Output for {what}
-        </Heading>
-      </Flex>
-      <Text as="p" size="1" color="gray" mb="3">
-        {headless
+    <>
+      <p className="seo-sheet-intro">
+        {server.origin.source === 'frontend'
           ? 'What SEO sends to your frontend. Your frontend decides what reaches visitors. Includes changes that are still drafts.'
-          : `What browsers and search engines receive for ${what}, once published. Includes changes that are still drafts.`}
-      </Text>
+          : `What search engines and visitors get for ${what}, including this draft.`}
+      </p>
       {!head ? (
-        <Text as="p" size="2">
-          There is no page to show output for.
-        </Text>
+        <p className="seo-sheet-intro">There is no page to show output for.</p>
       ) : (
         <>
-          <DataList.Root size="1" data-testid="seo-output" className="seo-rows">
-            {list.map((row, index) => (
-              <DataList.Item key={index}>
-                <DataList.Label minWidth="104px">{row.name}</DataList.Label>
-                <DataList.Value>
-                  {/* Whole, wrapped: a cut value could not be read by keyboard or touch. */}
-                  <span className="seo-wrap" lang={server.langcode}>
-                    {row.value}
-                  </span>
-                </DataList.Value>
-              </DataList.Item>
-            ))}
-          </DataList.Root>
-          <Flex justify="end" mt="2">
+          <div className="seo-out-head">
+            <h3>Tags</h3>
             <CopyButton
               text={list.map((row) => row.tag).join('\n')}
               label="Copy tags"
             />
-          </Flex>
+          </div>
+          <dl className="seo-kv" data-testid="seo-output">
+            {list.map((row, index) => (
+              <div key={index} style={{ display: 'contents' }}>
+                <dt>{row.name}</dt>
+                {/* Whole, wrapped: a cut value could not be read by keyboard or touch. */}
+                <dd lang={server.langcode}>{row.value}</dd>
+              </div>
+            ))}
+          </dl>
           {graph && (
-            <>
-              <Flex justify="between" align="center" mt="3" mb="2">
-                <Text as="div" size="2" weight="medium">
-                  Structured data
-                </Text>
+            <div ref={schema}>
+              <div className="seo-out-head">
+                <h3>Structured data</h3>
                 <CopyButton text={graph} label="Copy structured data" />
-              </Flex>
-              <CodeView text={graph} />
-            </>
+              </div>
+              <pre
+                className="seo-code"
+                tabIndex={0}
+                role="group"
+                aria-label="Structured data JSON"
+              >
+                {graph.split('\n').map((line, index) => {
+                  const indent = line.length - line.trimStart().length;
+                  return (
+                    // A wrapped line hangs under its own indent.
+                    <span
+                      key={index}
+                      style={{ paddingLeft: `${indent + 2}ch` }}
+                    >
+                      {tint(line.trimStart())}
+                    </span>
+                  );
+                })}
+              </pre>
+            </div>
           )}
         </>
       )}
-      <Text as="p" size="1" color="gray" mt="3" className="seo-wrap">
-        {server.origin.source === 'settings'
-          ? `Addresses use the public address set for this site: ${server.origin.url}`
-          : headless
-          ? `Addresses use your frontend: ${server.origin.url}`
-          : `Addresses use ${server.origin.url.replace(/^https?:\/\//, '')}, the address you are signed in at.`}
-      </Text>
-    </div>
+    </>
   );
 }

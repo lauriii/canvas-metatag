@@ -105,6 +105,10 @@ test('Output says what the frontend receives', async ({ drupal, page }) => {
   const frame = await openSeo(page);
   await button(frame, UI.action.output).click();
   await expect(frame.getByText(UI.output.headless)).toBeVisible();
-  await expect(frame.getByText(UI.output.frontend)).toBeVisible();
+  // Where addresses come from is the sheet's ⓘ.
+  await expect(frame.getByRole('button', { name: 'About addresses', exact: true })).toHaveAttribute(
+    'aria-description',
+    UI.output.frontend,
+  );
   expect((await outputRows(frame)).canonical).toBe(`${FRONTEND_URL}${uri(pricing.path)}`);
 });

@@ -182,15 +182,27 @@ final class SchemaGraphTest extends UnitTestCase {
   }
 
   /**
+   * A summary left at its default is the page's description, not the token.
+   */
+  public function testSummaryDefault(): void {
+    $result = self::build(['type' => 'Article'], ['description' => 'Raw body text cut at'], [], ['description' => 'The summary.']);
+    self::assertSame('The summary.', $result['graph']['@graph'][3]['description']);
+    // Stored, it is filled like any other value.
+    $result = self::build(['type' => 'Article', 'props' => ['description' => '{description}']], ['description' => 'Raw body text cut at']);
+    self::assertSame('Raw body text cut at', $result['graph']['@graph'][3]['description']);
+  }
+
+  /**
    * Empty and invalid properties are left out and reported by level.
    */
   public function testMissing(): void {
     // Recommended and optional properties: the node ships without them.
+    // No description: the summary, which defaults to it, is left out too.
     $result = self::build(['type' => 'Article', 'props' => ['author_url' => '{field.field_link}']], [
       'title' => 'Hello',
       'field.field_link' => 'not a url',
       'modified' => 'yesterday',
-    ]);
+    ], [], ['description' => '']);
     self::assertFalse($result['withheld']);
     self::assertSame([], $result['missing_required']);
     self::assertSame(['image', 'datePublished', 'dateModified', 'author_name'], $result['missing_recommended']);
@@ -202,7 +214,7 @@ final class SchemaGraphTest extends UnitTestCase {
     $result = self::build([
       'type' => 'Event',
       'props' => ['startDate' => '{field.field_when}', 'location_name' => 'Example Hall'],
-    ], ['title' => 'Launch', 'field.field_when' => '']);
+    ], ['title' => 'Launch', 'field.field_when' => ''], [], ['description' => '']);
     self::assertTrue($result['withheld']);
     self::assertSame(['startDate', 'location_address_streetAddress'], $result['missing_required']);
     self::assertSame(['endDate', 'description', 'image'], $result['missing_recommended']);

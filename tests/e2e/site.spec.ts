@@ -1,7 +1,7 @@
 import type { FrameLocator, Page } from '@playwright/test';
 
 import { IMAGES, PAGES, SITE_NAME, UI, USERS } from './constants';
-import { button, closeSeo, expect, graphNode, link, openSeo, readHead, status, tab, test, textbox } from './fixture';
+import { button, closeSeo, expect, graphNode, link, openSeo, readHead, sheet, status, test, textbox } from './fixture';
 
 /**
  * Site settings: reached from anywhere, saved explicitly, live at once.
@@ -16,10 +16,11 @@ async function openSite(page: Page): Promise<FrameLocator> {
   return openSeo(page);
 }
 
-/** Picks an image in the inline picker of the image row that is showing. */
-async function pick(frame: FrameLocator, image: { name: string }): Promise<void> {
-  await button(frame, UI.action.chooseImage).click();
-  await frame.getByRole('button', { name: new RegExp(`^${image.name}`) }).click();
+/** Picks an image for a row ("logo", "default image") in the Choose image sheet. */
+async function pick(frame: FrameLocator, noun: string, image: { name: string }): Promise<void> {
+  await button(frame, new RegExp(`^(Choose|Change) ${noun}$`)).click();
+  await sheet(frame, 'Choose image').getByRole('button', { name: image.name, exact: true }).click();
+  await expect(sheet(frame, 'Choose image')).toHaveCount(0);
 }
 
 test.beforeEach(async ({ drupal }) => {
@@ -35,25 +36,24 @@ test('with no page in context the dialog is the site settings, and a save applie
 
   const frame = await openSite(page);
   await expect(frame.getByRole('heading', { name: UI.site.heading })).toBeVisible();
-  // Each site tab carries the note; the hidden tabs stay mounted.
-  await expect(frame.getByRole('tabpanel').getByText(UI.site.hint)).toBeVisible();
-  await expect(frame.getByText(UI.site.band)).toBeVisible();
-  await expect(frame.getByRole('radio', { name: UI.scope.page })).toHaveCount(0);
+  // One view, no tabs, and a note on why there is no page.
+  await expect(frame.getByText(UI.site.hint)).toBeVisible();
+  await expect(frame.getByRole('tab')).toHaveCount(0);
+  await expect(frame.getByRole('button', { name: UI.scope.page })).toHaveCount(0);
   await expect(status(frame)).toContainText(UI.footer.siteLive);
 
   // Identity: who runs the site.
   await textbox(frame, UI.field.name).fill('Example Co');
-  await pick(frame, IMAGES.logo);
+  await pick(frame, 'logo', IMAGES.logo);
 
-  // Defaults: the separator and the image for pages that have none.
-  await tab(frame, UI.tab.defaults).click();
+  // Titles and sharing: the separator and the image for pages that have none.
   await frame
     // Named in words: a screen reader may skip punctuation.
     .getByRole('radio', { name: 'Middle dot', exact: true })
     .or(button(frame, 'Middle dot'))
     .first()
     .click();
-  await pick(frame, IMAGES.hero);
+  await pick(frame, 'default image', IMAGES.hero);
   await expect(status(frame)).toContainText(UI.footer.siteUnsaved);
 
   await button(frame, UI.action.save).click();
@@ -113,11 +113,8 @@ test('unsaved site edits survive a side-menu click, and hiding the site asks fir
   await expect(textbox(frame, UI.field.name)).toHaveValue('Example Co');
 
   // Hiding every page is confirmed in place, with its consequence spelled out.
-  await tab(frame, UI.tab.defaults).click();
-  const section = button(frame, new RegExp(`^${UI.field.siteVisibility}`));
-  if ((await section.getAttribute('aria-expanded')) !== 'true') {
-    await section.click();
-  }
+  // The switch is the first row of the Visibility list; the rest is "Advanced".
+  await expect(button(frame, UI.field.siteVisibility)).toBeVisible();
   const shown = frame.getByRole('switch', { name: UI.field.showInSearch });
   await expect(shown).toBeChecked();
   await shown.click();

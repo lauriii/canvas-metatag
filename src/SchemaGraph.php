@@ -103,7 +103,13 @@ final class SchemaGraph {
         $primary[$property] = $ref($target);
       }
       foreach ($type['props'] ?? [] as $prop) {
-        $value = self::value($type_id, $prop, $schema['props'][$prop['key']] ?? $prop['default'] ?? '', $ctx, $fill, $image);
+        $stored = $schema['props'][$prop['key']] ?? NULL;
+        // A summary left at its default is the page's own description, as
+        // search shows it, not the raw text it may have been cut from.
+        $own = $stored === NULL && ($prop['default'] ?? '') === '{description}'
+          ? static fn (): string => (string) ($ctx['description'] ?? '')
+          : $fill;
+        $value = self::value($type_id, $prop, $stored ?? $prop['default'] ?? '', $ctx, $own, $image);
         if ($value === NULL) {
           if (isset($prop['level'])) {
             $missing[$prop['level']][] = $prop['key'];

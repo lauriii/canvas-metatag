@@ -17,7 +17,7 @@ import {
 
 /**
  * AI suggestions, against the test provider of canvas_metatag_ai_test: it
- * answers at once and the same every time, and markers in "Steer it" make it
+ * answers at once and the same every time, and markers in "Refine" make it
  * fail in a chosen way. That no AI control exists without the submodule is
  * asserted where the coupled project already has the dialog open, in
  * page.spec.ts.
@@ -64,19 +64,24 @@ test('a title suggestion changes nothing until it is used, and keeps the site su
     .toMatch(/^.+ \{sep\} \{site\}$/);
 });
 
-test('"Steer it" reaches the provider, and its failures are explained in the panel', async ({ page }) => {
+test('"Refine" reaches the provider, and its failures are explained in the tray', async ({ page }) => {
   const control = button(frame, UI.ai.suggest).nth(1);
   await suggest(control);
 
+  // Refine is one click away: a button that becomes a text field.
+  const refine = button(frame, UI.ai.steer);
   const steer = frame.getByRole('textbox', { name: UI.ai.steer });
   for (const [hint, message] of [
     ['#garbage', UI.ai.invalid],
     ['#rate-limit', UI.ai.busy],
   ]) {
-    // After a failure the panel may show only the message: start it again.
     if (!(await steer.isVisible())) {
-      await page.keyboard.press('Escape');
-      await suggest(control);
+      // A tray left by an earlier failure is started again.
+      if (!(await refine.isVisible())) {
+        await page.keyboard.press('Escape');
+        await suggest(control);
+      }
+      await refine.click();
     }
     await steer.fill(hint);
     await button(frame, UI.ai.retry).first().click();

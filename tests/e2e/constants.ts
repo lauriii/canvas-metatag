@@ -89,42 +89,43 @@ export const UI = {
   tab: {
     search: 'Search',
     social: 'Social',
-    schema: 'Structured data',
-    // The tab's name also carries its badge ("2 issues").
+    schema: 'Schema',
+    // A header button, not a tab: its name carries the count ("Checks, 2 to improve").
     checks: /^Checks/,
-    identity: 'Identity',
-    defaults: 'Defaults',
   },
   field: {
-    title: 'Title in search results',
+    title: 'Title',
     titlePattern: 'Title pattern',
     description: 'Description',
     canonical: 'Canonical address',
-    socialTitle: 'Social title',
-    socialDescription: 'Social description',
+    // In the Social tab: scope with getByRole('tabpanel', { name: 'Social' }).
+    socialTitle: 'Title',
+    socialDescription: 'Description',
     showInSearch: 'Show in search results',
-    siteVisibility: 'Search visibility for the whole site',
+    // The disclosure that holds the rest of the visibility settings.
+    siteVisibility: 'Advanced',
     name: 'Name',
-    profiles: 'Profiles elsewhere (one address per line)',
+    profiles: 'Profiles',
   },
   source: {
-    site: /^From Site/,
+    site: 'Site default',
     page: 'Set on this page',
     article: 'Set for every Article',
-    heroField: 'From Hero image',
+    heroField: 'From the Hero image field',
   },
   action: {
-    insert: /Value$/,
+    insert: 'Insert value',
     undo: 'Undo',
-    startFromDefault: 'Start from default',
-    chooseImage: /^Choose (an image|another)$/,
-    useHeroField: 'Use a field: Hero image',
-    output: 'Output',
+    startFromDefault: 'Use the site pattern',
+    chooseImage: /^(Choose|Change) image$/,
+    useHeroField: 'Use the Hero image field',
+    output: 'View output',
+    back: 'Back',
     copy: /^Copy (tags|structured data)$/,
     copied: 'Copied',
-    save: 'Save for whole site',
+    save: 'Save',
     discard: 'Discard',
-    hideAndSave: 'Hide site and save',
+    hideAndSave: 'Hide site',
     useIt: 'Use it',
     reload: 'Reload editor',
   },
@@ -148,7 +149,6 @@ export const UI = {
   site: {
     heading: 'Site settings',
     hint: 'Open a page or a content template to edit its SEO.',
-    band: 'Site-wide. Saved changes apply to every page at once.',
     readOnly: 'Only people who administer SEO site settings can change these. You are viewing them.',
   },
   noAccess: {
@@ -158,15 +158,18 @@ export const UI = {
   output: {
     headless:
       'What SEO sends to your frontend. Your frontend decides what reaches visitors. Includes changes that are still drafts.',
+    // The ⓘ in the Output sheet's header carries it as its aria-description.
     frontend: `Addresses use your frontend: ${FRONTEND_URL}`,
   },
   checks: {
-    noHeading: 'The page has no main heading.',
-    titleLong: /^The title may be cut off/,
-    imageSmall: /^The social image is \d+ [x×] \d+\./,
-    siteTwice: 'The site name appears twice in the title.',
+    noHeading: 'Add a main heading',
+    titleLong: /^Shorten the title/,
+    imageSmall: 'Use a larger social image',
+    imageSmallDetail: /^The social image is \d+ [x×] \d+\./,
+    siteTwice: 'Remove the repeated site name',
     removeRepeat: 'Remove the repeat',
-    goToTitle: 'Go to title',
+    goToTitle: 'Show title',
+    // The ⓘ in the Checks sheet's header carries it as its aria-description.
     closing:
       'These checks cover the settings in this dialog and the page preview. They do not check robots.txt, speed or rankings.',
   },
@@ -174,8 +177,9 @@ export const UI = {
     suggest: /^Suggest a (title|description)$/,
     suggestSocial: 'Suggest title and description',
     suggestSchema: 'Suggest from this page',
-    steer: /^Steer it/,
-    use: 'Use this',
+    // A button that reveals a textbox of the same name.
+    steer: 'Refine',
+    use: 'Use',
     retry: 'Try again',
     disclosure: "Written by AI from this page's text. Check the facts.",
     invalid: "The AI answer couldn't be used. Try again.",

@@ -21,6 +21,7 @@ import {
   reviewRows,
   selectComponent,
   seoState,
+  sheet,
   status,
   switchPage,
   tab,
@@ -61,7 +62,9 @@ test('an untouched title is inherited; typing keeps the site suffix; reset retur
   const preview = frame.getByTestId(TEST_ID.search);
 
   // Nothing is stored: field and preview show the site's pattern, resolved.
-  await expect(frame.getByText(UI.source.site).first()).toBeVisible();
+  // Where it comes from is said on hover or focus.
+  await title.hover();
+  await expect(frame.getByText(UI.source.site, { exact: true }).first()).toBeVisible();
   await expect.poll(() => shown(title)).toBe(inherited);
   await expect(preview).toContainText(inherited);
   await expect(preview).toContainText(pricing.description);
@@ -73,7 +76,7 @@ test('an untouched title is inherited; typing keeps the site suffix; reset retur
   await title.pressSequentially('Pricing plans');
   await expect(title).toHaveValue('Pricing plans {Separator} {Site name}');
   await expect(frame.getByText(UI.source.page, { exact: true })).toBeVisible();
-  await expect(frame.getByText('Becomes: Pricing plans | Example')).toBeVisible();
+  // The preview, in sight above the field, shows what the chips become.
   await expect(preview).toContainText('Pricing plans | Example');
 
   // A value from the menu is one chip; Backspace next to it removes all of it.
@@ -94,10 +97,10 @@ test('an untouched title is inherited; typing keeps the site suffix; reset retur
   await page.keyboard.type('Page t');
   await page.keyboard.press('Enter');
   await expect(title).toHaveValue('Pricing plans by {Page title} {Separator} {Site name}');
-  await expect(frame.getByText('Becomes: Pricing plans by Pricing | Example')).toBeVisible();
+  await expect(preview).toContainText('Pricing plans by Pricing | Example');
 
   // Reset removes the override, and with it the draft.
-  await frame.getByRole('button', { name: /^Reset Title in search results/ }).click();
+  await button(frame, `Reset ${UI.field.title}`).click();
   await expect(button(frame, UI.action.undo)).toBeVisible();
   await expect.poll(() => shown(title)).toBe(inherited);
   await expect(preview).toContainText(inherited);
@@ -176,26 +179,33 @@ test("the description is Canvas's own field, handed over once when the field is 
 test('Checks lists what is wrong, leads to the field and fixes what is certain', async ({ page }) => {
   const checks = PAGES.checks;
   const frame = await open(page, checks.id);
-  await tab(frame, UI.tab.checks).click();
-  const panel = frame.getByRole('tabpanel', { name: UI.tab.checks });
+  await button(frame, UI.tab.checks).click();
+  const panel = sheet(frame, 'Checks');
 
   // The heading check reads the page preview, which takes a moment to render.
   await expect(panel.getByText(UI.checks.noHeading).first()).toBeVisible({ timeout: 60_000 });
   await expect(panel.getByText(UI.checks.titleLong).first()).toBeVisible();
   await expect(panel.getByText(UI.checks.imageSmall).first()).toBeVisible();
+  await expect(panel.getByText(UI.checks.imageSmallDetail).first()).toBeVisible();
   await expect(panel.getByText(UI.checks.siteTwice).first()).toBeVisible();
-  await expect(panel.getByText(UI.checks.closing)).toBeVisible();
+  // What Checks covers is one ⓘ away.
+  await expect(panel.getByRole('button', { name: 'About checks' })).toHaveAttribute(
+    'aria-description',
+    UI.checks.closing,
+  );
   // Facts only: no score, no percentage.
   await expect(panel).not.toContainText(/score|\d\s?%|\/\s?100/i);
 
-  // "Go to" opens the tab and puts the caret in the field.
+  // "Show" closes the sheet, opens the tab and puts the caret in the field.
   await button(frame, UI.checks.goToTitle).first().click();
+  await expect(panel).toHaveCount(0);
   await expect(tab(frame, UI.tab.search)).toHaveAttribute('aria-selected', 'true');
   await expect(textbox(frame, UI.field.title)).toBeFocused();
 
   // A fix is an ordinary edit: its row goes away and the change is saved.
-  await tab(frame, UI.tab.checks).click();
-  await button(frame, UI.checks.removeRepeat).click();
+  await button(frame, UI.tab.checks).click();
+  // The same fix also sits under the field, behind the sheet.
+  await panel.getByRole('button', { name: UI.checks.removeRepeat, exact: true }).click();
   await expect(panel.getByText(UI.checks.siteTwice)).toHaveCount(0);
   await expect(panel.getByText(UI.checks.titleLong).first()).toBeVisible();
   await expect.poll(() => stored(page, checks.id), { timeout: 30_000 }).not.toContain(SITE_NAME);

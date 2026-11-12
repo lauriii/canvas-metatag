@@ -1,19 +1,12 @@
 import {
-  ChevronDownIcon,
-  ChevronRightIcon,
   CrossCircledIcon,
+  ExclamationTriangleIcon,
   ResetIcon,
 } from '@radix-ui/react-icons';
-import {
-  Button,
-  Flex,
-  IconButton,
-  Link,
-  Text,
-  Tooltip,
-} from '@radix-ui/themes';
+import { Tooltip } from '@radix-ui/themes';
 import {
   type ChangeEvent,
+  type FocusEvent,
   type KeyboardEvent,
   type ReactNode,
   createContext,
@@ -26,150 +19,77 @@ import {
 
 import { useApp } from '../App';
 import { type Meter, source as sourceOf } from '../model';
-import type { Scope } from '../types';
+import type { Issue, Scope } from '../types';
+import { Btn, SparkleIcon, reveal } from './ui';
 
-// Collapsible sections: a button row with a chevron and a summary.
+/** The disclosure a field sits in: a jump opens it first. */
+export const DisclosureContext = createContext<{ open(): void } | null>(null);
 
-const SectionContext = createContext<{ open(): void } | null>(null);
-
-export function Section(props: {
-  title: string;
-  summary?: string;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const id = useId();
-  const [context] = useState(() => ({ open: () => setOpen(true) }));
-  return (
-    <SectionContext.Provider value={context}>
-      <div className="seo-section">
-        <button
-          type="button"
-          className="seo-section-row"
-          aria-expanded={open}
-          aria-controls={id}
-          onClick={() => setOpen(!open)}
-        >
-          {open ? (
-            <ChevronDownIcon aria-hidden />
-          ) : (
-            <ChevronRightIcon aria-hidden />
-          )}
-          <Text size="2" weight="medium">
-            {props.title}
-          </Text>
-          {props.summary && (
-            <Text size="1" color="gray" className="seo-section-summary">
-              {props.summary}
-            </Text>
-          )}
-        </button>
-        {/* Mounted when closed, so "Go to" can reach a field inside. */}
-        <div id={id} className="seo-section-body" hidden={!open}>
-          {props.children}
-        </div>
-      </div>
-    </SectionContext.Provider>
-  );
-}
-
-// The meter: one rail and one sentence. Advice, never a block.
-
-export function MeterLine(props: { meter: Meter; id?: string }) {
-  const { meter } = props;
-  if (!meter.sentence) {
-    return null;
-  }
-  const quoted = /"[^"]*"$/.exec(meter.sentence);
-  return (
-    <Flex className="seo-meter-line" align="start" gap="2">
-      {meter.state !== 'unmeasured' && (
-        <span
-          className="seo-meter"
-          role="meter"
-          aria-label="Length"
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={Math.round(meter.ratio * 100)}
-          aria-valuetext={meter.sentence}
-          data-state={meter.state}
-        >
-          <span style={{ width: `${meter.ratio * 100}%` }} />
-        </span>
-      )}
-      <Text as="span" size="1" color="gray" id={props.id}>
-        {quoted ? (
-          <>
-            {meter.sentence.slice(0, quoted.index)}
-            {/* The quoted words move to the next line as one piece. */}
-            <span className="seo-quote">{quoted[0]}</span>
-          </>
-        ) : (
-          meter.sentence
-        )}
-      </Text>
-    </Flex>
-  );
-}
-
-// Fields.
+/** What the bar says after a one-click fix, by the fix's label. */
+const DONE: Record<string, string> = {
+  'Remove the repeat': 'Repeat removed',
+  'Show in search results': 'Shown in search results',
+  'Allow text previews': 'Text previews allowed',
+  'Allow large previews': 'Large previews allowed',
+};
+export const fixedText = (label: string) => DONE[label] ?? 'Fixed';
 
 export interface FieldOptions {
   scope: Scope;
-  /** The dotted path within the scope: errors, reset and "Go to" use it. */
+  /** The dotted path within the scope: errors, reset and jumps use it. */
   path: string;
   label: string;
   /** Other paths this control also stores (their errors and jumps land here). */
   also?: string[];
-  /** What the unset state says when no layer supplies a value: "Same as page title". */
+  /** The source word when no layer supplies a value: "Same as search title". */
   fallback?: string;
-  /** Replaces the computed source line. */
+  /** Replaces the computed source word. */
   source?: ReactNode;
-  /** The accessible name of the reset button, when it is not "Reset <label> to …". */
-  resetLabel?: string;
+  /** What Reset returns to, for its tooltip: "Back to …". */
+  resetTip?: string;
   /** Replaces the plain reset of `path`. */
   onReset?(): void;
   /** A message of the dialog's own, shown like the server's. */
   error?: string;
+  /** The aside's action while nothing is set: "Use the site pattern". */
+  action?: ReactNode;
 }
 
 export interface FieldParts {
   /** Give it to the control. */
   id: string;
   labelId: string;
-  /** The ids of source, help, meter and error, in that order, for those that are shown. */
-  describe(shown?: { help?: boolean; meter?: boolean }): string | undefined;
+  asideId: string;
   invalid: boolean;
   disabled: boolean;
   /** A value is stored at this scope. */
   set: boolean;
-  /** "From Site ›", "Set on this page", "Reset · Undo". */
-  source: ReactNode;
-  reset: ReactNode;
-  error: ReactNode;
-  /** On the field's outer element: "Go to" scrolls to it. */
+  /** Source word and one action; null when there is nothing to say. */
+  aside: ReactNode;
+  /** The aside stays visible: an Undo is on offer. */
+  pinned: boolean;
+  message: string | undefined;
+  focused: boolean;
+  /** On the field's outer element. */
   ref: React.RefObject<HTMLDivElement>;
-  ids: { source: string; help: string; meter: string; error: string };
+  onFocus(): void;
+  onBlur(event: FocusEvent<HTMLElement>): void;
 }
 
-/** Everything a field knows about itself: where its value comes from, its error, its jump target. */
+/** Everything a field knows about itself: its source, its error, its jump target. */
 export function useField(options: FieldOptions): FieldParts {
   const { scope, path, label } = options;
-  const { state, dispatch, view, locked, jump, goTo } = useApp();
+  const { state, dispatch, view, locked, jump, goTo, setFocusField } =
+    useApp();
   const server = state.server!;
   const target = server.target;
   const id = useId();
-  const ids = {
-    source: `${id}-source`,
-    help: `${id}-help`,
-    meter: `${id}-meter`,
-    error: `${id}-error`,
-  };
   const ref = useRef<HTMLDivElement>(null);
-  const section = useContext(SectionContext);
+  const disclosure = useContext(DisclosureContext);
   const paths = [path, ...(options.also ?? [])];
+  const [focused, setFocused] = useState(false);
 
-  // "Go to": open the section, scroll, focus, say so.
+  // A jump: open the disclosure, scroll, focus, wash, say so.
   const handled = useRef(jump?.seq ?? 0);
   useEffect(() => {
     if (
@@ -183,38 +103,36 @@ export function useField(options: FieldOptions): FieldParts {
       return;
     }
     handled.current = jump.seq;
-    section?.open();
+    disclosure?.open();
     dispatch({ type: 'flash', flash: `Moved to ${label}` });
-    // After the tab and the section have been shown.
+    let wash: ReturnType<typeof setTimeout>;
+    // After the tab and the disclosure have been shown.
     const frame = requestAnimationFrame(() => {
       const root = ref.current;
       if (!root) {
         return;
       }
-      // The section's open() has not been rendered yet: a hidden body can be
-      // neither scrolled to nor focused. React shows it on its next render.
-      root.closest('.seo-section-body')?.removeAttribute('hidden');
-      root.scrollIntoView({ block: 'center' });
-      if (jump.toLabel) {
-        // Reading where a value comes from never puts a caret into it.
-        document.getElementById(`${id}-label`)?.focus({ preventScroll: true });
-        root.dataset.marked = '';
-        setTimeout(() => delete root.dataset.marked, 1500);
-      } else {
-        (
-          document.getElementById(id) ??
-          root.querySelector<HTMLElement>('[data-focus]')
-        )?.focus({ preventScroll: true });
-      }
+      root.closest('.seo-disclosure-body')?.removeAttribute('data-closed');
+      reveal(root, 'center');
+      // The input itself; the label only where there is none.
+      (
+        document.getElementById(id) ??
+        root.querySelector<HTMLElement>('[data-focus]') ??
+        document.getElementById(`${id}-label`)
+      )?.focus({ preventScroll: true });
+      root.dataset.wash = '';
+      wash = setTimeout(() => delete root.dataset.wash, 1500);
     });
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(wash);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump?.seq]);
 
-  const errors = state.errors[scope];
   const message =
     options.error ??
-    Object.entries(errors).find(([key]) =>
+    Object.entries(state.errors[scope]).find(([key]) =>
       paths.some((own) => key === own || key.startsWith(`${own}.`)),
     )?.[1];
 
@@ -232,14 +150,8 @@ export function useField(options: FieldOptions): FieldParts {
       : 'fallback';
   const language =
     server.languages[target?.default_langcode ?? ''] ?? 'default-language';
-  const belowName = {
-    default: `${language} version`,
-    site: 'Site',
-    target: '',
-    fallback: '',
-  }[below];
-  // Reset and its Undo remove the button that was pressed; focus stays on
-  // the field instead of falling to the document.
+  const disabled = locked[scope];
+  // Reset and its Undo remove the button that was pressed: focus stays in the field.
   const stayOnField = () =>
     requestAnimationFrame(() =>
       (
@@ -252,222 +164,390 @@ export function useField(options: FieldOptions): FieldParts {
     state.undo?.text === 'Reset' &&
     state.undo.path !== undefined &&
     paths.includes(state.undo.path);
+  // "Reset · Undo" stays in sight for 6 s.
+  const [pinned, setPinned] = useState(false);
+  useEffect(() => {
+    if (!justReset) {
+      setPinned(false);
+      return;
+    }
+    setPinned(true);
+    const timer = setTimeout(() => setPinned(false), 6000);
+    return () => clearTimeout(timer);
+  }, [justReset]);
 
-  let source: ReactNode = options.source;
-  if (justReset) {
-    source = (
-      <>
-        Reset ·{' '}
-        <Button
-          size="1"
-          variant="ghost"
-          // The source line is gray text; the action keeps the accent.
-          color="blue"
-          onClick={() => {
-            dispatch({ type: 'undo' });
-            stayOnField();
-          }}
-        >
-          Undo
-        </Button>
-      </>
-    );
-  } else if (source === undefined && scope === 'target' && target) {
-    const shown = set ? 'target' : from.find((one) => one !== 'fallback');
-    source =
-      shown === 'target' ? (
-        page ? (
-          'Set on this page'
-        ) : (
-          `Set for every ${target.label}`
-        )
-      ) : shown === 'default' ? (
-        `From the ${language} version`
-      ) : shown === 'site' ? (
-        <Link
-          size="1"
-          href="#"
-          onClick={(event) => {
-            event.preventDefault();
-            goTo(
-              { scope: 'site', tab: 'defaults', field: `values.${path}` },
-              { toLabel: true },
-            );
-          }}
-        >
-          From Site ›
-        </Link>
-      ) : (
-        options.fallback
-      );
+  const shown = set ? 'target' : from.find((one) => one !== 'fallback');
+  let word: ReactNode = options.source;
+  if (word === undefined && scope === 'target' && target) {
+    word =
+      shown === 'target'
+        ? page
+          ? 'Set on this page'
+          : `Set for every ${target.label}`
+        : shown === 'default'
+          ? `From the ${language} version`
+          : shown === 'site'
+            ? 'Site default'
+            : options.fallback;
   }
 
-  const disabled = locked[scope];
-  // Named after what it returns to, as the source line says it.
-  const resetName =
-    options.resetLabel ??
-    `Reset ${label} to ${
-      belowName
-        ? `the ${belowName} default`
-        : options.fallback
-          ? `"${options.fallback}"`
-          : 'the default'
-    }`;
-  const reset = set && !disabled && (
-    <Tooltip
-      content={
-        options.resetLabel ??
-        `Reset to the ${belowName ? `${belowName} ` : ''}default`
-      }
-    >
-      <IconButton
-        size="1"
+  let action: ReactNode = null;
+  if (justReset) {
+    word = 'Reset ·';
+    action = (
+      <Btn
         variant="ghost"
-        color="gray"
-        aria-label={resetName}
+        size={24}
+        accent
         onClick={() => {
-          if (options.onReset) {
-            options.onReset();
-          } else {
-            dispatch({ type: 'reset', scope, path });
-          }
+          dispatch({ type: 'undo' });
           stayOnField();
         }}
       >
-        <ResetIcon aria-hidden />
-      </IconButton>
-    </Tooltip>
-  );
+        Undo
+      </Btn>
+    );
+  } else if (set && !disabled) {
+    const back =
+      options.resetTip ??
+      (below === 'site'
+        ? 'the site default'
+        : below === 'default'
+          ? `the ${language} version`
+          : 'the default');
+    action = (
+      <Tooltip content={`Back to ${back}`}>
+        <Btn
+          variant="ghost"
+          size={24}
+          aria-label={`Reset ${label}`}
+          onClick={() => {
+            if (options.onReset) {
+              options.onReset();
+            } else {
+              dispatch({ type: 'reset', scope, path });
+            }
+            stayOnField();
+          }}
+        >
+          <ResetIcon aria-hidden width="12" height="12" />
+          Reset
+        </Btn>
+      </Tooltip>
+    );
+  } else if (shown === 'site' && server.can.site && !disabled) {
+    action = (
+      <Btn
+        variant="ghost"
+        size={24}
+        aria-label={`Edit the site default for ${label}`}
+        onClick={() =>
+          goTo({ scope: 'site', tab: 'defaults', field: `values.${path}` })
+        }
+      >
+        Edit
+      </Btn>
+    );
+  } else if (!disabled) {
+    action = options.action ?? null;
+  }
 
   return {
     id,
     labelId: `${id}-label`,
-    describe: (shown = {}) =>
-      [
-        source && ids.source,
-        shown.help && ids.help,
-        shown.meter && !message && ids.meter,
-        message && ids.error,
-      ]
-        .filter(Boolean)
-        .join(' ') || undefined,
+    asideId: `${id}-aside`,
     invalid: message !== undefined,
     disabled,
     set,
-    source: source ? (
-      <Text as="span" size="1" color="gray" id={ids.source}>
-        {source}
-      </Text>
-    ) : null,
-    reset,
-    error: message ? <ErrorLine id={ids.error}>{message}</ErrorLine> : null,
+    aside:
+      word || action ? (
+        <>
+          {word && <span>{word}</span>}
+          {action}
+        </>
+      ) : null,
+    pinned,
+    message,
+    focused,
     ref,
-    ids,
+    onFocus() {
+      setFocused(true);
+      setFocusField(path);
+    },
+    onBlur(event) {
+      if (!event.currentTarget.contains(event.relatedTarget)) {
+        setFocused(false);
+        setFocusField((current) => (current === path ? null : current));
+      }
+    },
   };
 }
 
-/** The server's sentence under the field. It never moves focus and never changes the text. */
-export function ErrorLine(props: { id?: string; children: string }) {
+/** The issue a field shows under itself: the first one to fix or improve that is about it. */
+function useIssue(scope: Scope, path: string): Issue | undefined {
+  const { issues } = useApp();
+  return scope === 'target'
+    ? issues.find(
+        (issue) =>
+          issue.severity !== 'info' &&
+          issue.jump?.scope === 'target' &&
+          issue.jump.field === path &&
+          !issue.id.startsWith('schema-required:'),
+      )
+    : undefined;
+}
+
+/** One line under a control: guidance, an issue or an error. */
+export function Guide(props: {
+  id?: string;
+  tone?: 'improve' | 'fix' | 'error';
+  role?: 'alert';
+  children: ReactNode;
+  count?: ReactNode;
+}) {
   return (
-    <Flex className="seo-error" gap="1" align="start" role="alert">
-      <CrossCircledIcon aria-hidden />
-      <Text as="span" size="1" id={props.id}>
-        {props.children}
-      </Text>
-    </Flex>
+    <div
+      className="seo-guide"
+      data-tone={props.tone}
+      id={props.id}
+      role={props.role}
+    >
+      {props.tone === 'error' || props.tone === 'fix' ? (
+        <CrossCircledIcon aria-hidden />
+      ) : props.tone === 'improve' ? (
+        <ExclamationTriangleIcon aria-hidden />
+      ) : null}
+      <span className="seo-guide-text">{props.children}</span>
+      {props.count !== undefined && (
+        <span className="seo-guide-count">{props.count}</span>
+      )}
+    </div>
   );
 }
 
+/** The one-click fix of an issue, or its suggestion, as a button beside its sentence. */
+export function IssueFix(props: {
+  issue: Issue;
+  /** The field, lower case: "Suggest a description". */
+  label: string;
+  onSuggest?(): void;
+}) {
+  const { state, dispatch, locked } = useApp();
+  const { fix } = props.issue;
+  if (!fix || locked.target) {
+    return null;
+  }
+  if ('apply' in fix) {
+    return (
+      <Btn
+        variant="ghost"
+        size={24}
+        onClick={() =>
+          dispatch({
+            type: 'apply',
+            scope: 'target',
+            values: fix.apply(state.edits.target),
+            undo: fixedText(fix.label),
+          })
+        }
+      >
+        {fix.label}
+      </Btn>
+    );
+  }
+  return props.onSuggest ? (
+    <Btn
+      variant="ghost"
+      size={24}
+      aria-label={`Suggest a ${props.label}`}
+      onClick={props.onSuggest}
+    >
+      <SparkleIcon width="12" height="12" />
+      Suggest
+    </Btn>
+  ) : null;
+}
+
 /**
- * Label row (name · source · reset · suggest), the control, then help. The
- * control places `status` (the error, else the meter) itself: a template
- * field puts its insert button on that line.
+ * Label row (label, aside), the control, then at most one line of guidance.
+ * At rest a healthy field shows its label and its value, nothing else.
  */
 export function Field(
   props: FieldOptions & {
-    /** Required details are marked; the mark is not part of the name. */
+    /** aria-required on the control; no visible mark. */
     required?: boolean;
-    /** The label is for assistive technology only (the section row shows it). */
+    /** A required value is missing: "Needed for Product". */
+    missing?: string;
+    /** The label is for assistive technology only. */
     labelHidden?: boolean;
     /** The label names a group of controls, not one control. */
     group?: boolean;
-    suggest?: ReactNode;
-    help?: ReactNode;
+    /** Label and control share one row. */
+    inline?: boolean;
+    /** An ⓘ beside the label. */
+    info?: ReactNode;
     meter?: Meter;
-    children(
-      field: FieldParts & { status: ReactNode; describedBy?: string },
-    ): ReactNode;
+    /** Chip fields: what the value becomes, shown on focus when no preview shows it. */
+    resolved?: string;
+    /** The field has no preview of its own (Schema, Site). */
+    noStage?: boolean;
+    /** A line that stays: the title pattern's example. */
+    note?: ReactNode;
+    /** Opens this field's suggestions, for an issue whose fix is a suggestion. */
+    onSuggest?(): void;
+    /** Under the guidance line: the suggestions tray. */
+    after?: ReactNode;
+    children(field: FieldParts & { describedBy?: string }): ReactNode;
   },
 ) {
   const field = useField(props);
-  const status =
-    field.error ??
-    (props.meter ? (
-      <MeterLine meter={props.meter} id={field.ids.meter} />
-    ) : null);
-  const aside = field.source || field.reset || props.suggest;
-  const label = (
-    <Text
-      asChild
-      size="2"
-      weight="medium"
-      className={props.labelHidden ? 'seo-visually-hidden' : undefined}
+  const { stageVisible } = useApp();
+  const issue = useIssue(props.scope, props.path);
+  const { meter } = props;
+  const guideId = `${field.id}-guide`;
+
+  // Length is guidance, as Checks files it: shown while editing, never as a
+  // warning at rest. The count stays on the line whatever the line says.
+  const long = meter?.state === 'long';
+  const count =
+    field.focused && meter && meter.state !== 'empty' ? (
+      <span data-long={long || undefined}>
+        {meter.state === 'unmeasured'
+          ? `${meter.chars} characters`
+          : meter.chars}
+      </span>
+    ) : undefined;
+  let guide: ReactNode = null;
+  if (field.message) {
+    guide = (
+      <Guide id={guideId} tone="error" role="alert" count={count}>
+        {field.message}
+      </Guide>
+    );
+  } else if (issue) {
+    guide = (
+      <Guide
+        id={guideId}
+        tone={issue.severity === 'fix' ? 'fix' : 'improve'}
+        count={count}
+      >
+        {issue.message}
+        <IssueFix
+          issue={issue}
+          label={props.label.toLowerCase()}
+          onSuggest={props.onSuggest}
+        />
+      </Guide>
+    );
+  } else if (props.missing) {
+    guide = (
+      <Guide id={guideId} tone="improve">
+        {props.missing}
+      </Guide>
+    );
+  } else if (field.focused && long) {
+    guide = (
+      <Guide id={guideId} count={count}>
+        May be cut off after “…{meter.after}”
+      </Guide>
+    );
+  } else if (
+    field.focused &&
+    props.resolved !== undefined &&
+    (props.noStage || !stageVisible)
+  ) {
+    guide = (
+      <Guide id={guideId} count={count}>
+        →{' '}
+        <span className="seo-guide-resolved" title={props.resolved}>
+          {props.resolved}
+        </span>
+      </Guide>
+    );
+  } else if (props.note) {
+    guide = <Guide id={guideId}>{props.note}</Guide>;
+  } else if (field.focused && meter) {
+    guide =
+      meter.state === 'empty' ? (
+        meter.sentence && (
+          <Guide id={guideId}>
+            Empty. Search engines will pick text from the page.
+          </Guide>
+        )
+      ) : (
+        <Guide id={guideId} count={count}>
+          {meter.state === 'fits' && 'Fits in results'}
+        </Guide>
+      );
+  }
+
+  // Kept while the line closes, so it folds away instead of vanishing.
+  const lastGuide = useRef<ReactNode>(null);
+  if (guide) {
+    lastGuide.current = guide;
+  }
+  const describedBy =
+    [field.aside && field.asideId, guide && guideId]
+      .filter(Boolean)
+      .join(' ') || undefined;
+  const label = props.group ? (
+    <span id={field.labelId} tabIndex={-1} className="seo-label">
+      {props.label}
+    </span>
+  ) : (
+    <label
+      htmlFor={field.id}
+      id={field.labelId}
+      tabIndex={-1}
+      className="seo-label"
     >
-      {props.group ? (
-        <span id={field.labelId} tabIndex={-1}>
-          {props.label}
+      {props.label}
+    </label>
+  );
+  const row = (
+    <div
+      className={props.labelHidden ? 'seo-visually-hidden' : 'seo-label-row'}
+    >
+      {props.info ? (
+        <span className="seo-label">
+          {label}
+          {props.info}
         </span>
       ) : (
-        <label htmlFor={field.id} id={field.labelId} tabIndex={-1}>
-          {props.label}
-        </label>
+        label
       )}
-    </Text>
+    </div>
   );
+  // After the control: Tab reaches the input before its Reset.
+  const aside = (
+    <div
+      className="seo-aside"
+      id={field.asideId}
+      data-pinned={field.pinned || undefined}
+    >
+      {field.aside}
+    </div>
+  );
+  const control = props.children({ ...field, describedBy });
   return (
     <div
-      className="seo-field"
+      className={props.inline ? 'seo-field seo-inline' : 'seo-field'}
       ref={field.ref}
+      data-path={props.path}
+      data-disabled={field.disabled || undefined}
       role={props.group ? 'group' : undefined}
       aria-labelledby={props.group ? field.labelId : undefined}
+      onFocus={field.onFocus}
+      onBlur={field.onBlur}
     >
-      {props.labelHidden && !aside ? (
-        // A hidden label with nothing beside it takes no room.
-        label
-      ) : (
-        <Flex
-          className="seo-label-row"
-          align="center"
-          justify="between"
-          wrap="wrap"
-          gapX="3"
-        >
-          {label}
-          {props.required && !props.labelHidden && (
-            <Text as="span" size="2" color="gray" aria-hidden mr="auto" ml="-2">
-              *
-            </Text>
-          )}
-          <Flex align="center" gap="2" ml="auto" minHeight="24px">
-            {field.source}
-            {field.reset}
-            {props.suggest}
-          </Flex>
-        </Flex>
-      )}
-      {props.children({
-        ...field,
-        status,
-        describedBy: field.describe({
-          help: !!props.help,
-          meter: !!props.meter?.sentence,
-        }),
-      })}
-      {props.help && (
-        <Text as="p" size="1" color="gray" id={field.ids.help} mt="1">
-          {props.help}
-        </Text>
-      )}
+      {row}
+      <div className="seo-control">{control}</div>
+      {!props.labelHidden && aside}
+      {/* No room is kept at rest: the line opens when there is one. */}
+      <div className="seo-guide-slot" data-open={guide ? '' : undefined}>
+        <div>{guide ?? lastGuide.current}</div>
+      </div>
+      {props.after}
     </div>
   );
 }

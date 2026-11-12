@@ -1,34 +1,22 @@
-import { CheckIcon, Cross2Icon, ImageIcon } from '@radix-ui/react-icons';
 import {
-  Button,
-  Card,
-  Flex,
-  IconButton,
-  Skeleton,
-  Text,
-  TextField,
-} from '@radix-ui/themes';
+  CheckIcon,
+  ImageIcon,
+  MagnifyingGlassIcon,
+} from '@radix-ui/react-icons';
 import { useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
 import type { ShownImage } from '../model';
 import type { MediaItem } from '../types';
+import { Btn, Sk } from './ui';
 
 /** What the picker returned for images chosen in this session, by UUID: shown before the server knows. */
 export const PICKED: Record<string, ShownImage> = {};
 
-const kilobytes = (bytes: number) =>
-  bytes >= 1048576
-    ? `${(bytes / 1048576).toFixed(1)} MB`
-    : `${Math.max(1, Math.round(bytes / 1024))} KB`;
-
-export function Thumb(props: { src?: string; size?: number }) {
+export function Thumb(props: { src?: string }) {
   const [broken, setBroken] = useState<string | null>(null);
   return (
-    <span
-      className="seo-thumb"
-      style={props.size ? { width: props.size, height: props.size } : undefined}
-    >
+    <span className="seo-thumb">
       {props.src && props.src !== broken ? (
         <img
           src={props.src}
@@ -43,113 +31,119 @@ export function Thumb(props: { src?: string; size?: number }) {
   );
 }
 
-/**
- * The image a setting uses, with the inline picker under it. The thumbnail
- * and the name come with the image from the server, also for an inherited one.
- */
-export function ImageRow(props: {
-  describedBy?: string;
-  image: ShownImage | null;
-  /** What the row says without an image. */
-  empty: string;
-  disabled?: boolean;
-  /** Images narrower than this are dimmed and marked "small". */
+/** A file name keeps its end in sight: "thestandingdesk-Wi0…unsplash.jpg". */
+export function ImageName(props: { name: string }) {
+  const { name } = props;
+  return /^\S+\.[a-z0-9]{2,5}$/i.test(name) && name.length > 24 ? (
+    <span className="seo-midcut" title={name}>
+      <span>{name.slice(0, -12)}</span>
+      <span>{name.slice(-12)}</span>
+    </span>
+  ) : (
+    <>{name}</>
+  );
+}
+
+/** "1770 × 996 · 249 KB", the weight when the server knows it. */
+export const imageSize = (image: ShownImage) =>
+  `${image.width} × ${image.height}${
+    image.bytes
+      ? image.bytes >= 1e6
+        ? ` · ${(image.bytes / 1e6).toFixed(1)} MB`
+        : ` · ${Math.max(1, Math.round(image.bytes / 1e3))} KB`
+      : ''
+  }`;
+
+/** What the Choose image sheet needs from the row that opened it. */
+export interface ImageRequest {
+  /** Images narrower than this say "Too small". */
   minWidth: number;
   /** The UUID stored here, when one is. */
   chosen?: string;
-  /** Template scope: the content type's image fields. */
-  fields?: { value: string; label: string }[];
+  /** Template scope: the content type's image fields, as `{field.x}` values. */
+  fields?: { value: string; label: string; image?: ShownImage | null }[];
   onPick(value: string): void;
-  /** Site scope: a chosen image can be removed again. */
-  onClear?(): void;
-}) {
-  const [open, setOpen] = useState(false);
+}
+
+/**
+ * The image a setting uses: a thumbnail, its name and size, Change and,
+ * where an image can be taken away, Remove.
+ */
+export function ImageRow(
+  props: ImageRequest & {
+    describedBy?: string;
+    image: ShownImage | null;
+    /** In the buttons' names: "image", "logo", "default image". */
+    noun?: string;
+    /** The row's name line, instead of the image's: "From each Article's Hero image field". */
+    name?: string;
+    disabled?: boolean;
+    onClear?(): void;
+  },
+) {
+  const { openSheet } = useApp();
   const button = useRef<HTMLButtonElement>(null);
-  const { image } = props;
-  const close = () => {
-    setOpen(false);
-    // Back to the row.
-    requestAnimationFrame(() => button.current?.focus());
-  };
+  const { image, noun = 'image' } = props;
   return (
-    <div className="seo-image">
-      <Flex align="center" gap="3" className="seo-image-row">
-        <Thumb src={image?.thumb} />
-        <Flex direction="column" gap="1" align="start" minWidth="0">
-          {image ? (
-            // A long file name is cut; its size always shows.
-            <Text as="div" size="2" className="seo-image-text">
-              <span title={image.name}>{image.name}</span>
-              <span>
-                {'\u00a0· ' +
-                  [
-                    `${image.width} × ${image.height}`,
-                    ...(image.bytes ? [kilobytes(image.bytes)] : []),
-                  ].join(' · ')}
-              </span>
-            </Text>
-          ) : (
-            <Text as="div" size="2" className="seo-wrap">
-              {props.empty}
-            </Text>
+    <div className="seo-image-row">
+      {image ? (
+        <Thumb src={image.thumb} />
+      ) : (
+        <span className="seo-thumb" data-empty="">
+          <ImageIcon aria-hidden />
+        </span>
+      )}
+      <div className="seo-image-name">
+        <div title={props.name ?? image?.name}>
+          {props.name ?? (image ? <ImageName name={image.name} /> : 'No image')}
+        </div>
+        {image && <small>{imageSize(image)}</small>}
+      </div>
+      {!props.disabled && (
+        <div className="seo-image-actions">
+          <Btn
+            ref={button}
+            data-focus
+            variant="soft"
+            aria-label={`${image ? 'Change' : 'Choose'} ${noun}`}
+            aria-describedby={props.describedBy}
+            onClick={() =>
+              openSheet({
+                kind: 'image',
+                request: {
+                  minWidth: props.minWidth,
+                  chosen: props.chosen,
+                  fields: props.fields,
+                  onPick: props.onPick,
+                },
+              })
+            }
+          >
+            {image ? 'Change' : 'Choose image'}
+          </Btn>
+          {props.onClear && props.chosen && (
+            <Btn
+              variant="ghost"
+              aria-label={`Remove ${noun}`}
+              onClick={() => {
+                props.onClear!();
+                // The button goes with the image; focus stays on the row.
+                requestAnimationFrame(() => button.current?.focus());
+              }}
+            >
+              Remove
+            </Btn>
           )}
-          {!props.disabled && (
-            <Flex gap="3" align="center">
-              <Button
-                ref={button}
-                data-focus
-                aria-describedby={props.describedBy}
-                size="1"
-                variant="soft"
-                color="gray"
-                aria-expanded={open}
-                onClick={() => setOpen(!open)}
-              >
-                {image ? 'Choose another' : 'Choose an image'}
-              </Button>
-              {props.onClear && props.chosen && (
-                <Button
-                  size="1"
-                  variant="ghost"
-                  color="gray"
-                  onClick={() => {
-                    props.onClear!();
-                    // The button goes with the image; focus stays on the row.
-                    requestAnimationFrame(() => button.current?.focus());
-                  }}
-                >
-                  Remove
-                </Button>
-              )}
-            </Flex>
-          )}
-        </Flex>
-      </Flex>
-      {open && (
-        <Picker
-          minWidth={props.minWidth}
-          chosen={props.chosen}
-          fields={props.fields}
-          onPick={(value) => {
-            props.onPick(value);
-            close();
-          }}
-          onClose={close}
-        />
+        </div>
       )}
     </div>
   );
 }
 
-/** An inline panel, not a second dialog: search, 24 at a time, newest first. There is no upload. */
-function Picker(props: {
-  minWidth: number;
-  chosen?: string;
-  fields?: { value: string; label: string }[];
-  onPick(value: string): void;
-  onClose(): void;
-}) {
-  const { api } = useApp();
+/** Search, 24 at a time, newest first. There is no upload. */
+export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
+  const { api, state } = useApp();
+  const { request } = props;
   const [query, setQuery] = useState('');
   const [items, setItems] = useState<MediaItem[]>([]);
   const [more, setMore] = useState(false);
@@ -157,15 +151,16 @@ function Picker(props: {
   const page = useRef(0);
   // The page a failed request asked for: "Try again" asks for it again.
   const failed = useRef(0);
-  const request = useRef(0);
+  const call = useRef(0);
   const search = useRef<HTMLInputElement>(null);
+  const target = state.server?.target;
 
   const load = (next: number) => {
-    const mine = ++request.current;
+    const mine = ++call.current;
     setPhase('loading');
     api.getMedia(query.trim(), next).then(
       (result) => {
-        if (mine !== request.current) {
+        if (mine !== call.current) {
           return;
         }
         page.current = next;
@@ -176,7 +171,7 @@ function Picker(props: {
         setPhase('ready');
       },
       () => {
-        if (mine === request.current) {
+        if (mine === call.current) {
           failed.current = next;
           setPhase('error');
         }
@@ -193,123 +188,124 @@ function Picker(props: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
   useEffect(() => search.current?.focus({ preventScroll: true }), []);
-  // Bring the whole panel into view once its first thumbnails are in.
-  const panel = useRef<HTMLDivElement>(null);
-  const shown = useRef(false);
-  useEffect(() => {
-    if (!shown.current && phase !== 'loading') {
-      shown.current = true;
-      panel.current?.scrollIntoView({ block: 'nearest' });
-    }
-  }, [phase]);
+
+  const pick = (value: string) => {
+    request.onPick(value);
+    props.onDone();
+  };
+  // Picked in this session first.
+  const picked = Object.keys(PICKED);
+  const sorted = [...items].sort(
+    (a, b) => Number(picked.includes(b.uuid)) - Number(picked.includes(a.uuid)),
+  );
 
   return (
-    <Card
-      ref={panel}
-      className="seo-picker"
-      mt="3"
-      onKeyDown={(event) => {
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          props.onClose();
-        }
-      }}
-    >
-      <Flex gap="2" align="center" mb="3">
-        <TextField.Root
+    <>
+      <div className="seo-input-wrap">
+        <MagnifyingGlassIcon aria-hidden />
+        <input
           ref={search}
-          size="2"
-          placeholder="Search images…"
+          type="search"
+          className="seo-input"
+          placeholder="Search images"
           aria-label="Search images"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-          style={{ flex: 1 }}
         />
-        <IconButton
-          size="1"
-          variant="ghost"
-          color="gray"
-          aria-label="Close image picker"
-          onClick={props.onClose}
-        >
-          <Cross2Icon aria-hidden />
-        </IconButton>
-      </Flex>
-      {props.fields && props.fields.length > 0 && (
-        <Flex gap="2" wrap="wrap" mb="3">
-          {props.fields.map((field) => (
-            <Button
+      </div>
+      {request.fields && request.fields.length > 0 && (
+        <>
+          <p className="seo-subhead">From each {target?.label ?? 'page'}</p>
+          {request.fields.map((field) => (
+            <button
               key={field.value}
-              size="1"
-              variant="soft"
-              onClick={() => props.onPick(field.value)}
+              type="button"
+              className="seo-fieldpick"
+              aria-label={`Use the ${field.label} field`}
+              aria-pressed={request.chosen === field.value}
+              onClick={() => pick(field.value)}
             >
-              Use a field: {field.label}
-            </Button>
+              <span>
+                <ImageIcon aria-hidden />
+              </span>
+              <span>
+                <b>{field.label} field</b>
+                {field.image && (
+                  <small aria-hidden>
+                    This {target?.label.toLowerCase() ?? 'page'}:{' '}
+                    {field.image.name} · {field.image.width} ×{' '}
+                    {field.image.height}
+                  </small>
+                )}
+              </span>
+              {request.chosen === field.value && <CheckIcon aria-hidden />}
+            </button>
           ))}
-        </Flex>
+          <p className="seo-subhead">Media library</p>
+        </>
       )}
-      <div className="seo-picker-grid" aria-busy={phase === 'loading'}>
-        {items.map((item) => {
-          const small = item.width < props.minWidth;
+      <div className="seo-tiles" aria-busy={phase === 'loading'}>
+        {sorted.map((item) => {
+          const small = item.width < request.minWidth;
           const size = `${item.width} × ${item.height}`;
           return (
             <button
               key={item.uuid}
               type="button"
-              className="seo-picker-item"
-              aria-pressed={item.uuid === props.chosen}
-              aria-label={`${item.name}, ${size}${small ? ', small' : ''}`}
-              data-small={small || undefined}
+              className="seo-tile"
+              aria-pressed={item.uuid === request.chosen}
+              aria-description={`${size}${small ? ', too small' : ''}`}
               onClick={() => {
                 PICKED[item.uuid] = item;
-                props.onPick(item.uuid);
+                pick(item.uuid);
               }}
             >
-              <Thumb src={item.thumb} />
-              {item.uuid === props.chosen && (
-                <span className="seo-picker-mark">
-                  <CheckIcon aria-hidden />
-                </span>
-              )}
-              {small && <span className="seo-picker-small">small</span>}
-              <span className="seo-picker-name">{item.name}</span>
-              <span className="seo-picker-size">{size}</span>
+              <span className="seo-tile-image">
+                <Thumb src={item.thumb} />
+                {item.uuid === request.chosen && (
+                  <span className="seo-tile-badge">
+                    <CheckIcon aria-hidden width="12" height="12" />
+                  </span>
+                )}
+              </span>
+              <b>{item.name}</b>
+              {small ? <small data-warn="" aria-hidden>Too small</small> : <small aria-hidden>{size}</small>}
             </button>
           );
         })}
         {phase === 'loading' &&
           items.length === 0 &&
-          [0, 1, 2, 3].map((index) => <Skeleton key={index} height="96px" />)}
+          [0, 1, 2].map((index) => (
+            <span key={index}>
+              <Sk w="100%" h={72} />
+              <Sk w="70%" h={12} mt={8} />
+            </span>
+          ))}
       </div>
       {phase === 'ready' && items.length === 0 && (
-        <Text as="p" size="1" color="gray">
-          No images found. To use a new image, add it as the page image in Page
-          data, or upload it in Content › Media.
-        </Text>
+        <p className="seo-sheet-intro">
+          No images found. To use a new image, add it to the media library
+          first.
+        </p>
       )}
       {phase === 'error' && (
-        <Flex align="center" gap="3">
-          <Text as="p" size="1" color="gray">
-            The images couldn't be loaded.
-          </Text>
-          <Button size="1" variant="ghost" onClick={() => load(failed.current)}>
+        <p className="seo-sheet-intro">
+          The images couldn't be loaded.{' '}
+          <Btn variant="ghost" accent onClick={() => load(failed.current)}>
             Try again
-          </Button>
-        </Flex>
+          </Btn>
+        </p>
       )}
       {more && phase !== 'error' && (
-        <Flex justify="end" mt="2">
-          <Button
-            size="1"
-            variant="ghost"
-            loading={phase === 'loading'}
-            onClick={() => load(page.current + 1)}
-          >
-            Show more
-          </Button>
-        </Flex>
+        <Btn
+          className="seo-btn seo-more"
+          size={32}
+          aria-disabled={phase === 'loading'}
+          onClick={() => phase !== 'loading' && load(page.current + 1)}
+        >
+          Show more
+        </Btn>
       )}
-    </Card>
+    </>
   );
 }

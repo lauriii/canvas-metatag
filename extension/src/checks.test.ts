@@ -161,21 +161,21 @@ describe('checks()', () => {
     expect(checks(input())).toEqual([]);
   });
 
-  // [rule, severity, what makes it fire, the exact message]
-  const rows: [string, Issue['severity'], Setup, string][] = [
+  // [rule, severity, what makes it fire, the exact message (and detail)]
+  const rows: [string, Issue['severity'], Setup, string | [string, string]][] = [
     [
       'title-empty',
       'fix',
       {
         tokens: { title: text('Page title', ''), site: text('Site name', '') },
       },
-      'This page has no title for search results.',
+      ['Add a title', 'This page has no title for search results.'],
     ],
     [
       'title-generic',
       'improve',
       { tokens: { title: text('Page title', 'Home') } },
-      '"Home" says little about this page.',
+      ['Make the title specific', '"Home" says little about this page.'],
     ],
     [
       'token-empty:description',
@@ -184,13 +184,13 @@ describe('checks()', () => {
         target: { social: { description: '{description} More.' } },
         tokens: { description: text('Description', '') },
       },
-      '"Description" is empty for this page, so it is left out.',
+      ['Fill in Description or remove it', '"Description" is empty for this page, so it is left out.'],
     ],
     [
       'title-site-twice',
       'improve',
       { target: { title: 'Example pricing {sep} {site}' } },
-      'The site name appears twice in the title.',
+      ['Remove the repeated site name', 'The site name appears twice in the title.'],
     ],
     [
       'title-heading',
@@ -204,37 +204,37 @@ describe('checks()', () => {
           },
         },
       },
-      'The title and the main heading say different things.',
+      'Match the title to the main heading',
     ],
     [
       'title-long',
       'info',
       { target: { title: long(14) } },
-      'The title may be cut off on desktop after "words words words".',
+      ['Shorten the title', 'May be cut off after “…words words words”.'],
     ],
     [
       'description-missing',
       'improve',
       { tokens: { description: text('Description', '') } },
-      'There is no description. Search engines will pick text from the page.',
+      ['Add a description', 'Without one, search engines pick text from the page.'],
     ],
     [
       'description-long',
       'info',
       { tokens: { description: text('Description', long(20)) } },
-      'The description may be cut off on phones after "words words words".',
+      ['Shorten the description', 'May be cut off after “…words words words”.'],
     ],
     [
       'description-title',
       'improve',
       { tokens: { description: text('Description', 'pricing!') } },
-      'The description repeats the title.',
+      ['Make the description say more', 'It repeats the title.'],
     ],
     [
       'noindex',
       'improve',
       { target: { robots: { noindex: true } } },
-      'Hidden from search engines. Set on this page.',
+      ['Show this page in search', 'Hidden from search engines. Set on this page.'],
     ],
     [
       'noindex-canonical',
@@ -252,55 +252,55 @@ describe('checks()', () => {
       'snippet-off',
       'info',
       { target: { robots: { nosnippet: true } } },
-      'Text previews are off. Results show no description and answer engines cannot quote this page.',
+      ['Text previews are off', 'Results show no description and answer engines cannot quote this page.'],
     ],
     [
       'image-preview',
       'info',
       { target: { robots: { max_image_preview: 'none' } } },
-      'Large image previews are off.',
+      ['Large image previews are off', 'Results show a standard-size image at most.'],
     ],
     [
       'image-missing',
       'improve',
       { resolved: { image: null } },
-      'No image for social cards. Links to this page will show without one.',
+      ['Add a social image', 'Links to this page will show without one.'],
     ],
     [
       'image-small',
       'improve',
       { resolved: { image: { ...IMAGE, width: 800, height: 420 } } },
-      'The social image is 800 x 420. Use at least 1200 x 630 for a large card.',
+      ['Use a larger social image', 'The social image is 800 x 420. Use at least 1200 x 630 for a large card.'],
     ],
     [
       'image-ratio',
       'info',
       { resolved: { image: { ...IMAGE, width: 1200, height: 1200 } } },
-      'The social image will be cropped. About 1.91:1 fits best.',
+      ['The social image will be cropped', 'About 1.91:1 fits best.'],
     ],
     [
       'image-heavy',
       'info',
       { resolved: { image: { ...IMAGE, bytes: 6.5 * 1048576 } } },
-      'The social image is 6.5 MB. Some services skip images over 5 MB.',
+      ['The social image is 6.5 MB', 'Some services skip images over 5 MB.'],
     ],
     [
       'image-format',
       'improve',
       { resolved: { image: { ...IMAGE, mime: 'image/svg+xml' } } },
-      'SVG images do not show on many services. Use JPEG, PNG or WebP.',
+      ['Use JPEG, PNG or WebP', 'SVG images do not show on many services.'],
     ],
     [
       'image-alt',
       'info',
       { resolved: { image: { ...IMAGE, alt: ' ' } } },
-      'The social image has no description for people who cannot see it.',
+      ['The social image has no alt text', 'People who cannot see it get no description.'],
     ],
     [
       'h1-missing',
       'improve',
       { input: { facts: { h1: [], imagesWithoutAlt: [], text: '' } } },
-      'The page has no main heading.',
+      ['Add a main heading', 'Set one heading in the page to Heading 1. This is done in the page, not here.'],
     ],
     [
       'img-alt',
@@ -329,7 +329,7 @@ describe('checks()', () => {
           },
         },
       },
-      'Event needs "Starts". Until it is filled in, the Event details are left out.',
+      ['Add Starts', 'Event details are left out until it is filled in.'],
     ],
     [
       'schema-recommended',
@@ -381,7 +381,7 @@ describe('checks()', () => {
           schema: { type: 'Event', props: { location_name: 'The New Mill' } },
         },
       },
-      '"Venue" does not appear on the page. Structured data should match what visitors see.',
+      ['Check Venue', 'It does not appear on the page. Structured data should match what visitors see.'],
     ],
     [
       'identity-incomplete',
@@ -404,10 +404,14 @@ describe('checks()', () => {
     ],
   ];
 
-  it.each(rows)('%s fires', (id, severity, setup, message) => {
+  it.each(rows)('%s fires', (id, severity, setup, text) => {
     const issue = find(setup, id);
+    const [message, detail] = typeof text === 'string' ? [text] : text;
     expect(issue).toBeDefined();
     expect(issue).toMatchObject({ id, severity, message });
+    if (detail !== undefined) {
+      expect(issue!.detail).toBe(detail);
+    }
     // And it is silent on the complete page.
     expect(find({}, id)).toBeUndefined();
   });
@@ -459,7 +463,9 @@ describe('checks()', () => {
         { input: { facts: { h1: [], imagesWithoutAlt: [], text: '' } } },
         'h1-missing',
       )!.detail,
-    ).toBe('Add a heading set to H1 in the page content.');
+    ).toBe(
+      'Set one heading in the page to Heading 1. This is done in the page, not here.',
+    );
     // A template's heading is set in the template.
     expect(
       find(
@@ -471,7 +477,9 @@ describe('checks()', () => {
         },
         'h1-missing',
       )!.detail,
-    ).toBe('Set a heading in this template to H1.');
+    ).toBe(
+      'Set one heading in this template to Heading 1. This is done in the template, not here.',
+    );
     // A code is rarely printed as written: no "does not appear" for it.
     const product = find(
       {
@@ -505,7 +513,7 @@ describe('checks()', () => {
     expect(
       find(rows.find(([id]) => id === 'title-heading')![2], 'title-heading')!
         .detail,
-    ).toBe('Title: "Pricing | Example" · Heading: "Contact our sales team"');
+    ).toBe('The title and the main heading say different things.');
     expect(
       find(
         rows.find(([id]) => id === 'schema-required:startDate')![2],
@@ -779,10 +787,10 @@ describe('rules with conditions', () => {
       find({ ...hidden, input: { published: false } }, 'noindex'),
     ).toBeUndefined();
     expect(
-      find({ ...hidden, input: { scope: 'template' } }, 'noindex')!.message,
+      find({ ...hidden, input: { scope: 'template' } }, 'noindex')!.detail,
     ).toBe('Hidden from search engines. Set for every Article.');
     const bySite = find({ site: { robots: { noindex: true } } }, 'noindex')!;
-    expect(bySite.message).toBe(
+    expect(bySite.detail).toBe(
       'Hidden from search engines. Set for the whole site.',
     );
     expect(bySite.jump).toEqual({
@@ -800,13 +808,13 @@ describe('rules with conditions', () => {
       )!.jump,
     ).toBeUndefined();
     expect(
-      find({ fromDefault: { robots: { noindex: true } } }, 'noindex')!.message,
+      find({ fromDefault: { robots: { noindex: true } } }, 'noindex')!.detail,
     ).toBe('Hidden from search engines. Set on the English version.');
     // Only the server's output says so: a configuration override.
     expect(
       find({ robotsMeta: 'noindex, max-image-preview:large' }, 'noindex'),
     ).toMatchObject({
-      message:
+      detail:
         'Hidden from search engines. Set in site configuration outside SEO.',
       fix: undefined,
     });
@@ -827,7 +835,7 @@ describe('rules with conditions', () => {
       find(
         { resolved: { image: { ...IMAGE, width: 400, height: 210 } } },
         'image-small',
-      )!.message,
+      )!.detail,
     ).toBe('The social image is 400 x 210. It will show as a small thumbnail.');
   });
 
@@ -865,7 +873,7 @@ describe('rules with conditions', () => {
       },
       'title-empty',
     )!;
-    expect(issue.message).toBe('Hello world has no title for search results.');
+    expect(issue.detail).toBe('Hello world has no title for search results.');
   });
 
   it('long text cannot be judged without a measurer', () => {

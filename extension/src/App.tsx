@@ -1,50 +1,41 @@
 import {
-  CheckIcon,
-  CrossCircledIcon,
   ExclamationTriangleIcon,
-  InfoCircledIcon,
+  LockClosedIcon,
 } from '@radix-ui/react-icons';
+import { Tabs } from '@radix-ui/themes';
 import {
-  Badge,
-  Box,
-  Button,
-  Callout,
-  Flex,
-  Heading,
-  Popover,
-  ScrollArea,
-  SegmentedControl,
-  Skeleton,
-  Spinner,
-  Tabs,
-  Text,
-} from '@radix-ui/themes';
-import {
-  type ComponentType,
+  type Dispatch,
   type KeyboardEvent,
   type ReactNode,
+  type SetStateAction,
   createContext,
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useReducer,
   useRef,
   useState,
 } from 'react';
+import { flushSync } from 'react-dom';
 
 import { type Api, ApiError, createApi } from './api';
-import { checks, countIssues } from './checks';
-import { ChecksTab } from './components/ChecksTab';
-import { Output } from './components/Output';
+import { checks } from './checks';
+import { CHECKS_NOTE, ChecksSheet } from './components/ChecksSheet';
+import { Header, Sheet } from './components/Header';
+import { type ImageRequest, ImageSheet } from './components/MediaPicker';
+import { OutputSheet, originNote } from './components/Output';
 import { SearchSkeleton } from './components/Previews';
-import { SchemaTab } from './components/SchemaTab';
+import { CustomJson, SchemaTab } from './components/SchemaTab';
 import { SearchTab } from './components/SearchTab';
-import { DefaultsTab, IdentityTab } from './components/SiteTab';
+import { SiteView } from './components/SiteTab';
 import { SocialTab } from './components/SocialTab';
+import { Btn, InfoTip, Notice, reveal } from './components/ui';
 import { type Host, type HostContext, createHost } from './host';
 import {
   type DraftIO,
+  type Footer,
   type FooterAction,
   MESSAGES,
   REGISTRY,
@@ -77,9 +68,15 @@ import type {
   Scope,
   State,
   StatePayload,
-  Tab,
   Texts,
 } from './types';
+
+/** A full-frame tool over the view. */
+export type SheetState =
+  | { kind: 'checks' }
+  | { kind: 'output'; section?: 'schema' }
+  | { kind: 'custom' }
+  | { kind: 'image'; request: ImageRequest };
 
 // What components get. One context, read with useApp().
 
@@ -97,23 +94,32 @@ export interface AppContext {
   measurer: Measurer;
   /** A scope whose controls are disabled: values stay readable. */
   locked: Record<Scope, boolean>;
-  /** The last "Go to": fields compare `field` and `seq` to take focus. */
-  jump: (Jump & { seq: number; toLabel: boolean; suggest: boolean }) | null;
+  /** The last jump: fields compare `field` and `seq` to take focus. */
+  jump: (Jump & { seq: number; suggest: boolean }) | null;
   /**
-   * Switches scope and tab, then names the field. `toLabel`: focus its label,
-   * not its input. `suggest`: open its suggestion panel.
+   * Closes any sheet, switches scope and tab, then names the field.
+   * `suggest`: open its suggestions.
    */
-  goTo(jump: Jump, how?: { toLabel?: boolean; suggest?: boolean }): void;
-  /** The texts a suggestion panel is trying out: the previews show them. */
-  trial: Texts | null;
-  setTrial(trial: Texts | null): void;
+  goTo(jump: Jump, how?: { suggest?: boolean }): void;
+  /** The texts a suggestion is trying out: the previews show them. */
+  trial: (Texts & { index?: number }) | null;
+  setTrial(trial: (Texts & { index?: number }) | null): void;
   /** Canvas's own Description is the field's while it has focus: previews follow `text`. */
   holdDescription(text: string): void;
   /** Hands the Description to Canvas, once. False when the editor did not take it. */
   commitDescription(text: string): boolean;
-  /** The Output view replaces the scroll area. */
-  output: boolean;
-  setOutput(open: boolean): void;
+  /** The sheet over the view, if any. */
+  sheet: SheetState | null;
+  /** Opens a sheet; closing it returns focus to what had it. */
+  openSheet(sheet: SheetState): void;
+  /** `restore`: focus goes back to the opener. */
+  closeSheet(restore?: boolean): void;
+  /** The path of the field that has focus: its part of the preview lights up. */
+  focusField: string | null;
+  setFocusField: Dispatch<SetStateAction<string | null>>;
+  /** The preview of the shown view is in sight. */
+  stageVisible: boolean;
+  setStageVisible(visible: boolean): void;
 }
 
 const Context = createContext<AppContext | null>(null);
@@ -126,19 +132,7 @@ export function useApp(): AppContext {
   return app;
 }
 
-// Tabs. Panels of both scopes stay mounted; inactive ones are hidden.
-
-const PANELS: Record<
-  Tab,
-  { scope: Scope; label: string; body: ComponentType }
-> = {
-  search: { scope: 'target', label: 'Search', body: SearchTab },
-  social: { scope: 'target', label: 'Social', body: SocialTab },
-  schema: { scope: 'target', label: 'Structured data', body: SchemaTab },
-  checks: { scope: 'target', label: 'Checks', body: ChecksTab },
-  identity: { scope: 'site', label: 'Identity', body: IdentityTab },
-  defaults: { scope: 'site', label: 'Defaults', body: DefaultsTab },
-};
+const TARGET_TABS = ['search', 'social', 'schema'];
 
 // Outside React.
 
@@ -204,9 +198,12 @@ export default function App() {
   const [state, rawDispatch] = useReducer(reducer, undefined, () =>
     initialState(host.context()),
   );
-  const [output, setOutput] = useState(false);
+  const [sheet, setSheet] = useState<SheetState | null>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const [jump, setJump] = useState<AppContext['jump']>(null);
-  const [trial, setTrial] = useState<Texts | null>(null);
+  const [trial, setTrial] = useState<AppContext['trial']>(null);
+  const [focusField, setFocusField] = useState<string | null>(null);
+  const [stageVisible, setStageVisible] = useState(true);
 
   // The same reducer runs here first, so async code always reads the state
   // its own dispatches produced, and the session-storage mirror is written
@@ -331,7 +328,7 @@ export default function App() {
           ctx,
           payload,
           readonly: access(ctx, payload),
-          flash: !first.current && label ? `Now editing: ${label}` : undefined,
+          flash: !first.current && label ? `Now editing ${label}` : undefined,
         });
         dispatch({ type: 'live', live: host.inputs() ?? {} });
         dispatch({ type: 'facts', facts: host.readFacts() });
@@ -403,7 +400,7 @@ export default function App() {
       flush();
       shown.current = key;
       loaded.current = null;
-      setOutput(false);
+      setSheet(null);
       dispatch({ type: 'loading', ctx });
     }
     // An entity route without an owner yet is loading, never "no page".
@@ -741,12 +738,19 @@ export default function App() {
       },
       jump,
       goTo(to, how = {}) {
-        setOutput(false);
+        setSheet(null);
         dispatch({ type: 'scope', scope: to.scope });
+        if (to.tab === 'checks') {
+          setSheet({ kind: 'checks' });
+          return;
+        }
         dispatch({ type: 'tab', tab: to.tab });
+        if (to.field === 'schema.custom') {
+          setSheet({ kind: 'custom' });
+          return;
+        }
         setJump((last) => ({
           ...to,
-          toLabel: how.toLabel ?? false,
           suggest: how.suggest ?? false,
           seq: (last?.seq ?? 0) + 1,
         }));
@@ -776,18 +780,39 @@ export default function App() {
         });
         return taken;
       },
-      output,
-      setOutput,
+      sheet,
+      openSheet(next) {
+        opener.current = document.activeElement as HTMLElement | null;
+        setSheet(next);
+      },
+      closeSheet(restore = true) {
+        // Committed now, so the view is no longer inert and focus never
+        // rests on the document between frames.
+        flushSync(() => setSheet(null));
+        if (restore) {
+          // Back to what opened it, else to the scope.
+          (opener.current?.isConnected
+            ? opener.current
+            : document.querySelector<HTMLElement>('.seo-scope')
+          )?.focus();
+        }
+      },
+      focusField,
+      setFocusField,
+      stageVisible,
+      setStageVisible,
     }),
     [
       api,
       dispatch,
+      focusField,
       host,
       issues,
       jump,
       measurer,
-      output,
+      sheet,
       shownView,
+      stageVisible,
       state,
       trial,
     ],
@@ -795,9 +820,7 @@ export default function App() {
 
   const act: Act = (action) => {
     const { scope, errors, offer, edits, server } = now.current;
-    if (action === 'output') {
-      setOutput(true);
-    } else if (action === 'undo') {
+    if (action === 'undo') {
       dispatch({ type: 'undo' });
     } else if (action === 'goto') {
       const field = Object.keys(errors[scope])[0];
@@ -859,37 +882,52 @@ export default function App() {
   return (
     <Context.Provider value={app}>
       <main className="seo-app" onKeyDown={onKeyDown}>
+        <h1 className="seo-visually-hidden">SEO</h1>
         {state.phase === 'loading' && !state.server && (
-          <Loading
-            // The address and the description paint with the first frame.
-            origin={undefined}
-            inputs={state.ctx.kind === 'page' ? host.inputs() : null}
-          />
+          <div className="seo-frame seo-loading">
+            <header className="seo-header">
+              <span className="seo-scope" data-static="">
+                {state.ctx.kind === 'page'
+                  ? 'This page'
+                  : state.ctx.kind === 'none'
+                    ? 'Site settings'
+                    : 'Template'}
+              </span>
+            </header>
+            <div className="seo-body">
+              <Loading
+                inputs={state.ctx.kind === 'page' ? host.inputs() : null}
+              />
+            </div>
+          </div>
         )}
         {state.phase === 'forbidden' && (
-          <Message title="SEO is not available">
-            You don't have permission to edit SEO settings. Ask a site
-            administrator for "Edit SEO settings in Canvas".
-          </Message>
+          <div className="seo-center">
+            <LockClosedIcon aria-hidden />
+            <h2>SEO is not available</h2>
+            <p>You don't have permission to edit SEO settings.</p>
+          </div>
         )}
         {state.phase === 'error' && (
-          <Message
-            title="SEO settings couldn't load"
-            action="Try again"
-            onAction={() => {
-              shown.current = null;
-              loaded.current = null;
-              follow();
-            }}
-          >
-            The server didn't answer. Your page is not affected.
-          </Message>
+          <div className="seo-center">
+            <ExclamationTriangleIcon aria-hidden />
+            <h2>SEO settings couldn't load</h2>
+            <Btn
+              onClick={() => {
+                shown.current = null;
+                loaded.current = null;
+                follow();
+              }}
+            >
+              Try again
+            </Btn>
+          </div>
         )}
         {(state.phase === 'ready' || state.phase === 'loading') &&
           state.server && (
             // One element in both phases: when the editor moves on, the
-            // frame stays, and so do focus and the footer's live region.
-            // Only the scroll area waits.
+            // frame stays, and so do focus and the live region. Only the
+            // body waits.
             <Ready
               strips={
                 state.phase === 'ready'
@@ -933,10 +971,6 @@ function Loading(props: {
   }
   return (
     <div className="seo-loading">
-      <Flex direction="column" gap="2" mb="4">
-        <Skeleton height="32px" width="45%" />
-        <Skeleton height="24px" width="80%" />
-      </Flex>
       <SearchSkeleton
         host={host}
         alias={props.inputs?.alias}
@@ -946,397 +980,340 @@ function Loading(props: {
   );
 }
 
-function Message(props: {
-  title: string;
-  children: string;
-  action?: string;
-  onAction?(): void;
-}) {
-  return (
-    <Flex
-      className="seo-message"
-      direction="column"
-      align="center"
-      justify="center"
-      gap="2"
-    >
-      <Heading as="h1" size="3">
-        {props.title}
-      </Heading>
-      <Text as="p" size="2">
-        {props.children}
-      </Text>
-      {props.action && (
-        <Button size="2" variant="soft" mt="2" onClick={props.onAction}>
-          {props.action}
-        </Button>
-      )}
-    </Flex>
-  );
-}
-
-// The frame: scope bar, tabs, strips, one scroll area, footer.
+// The frame: header, one body, the bar when a button is needed, sheets over it.
 
 const BUTTONS: Record<
-  FooterAction | Strip['actions'][number],
-  { label: string; variant: 'ghost' | 'soft' | 'solid'; color?: 'gray' | 'red' }
+  Exclude<FooterAction, 'output'> | Strip['actions'][number],
+  {
+    label: string;
+    variant: 'ghost' | 'soft' | 'solid' | 'danger' | 'outline';
+    accent?: boolean;
+  }
 > = {
-  output: { label: 'Output', variant: 'ghost' },
-  undo: { label: 'Undo', variant: 'ghost' },
-  goto: { label: 'Go to', variant: 'ghost' },
-  retry: { label: 'Try again', variant: 'ghost' },
-  discard: { label: 'Discard', variant: 'soft', color: 'gray' },
-  save: { label: 'Save for whole site', variant: 'solid' },
-  hide: { label: 'Hide site and save', variant: 'solid', color: 'red' },
-  reload: { label: 'Reload editor', variant: 'ghost' },
-  show: { label: 'Undo', variant: 'ghost' },
-  drop: { label: 'Discard', variant: 'ghost' },
-  use: { label: 'Use it', variant: 'ghost' },
+  undo: { label: 'Undo', variant: 'ghost', accent: true },
+  goto: { label: 'Show', variant: 'ghost', accent: true },
+  retry: { label: 'Try again', variant: 'ghost', accent: true },
+  discard: { label: 'Discard', variant: 'soft' },
+  save: { label: 'Save', variant: 'solid' },
+  hide: { label: 'Hide site', variant: 'danger' },
+  reload: { label: 'Reload editor', variant: 'outline' },
+  show: { label: 'Show in search', variant: 'outline' },
+  drop: { label: 'Discard', variant: 'outline' },
+  use: { label: 'Use it', variant: 'outline' },
 };
 
 type Act = (action: keyof typeof BUTTONS) => void;
 
-function Actions(props: {
+const BAR: FooterAction[] = ['undo', 'goto', 'retry', 'discard', 'save', 'hide'];
+
+/** The bar shows only when a button is needed, or for a passing message. */
+const barOf = (state: State, shown: Footer) =>
+  shown.actions.some((action) => BAR.includes(action)) ||
+  // A jump is answered by the focused field itself.
+  (shown.dot === 'info' && !state.flash?.startsWith('Moved to '));
+
+function Buttons(props: {
   actions: (keyof typeof BUTTONS)[];
   act: Act;
-  /** On a tinted strip: text at full contrast. */
-  highContrast?: boolean;
+  /** Where focus goes when the pressed button is gone. */
+  fallback(): HTMLElement | null | undefined;
 }) {
-  const { output } = useApp();
   return props.actions.map((action) => (
-    <Button
+    <Btn
       key={action}
-      size="1"
       variant={BUTTONS[action].variant}
-      color={BUTTONS[action].color}
-      highContrast={props.highContrast}
-      aria-expanded={action === 'output' ? output : undefined}
+      accent={BUTTONS[action].accent}
+      aria-keyshortcuts={
+        action === 'save' ? 'Control+Enter Meta+Enter' : undefined
+      }
       onClick={(event) => {
         const pressed = event.currentTarget;
-        const strip = pressed.closest('.seo-strips') !== null;
-        props.act(action);
+        const group = pressed.parentElement;
+        const after = [...(group?.children ?? [])].indexOf(pressed);
+        flushSync(() => props.act(action));
         // Most actions remove the button that was pressed. Focus must not
-        // fall to the document: a strip hands it to the tab list, the footer
-        // to its next button, else to its status.
-        requestAnimationFrame(() => {
-          const active = document.activeElement;
-          if (pressed.isConnected || (active && active !== document.body)) {
-            return;
-          }
-          const footer = document.querySelector('.seo-footer');
-          (strip
-            ? document.querySelector<HTMLElement>(
-                '.seo-tabs [role="tab"][data-state="active"]',
-              )
-            : (footer?.querySelector<HTMLElement>('button') ??
-              footer?.querySelector<HTMLElement>('[role="status"]'))
-          )?.focus();
-        });
+        // fall to the document: the button now in its place (or the last
+        // one) of the same group takes it, else the fallback.
+        const active = document.activeElement;
+        if (pressed.isConnected || (active && active !== document.body)) {
+          return;
+        }
+        const left = group?.isConnected
+          ? group.querySelectorAll<HTMLElement>(':scope > button')
+          : [];
+        (left[Math.min(after, left.length - 1)] ?? props.fallback())?.focus();
       }}
     >
       {BUTTONS[action].label}
-    </Button>
+    </Btn>
   ));
+}
+
+/** Notes that explain a scope the user can read and not change, or why there is no page. */
+function useNotes(): string[] {
+  const { state } = useApp();
+  const server = state.server!;
+  return [
+    state.scope === 'site' && !server.target
+      ? state.ctx.kind === 'none' && state.ctx.template
+        ? 'SEO for a content type is set in its Full content template, with a page to preview.'
+        : 'Open a page or a content template to edit its SEO.'
+      : null,
+    state.scope === 'site' && !server.can.site
+      ? 'Only people who administer SEO site settings can change these. You are viewing them.'
+      : null,
+    state.scope === 'target' && state.readonly === 'access'
+      ? 'You can view these settings but not change them.'
+      : null,
+  ].filter((line) => line !== null);
 }
 
 function Ready(props: {
   strips: Strip[];
   act: Act;
-  /** While the editor's next context loads: what replaces the panels. */
+  /** While the editor's next context loads: what replaces the views. */
   loading?: ReactNode;
 }) {
-  const { state, dispatch, issues, output } = useApp();
+  const { state, dispatch, sheet, closeSheet } = useApp();
   const server = state.server!;
-  const count = props.loading ? 0 : countIssues(issues);
-  const tabs = (Object.keys(PANELS) as Tab[]).filter(
-    (tab) => PANELS[tab].scope === 'site' || server.target,
-  );
+  const shown = footer(state);
+  const bar = barOf(state, shown);
+  const notes = useNotes();
+  const frame = useRef<HTMLDivElement>(null);
+  const [scrolled, setScrolled] = useState(false);
+  const tab = TARGET_TABS.includes(state.tabs.target)
+    ? state.tabs.target
+    : 'search';
+  // The view behind a sheet is out of reach.
+  useLayoutEffect(() => {
+    frame.current?.toggleAttribute('inert', sheet !== null);
+  }, [sheet]);
+  // Every view opens at its preview. A jump scrolls after this, to its field.
+  const body = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    body.current?.scrollTo(0, 0);
+  }, [tab, state.scope]);
+  // The bar floats over the body's end: the body makes room for its real
+  // height, and what was in view (the end, or the control just used) stays.
+  const barRef = useRef<HTMLDivElement>(null);
+  const atEnd = useRef(false);
+  const barHeight = useRef(0);
+  // Every render: the bar's words (and its height) change with the state.
+  useLayoutEffect(() => {
+    const element = barRef.current;
+    const scroller = body.current;
+    const height = element?.offsetHeight ?? 0;
+    if (!element || !scroller || height === barHeight.current) {
+      barHeight.current = height;
+      return;
+    }
+    barHeight.current = height;
+    element.parentElement?.style.setProperty('--seo-bar-h', `${height}px`);
+    if (atEnd.current) {
+      scroller.scrollTop = scroller.scrollHeight;
+    } else if (scroller.contains(document.activeElement)) {
+      reveal(document.activeElement);
+    }
+  });
+  const firstField = () =>
+    document.querySelector<HTMLElement>(
+      '.seo-body [data-path] :is(textarea, input, button[role], button)',
+    );
+  const trigger = () => document.querySelector<HTMLElement>('.seo-scope');
+  const actions = shown.actions.filter((action) => BAR.includes(action));
+
   return (
     <>
-      <ScopeBar />
       <Tabs.Root
-        className="seo-tabs"
-        // Output replaces the scroll area; the tabs stay mounted behind it.
-        data-output={output || undefined}
-        value={state.tab}
-        onValueChange={(tab) => dispatch({ type: 'tab', tab: tab as Tab })}
+        ref={frame}
+        className="seo-frame"
+        data-bar={bar || undefined}
+        data-scope={state.scope}
+        value={tab}
+        onValueChange={(value) => dispatch({ type: 'tab', tab: value as typeof state.tab })}
       >
-        {!output && (
-          <Tabs.List size="2">
-            {tabs
-              .filter((tab) => PANELS[tab].scope === state.scope)
-              .map((tab) => (
-                <Tabs.Trigger key={tab} value={tab}>
-                  {PANELS[tab].label}
-                  {tab === 'checks' && count > 0 && (
-                    <Badge
-                      ml="2"
-                      radius="full"
-                      highContrast
-                      color={
-                        issues.some((issue) => issue.severity === 'fix')
-                          ? 'red'
-                          : 'amber'
-                      }
-                      aria-label={`${count} ${count === 1 ? 'issue' : 'issues'}`}
-                    >
-                      {count}
-                    </Badge>
-                  )}
-                </Tabs.Trigger>
+        <Header
+          footer={shown}
+          bar={bar}
+          loading={!!props.loading}
+          scrolled={scrolled}
+          tab={tab}
+        />
+        <div
+          className="seo-body"
+          ref={body}
+          onScroll={(event) => {
+            const { scrollTop, scrollHeight, clientHeight } = event.currentTarget;
+            setScrolled(scrollTop > 0);
+            atEnd.current = scrollHeight - scrollTop - clientHeight < 2;
+          }}
+        >
+          {(props.strips.length > 0 || notes.length > 0) && !props.loading && (
+            <div className="seo-notices">
+              {props.strips.map((strip) => (
+                <Notice
+                  key={strip.id}
+                  tone={
+                    strip.tone === 'amber' && strip.id !== 'hidden'
+                      ? 'amber'
+                      : 'neutral'
+                  }
+                  icon={strip.id === 'hidden' ? 'hidden' : undefined}
+                  role={strip.role}
+                  actions={
+                    strip.actions.length > 0 && (
+                      <Buttons
+                        actions={strip.actions}
+                        act={props.act}
+                        fallback={firstField}
+                      />
+                    )
+                  }
+                >
+                  {strip.text}
+                </Notice>
               ))}
-          </Tabs.List>
-        )}
-        {state.scope === 'site' && (
-          <Text as="p" size="1" className="seo-band">
-            Site-wide. Saved changes apply to every page at once.
-          </Text>
-        )}
-        {props.strips.length > 0 && (
-          <Flex className="seo-strips" direction="column" gap="1">
-            {props.strips.map((strip) => (
-              <Callout.Root
-                key={strip.id}
-                className="seo-strip"
-                size="1"
-                color={strip.tone}
-                role={strip.role}
-                highContrast
+              {notes.map((note) => (
+                <Notice key={note}>{note}</Notice>
+              ))}
+            </div>
+          )}
+          {props.loading}
+          {!props.loading && server.target && (
+            <>
+              <Tabs.Content
+                value="search"
+                forceMount
+                tabIndex={-1}
+                className="seo-panel"
               >
-                <Callout.Icon>
-                  {strip.tone === 'blue' ? (
-                    <InfoCircledIcon aria-hidden />
-                  ) : (
-                    <ExclamationTriangleIcon aria-hidden />
-                  )}
-                </Callout.Icon>
-                <Callout.Text>{strip.text}</Callout.Text>
-                <Flex gap="3" align="center">
-                  <Actions
-                    actions={strip.actions}
-                    act={props.act}
-                    highContrast
-                  />
-                </Flex>
-              </Callout.Root>
-            ))}
-          </Flex>
-        )}
-        {props.loading && <Box className="seo-panel">{props.loading}</Box>}
-        {output && !props.loading && (
-          <Box className="seo-panel">
-            <ScrollArea type="auto" scrollbars="vertical">
-              <Box className="seo-panel-body">
-                <Output />
-              </Box>
-            </ScrollArea>
-          </Box>
-        )}
-        {!props.loading && tabs.map((tab) => {
-          const Body = PANELS[tab].body;
-          return (
-            // Mounted when hidden, so each tab keeps its state and its scroll area.
-            <Tabs.Content
-              key={tab}
-              value={tab}
-              forceMount
-              className="seo-panel"
+                <SearchTab />
+              </Tabs.Content>
+              <Tabs.Content
+                value="social"
+                forceMount
+                tabIndex={-1}
+                className="seo-panel"
+              >
+                <SocialTab />
+              </Tabs.Content>
+              <Tabs.Content
+                value="schema"
+                forceMount
+                tabIndex={-1}
+                className="seo-panel"
+              >
+                <SchemaTab />
+              </Tabs.Content>
+            </>
+          )}
+          {!props.loading && (
+            <div
+              className="seo-panel seo-site"
+              role="region"
+              aria-label="Site"
             >
-              <ScrollArea type="auto" scrollbars="vertical">
-                <Box className="seo-panel-body">
-                  <Notes scope={PANELS[tab].scope} />
-                  <Body />
-                </Box>
-              </ScrollArea>
-            </Tabs.Content>
-          );
-        })}
+              <SiteView />
+            </div>
+          )}
+        </div>
       </Tabs.Root>
-      <Footer act={props.act} />
+      {sheet && <SheetHost sheet={sheet} onClose={() => closeSheet()} />}
+      {/* Over a sheet too: a fix made there is undone here. */}
+      {bar && (
+          <div className="seo-bar" ref={barRef}>
+            {shown.actions.includes('hide') ? (
+              <ExclamationTriangleIcon aria-hidden />
+            ) : (
+              <span className="seo-dot" data-tone={shown.dot} />
+            )}
+            {/* The live region already says it. */}
+            <span className="seo-bar-text" aria-hidden>
+              {shown.text}
+            </span>
+            {actions.length > 0 && (
+              <span className="seo-bar-actions">
+                <Buttons
+                  actions={actions as (keyof typeof BUTTONS)[]}
+                  act={props.act}
+                  fallback={trigger}
+                />
+              </span>
+            )}
+          </div>
+        )}
     </>
   );
 }
 
-/** The dialog takes focus once per frame: never again when the editor moves on. */
-let focusedOnce = false;
-
-function ScopeBar() {
-  const { state, dispatch, setOutput } = useApp();
+function SheetHost(props: { sheet: SheetState; onClose(): void }) {
+  const { sheet, onClose } = props;
+  const { state, dispatch, closeSheet } = useApp();
   const server = state.server!;
-  const target = server.target;
-  const focus = useRef<HTMLDivElement>(null);
-  // Once, when the dialog opens. Focus never moves again without a user action.
-  useEffect(() => {
-    if (focusedOnce) {
-      return;
-    }
-    focusedOnce = true;
-    focus.current
-      ?.querySelector<HTMLElement>('button[data-state="on"], h1[tabindex]')
-      ?.focus();
-  }, []);
-  const change = (scope: string) => {
-    if (scope) {
-      // Output belongs to the page or template it was opened for.
-      setOutput(false);
-      dispatch({ type: 'scope', scope: scope as Scope });
-    }
-  };
-
-  if (!target) {
+  if (sheet.kind === 'checks') {
     return (
-      <Flex className="seo-scope" align="center" ref={focus}>
-        <Heading as="h1" size="3" tabIndex={-1}>
-          Site settings
-        </Heading>
-      </Flex>
+      <Sheet
+        title="Checks"
+        end={<InfoTip label="About checks" text={CHECKS_NOTE} size={28} />}
+        onClose={onClose}
+      >
+        <ChecksSheet />
+      </Sheet>
+    );
+  }
+  if (sheet.kind === 'output') {
+    return (
+      <Sheet
+        title="Output"
+        focusBack
+        end={
+          <InfoTip
+            label="About addresses"
+            text={originNote(server)}
+            size={28}
+          />
+        }
+        onClose={onClose}
+      >
+        <OutputSheet section={sheet.section} />
+      </Sheet>
+    );
+  }
+  if (sheet.kind === 'custom') {
+    const set = !!state.edits.target.schema?.custom;
+    return (
+      <Sheet
+        title="Custom JSON-LD"
+        end={
+          set &&
+          state.readonly === 'no' && (
+            <Btn
+              variant="ghost"
+              onClick={() =>
+                dispatch({
+                  type: 'apply',
+                  scope: 'target',
+                  values: {
+                    ...state.edits.target,
+                    schema: { ...state.edits.target.schema, custom: undefined },
+                  },
+                  undo: 'Removed custom JSON-LD',
+                })
+              }
+            >
+              Remove
+            </Btn>
+          )
+        }
+        onClose={onClose}
+      >
+        <CustomJson key={set ? 'set' : 'empty'} />
+      </Sheet>
     );
   }
   return (
-    <Flex
-      className="seo-scope"
-      align="center"
-      justify="between"
-      gap="3"
-      // At 200% zoom the language button moves under the scope switch.
-      wrap="wrap"
-      ref={focus}
-    >
-      <h1 className="seo-visually-hidden">SEO</h1>
-      <SegmentedControl.Root
-        size="2"
-        role="radiogroup"
-        aria-label="Scope"
-        value={state.scope}
-        onValueChange={change}
-        // A radio group selects as the arrows move, as screen readers announce.
-        onKeyDown={(event) => {
-          if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-            change(event.key === 'ArrowLeft' ? 'target' : 'site');
-          }
-        }}
-      >
-        <SegmentedControl.Item value="target">
-          {target.scope === 'page' ? 'This page' : `Every ${target.label}`}
-        </SegmentedControl.Item>
-        <SegmentedControl.Item value="site">
-          <Flex as="span" align="center" gap="2">
-            Site
-            {state.siteDirty && (
-              <span
-                className="seo-dot"
-                data-tone="blue"
-                role="img"
-                aria-label="unsaved changes"
-              />
-            )}
-          </Flex>
-        </SegmentedControl.Item>
-      </SegmentedControl.Root>
-      {state.scope === 'target' &&
-        target.scope === 'page' &&
-        Object.keys(server.languages).length > 1 && <Language />}
-    </Flex>
-  );
-}
-
-/** Which language is being edited, and what that means for the others. */
-function Language() {
-  const server = useApp().state.server!;
-  const target = server.target!;
-  const name = (langcode: string | null) =>
-    server.languages[langcode ?? ''] ?? langcode ?? '';
-  const language = name(server.langcode);
-  const original = name(target.default_langcode);
-  return (
-    <Popover.Root>
-      <Popover.Trigger>
-        <Button size="1" variant="ghost" color="gray">
-          {language}
-          <InfoCircledIcon aria-hidden />
-        </Button>
-      </Popover.Trigger>
-      <Popover.Content size="1" maxWidth="340px">
-        <Text as="p" size="2">
-          {!target.translatable
-            ? 'These settings are shared by every language of this page.'
-            : target.default_langcode &&
-                target.default_langcode !== server.langcode
-              ? `You are editing the ${language} version. Canvas publishes translations together with the ${original} version, so this draft goes live the next time the ${original} version is published. It is not listed in "Review changes".`
-              : `You are editing the ${language} version. Titles, descriptions and social text set here apply to ${language} only. Search visibility, the social image and the page type also apply to other languages until they set their own.`}
-        </Text>
-      </Popover.Content>
-    </Popover.Root>
-  );
-}
-
-/** One line that explains a scope the user can read and not change, or why there is no page. */
-function Notes(props: { scope: Scope }) {
-  const { state } = useApp();
-  const server = state.server!;
-  const lines = [
-    props.scope === 'site' && !server.target
-      ? state.ctx.kind === 'none' && state.ctx.template
-        ? 'SEO for a content type is set in its Full content template, with a page to preview.'
-        : 'Open a page or a content template to edit its SEO.'
-      : null,
-    props.scope === 'site' && !server.can.site
-      ? 'Only people who administer SEO site settings can change these. You are viewing them.'
-      : null,
-    props.scope === 'target' && state.readonly === 'access'
-      ? 'You can view these settings but not change them.'
-      : null,
-  ].filter((line) => line !== null);
-  return lines.map((line) => (
-    <Callout.Root key={line} size="1" color="gray" mb="3">
-      <Callout.Icon>
-        <InfoCircledIcon aria-hidden />
-      </Callout.Icon>
-      <Callout.Text>{line}</Callout.Text>
-    </Callout.Root>
-  ));
-}
-
-function Footer(props: { act: Act }) {
-  const { state } = useApp();
-  const { dot, text, actions } = footer(state);
-  return (
-    <Flex
-      className="seo-footer"
-      align="center"
-      justify="between"
-      gap="2"
-      wrap="wrap"
-      // Site with unsaved changes: the sentence, then its two buttons.
-      data-rows={actions.length > 1 ? 2 : undefined}
-    >
-      {/* One polite live region: the only place status lives. */}
-      <Flex
-        align="center"
-        gap="2"
-        role="status"
-        data-testid="seo-footer-status"
-        // Where focus goes when the button that was pressed is gone.
-        tabIndex={-1}
-      >
-        {dot === 'spinner' ? (
-          <Spinner size="1" />
-        ) : dot === 'ok' ? (
-          <CheckIcon color="var(--green-11)" aria-hidden />
-        ) : dot === 'error' ? (
-          <CrossCircledIcon color="var(--red-11)" aria-hidden />
-        ) : dot === 'warn' ? (
-          <ExclamationTriangleIcon color="var(--amber-11)" aria-hidden />
-        ) : dot === 'info' ? (
-          <InfoCircledIcon aria-hidden />
-        ) : (
-          <span className="seo-dot" data-tone={dot} />
-        )}
-        <Text size="1">{text}</Text>
-      </Flex>
-      <Flex gap="3" align="center" ml="auto">
-        <Actions actions={actions} act={props.act} />
-      </Flex>
-    </Flex>
+    <Sheet title="Choose image" onClose={onClose}>
+      <ImageSheet request={sheet.request} onDone={() => closeSheet()} />
+    </Sheet>
   );
 }

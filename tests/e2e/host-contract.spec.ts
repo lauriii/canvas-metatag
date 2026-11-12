@@ -192,11 +192,12 @@ test('inside the frame: Enter, links, the clipboard and a typed date', async ({ 
   await button(frame, UI.action.output).click();
   await button(frame, UI.action.copy).first().click();
   await expect(frame.getByText(UI.action.copied).first()).toBeVisible();
-  await button(frame, /Back/).click();
+  await button(frame, UI.action.back).click();
 
   // A fixed date is typed into the browser's own date input.
   await tab(frame, UI.tab.schema).click();
-  await frame.getByRole('radio', { name: /^Event/ }).click();
+  await frame.getByRole('combobox', { name: 'Type', exact: true }).click();
+  await frame.getByRole('option', { name: /^Event/ }).click();
   await frame.getByRole('combobox', { name: /^Starts/ }).click();
   await frame.getByRole('option', { name: 'A fixed date…' }).click();
   const date = frame.locator('input[type="date"]').first();

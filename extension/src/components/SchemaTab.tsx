@@ -1,20 +1,18 @@
+import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
+import { Select } from '@radix-ui/themes';
 import {
-  Button,
-  Callout,
-  Flex,
-  RadioCards,
-  SegmentedControl,
-  Select,
-  Text,
-  TextArea,
-  TextField,
-} from '@radix-ui/themes';
-import { type ReactNode, useId, useState } from 'react';
+  Fragment,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 
 import { useApp } from '../App';
 import {
   REGISTRY,
-  article,
+  chipsIn,
   dateText,
   fill,
   inherited,
@@ -22,26 +20,39 @@ import {
   plain,
   toDisplay,
   toStored,
+  tokensIn,
 } from '../model';
 import type { SchemaProp } from '../types';
-import { Field, Section, useField, useHeld } from './Field';
+import { Field, Guide, useField, useHeld } from './Field';
 import { ImageRow, PICKED } from './MediaPicker';
-import { CodeView, CopyButton, jsonLd } from './Output';
+import { Disclosure, List, NavRow } from './SettingsList';
 import { SchemaSuggest, SuggestButton } from './Suggest';
 import { TemplateInput } from './TemplateInput';
+import { Btn, InfoTip, Notice } from './ui';
 
 const IDS = Object.keys(REGISTRY);
-/** The types offered as rows: a variant ("Blog post") is chosen inside its family's form. */
 const FAMILIES = IDS.filter((id) => !REGISTRY[id].extends);
-const WEB = FAMILIES.filter((id) => !REGISTRY[id].primary_type);
-const SPECIFIC = FAMILIES.filter((id) => REGISTRY[id].primary_type);
-
-/** What an unset detail says about its default. */
-const DEFAULTS: Record<string, string> = {
-  '{title}': 'Same as page title',
-  '{description}': 'Same as description',
-  '{image}': 'From the page image',
-};
+const variants = (family: string) =>
+  IDS.filter((id) => REGISTRY[id].extends === family);
+/** The Type select: web pages, then each family with its variants, then the rest. */
+const GROUPS = [
+  {
+    label: 'Web page',
+    ids: FAMILIES.filter(
+      (id) => !REGISTRY[id].primary_type && !variants(id).length,
+    ),
+  },
+  ...FAMILIES.filter((id) => variants(id).length).map((id) => ({
+    label: REGISTRY[id].label,
+    ids: [id, ...variants(id)],
+  })),
+  {
+    label: 'More specific',
+    ids: FAMILIES.filter(
+      (id) => REGISTRY[id].primary_type && !variants(id).length,
+    ),
+  },
+].filter((group) => group.ids.length > 0);
 
 /** The token type a typed detail can be bound to, and the name of its fixed value. */
 const TYPED = {
@@ -51,10 +62,28 @@ const TYPED = {
   image: { token: 'image', fixed: 'Choose an image…' },
 } as const;
 
+/** What an unset detail says about its default. */
+const DEFAULTS: Record<string, string> = {
+  '{title}': 'From the page title',
+  '{description}': 'Same as description',
+  '{image}': 'From the Image field',
+};
+
+/** "InStock" → "In stock", "FAQPage" → "FAQ page". */
 const words = (option: string) =>
   option
     .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .replace(/ ([A-Z])/g, (_, letter: string) => ` ${letter.toLowerCase()}`);
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .replace(/ ([A-Z])(?=[a-z])/g, (_, letter: string) => ` ${letter.toLowerCase()}`);
+
+/** Indented for reading; stored as typed. Text that does not parse stays as it is. */
+function pretty(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2);
+  } catch {
+    return text;
+  }
+}
 
 /** "Line 4: this is not valid JSON.", or nothing when the text parses. */
 function jsonError(text: string): string | undefined {
@@ -79,7 +108,7 @@ function jsonError(text: string): string | undefined {
 }
 
 /** One detail of the chosen type, by its kind. A stored value overrides the default. */
-function Detail(props: { prop: SchemaProp }) {
+function Detail(props: { prop: SchemaProp; type: string }) {
   const { prop } = props;
   const { state, dispatch, ...app } = useApp();
   const view = app.view!;
@@ -105,14 +134,15 @@ function Detail(props: { prop: SchemaProp }) {
     path,
     label: prop.label,
     required: prop.level === 'required',
+    missing:
+      prop.level === 'required' && stored === undefined && !prop.default
+        ? `Needed for ${REGISTRY[props.type].label}`
+        : undefined,
     fallback:
-      stored !== undefined
-        ? undefined
-        : prop.default
-          ? (DEFAULTS[prop.default] ?? 'Default')
-          : prop.level === 'required'
-            ? 'Needs a value'
-            : undefined,
+      stored === undefined && prop.default
+        ? (DEFAULTS[prop.default] ?? 'From the page')
+        : undefined,
+    noStage: true,
   };
 
   if (prop.kind === 'text') {
@@ -123,14 +153,30 @@ function Detail(props: { prop: SchemaProp }) {
       }
       setHeld(null);
     };
+    const template = value || prop.default || '';
+    // A summary left at its default is the description search shows.
+    const own =
+      prop.default === '{description}'
+        ? plain(view.texts.description, 2000)
+        : plain(fill(prop.default ?? '', view.values), 2000);
     return (
-      <Field {...common}>
+      <Field
+        {...common}
+        resolved={
+          !value && prop.default
+            ? own
+            : tokensIn(template).length
+              ? plain(fill(template, view.values), 2000)
+              : undefined
+        }
+      >
         {(field) => (
           <TemplateInput
             id={field.id}
             describedBy={field.describedBy}
             invalid={field.invalid}
             disabled={field.disabled}
+            required={common.required}
             lang={server.langcode}
             value={value}
             onChange={prop.pattern ? setHeld : edit}
@@ -140,16 +186,11 @@ function Detail(props: { prop: SchemaProp }) {
                 ? (event) => event.key === 'Enter' && done()
                 : undefined
             }
-            inherited={
-              prop.default
-                ? plain(fill(prop.default, view.values), 2000)
-                : undefined
-            }
+            inherited={prop.default ? own : undefined}
+            inheritedFrom="the page"
             tokens={view.tokens}
             fields={!page}
-            alwaysInsert={!page}
-            becomes={plain(fill(value, view.values), 2000)}
-            status={field.status}
+            insert={page ? 'focus' : 'always'}
           />
         )}
       </Field>
@@ -160,32 +201,31 @@ function Detail(props: { prop: SchemaProp }) {
     return (
       <Field {...common}>
         {(field) => (
-          <>
-            <Select.Root
-              size="2"
-              value={stored ?? 'none'}
-              disabled={field.disabled}
-              onValueChange={(value) =>
-                edit(value === 'none' ? undefined : value)
-              }
+          <Select.Root
+            value={stored ?? 'none'}
+            disabled={field.disabled}
+            onValueChange={(value) =>
+              edit(value === 'none' ? undefined : value)
+            }
+          >
+            <Select.Trigger
+              id={field.id}
+              className="seo-select-box"
+              aria-labelledby={field.labelId}
+              aria-describedby={field.describedBy}
+            />
+            <Select.Content
+              position="popper"
+              className="seo-select-content seo-select-fit"
             >
-              <Select.Trigger
-                id={field.id}
-                aria-labelledby={field.labelId}
-                aria-describedby={field.describedBy}
-                className="seo-select"
-              />
-              <Select.Content position="popper">
-                <Select.Item value="none">Not set</Select.Item>
-                {(prop.options ?? []).map((option) => (
-                  <Select.Item key={option} value={option}>
-                    {words(option)}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-            {field.status}
-          </>
+              <Select.Item value="none">Not set</Select.Item>
+              {(prop.options ?? []).map((option) => (
+                <Select.Item key={option} value={option}>
+                  {words(option)}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
         )}
       </Field>
     );
@@ -211,131 +251,134 @@ function Detail(props: { prop: SchemaProp }) {
     : (token?.image ?? null);
 
   return (
-    <Field {...common} group={matching.length === 0 && prop.kind === 'image'}>
+    <Field
+      {...common}
+      group={matching.length === 0 && prop.kind === 'image'}
+      info={
+        prop.kind === 'date' &&
+        mode === 'fixed' && (
+          <InfoTip
+            label="About times"
+            text="Times are in the site's time zone."
+          />
+        )
+      }
+      resolved={
+        token && prop.kind !== 'image'
+          ? token.value
+            ? prop.kind === 'date'
+              ? dateText(token.value)
+              : token.value
+            : 'Empty for this page'
+          : undefined
+      }
+    >
       {(field) => {
         // The first control carries the label: the select, or the fixed input alone.
         const first = matching.length > 0 ? undefined : field.id;
         return (
           <>
-            <Flex gap="2" wrap="wrap" align="center">
-              {matching.length > 0 && (
-                <Select.Root
-                  size="2"
-                  value={mode}
-                  disabled={field.disabled}
-                  onValueChange={(value) => {
-                    setFixing(value === 'fixed');
-                    edit(
-                      value.startsWith('token:')
-                        ? `{${value.slice(6)}}`
-                        : undefined,
-                    );
-                  }}
-                >
-                  <Select.Trigger
-                    id={field.id}
-                    aria-labelledby={field.labelId}
-                    aria-describedby={field.describedBy}
-                    className="seo-select"
-                  />
-                  <Select.Content position="popper">
-                    {!prop.default && (
-                      <Select.Item value="none">Not set</Select.Item>
-                    )}
-                    {matching.map(([name, item]) => (
-                      <Select.Item key={name} value={`token:${name}`}>
-                        {name.startsWith('field.')
-                          ? `Field: ${item.label}`
-                          : item.label}
-                      </Select.Item>
-                    ))}
-                    <Select.Item value="fixed">{typed.fixed}</Select.Item>
-                  </Select.Content>
-                </Select.Root>
-              )}
-              {mode === 'fixed' && prop.kind === 'date' && (
-                <>
-                  <TextField.Root
-                    id={first}
-                    size="2"
-                    type="date"
-                    aria-label={first ? undefined : `${prop.label}, date`}
-                    aria-invalid={field.invalid || undefined}
-                    disabled={field.disabled}
-                    value={date}
-                    onChange={(event) =>
-                      edit(
-                        event.target.value
-                          ? event.target.value + (time ? `T${time}` : '')
-                          : undefined,
-                      )
-                    }
-                  />
-                  <TextField.Root
-                    size="2"
-                    type="time"
-                    aria-label={`${prop.label}, time`}
-                    disabled={field.disabled || !date}
-                    value={time}
-                    onChange={(event) =>
-                      edit(
-                        date +
-                          (event.target.value ? `T${event.target.value}` : ''),
-                      )
-                    }
-                  />
-                </>
-              )}
-              {mode === 'fixed' &&
-                (prop.kind === 'url' || prop.kind === 'number') && (
-                  <TextField.Root
-                    id={first}
-                    size="2"
-                    inputMode={prop.kind === 'url' ? 'url' : 'decimal'}
-                    placeholder={prop.kind === 'url' ? 'https://' : undefined}
-                    aria-label={first ? undefined : `${prop.label}, fixed`}
-                    aria-invalid={field.invalid || undefined}
-                    aria-describedby={first ? field.describedBy : undefined}
-                    disabled={field.disabled}
-                    className="seo-grow"
-                    {...fixed}
-                  />
-                )}
-            </Flex>
-            {mode === 'fixed' && prop.kind === 'date' && (
-              <Text as="p" size="1" color="gray" mt="1">
-                Times are in the site's time zone.
-              </Text>
-            )}
-            {prop.kind === 'image' && (mode === 'fixed' || token) && (
-              <ImageRow
-                image={image}
-                empty={
-                  mode === 'fixed'
-                    ? 'No image chosen.'
-                    : 'No image for this page.'
-                }
-                disabled={field.disabled || mode !== 'fixed'}
-                minWidth={600}
-                chosen={literal ? stored : undefined}
-                onPick={edit}
-              />
-            )}
-            {token && prop.kind !== 'image' && (
-              <Text
-                as="p"
-                size="1"
-                color="gray"
-                mt="1"
-                className="seo-becomes"
-                lang={server.langcode}
+            {matching.length > 0 && (
+              <Select.Root
+                value={mode}
+                disabled={field.disabled}
+                onValueChange={(value) => {
+                  setFixing(value === 'fixed');
+                  edit(
+                    value.startsWith('token:')
+                      ? `{${value.slice(6)}}`
+                      : undefined,
+                  );
+                }}
               >
-                {token.value
-                  ? `Becomes: ${prop.kind === 'date' ? dateText(token.value) : token.value}`
-                  : 'Empty for this page.'}
-              </Text>
+                <Select.Trigger
+                  id={field.id}
+                  className="seo-select-box"
+                  aria-labelledby={field.labelId}
+                  aria-describedby={field.describedBy}
+                />
+                <Select.Content
+                  position="popper"
+                  className="seo-select-content seo-select-fit"
+                >
+                  {!prop.default && (
+                    <Select.Item value="none">Not set</Select.Item>
+                  )}
+                  {matching.map(([name, item]) => (
+                    <Select.Item key={name} value={`token:${name}`}>
+                      {name.startsWith('field.')
+                        ? `Field: ${item.label}`
+                        : item.label}
+                    </Select.Item>
+                  ))}
+                  <Select.Item value="fixed">{typed.fixed}</Select.Item>
+                </Select.Content>
+              </Select.Root>
             )}
-            {field.status}
+            {mode === 'fixed' && prop.kind === 'date' && (
+              <div
+                className="seo-pair"
+                data-even=""
+                style={{ marginTop: matching.length ? 8 : 0 }}
+              >
+                <input
+                  id={first}
+                  className="seo-input"
+                  type="date"
+                  aria-label={first ? undefined : `${prop.label}, date`}
+                  aria-invalid={field.invalid || undefined}
+                  disabled={field.disabled}
+                  value={date}
+                  onChange={(event) =>
+                    edit(
+                      event.target.value
+                        ? event.target.value + (time ? `T${time}` : '')
+                        : undefined,
+                    )
+                  }
+                />
+                <input
+                  className="seo-input"
+                  type="time"
+                  aria-label={`${prop.label}, time`}
+                  disabled={field.disabled || !date}
+                  value={time}
+                  onChange={(event) =>
+                    edit(
+                      date +
+                        (event.target.value ? `T${event.target.value}` : ''),
+                    )
+                  }
+                />
+              </div>
+            )}
+            {mode === 'fixed' &&
+              (prop.kind === 'url' || prop.kind === 'number') && (
+                <input
+                  id={first}
+                  className="seo-input"
+                  style={{ marginTop: matching.length ? 8 : 0 }}
+                  inputMode={prop.kind === 'url' ? 'url' : 'decimal'}
+                  placeholder={prop.kind === 'url' ? 'https://' : '0.00'}
+                  aria-label={first ? undefined : `${prop.label}, fixed`}
+                  aria-required={common.required || undefined}
+                  aria-invalid={field.invalid || undefined}
+                  aria-describedby={first ? field.describedBy : undefined}
+                  disabled={field.disabled}
+                  {...fixed}
+                />
+              )}
+            {prop.kind === 'image' && (mode === 'fixed' || token) && (
+              <div style={{ marginTop: matching.length ? 8 : 0 }}>
+                <ImageRow
+                  image={image}
+                  disabled={field.disabled || mode !== 'fixed'}
+                  minWidth={600}
+                  chosen={literal ? stored : undefined}
+                  onPick={edit}
+                />
+              </div>
+            )}
           </>
         );
       }}
@@ -343,29 +386,43 @@ function Detail(props: { prop: SchemaProp }) {
   );
 }
 
-/** Lays details out; runs of short free-text details share a row where there is room. */
-function Details(props: { items: SchemaProp[] }) {
+/** Lays details out; short pairs share a row where there is room. */
+function Details(props: { items: SchemaProp[]; type: string }) {
   const short = (prop: SchemaProp) =>
     prop.kind === 'text' && !prop.default && !prop.pattern;
   const rows: ReactNode[] = [];
-  for (let index = 0; index < props.items.length; index++) {
-    const run = [props.items[index]];
+  const { items } = props;
+  for (let index = 0; index < items.length; index++) {
+    const prop = items[index];
+    const next = items[index + 1];
+    // A number and its code: Price + Currency.
+    if (prop.kind === 'number' && next?.kind === 'text' && next.pattern) {
+      rows.push(
+        <div className="seo-pair" key={prop.key}>
+          <Detail prop={prop} type={props.type} />
+          <Detail prop={next} type={props.type} />
+        </div>,
+      );
+      index++;
+      continue;
+    }
+    const run = [prop];
     while (
       short(run[0]) &&
-      index + 1 < props.items.length &&
-      short(props.items[index + 1])
+      index + 1 < items.length &&
+      short(items[index + 1])
     ) {
-      run.push(props.items[++index]);
+      run.push(items[++index]);
     }
     rows.push(
       run.length > 1 ? (
-        <div className="seo-row" key={run[0].key}>
-          {run.map((prop) => (
-            <Detail key={prop.key} prop={prop} />
+        <div className="seo-pair" data-even="" key={run[0].key}>
+          {run.map((one) => (
+            <Detail key={one.key} prop={one} type={props.type} />
           ))}
         </div>
       ) : (
-        <Detail key={run[0].key} prop={run[0]} />
+        <Detail key={prop.key} prop={prop} type={props.type} />
       ),
     );
   }
@@ -373,24 +430,15 @@ function Details(props: { items: SchemaProp[] }) {
 }
 
 export function SchemaTab() {
-  const { state, dispatch, ...app } = useApp();
+  const { state, dispatch, openSheet, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
   const target = server.target!;
-  const page = target.scope === 'page';
   const stored = state.edits.target.schema ?? {};
   const chosen = view.effective.schema?.type;
   const typeId = chosen && REGISTRY[chosen] ? chosen : 'WebPage';
   const type = REGISTRY[typeId];
-  const family = type.extends ?? typeId;
-  const variants = IDS.filter(
-    (id) => id === family || REGISTRY[id].extends === family,
-  );
   const props = type.props ?? [];
-  const subject = page ? 'This page' : `Every ${target.label}`;
-  const question = page
-    ? 'What is this page?'
-    : `What is each ${target.label}?`;
 
   const [suggesting, setSuggesting] = useState(false);
   const suggestId = useId();
@@ -432,73 +480,212 @@ export function SchemaTab() {
   const typeField = useField({
     scope: 'target',
     path: 'schema.type',
-    label: question,
-    fallback: 'Default',
-    resetLabel: 'Reset the page type',
+    label: 'Type',
+    resetTip: 'the default type',
     onReset: () => setType(undefined),
   });
-  const suggest = (
-    <SuggestButton
-      id={suggestId}
-      label="Suggest from this page"
-      open={suggesting}
-      onClick={() => setSuggesting(!suggesting)}
-    />
-  );
-  const panel = suggesting && (
-    <div className="seo-under">
-      <SchemaSuggest opener={suggestId} onClose={() => setSuggesting(false)} />
-    </div>
-  );
-  // One choice, so one radio group: arrows move through every type. The
-  // group captions are text inside it.
-  const card = (id: string) => (
-    <RadioCards.Item key={id} value={id} className="seo-type">
-      <Text size="2" weight="medium">
-        {REGISTRY[id].label}
-      </Text>
-      <Text size="1" color="gray">
-        {REGISTRY[id].hint}
-      </Text>
-    </RadioCards.Item>
-  );
-  const caption = (label: string) => (
-    <Text as="div" size="1" className="seo-group-label" mt="2" role="none">
-      {label}
-    </Text>
-  );
-  const cards = (
-    <RadioCards.Root
-      columns="1"
-      size="1"
-      gap="1"
-      aria-labelledby={typeField.labelId}
-      value={typeId}
-      disabled={typeField.disabled}
-      onValueChange={(value) => setType(value)}
-    >
-      {caption('Web page')}
-      {WEB.map(card)}
-      {caption('More specific')}
-      {SPECIFIC.map(card)}
-    </RadioCards.Root>
-  );
 
   // The report describes the saved draft: it catches up when a write is confirmed.
-  const required = props.filter((prop) => prop.level === 'required');
   const report = server.resolved?.schema;
   const current =
     report &&
     (target.values.schema?.type ??
       target.from_default.schema?.type ??
       'WebPage') === typeId;
-  const missing = (report?.missing_required ?? [])
-    .map((key) => props.find((prop) => prop.key === key)?.label)
-    .filter((label) => label !== undefined);
-  const graph = jsonLd(server.resolved?.head);
+  const missing = current
+    ? (report.missing_required ?? [])
+        .map((key) => props.find((prop) => prop.key === key)?.label)
+        .filter((label) => label !== undefined)
+    : [];
+  const main = props.filter(
+    (prop) =>
+      prop.level === 'required' ||
+      (prop.level === 'recommended' && !prop.default),
+  );
+  const more = props.filter((prop) => !main.includes(prop));
+  const customType = (() => {
+    try {
+      const data = JSON.parse(stored.custom ?? '');
+      const found = (Array.isArray(data) ? data[0] : data)?.['@type'];
+      return typeof found === 'string' ? `${words(found)} · ` : '';
+    } catch {
+      return '';
+    }
+  })();
+  const lineId = `${typeField.id}-line`;
+  const describedBy =
+    [typeField.aside && typeField.asideId, lineId].filter(Boolean).join(' ');
+
+  return (
+    <>
+      <div
+        className="seo-field"
+        ref={typeField.ref}
+        data-path="schema.type"
+        data-disabled={typeField.disabled || undefined}
+        onFocus={typeField.onFocus}
+        onBlur={typeField.onBlur}
+      >
+        <div className="seo-label-row">
+          <label
+            htmlFor={typeField.id}
+            id={typeField.labelId}
+            tabIndex={-1}
+            className="seo-label"
+          >
+            Type
+          </label>
+          <div
+            className="seo-aside"
+            id={typeField.asideId}
+            data-pinned={typeField.pinned || undefined}
+          >
+            {typeField.aside}
+          </div>
+        </div>
+        <div className="seo-type-row">
+          <Select.Root
+            value={chosen ? typeId : ''}
+            disabled={typeField.disabled}
+            onValueChange={(value) => setType(value)}
+          >
+            <Select.Trigger
+              id={typeField.id}
+              className="seo-select-box"
+              placeholder="Choose a type"
+              aria-describedby={describedBy}
+            >
+              {type.label}
+            </Select.Trigger>
+            <Select.Content
+              position="popper"
+              className="seo-select-content seo-select-wide"
+            >
+              {GROUPS.map((group) => (
+                <Select.Group key={group.label}>
+                  <Select.Label>{group.label}</Select.Label>
+                  {group.ids.map((id) => (
+                    <Select.Item key={id} value={id}>
+                      <span className="seo-option">
+                        {REGISTRY[id].label}
+                        <small>{REGISTRY[id].hint}</small>
+                      </span>
+                    </Select.Item>
+                  ))}
+                </Select.Group>
+              ))}
+            </Select.Content>
+          </Select.Root>
+          <SuggestButton
+            id={suggestId}
+            label="Suggest from this page"
+            open={suggesting}
+            onClick={() => setSuggesting(!suggesting)}
+          />
+        </div>
+        {typeField.message ? (
+          <Guide id={lineId} tone="error" role="alert">
+            {typeField.message}
+          </Guide>
+        ) : missing.length > 0 ? (
+          <div className="seo-guide" data-tone="improve" id={lineId}>
+            <ExclamationTriangleIcon aria-hidden />
+            <span className="seo-guide-text">
+              Add {missing.join(' and ')} to show {type.label} details in
+              search.
+            </span>
+          </div>
+        ) : (
+          <Guide id={lineId}>
+            {chosen
+              ? type.hint
+              : 'Helps search engines understand the page and show richer results.'}
+          </Guide>
+        )}
+        {asking && (
+          <div style={{ marginTop: 12 }}>
+            <Notice
+              actions={
+                <>
+                  <Btn
+                    variant="soft"
+                    onClick={() => setType(asking.to, true)}
+                  >
+                    {asking.to === undefined
+                      ? 'Reset'
+                      : `Change to ${REGISTRY[asking.to].label}`}
+                  </Btn>
+                  <Btn variant="outline" onClick={() => setAsking(null)}>
+                    Keep {type.label}
+                  </Btn>
+                </>
+              }
+            >
+              {asking.to === undefined
+                ? 'Resetting'
+                : `Changing to ${REGISTRY[asking.to].label}`}{' '}
+              removes {asking.dropped} {type.label}{' '}
+              {asking.dropped === 1 ? 'detail' : 'details'}.
+            </Notice>
+          </div>
+        )}
+        {suggesting && (
+          <SchemaSuggest
+            opener={suggestId}
+            onClose={() => setSuggesting(false)}
+          />
+        )}
+      </div>
+      <Details items={main} type={typeId} />
+      <List>
+        {more.length > 0 && (
+          <Disclosure
+            label="More details"
+            summary={
+              more.length > 2
+                ? `${more
+                    .slice(0, 2)
+                    .map((prop, index) =>
+                      index ? prop.label.toLowerCase() : prop.label,
+                    )
+                    .join(', ')}, ${more.length - 2} more`
+                : more.map((prop) => prop.label).join(', ')
+            }
+            // Open when it holds a value set here, or a problem.
+            defaultOpen={more.some(
+              (prop) =>
+                stored.props?.[prop.key] !== undefined ||
+                state.errors.target[`schema.props.${prop.key}`] !== undefined,
+            )}
+          >
+            <div className="seo-row-field seo-more-details">
+              <Details items={more} type={typeId} />
+            </div>
+          </Disclosure>
+        )}
+        <NavRow
+          label="Custom JSON-LD"
+          value={stored.custom ? `${customType}In use` : 'Off'}
+          onClick={() => openSheet({ kind: 'custom' })}
+        />
+        <NavRow
+          label="View output"
+          onClick={() => openSheet({ kind: 'output', section: 'schema' })}
+        />
+      </List>
+    </>
+  );
+}
+
+/** One object or a list, parsed here when the field is left and validated again by the server. */
+export function CustomJson() {
+  const { state, dispatch, ...app } = useApp();
+  const view = app.view!;
+  const stored = state.edits.target.schema?.custom ?? '';
+  const [bad, setBad] = useState<string>();
   // Text values show and take labels, as every other field does.
-  const custom = useHeld(
-    jsonStrings(stored.custom ?? '', (text) => toDisplay(text, view.tokens)),
+  const held = useHeld(
+    pretty(jsonStrings(stored, (text) => toDisplay(text, view.tokens))),
     (text) =>
       dispatch({
         type: 'edit',
@@ -508,225 +695,64 @@ export function SchemaTab() {
       }),
     true,
   );
-  const more = props.filter((prop) => !prop.level);
-
+  const area = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => area.current?.focus(), []);
   return (
     <>
-      <div
-        className="seo-field"
-        ref={typeField.ref}
-        role="group"
-        aria-labelledby={typeField.labelId}
-      >
-        {chosen === undefined ? (
-          <>
-            <Flex align="center" justify="between" wrap="wrap" gapX="3">
-              <Text
-                size="2"
-                weight="medium"
-                id={typeField.labelId}
-                tabIndex={-1}
-              >
-                {question}
-              </Text>
-              <Flex align="center" gap="2" ml="auto" minHeight="24px">
-                {typeField.source}
-                {suggest}
-              </Flex>
-            </Flex>
-            {panel}
-            {cards}
-          </>
-        ) : (
-          <Flex align="center" wrap="wrap" gap="2">
-            <Text asChild size="2" weight="medium">
-              <label
-                htmlFor={typeField.id}
-                id={typeField.labelId}
-                tabIndex={-1}
-              >
-                {subject} is {article(REGISTRY[family].label)}
-              </label>
-            </Text>
-            <Select.Root
-              size="2"
-              value={family}
-              disabled={typeField.disabled}
-              onValueChange={(value) => setType(value)}
-            >
-              <Select.Trigger
-                id={typeField.id}
-                className="seo-select"
-                data-compact
+      <p className="seo-sheet-intro">
+        Added to this page's structured data. Values in braces are filled in.
+      </p>
+      <div className="seo-json-wrap">
+        <Field
+          scope="target"
+          path="schema.custom"
+          label="Custom JSON-LD"
+          labelHidden
+          error={bad}
+        >
+          {(field) => (
+            <div className="seo-json-box">
+              {/* Paints the text, each value in braces as a chip. */}
+              <div className="seo-json seo-json-mirror" aria-hidden>
+                {chipsIn(held.value, view.tokens).map((chip, index, all) => (
+                  <Fragment key={chip.start}>
+                    {held.value.slice(index ? all[index - 1].end : 0, chip.start)}
+                    <span className="seo-chip">
+                      <span className="seo-brace">{'{'}</span>
+                      {chip.label}
+                      <span className="seo-brace">{'}'}</span>
+                    </span>
+                  </Fragment>
+                ))}
+                {held.value.slice(
+                  chipsIn(held.value, view.tokens).at(-1)?.end ?? 0,
+                )}
+                {'​'}
+              </div>
+              <textarea
+                ref={area}
+                id={field.id}
+                className="seo-input seo-json"
+                rows={12}
+                spellCheck={false}
+                disabled={field.disabled}
+                aria-invalid={field.invalid || undefined}
+                aria-describedby={field.describedBy}
+                value={held.value}
+                onChange={(event) => {
+                  setBad(undefined);
+                  held.onChange(event);
+                }}
+                onBlur={() => {
+                  setBad(jsonError(held.value));
+                  held.onBlur();
+                }}
+                onKeyDown={held.onKeyDown}
               />
-              <Select.Content position="popper">
-                <Select.Group>
-                  <Select.Label>Web page</Select.Label>
-                  {WEB.map((id) => (
-                    <Select.Item key={id} value={id}>
-                      {REGISTRY[id].label}
-                    </Select.Item>
-                  ))}
-                </Select.Group>
-                <Select.Group>
-                  <Select.Label>More specific</Select.Label>
-                  {SPECIFIC.map((id) => (
-                    <Select.Item key={id} value={id}>
-                      {REGISTRY[id].label}
-                    </Select.Item>
-                  ))}
-                </Select.Group>
-              </Select.Content>
-            </Select.Root>
-            <Flex align="center" gap="2" ml="auto" minHeight="24px">
-              {typeField.source}
-              {typeField.reset}
-              {suggest}
-            </Flex>
-          </Flex>
-        )}
-        {chosen !== undefined && panel}
-        {asking && (
-          <Callout.Root
-            size="1"
-            color="amber"
-            mt="2"
-            className="seo-strip"
-            highContrast
-          >
-            <Callout.Text>
-              {asking.to === undefined
-                ? 'Resetting'
-                : `Changing to ${REGISTRY[asking.to].label}`}{' '}
-              removes {asking.dropped} {type.label}{' '}
-              {asking.dropped === 1 ? 'detail' : 'details'}.
-            </Callout.Text>
-            <Flex gap="3" align="center">
-              <Button
-                size="1"
-                variant="ghost"
-                highContrast
-                onClick={() => setType(asking.to, true)}
-              >
-                {asking.to === undefined ? 'Reset' : 'Change'}
-              </Button>
-              <Button
-                size="1"
-                variant="ghost"
-                highContrast
-                onClick={() => setAsking(null)}
-              >
-                Keep {type.label}
-              </Button>
-            </Flex>
-          </Callout.Root>
-        )}
-        {typeField.error}
+            </div>
+          )}
+        </Field>
       </div>
-      {chosen !== undefined && variants.length > 1 && (
-        <SegmentedControl.Root
-          size="1"
-          aria-label="Kind"
-          value={typeId}
-          disabled={typeField.disabled}
-          onValueChange={(value) => value && setType(value)}
-        >
-          {variants.map((id) => (
-            <SegmentedControl.Item key={id} value={id}>
-              {REGISTRY[id].label}
-            </SegmentedControl.Item>
-          ))}
-        </SegmentedControl.Root>
-      )}
-      <Details items={props.filter((prop) => prop.level === 'required')} />
-      <Details items={props.filter((prop) => prop.level === 'recommended')} />
-      {required.length > 0 && current && (
-        <Flex gap="2" align="start" className="seo-progress" role="status">
-          <span
-            className="seo-dot"
-            data-tone={missing.length ? 'amber' : undefined}
-          />
-          <Text as="p" size="1">
-            {missing.length
-              ? `${required.length - missing.length} of ${required.length} required details filled · ${missing.join(
-                  ', ',
-                )} ${missing.length === 1 ? 'is' : 'are'} missing. Until then the ${type.label} details are left out.`
-              : 'All required details are filled.'}
-          </Text>
-        </Flex>
-      )}
-      {more.length > 0 && (
-        <Section
-          title="More details"
-          summary={more.map((prop) => prop.label).join(', ')}
-        >
-          <Details items={more} />
-        </Section>
-      )}
-
-      <Section title="Generated structured data">
-        <Flex justify="between" align="start" gap="3" mb="2">
-          <Text as="p" size="1" color="gray">
-            Built from the settings above. Copy it to test it elsewhere.
-          </Text>
-          {graph && <CopyButton text={graph} label="Copy structured data" />}
-        </Flex>
-        {graph ? (
-          <CodeView text={graph} />
-        ) : (
-          <Text as="p" size="1" color="gray">
-            Nothing is generated without a page to preview.
-          </Text>
-        )}
-      </Section>
-      <Section
-        title="Custom JSON-LD"
-        summary={stored.custom ? 'In use' : undefined}
-      >
-        <CustomField held={custom} />
-      </Section>
     </>
-  );
-}
-
-/** One object or a list, parsed here when the field is left and validated again by the server. */
-function CustomField(props: { held: ReturnType<typeof useHeld> }) {
-  const [bad, setBad] = useState<string>();
-  const { held } = props;
-  return (
-    <Field
-      scope="target"
-      path="schema.custom"
-      label="Custom JSON-LD"
-      labelHidden
-      error={bad}
-      help="For anything the choices above don't cover. One object or a list. Text values can hold dynamic values, like {Page title}."
-    >
-      {(field) => (
-        <>
-          <TextArea
-            id={field.id}
-            size="2"
-            rows={6}
-            spellCheck={false}
-            className="seo-textarea seo-mono"
-            disabled={field.disabled}
-            aria-invalid={field.invalid || undefined}
-            aria-describedby={field.describedBy}
-            value={held.value}
-            onChange={(event) => {
-              setBad(undefined);
-              held.onChange(event);
-            }}
-            onBlur={() => {
-              setBad(jsonError(held.value));
-              held.onBlur();
-            }}
-            onKeyDown={held.onKeyDown}
-          />
-          {field.status}
-        </>
-      )}
-    </Field>
   );
 }

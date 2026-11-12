@@ -1,90 +1,30 @@
-import {
-  Button,
-  Flex,
-  Select,
-  Switch,
-  Text,
-  TextArea,
-  TextField,
-  Tooltip,
-} from '@radix-ui/themes';
+import { Select, Switch } from '@radix-ui/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import {
-  inherited,
-  meter,
-  seedTitle,
-  setPath,
-  texts,
-  tokensIn,
-} from '../model';
+import { inherited, meter, seedTitle, setPath, texts, tokensIn } from '../model';
 import type { Robots, Scope, SuggestField } from '../types';
-import { Field, Section, useField, useHeld } from './Field';
+import { Field, useHeld } from './Field';
 import { SearchPreview } from './Previews';
-import { SuggestButton, TextSuggest } from './Suggest';
+import { Disclosure, List, Row } from './SettingsList';
+import { SuggestIcon, TextSuggest } from './Suggest';
 import { TemplateInput } from './TemplateInput';
+import { Btn } from './ui';
 
-/** A switch in plain words, with where its value comes from under it. */
-function Toggle(props: {
-  scope: Scope;
-  path: string;
-  label: string;
-  /** The technical name, for people who look for it. */
-  code: string;
-  checked: boolean;
-  /** What "off" means. */
-  off: string;
-  onChange(checked: boolean): void;
-}) {
-  const field = useField({
-    scope: props.scope,
-    path: props.path,
-    label: props.label,
-    fallback: props.scope === 'target' ? 'Default' : undefined,
-  });
-  return (
-    <div className="seo-field" ref={field.ref}>
-      <Flex justify="between" align="center" gap="3">
-        <Flex align="baseline" gapX="2" wrap="wrap">
-          <Text asChild size="2" weight="medium">
-            <label htmlFor={field.id} id={field.labelId} tabIndex={-1}>
-              {props.label}
-            </label>
-          </Text>
-        </Flex>
-        <Switch
-          size="2"
-          id={field.id}
-          checked={props.checked}
-          disabled={field.disabled}
-          aria-describedby={field.describe({ help: !props.checked })}
-          onCheckedChange={props.onChange}
-        />
-      </Flex>
-      {(field.source || field.reset) && (
-        <Flex align="center" gap="2" minHeight="24px">
-          {field.source}
-          {field.reset}
-        </Flex>
-      )}
-      {!props.checked && (
-        // The technical name only where the switch is off: next to an "on"
-        // switch it reads as the opposite state.
-        <Text as="p" size="1" color="gray" id={field.ids.help}>
-          {props.off} <span className="seo-code">({props.code})</span>
-        </Text>
-      )}
-      {field.error}
-    </div>
-  );
-}
+const ADVANCED = [
+  'robots.nofollow',
+  'robots.nosnippet',
+  'robots.max_snippet',
+  'robots.max_image_preview',
+  'canonical',
+];
 
-/** The robots directives, in plain words. The same controls at target and Site scope. */
+/** The robots directives in plain words: one switch, the rest behind "Advanced". */
 export function Visibility(props: { scope: Scope }) {
   const { scope } = props;
-  const { state, dispatch, view } = useApp();
+  const { state, dispatch, view, issues } = useApp();
   const target = state.server!.target;
+  const page = scope === 'target' && target?.scope === 'page';
   const prefix = scope === 'site' ? 'values.' : '';
   const robots: Robots =
     (scope === 'site'
@@ -100,77 +40,105 @@ export function Visibility(props: { scope: Scope }) {
       : limit > 0
         ? 'limited'
         : 'allowed';
+  const image = robots.max_image_preview ?? 'standard';
   const held = useHeld(limit > 0 ? String(limit) : '', (text) => {
     const number = Number(text);
     if (text.trim() !== '' && Number.isFinite(number)) {
       edit('max_snippet', Math.round(number));
     }
   });
-  const where =
-    scope === 'site' ? 'site' : target?.scope === 'page' ? 'page' : 'type';
+  const canonical = useHeld(state.edits.target.canonical ?? '', (text) =>
+    dispatch({ type: 'edit', scope: 'target', path: 'canonical', value: text }),
+  );
+  const canonicalSet = page && !!view?.effective.canonical?.trim();
+
+  const summary = [
+    canonicalSet && 'Canonical set',
+    robots.nofollow === true && 'Not following links',
+    previews === 'off' && 'Text previews off',
+    previews === 'limited' && `Up to ${limit} characters`,
+    image === 'standard' && 'Standard image previews',
+    image === 'none' && 'No image previews',
+  ].filter((part) => typeof part === 'string');
+  const flagged = issues.some(
+    (issue) =>
+      issue.severity !== 'info' &&
+      ADVANCED.includes(issue.jump?.field.replace(/^values\./, '') ?? ''),
+  );
 
   return (
-    <>
-      <Toggle
+    <List>
+      <Row
         scope={scope}
         path={`${prefix}robots.noindex`}
         label="Show in search results"
-        code="noindex"
-        checked={robots.noindex !== true}
-        off={
-          {
-            site: 'Search engines are asked not to list any page of this site.',
-            page: 'Search engines are asked not to list this page.',
-            type: 'Search engines are asked not to list these pages.',
-          }[where]
+        second={
+          robots.noindex === true && (
+            <>
+              Hidden · <code>noindex</code>
+            </>
+          )
         }
-        onChange={(checked) => edit('noindex', !checked)}
+        control={(field) => (
+          <Switch
+            size="2"
+            id={field.id}
+            checked={robots.noindex !== true}
+            disabled={field.disabled}
+            aria-describedby={field.describedBy}
+            onCheckedChange={(checked) => edit('noindex', !checked)}
+          />
+        )}
       />
-      <Toggle
-        scope={scope}
-        path={`${prefix}robots.nofollow`}
-        label={
-          {
-            site: 'Follow links',
-            page: 'Follow links on this page',
-            type: 'Follow links on these pages',
-          }[where]
-        }
-        code="nofollow"
-        checked={robots.nofollow !== true}
-        off="Search engines are asked not to follow the links here."
-        onChange={(checked) => edit('nofollow', !checked)}
-      />
-      <Field
-        scope={scope}
-        path={`${prefix}robots.nosnippet`}
-        also={[`${prefix}robots.max_snippet`]}
-        label="Text previews in results and AI answers"
-        fallback={scope === 'target' ? 'Default' : undefined}
-        onReset={() =>
-          dispatch({
-            type: 'apply',
-            scope: 'target',
-            values: setPath(
-              setPath(state.edits.target, 'robots.nosnippet', undefined),
-              'robots.max_snippet',
-              undefined,
-            ),
-            undo: 'Reset',
-            path: 'robots.nosnippet',
-          })
-        }
-        help={
-          previews === 'off'
-            ? 'Also removes the description under your title in search results.'
-            : undefined
-        }
+      <Disclosure
+        label="Advanced"
+        summary={summary.length ? summary.join(', ') : 'Defaults'}
+        defaultOpen={summary.length > 0 || flagged}
       >
-        {(field) => (
-          <>
-            <Flex align="center" gap="2" wrap="wrap">
+        <Row
+          scope={scope}
+          path={`${prefix}robots.nofollow`}
+          label="Follow links"
+          second={robots.nofollow === true && <code>nofollow</code>}
+          control={(field) => (
+            <Switch
+              size="2"
+              id={field.id}
+              checked={robots.nofollow !== true}
+              disabled={field.disabled}
+              aria-describedby={field.describedBy}
+              onCheckedChange={(checked) => edit('nofollow', !checked)}
+            />
+          )}
+        />
+        <Row
+          scope={scope}
+          path={`${prefix}robots.nosnippet`}
+          also={[`${prefix}robots.max_snippet`]}
+          label="Text previews"
+          second={
+            previews === 'off' ? (
+              <code>nosnippet</code>
+            ) : previews === 'limited' ? (
+              <code>max-snippet:{limit}</code>
+            ) : undefined
+          }
+          onReset={() =>
+            dispatch({
+              type: 'apply',
+              scope: 'target',
+              values: setPath(
+                setPath(state.edits.target, 'robots.nosnippet', undefined),
+                'robots.max_snippet',
+                undefined,
+              ),
+              undo: 'Reset',
+              path: 'robots.nosnippet',
+            })
+          }
+          control={(field) => (
+            <>
               <Select.Root
-                size="2"
                 value={previews}
                 disabled={field.disabled}
                 onValueChange={(value) => {
@@ -185,78 +153,91 @@ export function Visibility(props: { scope: Scope }) {
               >
                 <Select.Trigger
                   id={field.id}
+                  className="seo-select-ghost"
                   aria-labelledby={field.labelId}
                   aria-describedby={field.describedBy}
-                  className="seo-select"
-                />
-                <Select.Content position="popper">
+                >
+                  {/* The ellipsis belongs to the menu item only. */}
+                  {previews[0].toUpperCase() + previews.slice(1)}
+                </Select.Trigger>
+                <Select.Content
+                  position="popper"
+                  align="end"
+                  className="seo-select-content"
+                >
                   <Select.Item value="allowed">Allowed</Select.Item>
-                  <Select.Item value="limited">Limited to…</Select.Item>
-                  <Select.Item value="off">Not allowed</Select.Item>
+                  <Select.Item value="limited">Limited…</Select.Item>
+                  <Select.Item value="off">Off</Select.Item>
                 </Select.Content>
               </Select.Root>
               {previews === 'limited' && (
-                <>
-                  <TextField.Root
-                    size="1"
-                    type="number"
-                    min={1}
-                    max={1000}
-                    aria-label="Characters"
-                    aria-invalid={field.invalid || undefined}
-                    disabled={field.disabled}
-                    className="seo-number"
-                    {...held}
-                  />
-                  <Text size="1" color="gray">
-                    characters
-                  </Text>
-                </>
-              )}
-              <Text size="1" color="gray" className="seo-code" ml="auto">
-                nosnippet, max-snippet
-              </Text>
-            </Flex>
-            {field.status}
-          </>
-        )}
-      </Field>
-      <Field
-        scope={scope}
-        path={`${prefix}robots.max_image_preview`}
-        label="Image previews"
-        fallback={scope === 'target' ? 'Default' : undefined}
-      >
-        {(field) => (
-          <>
-            <Flex align="center" gap="2" wrap="wrap">
-              <Select.Root
-                size="2"
-                value={robots.max_image_preview ?? 'standard'}
-                disabled={field.disabled}
-                onValueChange={(value) => edit('max_image_preview', value)}
-              >
-                <Select.Trigger
-                  id={field.id}
-                  aria-labelledby={field.labelId}
-                  aria-describedby={field.describedBy}
-                  className="seo-select"
+                <input
+                  className="seo-input"
+                  data-size="sm"
+                  type="number"
+                  min={1}
+                  max={1000}
+                  aria-label="Characters"
+                  aria-invalid={field.invalid || undefined}
+                  disabled={field.disabled}
+                  {...held}
                 />
-                <Select.Content position="popper">
-                  <Select.Item value="large">Large</Select.Item>
-                  <Select.Item value="standard">Standard</Select.Item>
-                  <Select.Item value="none">None</Select.Item>
-                </Select.Content>
-              </Select.Root>
-              <Text size="1" color="gray" className="seo-code" ml="auto">
-                max-image-preview
-              </Text>
-            </Flex>
-            {field.status}
-          </>
+              )}
+            </>
+          )}
+        />
+        <Row
+          scope={scope}
+          path={`${prefix}robots.max_image_preview`}
+          label="Image previews"
+          second={
+            image !== 'large' && <code>max-image-preview:{image}</code>
+          }
+          control={(field) => (
+            <Select.Root
+              value={image}
+              disabled={field.disabled}
+              onValueChange={(value) => edit('max_image_preview', value)}
+            >
+              <Select.Trigger
+                id={field.id}
+                className="seo-select-ghost"
+                aria-labelledby={field.labelId}
+                aria-describedby={field.describedBy}
+              />
+              <Select.Content
+                position="popper"
+                align="end"
+                className="seo-select-content"
+              >
+                <Select.Item value="large">Large</Select.Item>
+                <Select.Item value="standard">Standard</Select.Item>
+                <Select.Item value="none">None</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          )}
+        />
+        {page && (
+          <div className="seo-row-field">
+            <Field scope="target" path="canonical" label="Canonical address">
+              {(field) => (
+                <input
+                  id={field.id}
+                  className="seo-input"
+                  inputMode="url"
+                  placeholder={view?.tokens.url?.value}
+                  disabled={field.disabled}
+                  aria-invalid={field.invalid || undefined}
+                  aria-describedby={field.describedBy}
+                  {...canonical}
+                />
+              )}
+            </Field>
+          </div>
         )}
-      </Field>
-    </>
+        <p className="seo-row-note">AI training is set in robots.txt, not here.</p>
+      </Disclosure>
+    </List>
   );
 }
 
@@ -279,7 +260,7 @@ export function SearchTab() {
     dispatch({ type: 'edit', scope: 'target', path, value });
   const ids = { title: useId(), description: useId() };
 
-  // One suggestion panel at a time; Checks can open the one for a field.
+  // One tray at a time; Checks and the fields' issues can open one.
   const [suggesting, setSuggesting] = useState<SuggestField | null>(null);
   const handled = useRef(jump?.seq ?? 0);
   useEffect(() => {
@@ -301,6 +282,13 @@ export function SearchTab() {
     { ...view.effective, title: pattern, description: undefined },
     view.values,
   );
+  const source = (path: string) =>
+    ({
+      target: '',
+      default: 'the default language',
+      site: 'the site default',
+      fallback: 'the default',
+    })[view.source(path)];
 
   // Canvas's own Description: the field's text is its own while it has focus.
   const [typing, setTyping] = useState<string | null>(null);
@@ -311,28 +299,36 @@ export function SearchTab() {
       setTyping(null);
     }
   };
-  const bound = tokensIn(edits.description ?? '');
 
-  const anySet = (
-    [
-      'noindex',
-      'nofollow',
-      'nosnippet',
-      'max_snippet',
-      'max_image_preview',
-    ] as const
-  ).some((key) => view.source(`robots.${key}`) === 'target');
-  const canonical = useHeld(edits.canonical ?? '', (text) =>
-    edit('canonical', text),
-  );
-
-  const suggest = (field: 'title' | 'description') => (
-    <SuggestButton
+  const sparkle = (field: 'title' | 'description') => (
+    <SuggestIcon
       id={ids[field]}
       label={`Suggest a ${field}`}
       open={suggesting === field}
       onClick={() => setSuggesting(suggesting === field ? null : field)}
     />
+  );
+  const tray = (field: 'title' | 'description') =>
+    suggesting === field && (
+      <TextSuggest
+        fields={[field]}
+        opener={ids[field]}
+        onClose={() => setSuggesting(null)}
+        onUse={(variant) => {
+          if (field === 'description') {
+            return commitDescription(variant.description ?? '');
+          }
+          // Applied as typing is: the site's suffix stays.
+          edit('title', seedTitle(pattern, variant.title ?? ''));
+          return true;
+        }}
+      />
+    );
+  const titleMeter = meter('title', view.texts.title, measurer);
+  const descriptionMeter = meter(
+    'description',
+    view.texts.description,
+    measurer,
   );
 
   return (
@@ -341,24 +337,25 @@ export function SearchTab() {
       <Field
         scope="target"
         path="title"
-        label="Title in search results"
-        fallback="Default"
-        meter={meter('title', view.texts.title, measurer)}
-        suggest={suggest('title')}
-        help={
+        label="Title"
+        meter={titleMeter}
+        resolved={
+          tokensIn(edits.title ?? pattern).length ? view.texts.title : undefined
+        }
+        onSuggest={() => setSuggesting('title')}
+        after={tray('title')}
+        action={
           !page &&
           edits.title === undefined &&
-          pattern !== '' &&
-          state.readonly === 'no' && (
-            <Button
-              size="1"
+          pattern !== '' && (
+            <Btn
               variant="ghost"
-              // The help line is gray text; the action keeps the accent.
-              color="blue"
+              size={24}
+              accent
               onClick={() => edit('title', pattern)}
             >
-              Start from default
-            </Button>
+              Use the site pattern
+            </Btn>
           )
         }
       >
@@ -372,59 +369,42 @@ export function SearchTab() {
             value={edits.title ?? ''}
             onChange={(value) => edit('title', value)}
             inherited={unset.title}
+            inheritedFrom={source('title')}
+            // A page's own title reads as text; the site's values as chips.
+            pattern={
+              page
+                ? pattern.replaceAll('{title}', view.values.title ?? '')
+                : pattern
+            }
             tokens={view.tokens}
             fields={!page}
             seed={page ? pattern : undefined}
-            alwaysInsert={!page}
-            becomes={view.texts.title}
-            status={field.status}
+            insert={page ? 'focus' : 'always'}
+            trailing={sparkle('title')}
           />
         )}
       </Field>
-      {suggesting === 'title' && (
-        <TextSuggest
-          fields={['title']}
-          opener={ids.title}
-          onClose={() => setSuggesting(null)}
-          onUse={(variant) => {
-            // Applied as typing is: the site's suffix stays.
-            edit('title', seedTitle(pattern, variant.title ?? ''));
-            return true;
-          }}
-        />
-      )}
 
       {page ? (
         <Field
           scope="target"
           path="description"
           label="Description"
-          source={
-            // The caption answers "why did Page data change too?"; its
-            // second sentence is one hover or one Tab away.
-            <Tooltip content="Same field as Page data. Translated with the page.">
-              <span>
-                Same as Page data
-                <span className="seo-visually-hidden">
-                  . Translated with the page.
-                </span>
-              </span>
-            </Tooltip>
-          }
-          meter={meter('description', view.texts.description, measurer)}
-          suggest={suggest('description')}
+          source="Also in Page data"
+          meter={descriptionMeter}
+          onSuggest={() => setSuggesting('description')}
+          after={tray('description')}
         >
           {(field) => (
-            <>
-              <TextArea
+            <div className="seo-template seo-has-trail">
+              <textarea
                 id={field.id}
-                size="2"
                 rows={2}
-                resize="none"
                 lang={server.langcode}
-                className="seo-textarea"
+                className="seo-input"
                 disabled={field.disabled}
                 aria-describedby={field.describedBy}
+                aria-description="The same field as Page data. Translated with the page."
                 value={typing ?? live}
                 onFocus={() => setTyping(live)}
                 onChange={(event) => {
@@ -443,8 +423,8 @@ export function SearchTab() {
                   }
                 }}
               />
-              {field.status}
-            </>
+              <div className="seo-trail">{sparkle('description')}</div>
+            </div>
           )}
         </Field>
       ) : (
@@ -452,16 +432,11 @@ export function SearchTab() {
           scope="target"
           path="description"
           label="Description"
-          fallback="Default"
-          meter={meter('description', view.texts.description, measurer)}
-          help={
-            bound.length === 1 &&
-            edits.description?.trim() === `{${bound[0]}}` &&
-            view.tokens[bound[0]]
-              ? `Each ${target.label} uses its own ${view.tokens[bound[0]].label}.`
-              : edits.description === undefined
-                ? `Each ${target.label} uses its own summary or the start of its text.`
-                : undefined
+          meter={descriptionMeter}
+          resolved={
+            tokensIn(edits.description ?? '').length
+              ? view.texts.description
+              : undefined
           }
         >
           {(field) => (
@@ -474,83 +449,16 @@ export function SearchTab() {
               value={edits.description ?? ''}
               onChange={(value) => edit('description', value)}
               inherited={unset.description}
+              inheritedFrom={source('description')}
               tokens={view.tokens}
               fields
               multiline
-              alwaysInsert
-              becomes={view.texts.description}
-              status={field.status}
             />
           )}
         </Field>
       )}
-      {suggesting === 'description' && (
-        <TextSuggest
-          fields={['description']}
-          opener={ids.description}
-          onClose={() => setSuggesting(null)}
-          onUse={(variant) => commitDescription(variant.description ?? '')}
-        />
-      )}
 
-      <Section
-        title="Search visibility"
-        summary={`${
-          view.hidden ? 'Hidden from search engines' : 'Shown in search results'
-        }${
-          anySet
-            ? page
-              ? ' · set on this page'
-              : ` · set for every ${target.label}`
-            : ''
-        }`}
-      >
-        <Visibility scope="target" />
-        <Text as="p" size="1" color="gray">
-          Training of AI models is controlled in robots.txt, not per page. SEO
-          does not manage that file.
-        </Text>
-      </Section>
-
-      {page && (
-        <Section
-          title="Canonical address"
-          summary={edits.canonical?.trim() || 'This page'}
-        >
-          <Field
-            scope="target"
-            path="canonical"
-            label="Canonical address"
-            labelHidden
-            help="Only change this when the same content lives at another address that should rank instead."
-          >
-            {(field) => (
-              <>
-                <TextField.Root
-                  id={field.id}
-                  size="2"
-                  inputMode="url"
-                  placeholder={view.tokens.url?.value}
-                  className="seo-inherited-input"
-                  disabled={field.disabled}
-                  aria-invalid={field.invalid || undefined}
-                  aria-describedby={field.describedBy}
-                  {...canonical}
-                >
-                  {!edits.canonical && !canonical.value && (
-                    <TextField.Slot side="right">
-                      <Text size="1" color="gray" aria-hidden>
-                        (inherited)
-                      </Text>
-                    </TextField.Slot>
-                  )}
-                </TextField.Root>
-                {field.status}
-              </>
-            )}
-          </Field>
-        </Section>
-      )}
+      <Visibility scope="target" />
     </>
   );
 }

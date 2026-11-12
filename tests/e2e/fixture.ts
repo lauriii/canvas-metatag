@@ -290,6 +290,15 @@ export const tab = (frame: FrameLocator, name: string | RegExp) => frame.getByRo
 export const textbox = (frame: FrameLocator, name: string) => frame.getByRole('textbox', { name, exact: true });
 export const button = (frame: FrameLocator, name: string | RegExp) => frame.getByRole('button', { name, exact: true });
 export const status = (frame: FrameLocator) => frame.getByTestId(TEST_ID.status);
+/** A full-frame sheet: "Checks", "Output", "Choose image", "Custom JSON-LD". */
+export const sheet = (frame: FrameLocator, name: string) => frame.getByRole('region', { name, exact: true });
+
+/** Switches scope with the scope menu in the header. */
+export async function scope(frame: FrameLocator, name: string): Promise<void> {
+  await frame.getByRole('button', { name: /^(This page|Every \w+|Site)$/ }).click();
+  await frame.getByRole('menuitemradio', { name, exact: true }).click();
+  await expect(frame.getByRole('button', { name, exact: true })).toBeVisible();
+}
 
 /** Sets the caret of a text field after the first occurrence of `text`. */
 export async function caretAfter(field: Locator, text: string): Promise<void> {

@@ -1,16 +1,10 @@
-import { EyeNoneIcon, ImageIcon } from '@radix-ui/react-icons';
-import { Card, Flex, Skeleton, Text, Tooltip } from '@radix-ui/themes';
-import {
-  type ReactNode,
-  type RefObject,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { CodeIcon, ImageIcon } from '@radix-ui/react-icons';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
 import { breadcrumb, previewText, socialImage } from '../model';
 import { PICKED } from './MediaPicker';
+import { IconBtn, InfoTip, Sk, SparkleIcon } from './ui';
 
 /** A value that follows `value` once it has been still for `ms`. */
 function useSettled<T>(value: T, ms: number): T {
@@ -22,78 +16,69 @@ function useSettled<T>(value: T, ms: number): T {
   return shown;
 }
 
-/** True while `ref` is scrolled out of its scroll area. */
-function useScrolledAway(ref: RefObject<HTMLElement>): boolean {
-  const [away, setAway] = useState(false);
+/** Puts focus in the field a part of a preview shows (pointer only). */
+function focusPath(path: string) {
+  const field = document.querySelector(
+    `.seo-panel[data-state="active"] [data-path="${path}"]`,
+  );
+  field
+    ?.querySelector<HTMLElement>('textarea, input, [data-focus]')
+    ?.focus();
+}
+
+/**
+ * The tinted surface a view opens with. It tells the fields whether it is in
+ * sight: chip fields say what they become only when it is not.
+ */
+export function Stage(props: {
+  caption: ReactNode;
+  buttons?: ReactNode;
+  children: ReactNode;
+}) {
+  const { setStageVisible } = useApp();
+  const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const element = ref.current;
     if (!element || typeof IntersectionObserver === 'undefined') {
       return;
     }
     const observer = new IntersectionObserver(
-      ([entry]) => setAway(!entry.isIntersecting),
-      { root: element.closest('.rt-ScrollAreaViewport') },
+      ([entry]) => {
+        // A stage behind another tab does not speak.
+        if (element.offsetParent !== null) {
+          setStageVisible(entry.isIntersecting);
+        }
+      },
+      { root: element.closest('.seo-body') },
     );
     observer.observe(element);
     return () => observer.disconnect();
-  }, [ref]);
-  return away;
-}
-
-/**
- * The preview's two-line form. It sticks to the top of the scroll area once
- * the card has scrolled away: a visual duplicate, hidden from assistive
- * technology.
- */
-function Compact(props: {
-  card: RefObject<HTMLElement>;
-  first: string;
-  second: string;
-  /** The second line is a placeholder, not text of the page. */
-  muted?: boolean;
-  hidden?: boolean;
-  lang: string;
-}) {
-  const away = useScrolledAway(props.card);
+  }, [setStageVisible]);
   return (
-    <div className="seo-compact" aria-hidden data-show={away || undefined}>
-      <div
-        className="seo-compact-bar"
-        lang={props.lang}
-        data-dimmed={props.hidden || undefined}
-      >
-        <span className="seo-result-title">{props.first}</span>
-        <span className="seo-result-text" data-muted={props.muted || undefined}>
-          {props.second || ' '}
-        </span>
+    <div className="seo-stage" ref={ref}>
+      <div className="seo-stage-cap">
+        <div className="seo-stage-cap-l">{props.caption}</div>
+        {props.buttons && (
+          <div className="seo-stage-cap-btns">{props.buttons}</div>
+        )}
       </div>
+      {props.children}
     </div>
   );
 }
 
-function PreviewLabel(props: { children: ReactNode; action?: ReactNode }) {
+/** The `</>` on a preview: what search engines and visitors get. */
+export function OutputButton() {
+  const { openSheet } = useApp();
   return (
-    <Flex
-      className="seo-label-row"
-      align="center"
-      justify="between"
-      gap="3"
-      minHeight="20px"
+    <IconBtn
+      label="View output"
+      onClick={() => openSheet({ kind: 'output' })}
     >
-      <Text as="div" size="1" color="gray">
-        {props.children}
-      </Text>
-      {props.action}
-    </Flex>
+      <CodeIcon aria-hidden />
+    </IconBtn>
   );
 }
-
-const Estimate = () => (
-  <Tooltip content="Search engines often rewrite titles and descriptions.">
-    {/* No tab stop: the preview's accessible name already says "estimate". */}
-    <span className="seo-hint">estimate</span>
-  </Tooltip>
-);
 
 /** The page's public address: Canvas's live path while it differs from the saved one. */
 function useAddress(): string {
@@ -122,17 +107,35 @@ function useAddress(): string {
   return server.origin.url + prefix + alias;
 }
 
-/** What an empty description shows: search engines then choose the text. */
-const NO_DESCRIPTION = '(Search engines will pick text from the page)';
+/** The site's mark in a result: its logo, else its first letter. */
+function Favicon(props: { site: string }) {
+  const { state } = useApp();
+  const server = state.server!;
+  const logo = PICKED[server.site.identity.logo] ?? server.media[server.site.identity.logo];
+  const [broken, setBroken] = useState(false);
+  return (
+    <span className="seo-result-icon" aria-hidden>
+      {logo?.thumb && !broken ? (
+        <img
+          src={logo.thumb}
+          alt=""
+          width={18}
+          height={18}
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        (Array.from(props.site.trim())[0]?.toUpperCase() ?? '')
+      )}
+    </span>
+  );
+}
 
-/** The search result, in the phone layout at true size. One image to assistive technology. */
+/** The search result, at true size. One image to assistive technology. */
 export function SearchPreview() {
-  const { state, measurer, trial, ...app } = useApp();
-  // Target tabs are mounted only with a target.
+  const { state, measurer, trial, focusField, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
   const target = server.target!;
-  const card = useRef<HTMLDivElement>(null);
   const address = useAddress();
   const texts = { ...view.texts, ...trial };
   const robots = view.effective.robots ?? {};
@@ -140,10 +143,10 @@ export function SearchPreview() {
   const site = view.values.site ?? '';
   const title = previewText('title', texts.title, measurer);
   const description = !snippets
-    ? '(no description: text previews are off)'
+    ? 'No description: text previews are off'
     : texts.description
       ? previewText('description', texts.description, measurer)
-      : NO_DESCRIPTION;
+      : 'Search engines will pick text from the page.';
   const muted = !snippets || !texts.description;
   const crumbs = breadcrumb(address);
   // A canonical set here shows at once; a path is put on the public address.
@@ -157,146 +160,139 @@ export function SearchPreview() {
     `${view.hidden ? 'Not shown in search results. ' : ''}Search result preview, estimate. ${site}, ${crumbs.replaceAll(
       ' › ',
       ', ',
-    )}. Title: ${title}.${snippets && description ? ` Description: ${description}` : ''}`,
+    )}. Title: ${title}.${snippets && texts.description ? ` Description: ${description}` : ''}`,
     1000,
   );
   const template = target.scope === 'template';
+  const on = (path: 'title' | 'description') =>
+    focusField === path ||
+    (trial !== null && trial[path] !== view.texts[path]) ||
+    undefined;
   return (
-    <>
-      <Compact
-        card={card}
-        first={title}
-        second={description}
-        muted={muted}
-        hidden={view.hidden}
-        lang={server.langcode}
-      />
-      <div className="seo-preview">
-        <PreviewLabel>
-          {template ? (
-            // One line: a long page label is cut, "· estimate" always shows.
-            <span className="seo-previewing">
-              <span title={server.preview?.label}>
-                Previewing: {server.preview?.label ?? ''}
-              </span>
+    <Stage
+      caption={
+        trial ? (
+          <span data-trial="">
+            <SparkleIcon width="12" height="12" />
+            Trying suggestion {trial.index ?? ''}
+          </span>
+        ) : (
+          <>
+            {template ? (
+              <>
+                Previewing <em>{server.preview?.label ?? ''}</em>
+              </>
+            ) : (
+              <span>Search result</span>
+            )}
+            {!target.published && (
               <span>
-                {'\u00a0· '}
-                <Estimate />
+                · {template ? 'Template not in use yet' : 'Not published yet'}
               </span>
-            </span>
-          ) : (
-            <>
-              Search result preview · <Estimate />
-            </>
-          )}
-        </PreviewLabel>
-        {template && (
-          <Text as="p" size="1" color="gray" mb="2">
-            Switch pages with the preview picker in the top bar.
-          </Text>
-        )}
-        <Card
-          ref={card}
-          className="seo-card"
-          role="img"
-          aria-label={name}
-          lang={server.langcode}
-          data-testid="seo-search-preview"
-        >
-          {view.hidden && (
-            <div className="seo-hidden-band">
-              <EyeNoneIcon aria-hidden />
-              Not shown in search results
-            </div>
-          )}
-          <div className="seo-result" data-dimmed={view.hidden || undefined}>
-            <Flex align="center" gap="3" mb="2">
-              <span className="seo-result-icon">
-                {Array.from(site.trim())[0]?.toUpperCase() ?? ''}
-              </span>
-              <div className="seo-result-site">
-                <span>{site}</span>
-                <span className="seo-result-address">{crumbs}</span>
-              </div>
-            </Flex>
-            <div className="seo-result-title">{title}</div>
-            <div
-              className="seo-result-text"
-              data-muted={muted || undefined}
-            >
-              {description}
-            </div>
+            )}
+            {view.hidden && <span>· Hidden from search</span>}
+          </>
+        )
+      }
+      buttons={
+        <>
+          <OutputButton />
+          <InfoTip
+            label="About this preview"
+            text={`An estimate. Search engines sometimes rewrite titles and descriptions.${
+              template
+                ? ` Switch the previewed ${target.label} with the preview picker in the top bar.`
+                : ''
+            }`}
+          />
+        </>
+      }
+    >
+      <div
+        className="seo-result"
+        role="img"
+        aria-label={name}
+        lang={server.langcode}
+        data-testid="seo-search-preview"
+      >
+        <div className="seo-result-site">
+          <Favicon site={site} />
+          <div>
+            <div className="seo-result-name">{site}</div>
+            <div className="seo-result-address">{crumbs}</div>
           </div>
-        </Card>
-        {view.hidden && (
-          <Text as="p" size="1" color="gray" mt="1">
-            If it were shown, it would look like this.
-          </Text>
-        )}
+        </div>
+        <div className="seo-result-title">
+          <span
+            className="seo-part"
+            data-on={on('title')}
+            onClick={() => focusPath('title')}
+          >
+            {title}
+          </span>
+        </div>
+        <div className="seo-result-text" data-muted={muted || undefined}>
+          <span
+            className="seo-part"
+            data-on={on('description')}
+            onClick={() => focusPath('description')}
+          >
+            {description}
+          </span>
+        </div>
         {elsewhere && elsewhere !== address && (
-          <Text as="p" size="1" color="gray" mt="1" className="seo-wrap">
+          <div className="seo-result-note">
             Search engines are asked to show {elsewhere} instead.
-          </Text>
+          </div>
         )}
       </div>
-    </>
+    </Stage>
   );
 }
 
-/** The loading state of the Search tab: the address and description are real, the rest shimmers. */
+/** While loading: the address and the description are real, the rest waits. */
 export function SearchSkeleton(props: {
   host: string;
   alias?: string;
   description?: string;
 }) {
   return (
-    <Flex direction="column" gap="4" aria-busy="true">
-      <div className="seo-preview">
-        <Skeleton height="16px" width="45%" mb="2" />
-        <Card className="seo-card">
-          <div className="seo-result">
-            <Flex align="center" gap="3" mb="2">
-              <Skeleton width="28px" height="28px" />
-              <div className="seo-result-site">
-                <Skeleton height="12px" width="72px" mb="1" />
-                <span className="seo-result-address">
-                  {props.host && props.alias
-                    ? breadcrumb(`https://${props.host}${props.alias}`)
-                    : ' '}
-                </span>
-              </div>
-            </Flex>
-            <Skeleton height="22px" width="70%" mb="1" />
-            <div className="seo-result-text">
-              {props.description || <Skeleton height="16px" width="90%" />}
+    <div className="seo-panel" aria-busy="true">
+      <div className="seo-stage">
+        <div className="seo-stage-cap">
+          <div className="seo-stage-cap-l">Search result</div>
+        </div>
+        <div className="seo-result-site">
+          <span className="seo-result-icon" />
+          <div>
+            <Sk w={120} h={12} />
+            <div className="seo-result-address">
+              {props.host && props.alias
+                ? breadcrumb(`https://${props.host}${props.alias}`)
+                : ' '}
             </div>
           </div>
-        </Card>
+        </div>
+        <Sk w="72%" h={20} mt={12} />
+        <div className="seo-result-text">
+          {props.description || <Sk w="90%" h={14} mt={4} />}
+        </div>
       </div>
-      <div>
-        <Flex justify="between" mb="2">
-          <Skeleton height="16px" width="38%" />
-          <Skeleton height="16px" width="18%" />
-        </Flex>
-        <Skeleton height="32px" />
-      </div>
-      <div>
-        <Flex justify="between" mb="2">
-          <Skeleton height="16px" width="24%" />
-          <Skeleton height="16px" width="28%" />
-        </Flex>
-        <Skeleton height="52px" />
-      </div>
-    </Flex>
+      {[44, 32].map((label) => (
+        <div key={label}>
+          <Sk w={label} h={12} />
+          <Sk w="100%" h={32} mt={12} />
+        </div>
+      ))}
+    </div>
   );
 }
 
 /** The card a shared link shows. Honest about its input: no large image, no large card. */
 export function SocialPreview(props: { suggest?: ReactNode }) {
-  const { state, trial, ...app } = useApp();
+  const { state, trial, focusField, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
-  const card = useRef<HTMLDivElement>(null);
   const [broken, setBroken] = useState<string | null>(null);
   const texts = { ...view.texts, ...trial };
   const { image } = socialImage(state, view, PICKED);
@@ -309,12 +305,6 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
   } catch {
     // No public address: the card shows none.
   }
-  const picture =
-    src && src !== broken ? (
-      <img src={src} alt="" onError={() => setBroken(src)} />
-    ) : (
-      <ImageIcon aria-hidden />
-    );
   const name = useSettled(
     `Social card preview. ${
       large ? 'Large image' : image ? 'Small image' : 'No image'
@@ -325,44 +315,74 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
     }`,
     1000,
   );
+  const on = (path: string, key: 'social_title' | 'social_description') =>
+    focusField === path ||
+    (trial !== null && trial[key] !== view.texts[key]) ||
+    undefined;
   return (
-    <>
-      <Compact
-        card={card}
-        first={texts.social_title}
-        second={texts.social_description}
+    <Stage
+      caption={
+        trial ? (
+          <span data-trial="">
+            <SparkleIcon width="12" height="12" />
+            Trying suggestion {trial.index ?? ''}
+          </span>
+        ) : (
+          <>
+            <span>Link preview</span>
+            {!large && (
+              <span>
+                ·{' '}
+                {image ? 'Small card: image under 600 px wide' : 'Small card: no image'}
+              </span>
+            )}
+          </>
+        )
+      }
+      buttons={
+        <>
+          {props.suggest}
+          <OutputButton />
+        </>
+      }
+    >
+      <div
+        className="seo-social"
+        role="img"
+        aria-label={name}
         lang={server.langcode}
-      />
-      <div className="seo-preview">
-        <PreviewLabel action={props.suggest}>
-          Social card preview
-          {server.target?.scope === 'template' &&
-            ` · ${server.preview?.label ?? ''}`}
-        </PreviewLabel>
-        <Card
-          ref={card}
-          className="seo-card seo-social"
-          role="img"
-          aria-label={name}
-          lang={server.langcode}
-          data-testid="seo-social-preview"
-          data-layout={large ? 'large' : 'compact'}
-        >
-          <div className="seo-social-image">{picture}</div>
-          <div className="seo-social-text">
-            <span className="seo-social-host">{host}</span>
-            <span className="seo-social-title">{texts.social_title}</span>
-            <span className="seo-social-description">
+        data-testid="seo-social-preview"
+        data-layout={large ? 'large' : 'compact'}
+      >
+        <div className="seo-social-image">
+          {src && src !== broken ? (
+            <img src={src} alt="" onError={() => setBroken(src)} />
+          ) : (
+            <ImageIcon aria-hidden />
+          )}
+        </div>
+        <div className="seo-social-text">
+          <span className="seo-social-host">{host}</span>
+          <span className="seo-social-title">
+            <span
+              className="seo-part"
+              data-on={on('social.title', 'social_title')}
+              onClick={() => focusPath('social.title')}
+            >
+              {texts.social_title}
+            </span>
+          </span>
+          <span className="seo-social-description">
+            <span
+              className="seo-part"
+              data-on={on('social.description', 'social_description')}
+              onClick={() => focusPath('social.description')}
+            >
               {texts.social_description}
             </span>
-          </div>
-        </Card>
-        {!large && (
-          <Text as="p" size="1" color="gray" mt="1">
-            No large image: links will show a small card.
-          </Text>
-        )}
+          </span>
+        </div>
       </div>
-    </>
+    </Stage>
   );
 }
