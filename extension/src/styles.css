@@ -1,4 +1,4 @@
-/* Additions to Radix Themes. Radix tokens only, plus the two preview colours. */
+/* Additions to Radix Themes. Radix tokens only, plus the two preview colors. */
 
 html,
 body,
@@ -528,6 +528,7 @@ h2.seo-scope {
   font-weight: 500;
 }
 .seo-mi > small {
+  text-wrap: balance;
   color: var(--seo-ink-2);
   font-size: 12px;
   line-height: 16px;
@@ -794,7 +795,7 @@ h2.seo-scope {
   background: var(--gray-4);
   color: var(--seo-ink-2);
 }
-/* Whole pixels, so every hairline below it stays crisp. */
+/* Whole pixels, so every hairline and row below it stays crisp. */
 @supports (height: round(1px, 1px)) {
   .seo-social-image {
     aspect-ratio: auto;
@@ -1025,7 +1026,7 @@ h2.seo-scope {
 .seo-row[data-disabled] .seo-aside {
   display: none;
 }
-/* An Undo that is still offered keeps its full colour. */
+/* An Undo that is still offered keeps its full color. */
 .seo-aside .seo-btn[data-accent] {
   margin-left: -4px;
 }
@@ -1102,7 +1103,7 @@ h2.seo-scope {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-/* Amber only beside an amber line: good-to-know length stays grey. */
+/* Amber only beside an amber line: good-to-know length stays gray. */
 .seo-guide[data-tone="improve"] .seo-guide-count [data-long] {
   color: var(--seo-improve);
 }
@@ -1845,6 +1846,15 @@ button.seo-row:focus-visible {
 }
 .seo-tray-wrap > div {
   min-height: 0;
+  /* While it grows the card stays inside its row, not over the next field;
+     at rest nothing clips its shadow. */
+  animation: seo-grow-clip var(--seo-base) linear;
+}
+@keyframes seo-grow-clip {
+  from,
+  to {
+    clip-path: inset(0 -24px);
+  }
 }
 .seo-tray {
   scroll-margin: 8px 0;
@@ -1875,6 +1885,15 @@ button.seo-row:focus-visible {
 }
 .seo-tray-option.rt-RadioGroupItem:has([data-state="checked"]) {
   background: var(--seo-selected);
+}
+/* The radio is its circle, so the ring is round; Radix's own outline is off. */
+.seo-tray-option .rt-BaseRadioRoot {
+  height: var(--radio-size);
+  margin-top: 2px;
+  border-radius: 50%;
+}
+.seo-tray-option .rt-BaseRadioRoot:focus-visible::before {
+  outline: none;
 }
 .seo-tray-option .rt-RadioGroupItemInner {
   display: flex;
@@ -2007,14 +2026,17 @@ button.seo-row:focus-visible {
   flex: none;
   color: var(--red-11);
 }
-/* Nothing scrolls by in the gap under the bar. */
-.seo-bar::after {
+/* Nothing scrolls by in the gap under the bar. Behind it, so the bar's
+   translucent edge and corners are drawn over the panel, not over text. */
+.seo-app:has(> .seo-bar)::after {
   position: absolute;
-  top: 100%;
-  right: -8px;
-  left: -8px;
-  height: 8px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 6;
+  height: 30px;
   background: var(--color-panel-solid);
+  pointer-events: none;
   content: "";
 }
 .seo-bar-text {
@@ -2044,7 +2066,7 @@ button.seo-row:focus-visible {
   flex-direction: column;
   background: var(--color-panel-solid);
   /* Backwards only: at rest the sheet keeps no transform, so its text is not
-     rasterised on a layer of its own. */
+     rasterized on a layer of its own. */
   animation: seo-sheet-in var(--seo-sheet) var(--seo-ease) backwards;
 }
 @keyframes seo-sheet-in {
@@ -2190,10 +2212,11 @@ button.seo-row:focus-visible {
   display: grid;
   grid-template-columns: minmax(104px, max-content) minmax(0, 1fr);
   align-items: baseline;
-  gap: 6px 12px;
+  /* A value's 20 px line holds the mono name's baseline: rows step 24. */
+  gap: 4px 12px;
   margin: 0;
   font-size: 13px;
-  line-height: 18px;
+  line-height: 20px;
 }
 .seo-kv dt {
   color: var(--seo-ink-2);
@@ -2301,6 +2324,7 @@ button.seo-row:focus-visible {
 .seo-tile {
   all: unset;
   box-sizing: border-box;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -2321,6 +2345,12 @@ button.seo-row:focus-visible {
   background: var(--gray-4);
   box-shadow: inset 0 0 0 1px var(--gray-a4);
   transition: box-shadow var(--seo-fast) var(--seo-ease);
+}
+@supports (height: round(1px, 1px)) {
+  .seo-tile-image {
+    aspect-ratio: auto;
+    height: round(100cqw / 1.91, 1px);
+  }
 }
 /* A ring outside the image: an inset one is lost on a photo. */
 .seo-tile:hover .seo-tile-image {
@@ -2436,15 +2466,25 @@ button.seo-row:focus-visible {
     padding: 6px 8px;
     gap: 2px 6px;
   }
-  /* The controls' padding hangs past the gutter, as at 100%: their text
-     lines up with the content column. */
+  /* As at 100%, the controls' padding hangs into the gutter so their text
+     lines up with the content column. Half of it here: the same size on
+     screen, and the fills keep clear of the frame's edge. */
+  .seo-scope {
+    margin-left: -4px;
+    padding: 0 3px 0 4px;
+  }
   .seo-tabs.rt-BaseTabList {
     order: 3;
-    width: calc(100% + 16px);
-    margin: 0 -8px;
+    width: calc(100% + 8px);
+    margin: 0 -4px;
+  }
+  .seo-tab.rt-BaseTabListTrigger {
+    padding: 0 4px;
   }
   .seo-header > .seo-checks-btn.seo-checks-btn {
     margin-left: auto;
+    margin-right: -4px;
+    padding: 0 4px;
   }
   .seo-body {
     padding: 4px 8px 12px;

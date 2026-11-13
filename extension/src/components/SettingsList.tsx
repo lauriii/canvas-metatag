@@ -83,10 +83,9 @@ export function Disclosure(props: {
         <button
           type="button"
           className="seo-row"
-          aria-label={props.label}
           aria-expanded={open}
           aria-controls={id}
-          aria-describedby={`${id}-summary`}
+          aria-description={props.summary}
           onClick={() => {
             setOpen(!open);
             // Once it has unfolded, what it opened comes into view.
@@ -96,9 +95,9 @@ export function Disclosure(props: {
           }}
         >
           <span className="seo-row-label">{props.label}</span>
-          {/* Described, not named. */}
+          {/* Described, not named: not referenced, so not in the name either. */}
           <span className="seo-row-value" aria-hidden>
-            <span id={`${id}-summary`}>{props.summary}</span>
+            <span>{props.summary}</span>
             <ChevronDownIcon aria-hidden />
           </span>
         </button>
@@ -121,18 +120,16 @@ export function NavRow(props: {
   value?: string;
   onClick(): void;
 }) {
-  const id = useId();
   return (
     <button
       type="button"
       className="seo-row"
-      aria-label={props.label}
-      aria-describedby={props.value ? id : undefined}
+      aria-description={props.value || undefined}
       onClick={props.onClick}
     >
       <span className="seo-row-label">{props.label}</span>
       <span className="seo-row-value" aria-hidden>
-        {props.value && <span id={id}>{props.value}</span>}
+        {props.value && <span>{props.value}</span>}
         <ChevronRightIcon aria-hidden />
       </span>
     </button>

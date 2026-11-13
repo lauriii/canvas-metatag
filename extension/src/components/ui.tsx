@@ -176,7 +176,58 @@ export function reveal(
   scroller.scrollTop += delta;
 }
 
-/** A grey bar where text will be. */
+/**
+ * A select's list that opens scrolled to its checked item starts on a whole
+ * row: the nearest group heading below the cut, else the nearest option.
+ * For a `Select.Content` ref; Radix scrolls the item in after positioning.
+ */
+export function settleList(content: HTMLElement | null) {
+  if (!content) {
+    return;
+  }
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => {
+      const list = content.querySelector<HTMLElement>('.rt-SelectViewport');
+      const checked = list?.querySelector<HTMLElement>(
+        '[role="option"][data-state="checked"]',
+      );
+      if (!list || !checked || list.scrollTop === 0) {
+        return;
+      }
+      const rows = [
+        ...list.querySelectorAll('[role="option"], .rt-SelectLabel'),
+      ];
+      // The strip above the row shows the row before it: only as much as
+      // is padding, never the foot of its text.
+      const inset = Math.min(
+        parseFloat(getComputedStyle(list).paddingTop) || 0,
+        ...rows.map(
+          (row) => parseFloat(getComputedStyle(row).paddingBottom) || 0,
+        ),
+      );
+      const at = (element: Element) =>
+        element.getBoundingClientRect().top -
+        list.getBoundingClientRect().top +
+        list.scrollTop -
+        inset;
+      const fits = (y: number) =>
+        y >= list.scrollTop &&
+        y <= at(checked) &&
+        y <= list.scrollHeight - list.clientHeight;
+      const starts = (only?: string) =>
+        rows
+          .filter((row) => !only || row.matches(only))
+          .map(at)
+          .find(fits);
+      const y = starts('.rt-SelectLabel') ?? starts();
+      if (y !== undefined) {
+        list.scrollTop = y;
+      }
+    }),
+  );
+}
+
+/** A gray bar where text will be. */
 export const Sk = (props: { w: string | number; h: number; mt?: number }) => (
   <span
     className="seo-sk"

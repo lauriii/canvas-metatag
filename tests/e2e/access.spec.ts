@@ -190,7 +190,7 @@ test('the three tabs and the Checks sheet work by keyboard, pass an accessibilit
       const { violations } = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
       const serious = violations.filter(({ impact }) => impact === 'serious' || impact === 'critical');
       expect(
-        serious.map(({ id, help, nodes }) => `${id}: ${help} (${nodes.length})`),
+        serious.map(({ id, help, nodes }) => `${id}: ${help} (${nodes.map(({ target }) => target.join(' ')).join(', ')})`),
         view,
       ).toEqual([]);
     });

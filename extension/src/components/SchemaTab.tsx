@@ -28,7 +28,7 @@ import { ImageRow, PICKED } from './MediaPicker';
 import { Disclosure, List, NavRow } from './SettingsList';
 import { SchemaSuggest, SuggestButton } from './Suggest';
 import { TemplateInput } from './TemplateInput';
-import { Btn, InfoTip, Notice } from './ui';
+import { Btn, InfoTip, Notice, settleList } from './ui';
 
 const IDS = Object.keys(REGISTRY);
 const FAMILIES = IDS.filter((id) => !REGISTRY[id].extends);
@@ -558,6 +558,7 @@ export function SchemaTab() {
               {type.label}
             </Select.Trigger>
             <Select.Content
+              ref={settleList}
               position="popper"
               className="seo-select-content seo-select-wide"
             >

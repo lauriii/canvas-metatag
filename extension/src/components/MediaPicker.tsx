@@ -31,7 +31,7 @@ export function Thumb(props: { src?: string }) {
   );
 }
 
-/** A file name keeps its end in sight: "thestandingdesk-Wi0…unsplash.jpg". */
+/** A file name keeps its end in sight: "standing-desk-by-the-win…_hero-01.jpg". */
 export function ImageName(props: { name: string }) {
   const { name } = props;
   return /^\S+\.[a-z0-9]{2,5}$/i.test(name) && name.length > 24 ? (

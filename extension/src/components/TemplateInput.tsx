@@ -54,11 +54,11 @@ export function TemplateInput(props: {
   /** The stored template; '' when nothing is stored. */
   value: string;
   onChange(stored: string): void;
-  /** What the field inherits, resolved; shown in grey while nothing is stored. */
+  /** What the field inherits, resolved; shown in gray while nothing is stored. */
   inherited?: string;
   /** Where the inherited value comes from, for assistive technology. */
   inheritedFrom?: string;
-  /** The inherited value as a template: its values show as grey chips. */
+  /** The inherited value as a template: its values show as gray chips. */
   pattern?: string;
   /** The values this field may use. */
   tokens: Record<string, TokenInfo>;

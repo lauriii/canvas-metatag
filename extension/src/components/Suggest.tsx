@@ -134,7 +134,9 @@ function Tray(props: {
     // the AI disclosure, stays in view as it does.
     const observer = new ResizeObserver(() => reveal(element));
     if (element) {
+      // The wrap animates open; the tray inside changes with its content.
       observer.observe(element);
+      observer.observe(element.closest('.seo-tray-wrap') ?? element);
     }
     return () => {
       observer.disconnect();
