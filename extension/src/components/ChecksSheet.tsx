@@ -64,7 +64,8 @@ export function ChecksSheet() {
     );
   };
 
-  const actions = (issue: Issue) => {
+  /** `titleId`: the row's sentence, which describes its Show. */
+  const actions = (issue: Issue, titleId: string) => {
     const { fix, jump } = issue;
     return (
       <>
@@ -109,7 +110,10 @@ export function ChecksSheet() {
         {jump && (
           <Btn
             variant="ghost"
+            // Named for its field, described by its issue: several issues
+            // can lead to one field.
             aria-label={`Show ${where(jump)}`}
+            aria-describedby={titleId}
             onClick={() => goTo(jump)}
           >
             Show
@@ -149,7 +153,7 @@ export function ChecksSheet() {
             >
               <h4 id={`seo-checks-${group.severity}`}>{group.label}</h4>
               <ul>
-                {rows.map((issue) => (
+                {rows.map((issue, index) => (
                   <li key={issue.id} className="seo-check">
                     <span className="seo-check-mark" aria-hidden>
                       {issue.severity === 'info' ? (
@@ -162,11 +166,18 @@ export function ChecksSheet() {
                       )}
                     </span>
                     <div>
-                      <p className="seo-check-title">{issue.message}</p>
+                      <p
+                        className="seo-check-title"
+                        id={`seo-check-${group.severity}-${index}`}
+                      >
+                        {issue.message}
+                      </p>
                       {issue.detail && (
                         <p className="seo-check-detail">{issue.detail}</p>
                       )}
-                      <div className="seo-check-actions">{actions(issue)}</div>
+                      <div className="seo-check-actions">
+                        {actions(issue, `seo-check-${group.severity}-${index}`)}
+                      </div>
                     </div>
                   </li>
                 ))}

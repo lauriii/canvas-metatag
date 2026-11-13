@@ -307,9 +307,11 @@ body {
   all: unset;
   box-sizing: border-box;
   display: inline-flex;
-  flex: none;
+  /* A long name gives way before the header overflows. */
+  flex: 0 1 auto;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   max-width: 148px;
   height: var(--seo-control-h-sm);
   margin-left: -8px;
@@ -321,6 +323,10 @@ body {
   white-space: nowrap;
   cursor: default;
   transition: background-color var(--seo-fast) var(--seo-ease);
+}
+/* Without a Checks button the name takes the room there is. */
+.seo-header:not(:has(> .seo-checks-btn)) > .seo-scope {
+  max-width: none;
 }
 .seo-scope:hover,
 .seo-scope[data-state="open"] {
@@ -486,7 +492,7 @@ h2.seo-scope {
 
 /* Scope menu */
 .seo-scope-menu.rt-DropdownMenuContent {
-  width: 280px;
+  width: 320px;
   max-width: calc(100vw - 8px);
   border-radius: var(--seo-radius-surface);
   box-shadow: var(--seo-shadow-pop);
@@ -533,6 +539,10 @@ h2.seo-scope {
   font-size: 12px;
   line-height: 16px;
   overflow-wrap: anywhere;
+}
+/* A phrase that wraps as one. */
+.seo-mi > small > span {
+  white-space: nowrap;
 }
 /* The menu is as wide as it says, never as wide as its longest line. */
 .seo-scope-menu .rt-ScrollAreaViewport > div {
@@ -682,6 +692,11 @@ h2.seo-scope {
   color: var(--seo-ink);
   font-style: normal;
   text-overflow: ellipsis;
+}
+/* A cut name's ellipsis leaves up to a letter's width of room after it: the
+   suffix moves into it, so both joins of the name look alike. */
+.seo-stage-cap-l > em + span {
+  margin-left: -3px;
 }
 .seo-stage-cap-l > [data-warn] {
   color: var(--seo-improve);
@@ -1248,6 +1263,10 @@ textarea.seo-input {
 .seo-select-box[data-placeholder] .rt-SelectTriggerInner {
   color: var(--seo-ink-2);
 }
+/* Read-only: a value at rest, no promise of a menu. */
+.seo-select-box[data-disabled] .rt-SelectIcon {
+  display: none;
+}
 .seo-select-ghost.rt-SelectTrigger {
   height: var(--seo-control-h-sm);
   /* Its pill ends at the switches' edge; value and chevron line up with
@@ -1405,8 +1424,11 @@ textarea.seo-input {
   box-shadow: inset 0 0 0 1px var(--amber-9);
   color: var(--amber-11);
 }
+/* Read-only, a chip is a neutral label, at full contrast. */
 .seo-template-box[data-disabled] .seo-chip {
-  opacity: 0.7;
+  background: var(--gray-a2);
+  box-shadow: inset 0 0 0 1px var(--gray-a5);
+  color: var(--seo-ink-2);
 }
 .seo-brace {
   color: transparent;
@@ -1654,6 +1676,11 @@ button.seo-row:focus-visible {
   font-weight: 400;
   line-height: 20px;
   white-space: nowrap;
+}
+/* A row that opens nothing: its value lines up with the values beside a
+   chevron. */
+.seo-row[data-static] {
+  padding-right: 33px;
 }
 .seo-row-value > span {
   min-width: 0;
@@ -2098,6 +2125,23 @@ button.seo-row:focus-visible {
   line-height: 20px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* Output catching up with a save: shown after 400 ms, so a quick one is quiet. */
+.seo-updating-live {
+  display: flex;
+}
+.seo-updating {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 4px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--gray-11);
+}
+.seo-kv[aria-busy] dd,
+.seo-code[aria-busy] {
+  color: var(--gray-11);
 }
 .seo-sheet-end {
   display: flex;

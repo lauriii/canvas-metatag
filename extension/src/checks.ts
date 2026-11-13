@@ -1,7 +1,14 @@
 // The Checks rules: facts about this dialog's settings and the page preview.
 // No score. Rules fed by `resolved` describe the saved draft.
 import type { PageFacts } from './host';
-import { fill, meter, tokensIn, trimSeparators } from './model';
+import {
+  LARGE_CARD_WIDTH,
+  dimensions,
+  fill,
+  meter,
+  tokensIn,
+  trimSeparators,
+} from './model';
 import type {
   Issue,
   Jump,
@@ -407,20 +414,32 @@ export function checks(input: ChecksInput): Issue[] {
       });
     } else {
       const { width, height } = image;
-      if (width < 1200 || height < 630) {
+      const cropped = height > 0 && (width / height < 1.85 || width / height > 2);
+      const small = width < 1200 || height < 630;
+      // The link preview's rule, so the two never disagree: an image that
+      // already makes a large card works, and is only good to know, in one
+      // row with its cropping.
+      const thumbnail = width < LARGE_CARD_WIDTH;
+      if (small && thumbnail) {
         issues.push({
           id: 'image-small',
           severity: 'improve',
           message: 'Use a larger social image',
-          detail: `The social image is ${width} x ${height}. ${
-            width < 600 || height < 315
-              ? 'It will show as a small thumbnail.'
-              : 'Use at least 1200 x 630 for a large card.'
-          }`,
+          detail: `The social image is ${dimensions(width, height)}. Most link previews show it as a small thumbnail.`,
+          jump: at,
+        });
+      } else if (small) {
+        issues.push({
+          id: 'image-small',
+          severity: 'info',
+          message: 'The social image could be sharper',
+          detail: `The social image is ${dimensions(width, height)}. It works as a large card${
+            cropped ? ', cropped' : ''
+          }; ${dimensions(1200, 630)} ${cropped ? 'fits best' : 'looks sharper'}.`,
           jump: at,
         });
       }
-      if (height > 0 && (width / height < 1.85 || width / height > 2)) {
+      if (cropped && !(small && !thumbnail)) {
         issues.push({
           id: 'image-ratio',
           severity: 'info',

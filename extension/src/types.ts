@@ -156,6 +156,8 @@ export interface StatePayload {
     id: string;
     label: string;
     url: string;
+    /** Whether visitors can see it now. */
+    published: boolean;
   } | null;
   tokens: Record<string, TokenInfo>;
   media: Record<string, MediaInfo>;
@@ -250,7 +252,8 @@ export interface State {
   errors: Record<Scope, Record<string, string>>;
   live: { title?: string; description?: string; alias?: string };
   facts: PageFacts | null;
-  readonly: 'no' | 'store' | 'conflict' | 'access';
+  /** `empty`: a template whose type has no content to preview. */
+  readonly: 'no' | 'store' | 'conflict' | 'access' | 'empty';
   /** A pending change of the current scope's storage key that may not be applied by itself. */
   offer: { scope: Scope; pending: Pending } | null;
   /** Snapshot before a reset, discard or restore. */

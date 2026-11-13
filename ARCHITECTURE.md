@@ -175,20 +175,27 @@ substituted value again, so a field value cannot inject a token.
 | Token | Value | Type |
 |---|---|---|
 | `{title}` | the entity label | text |
-| `{description}` | page: Canvas's description field; node: first `text_with_summary` field's summary, else its text cut at 160 | text |
+| `{description}` | page: Canvas's description field; node: the first `text_with_summary` field's summary, else its text cut at 160 | text |
 | `{site}` | identity name, else `system.site:name` | text |
 | `{sep}` | identity separator | text |
 | `{url}` | the entity's own public URL | url |
 | `{author}` | owner's label (`view label` access) | text |
 | `{published}`, `{modified}` | `created`, `changed` as ISO 8601 in the site timezone | datetime |
-| `{image}` | page: its `image` media; node: first image field that resolves | image |
+| `{image}` | page: its `image` media; node: the first image field that resolves | image |
 | `{field.NAME}` | node templates: each configurable field of a supported type, delta 0 | by field type |
 
 The vocabulary of a bundle is `Resolver::tokenTypes()`; write mode refuses an
-unknown token, and an image token in text. Every token value is what an
+unknown token, and an image token in text. Its fields, and so "first" above,
+follow the order of the bundle's `default` form display; fields not on the
+form come last, by machine name. The head carries that form display's cache
+tag (section 13). Every token value is what an
 anonymous visitor may see: field, media, file and label access run for the
 anonymous account (`Resolver::allowed()`), images must be public files.
-Formatted text is reduced to plain text in `Resolver::text()`.
+Formatted text is reduced to plain text in `Resolver::text()`: the content of
+`script`, `style` and `template` elements is removed first (also when the
+element is not closed), then tags. The stored value is read, never the
+format's output: filters could render embedded entities for the current user
+into a cached, shared head.
 
 The dialog shows tokens as labelled chips (`{Page title}`); `model.ts`
 converts labels to stored names on commit (`toStored()`), also inside custom
@@ -222,9 +229,16 @@ social_title       = fill(social.title)         -> else {title}
 social_description = fill(social.description)   -> else description
 ```
 
-Each is passed through `Values::plain()`: controls removed, whitespace
-collapsed, trimmed, cut to its limit in code points. The output is plain text;
-the consumer escapes it.
+Each is cut by `Values::cut()`: `Values::plain()` removes controls,
+collapses whitespace, trims and cuts to the limit in code points, never inside
+an extended grapheme cluster (an emoji sequence, a flag, a letter with its
+marks is left out whole; PCRE `\X`, `Intl.Segmenter` in `model.ts`). A cut
+inside a word then backs up to the last space when that space is within the
+last tenth of the limit, and the title's separator check removes a separator
+the cut left at the end. Structured data values, URLs and the site name get
+`plain()` only. A node's `{description}` cut from its text (160 code points,
+at a word) drops a split cluster the same way (`Values::whole()`). The output
+is plain text; the consumer escapes it.
 
 ### Other outputs
 
@@ -369,6 +383,15 @@ Details that matter:
   auto-saved entity and converts only the fields in its form. The
   `canvas_metatag` field has no form display, so it is carried forward, and so
   is the template's third-party setting.
+- A value sent back exactly as the draft (or the stored entity) holds it is
+  carried forward although it no longer passes (`ApiController::carry()`):
+  read mode keeps it, and every other field must stay savable. Site saves do
+  the same against the stored site values.
+- A page translation's details (`schema.props`) belong to the type it
+  inherits from the default translation's draft. While that type differs from
+  the published one, `putPage()` writes the translation's details of the
+  published type along, unseen and never echoed, so that taking the type
+  change back loses none of them.
 - A 422 that names new paths is not counted as an attempt: those fields are
   marked refused (the footer says "other changes saved") and the PUT is resent
   with the refused paths at their last confirmed value. A refused field never
@@ -442,6 +465,8 @@ loudly.
 | Layout save starts from the auto-saved entity and converts only form fields (`ApiLayoutController::post()`, `ClientDataToEntityConverter`) | the whole draft transport | an editor save would erase the dialog's value | `PageDraftTest::testWriteThenEditorSave`, `testUnchangedLayoutRoundTripCreatesNoDraft`, `TemplateDraftTest::testWriteThenEditorSaves`, `page.spec.ts` |
 | Publish stores the field / third-party setting and enables the template (`ApiAutoSaveController`) | going live | values would not publish | `PageDraftTest::testPublish`, `TemplateDraftTest::testPublish`, `page.spec.ts`, `template.spec.ts` |
 | A draft of a never-published translation is kept under its own key and added on publish | `ApiController::translation()`, `Resolver::layers()`, install | that translation's SEO cannot be opened | `PageDraftTest::testDraftOfAnUnpublishedTranslation` |
+| Publishing a draft-only translation copies only the fields that differ from the stored default translation (`ApiAutoSaveController::applyAutoSaveTranslationSnapshots()`); its auto-save entry still exists during the save | `CanvasMetatagHooks::pagePresave()` restores a value equal to the default's | a new translation whose value equals the default's is published without it again (once Canvas compares against nothing, the hook finds nothing to do and can go) | `PageDraftTest::testPublishingNewTranslationEqualToDefault` |
+| An entity's translation drafts are published and discarded together, from the default translation's entry (`includeSiblingTranslationAutoSaves()`, `getTranslationGroupAutoSaves()`) | `putPage()` keeping a translation's details of the published type | a translation published alone, while the default's type change is a draft, would keep details the dialog cannot show (no loss) | `PageDraftTest::testTranslationKeepsDetailsOfThePublishedType` |
 | `onCanvasConfigEntitySave()` drops a template draft when the stored template changes | `canvas_metatag_uninstall()` writes drafts back | uninstall loses or keeps template drafts | `InstallTest::testUninstallAndReinstall` |
 | `Entity\ContentTemplate::loadForEntity($entity, 'full')`, `getTargetEntityTypeId()`, `getMode()`, `getTargetBundle()`; config name `canvas.content_template.*.*.*` (schema) | `Resolver::owns()/layers()`, hooks, `ApiController`, config schema | node ownership; failures are caught and logged (head lost, page served) | `ResolverTest::testOwnershipAndLayers`, `CoupledHeadTest::testNodeAndOtherRoutes` |
 | `Entity\Page`: base fields `description`, `image`, `created`, `changed`, owner; route `entity.canvas_page.canonical` | `Resolver::tokens()`, hooks | tokens and the coupled head | `ResolverTest::testTokens`, `CoupledHeadTest::testPage` |
@@ -468,8 +493,11 @@ guessed write.
 | `drupalSettings.canvas.canvasLayoutRequestInProgress`, `canvasLayoutRequestComplete` event | the write may race an editor save (read-back still retries) | `host-contract.spec.ts` "signal idle", `page.spec.ts` rapid edits |
 | Preview iframe `iframe[data-canvas-preview="true"][data-canvas-swap-active="true"]`, same-origin document, `<main>` | Checks and AI lose page facts | `host-contract.spec.ts` "exposes every path" |
 | `canvas:data:subscribe:previewHtml` bridge message (supported API) | facts not refreshed | `host-contract.spec.ts` |
-| Editor routes `/editor/canvas_page/{id}`, `/template/{type}/{bundle}/{mode}/{id}` (mirror `extractEntityParams`) | wrong or no context | `host.test.ts`, `host-contract.spec.ts` |
+| Editor routes `/editor/canvas_page/{id}`, `/template/{type}/{bundle}/{mode}/{id}`, and `/template/node/{bundle}/full` for a type without content (mirror `extractEntityParams`) | wrong or no context | `host.test.ts`, `host-contract.spec.ts` |
 | Dialog frame behavior (named, sized, survives editor navigation until a side-menu click) | layout or lifecycle | `host-contract.spec.ts` "dialog frame" |
+| The frame's nearest scrolling ancestor inside `[role="dialog"]` is the dialog's scroll container; Canvas sizes it and the frame to `calc(100vh - 300px)`; the panel has a `max-height` and a bottom padding (`host.fitFrame()`) | the frame keeps Canvas's height (no worse than before) | `host-contract.spec.ts` "dialog frame", `host.test.ts` |
+| The dialog panel opens a fifth of the window from the top by a `translate()`, leaving `top` free (`host.fitFrame()` moves a dialog opened in a taller window up with `top`) | the dialog stays where it opened; the frame keeps the room below it | `host-contract.spec.ts` "dialog frame" (panel top at 420 px) |
+| Closing the dialog removes the iframe without unmounting the extension's React tree (`host.fitFrame()` undoes itself on the frame's `pagehide`) | none: React's cleanup also undoes it | `host.test.ts` "is undone when the frame goes away" |
 
 ### UPSTREAM(canvas) asks
 
@@ -487,6 +515,14 @@ guessed write.
    `@internal` (Canvas's own `@todo` already points that way).
 5. `@drupal-canvas/headless-next` should map `article:*` and `og:image:*`, and
    render `head.script` (README).
+6. A viewport-aware height and position for the extension dialog: Canvas
+   leaves the frame 300 px less than the window and keeps the dialog where it
+   opened, so a dialog opened at 900 px tall and then made 350 px tall has a
+   92 px frame (48 px of view). It replaces `host.fitFrame()`, which moves the
+   dialog up and gives it a 202 px frame there.
+7. Publishing a translation that exists only as a draft should compare its
+   fields against nothing, not against the default translation. It replaces
+   `CanvasMetatagHooks::pagePresave()`.
 
 ## 12. Headless delivery
 
@@ -546,7 +582,7 @@ account; both page caches stay effective.
 | the content language | context `languages:language_content` | `resolve()` |
 | site settings, with overrides | `config:canvas_metatag.site` | `site()` |
 | site name, front page, timezone | `config:system.site`, `config:system.date` | `tokens()`, `url()` |
-| node field definitions, media type sources | `entity_field_info`, `config:media_type_list` | `tokens()` (non-page bundles) |
+| node field definitions, media type sources, the order of the form | `entity_field_info`, `config:media_type_list`, the bundle's default form display (its list tag while it does not exist: creating it invalidates only that) | `tokens()` (non-page bundles) |
 | the template | its tags; without one the `content_template` list tag | `layers()`; coupled node pages that are not owned also get the list tag (`pageAttachments()`) |
 | a draft (previews only) | the auto-save entry (`canvas__auto_save`) | `layers()`, decorator |
 | media, files, referenced labels | their tags | `mediaImage()`, `usable()`, `label()` |
@@ -575,6 +611,8 @@ key would mix them).
   the editor's auto-save key. `ApiController::translation()` accepts a
   translation that exists only as a Canvas draft (state `published: false`),
   for users with update access.
+- A translation that exists only as a draft is published with its own value,
+  also when it equals the default translation's (`pagePresave()`, section 11).
 - Hreflang lists published translations only, with `x-default`.
 - Site and template patterns and the identity name are config `string`, the
   same in every language (non-goal).
@@ -638,18 +676,20 @@ skip the CSRF check):
 | Suite | Proves | Run |
 |---|---|---|
 | `tests/src/Unit/ValuesTest`, `SchemaGraphTest` | validation (refused and accepted cases), encoding, cascade, text outputs, separators; registry, ids, withheld nodes, custom JSON-LD, encoder safety; the shared fixtures `tests/fixtures/text-cases.json` and `graphs/*.json` | PHPUnit |
-| `ResolverTest` | ownership, layers, tokens and access, the head, cacheability and drafts, the public base | PHPUnit (kernel) |
-| `PageDraftTest`, `TemplateDraftTest` | the draft transport against real Canvas: editor saves carry our value, the conflict rule, publish, translations (incl. draft-only), refusals, duplicate | PHPUnit (kernel) |
+| `ResolverTest` | ownership, layers, tokens and access, the form's order, the head, cacheability and drafts, the public base | PHPUnit (kernel) |
+| `PageDraftTest`, `TemplateDraftTest` | the draft transport against real Canvas: editor saves carry our value, the conflict rule, publish, translations (incl. draft-only, the details of a published type, a new translation equal to the default), refusals, duplicate | PHPUnit (kernel) |
 | `CoupledHeadTest` | the HTML head an anonymous visitor gets, with both page caches; non-owned routes untouched; a failing build serves core's head | PHPUnit (kernel) |
 | `HeadlessHeadTest` | the content API head, preview drafts, routes left alone, the runtime requirement | PHPUnit (kernel) |
 | `MetatagCoexistenceTest` | Metatag silent where the head is ours, widgets hidden | PHPUnit (kernel) |
-| `ApiTest` | route requirements, state, site, media, writes follow shown values | PHPUnit (kernel) |
+| `ApiTest` | route requirements, state (incl. a template without a node to preview), site (incl. a stored value carried forward), media, writes follow shown values | PHPUnit (kernel) |
+| `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node, heads and structured data, drafts, headless | PHPUnit (kernel) |
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest` | access, caps, flood, error codes, nothing logged or written; provider resolution, prompts, output cleaning | PHPUnit (kernel, submodule) |
 | `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks, API client, host adapter parsing | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
-| Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, templates bound to fields, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom | |
+| Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates bound to fields, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
 | Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider | |
+| Playwright `complex` | template scope on the complex fixture: type fields and their values, previews that follow the editor, an unpublished preview node, a type without content, text direction | |
 
 Commands are in the README ("Development"). Kernel tests use Canvas's
 `phpunit.xml.dist`. The Playwright suite installs a seeded sandbox per spec
@@ -679,6 +719,15 @@ limitations of the implementation:
   public files is treated as missing.
 - Custom JSON-LD is decoded as arrays on output, so an empty object or an
   object with only numeric keys is emitted as a list.
+- A content type's Full template with no content to preview is read-only in
+  the dialog: without a preview node Canvas keeps no draft entry to write
+  under (section 9). It needs a Canvas write path for templates without a
+  preview entity.
+- `host.fitFrame()` follows the editor's window, not a drag of the dialog: a
+  dialog dragged down keeps the height it had, and a resize keeps the drag
+  (the panel's place is measured once, at open). In a window 350 px tall the
+  view below the dialog's header is 158 px: the dialog stays below the
+  editor's top bar.
 - `templateContext()` reads the template's values itself (override-free)
   while `Resolver::layers()` reads them with overrides, so under a config
   override of a template's setting the dialog's values and its preview can

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\canvas_metatag\Hook;
 
+use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas_headless\Controller\CanvasContentController;
 use Drupal\canvas_metatag\Controller\HeadlessContentController;
@@ -54,6 +55,7 @@ final class CanvasMetatagHooks {
     private readonly LoggerChannelFactoryInterface $loggerFactory,
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly ClassResolverInterface $classResolver,
+    private readonly AutoSaveManager $autoSaveManager,
   ) {}
 
   /**
@@ -88,6 +90,35 @@ final class CanvasMetatagHooks {
   #[Hook('canvas_page_translation_create')]
   public function translationCreate(ContentEntityInterface $translation): void {
     $translation->set('canvas_metatag', NULL);
+  }
+
+  /**
+   * Implements hook_ENTITY_TYPE_presave() for canvas_page.
+   *
+   * Canvas publishes a translation that exists only as a draft by copying the
+   * fields that differ from the stored default translation, so a value equal
+   * to the default one's stays empty (translationCreate() empties it). Its
+   * draft, which Canvas deletes only after this save, holds the value.
+   *
+   * UPSTREAM(canvas): compare a new translation against nothing (ask 7).
+   * Then this finds nothing to restore and can be deleted.
+   */
+  #[Hook('canvas_page_presave')]
+  public function pagePresave(ContentEntityInterface $page): void {
+    $default = $page->getOriginal()?->getUntranslated()->get('canvas_metatag')->value;
+    if ($default === NULL || $default === '') {
+      return;
+    }
+    foreach (array_keys($page->getTranslationLanguages(FALSE)) as $langcode) {
+      $translation = $page->getTranslation($langcode);
+      if (!$translation->isNewTranslation() || !$translation->get('canvas_metatag')->isEmpty()) {
+        continue;
+      }
+      $draft = $this->autoSaveManager->getAutoSaveEntity($translation, TRUE)->entity;
+      if ($draft instanceof ContentEntityInterface && $draft->get('canvas_metatag')->value === $default) {
+        $translation->set('canvas_metatag', $default);
+      }
+    }
   }
 
   /**

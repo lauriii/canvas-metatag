@@ -170,7 +170,31 @@ export const fill = (template: string, values: Record<string, string>) =>
     Object.hasOwn(values, name) ? String(values[name]) : '',
   );
 
-/** Output normalization: control and bidi characters removed, whitespace collapsed, trimmed, cut. */
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * A text's direction from its first letter, as `dir="auto"` finds it. Engines
+ * have no Bidi_Class escape, so the right-to-left scripts are listed.
+ */
+export const dirOf = (text: string): 'rtl' | 'ltr' =>
+  /^\P{L}*[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}\p{Script=Mende_Kikakui}\p{Script=Imperial_Aramaic}\p{Script=Phoenician}\p{Script=Kharoshthi}\p{Script=Avestan}\p{Script=Old_Hungarian}]/u.test( // cspell:disable-line
+    text,
+  )
+    ? 'rtl'
+    : 'ltr';
+
+/**
+ * A type's label inside a sentence: "Event" reads "event", while a label
+ * that starts with an abbreviation ("FAQ page") stays as written.
+ */
+export const inSentence = (label: string) =>
+  /^\p{Lu}\p{Lu}/u.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1);
+
+/**
+ * Output normalization: control and bidi characters removed, whitespace
+ * collapsed, trimmed, cut to `max` code points, never inside a character drawn
+ * as one (an emoji sequence, a flag, a letter with its marks).
+ */
 export function plain(text: string, max: number): string {
   const clean = text
     // C0 and C1 controls except tab, LF and CR (DEL too, as in PHP); bidi
@@ -182,7 +206,34 @@ export function plain(text: string, max: number): string {
     .replace(/[ \t\n\r]+/g, ' ')
     .replace(/^ +| +$/g, '');
   const points = Array.from(clean);
-  return points.length > max ? points.slice(0, max).join('') : clean;
+  if (points.length <= max) {
+    return clean;
+  }
+  // The cluster that holds the first code point past the limit goes whole.
+  const clusters = Array.from(
+    graphemes.segment(points.slice(0, max + 1).join('')),
+    ({ segment }) => segment,
+  );
+  clusters.pop();
+  return clusters.join('');
+}
+
+/**
+ * A head text: plain(), ending at a word when one ends near the limit. A cut
+ * inside a word backs up to the last space when that space is within the last
+ * tenth of the limit.
+ */
+function cut(text: string, max: number): string {
+  const full = plain(text, Infinity);
+  const short = plain(full, max);
+  if (short === full || short.endsWith(' ') || full[short.length] === ' ') {
+    return short.replace(/ +$/, '');
+  }
+  const points = Array.from(short);
+  const space = points.lastIndexOf(' ');
+  return space >= 0 && space >= max - Math.floor(max / 10)
+    ? points.slice(0, space).join('')
+    : short;
 }
 
 /** A separator is only ever a whole word equal to the {sep} value. */
@@ -211,23 +262,20 @@ export function texts(
 ): Texts {
   const value = (name: string) => tokens[name] ?? '';
   const title =
-    trimSeparators(
-      plain(fill(effective.title ?? '', tokens), 255),
-      value('sep'),
-    ) ||
-    plain(value('title'), 255) ||
-    plain(value('site'), 255);
+    trimSeparators(cut(fill(effective.title ?? '', tokens), 255), value('sep')) ||
+    cut(value('title'), 255) ||
+    cut(value('site'), 255);
   const description =
-    plain(fill(effective.description ?? '', tokens), 1000) ||
-    plain(value('description'), 1000);
+    cut(fill(effective.description ?? '', tokens), 1000) ||
+    cut(value('description'), 1000);
   return {
     title,
     description,
     social_title:
-      plain(fill(effective.social?.title ?? '', tokens), 255) ||
-      plain(value('title'), 255),
+      cut(fill(effective.social?.title ?? '', tokens), 255) ||
+      cut(value('title'), 255),
     social_description:
-      plain(fill(effective.social?.description ?? '', tokens), 1000) ||
+      cut(fill(effective.social?.description ?? '', tokens), 1000) ||
       description,
   };
 }
@@ -343,13 +391,14 @@ function fitting(
   if (end > 0) {
     return text.slice(0, end);
   }
-  // Not even the first word fits: cut inside it.
-  const points = Array.from(text);
-  let count = points.length;
-  while (count > 0 && !fits(points.slice(0, count).join(''))) {
+  // Not even the first word fits: cut inside it, never inside a character
+  // drawn as one.
+  const clusters = Array.from(graphemes.segment(text), ({ segment }) => segment);
+  let count = clusters.length;
+  while (count > 0 && !fits(clusters.slice(0, count).join(''))) {
     count--;
   }
-  return points.slice(0, count).join('');
+  return clusters.slice(0, count).join('');
 }
 
 /**
@@ -1155,7 +1204,61 @@ export const sitePaths = (fields: Record<string, string>) =>
     ]),
   );
 
+/**
+ * What a preview's caption adds after its name, and its ⓘ text, from what is
+ * not published: the previewed node (template scope) or the target. One "not"
+ * at a time in the caption: the node's, else the template's.
+ */
+export function previewNote(note: {
+  template: boolean;
+  /** The target, a page or a template, is published (in use). */
+  published: boolean;
+  /** At template scope, the previewed node is published. */
+  node: boolean;
+  label: string;
+}): { suffix: string | null; unpublished: string; info: string } {
+  const type = inSentence(note.label);
+  const draftNode = note.template && !note.node;
+  const unpublished = draftNode
+    ? `This ${type} isn't published yet. Values that only editors can see are left out.${
+        note.published ? '' : ' The template is not in use yet.'
+      }`
+    : '';
+  const estimate =
+    'This preview is an estimate; search engines sometimes rewrite titles and descriptions.';
+  return {
+    suffix:
+      draftNode || !note.published
+        ? note.template && !draftNode
+          ? 'Template not in use yet'
+          : 'Not published yet'
+        : null,
+    unpublished,
+    info: draftNode
+      ? `${unpublished} ${estimate}`
+      : note.template
+        ? `${estimate} Switch the previewed ${type} with the preview picker in the top bar.`
+        : estimate,
+  };
+}
+
 // Footer and strips: what the shell says, as data.
+
+/** From this width most link previews show the image as a large card. */
+export const LARGE_CARD_WIDTH = 600;
+
+/** "1200 × 630", never broken across lines. */
+export const dimensions = (width: number, height: number) =>
+  `${width} × ${height}`;
+
+/**
+ * A change is on its way to the server, or its output is being read back:
+ * what the server resolved is about to change.
+ */
+export const catchingUp = (state: State) =>
+  state.save.target.phase === 'pending' ||
+  state.save.target.phase === 'saving' ||
+  state.save.site.phase === 'saving';
 
 export type FooterAction =
   'output' | 'undo' | 'goto' | 'retry' | 'discard' | 'save' | 'hide';
@@ -1247,7 +1350,11 @@ export function footer(state: State): Footer {
     return { dot: 'ok', text: 'Saved to draft', actions: [] };
   }
   if (state.readonly !== 'no') {
-    return { dot: 'gray', text: 'Read-only', actions: ['output'] };
+    return {
+      dot: 'gray',
+      text: 'Read-only',
+      actions: state.readonly === 'empty' ? [] : ['output'],
+    };
   }
   if (target.has_draft) {
     const name = (langcode: string) => server.languages[langcode] ?? langcode;

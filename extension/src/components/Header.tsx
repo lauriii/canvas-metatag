@@ -18,7 +18,7 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
-import type { Footer } from '../model';
+import { type Footer, inSentence } from '../model';
 import type { Scope } from '../types';
 import { summary } from './ChecksSheet';
 import { IconBtn } from './ui';
@@ -149,7 +149,9 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
               <small id={`${id}-target`}>
                 {page
                   ? target.label
-                  : `Previewing ${server.preview?.label ?? ''}`}
+                  : server.preview
+                    ? `Previewing ${server.preview.label}`
+                    : `No ${inSentence(target.label)} yet`}
               </small>
             </span>
           </DropdownMenu.RadioItem>
@@ -173,7 +175,11 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
               <small id={`${id}-site`}>
                 {state.siteDirty
                   ? 'Unsaved changes'
-                  : `${siteName} · every page, live when saved`}
+                  : (
+                    <>
+                      {siteName}{'\u00a0·'} <span>every page, live when saved</span>
+                    </>
+                  )}
               </small>
             </span>
           </DropdownMenu.RadioItem>
@@ -374,7 +380,7 @@ export function Header(props: {
       <ScopeMenu footer={props.footer} bar={props.bar} />
       <SaveStatus footer={props.footer} bar={props.bar} />
       {target && <TabList value={props.tab} />}
-      {target && !props.loading && <ChecksButton />}
+      {target && !props.loading && state.server?.preview && <ChecksButton />}
     </header>
   );
 }

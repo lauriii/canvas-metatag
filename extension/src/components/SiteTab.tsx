@@ -146,6 +146,7 @@ export function SiteView() {
           <input
             id={field.id}
             className="seo-input"
+            dir="auto"
             value={identity.name}
             placeholder={view?.tokens.site?.value}
             disabled={field.disabled}

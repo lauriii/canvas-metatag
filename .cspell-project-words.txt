@@ -16,11 +16,15 @@ noreferrer
 nosnippet
 nums
 pagehide
+pcre
 primaryimage
 radiogroup
+rels
 rescanned
 serp
+shakshuka
 tabpanel
+thaana
 tietoa
 tsup
 unrequested

@@ -97,14 +97,15 @@ once more when a write is denied by the route.
 
 #### Scenario: A state request that cannot be read
 
-- **WHEN** the state is asked for with a langcode but no page, with a template but no preview node, or with an entity type other than a page or a template
+- **WHEN** the state is asked for with a langcode but no page, with a langcode for a template, with a preview node but no template, or with an entity type other than a page or a template
 - **THEN** the system MUST answer 400 `bad_request`
 
 ### Requirement: Viewing needs view access
 
 The state of a page MUST require view access to the page translation. The state
-of a template MUST require view access to the template and to the node it is
-previewed with. Without view access the system MUST answer 403 `forbidden`.
+of a template MUST require view access to the template and, when it is
+previewed with a node, to that node. Without view access the system MUST answer
+403 `forbidden`.
 
 #### Scenario: An unpublished page
 
@@ -114,6 +115,11 @@ previewed with. Without view access the system MUST answer 403 `forbidden`.
 #### Scenario: A template without Canvas access
 
 - **WHEN** a user with `edit canvas metatag` and no access to Canvas asks for a template's state
+- **THEN** the system MUST answer 403 `forbidden`
+
+#### Scenario: A template without a node, without Canvas access
+
+- **WHEN** a user with `edit canvas metatag` and no access to Canvas asks for a template's state without a preview node
 - **THEN** the system MUST answer 403 `forbidden`
 
 ### Requirement: Only people with update access read drafts

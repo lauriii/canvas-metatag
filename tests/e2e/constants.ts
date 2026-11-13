@@ -63,6 +63,51 @@ export const NODES = {
 
 export const TEMPLATE_ID = 'node.article.full';
 
+/**
+ * The complex content fixture (project `complex`): CanvasMetatagTestSetup with
+ * CANVAS_METATAG_E2E_COMPLEX=1 adds it after the base site, and checks these
+ * ids against its COMPLEX_NODES. Titles and values are those of
+ * \Drupal\Tests\canvas_metatag\Fixture\ComplexContent.
+ */
+// cspell:ignore Ruisleipä שקשוקה مصباح مكتب عمر حداد
+export const COMPLEX = {
+  event: {
+    id: 11,
+    title: 'Midsummer Night Concert',
+    path: './complex/events/midsummer-night-concert',
+    venue: 'Lakeside Concert Hall',
+    status: 'On as planned',
+  },
+  /** Emoji in the title; its venue and first performer are unpublished. */
+  eventHidden: {
+    id: 12,
+    title: 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮',
+    path: './complex/events/strings-workshop',
+  },
+  /** The start of a title of 247 characters. */
+  eventLong: { id: 13, title: 'An unusually long evening programme of chamber music' },
+  /** Not published: visitors cannot see it. */
+  eventUnpublished: { id: 14, title: 'Autumn season opening (draft)' },
+  product: { id: 15, title: 'Oak desk lamp', path: './complex/products/oak-desk-lamp' },
+  /** Name and biography from right to left. */
+  personOmar: { id: 8, title: 'عمر حداد' },
+  /** Title and description from right to left. */
+  productRtl: { id: 16, title: 'مصباح مكتب' },
+  /** The Recipe template was never published. */
+  recipe: {
+    id: 19,
+    title: 'Ruisleipä (Finnish rye bread)',
+    path: './complex/recipes/rye-bread',
+    firstIngredient: '500 g rye flour',
+  },
+  /** A recipe written from right to left. */
+  recipeRtl: { id: 20, title: 'שקשוקה' },
+  /** The Announcement type has no content; its template stores this title. */
+  announcement: { title: '{Page title} {Separator} News' },
+  /** What the Event template's live and draft title patterns end with. */
+  ending: { live: 'Events', draft: 'Tickets' },
+} as const;
+
 const user = (username: string) => ({ username, password: username });
 export const USERS = {
   /** Edits Canvas pages and templates, with neither SEO permission. */
@@ -146,9 +191,14 @@ export const UI = {
     cannotSave: "SEO can't save to this page right now. Site settings still work.",
     offer: "An earlier change wasn't saved",
   },
+  template: {
+    nothingToPreview: 'No announcement yet. Add one to preview and edit these settings.',
+  },
   site: {
     heading: 'Site settings',
     hint: 'Open a page or a content template to edit its SEO.',
+    otherTemplate: 'SEO for a content type is set in its Full content template.',
+    noFullTemplate: 'This content type has no Full content template yet. Add one to set its SEO.',
     readOnly: 'Only people who administer SEO site settings can change these. You are viewing them.',
   },
   noAccess: {
@@ -156,6 +206,8 @@ export const UI = {
     text: "You don't have permission to edit SEO settings.",
   },
   output: {
+    // By the sheet's heading while a change is saved or read back.
+    updating: 'Updating…',
     headless:
       'What SEO sends to your frontend. Your frontend decides what reaches visitors. Includes changes that are still drafts.',
     // The ⓘ in the Output sheet's header carries it as its aria-description.
@@ -163,12 +215,14 @@ export const UI = {
   },
   checks: {
     noHeading: 'Add a main heading',
+    // Every Show is named for its field and described by its issue.
+    show: /^Show [a-z ]+$/,
     titleLong: /^Shorten the title/,
     imageSmall: 'Use a larger social image',
-    imageSmallDetail: /^The social image is \d+ [x×] \d+\./,
+    imageSmallDetail: /^The social image is \d+\u00a0×\u00a0\d+\./,
     siteTwice: 'Remove the repeated site name',
     removeRepeat: 'Remove the repeat',
-    goToTitle: 'Show title',
+    goToTitle: /^Show title$/,
     // The ⓘ in the Checks sheet's header carries it as its aria-description.
     closing:
       'These checks cover the settings in this dialog and the page preview. They do not check robots.txt, speed or rankings.',

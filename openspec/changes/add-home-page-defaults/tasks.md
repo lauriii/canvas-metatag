@@ -59,6 +59,8 @@ attached to the merge request.
 - [ ] 6.3 Make the home page sentences conditional on host root vs path and on a frontend origin; verify with `tests/e2e/page.spec.ts` cases using a `settings.php` public base with a path and a configured frontend, then check them in the browser on site-4 and attach screenshots.
 - [ ] 6.4 Add the read-only "Home page" row to Site (owned page, set by alias, listing, node, language without a home page) with actions gated on site configuration permission; verify with `tests/e2e/site.spec.ts` cases for each state and `tests/e2e/access.spec.ts` for a user who may administer SEO settings but not site configuration, then check it in the browser on site-4 and attach screenshots.
 
+- [ ] 6.5 When the public base comes from the request, Site settings tells administrators, once and in plain words, that each address visitors use (for example http and https) points at itself, and how to set one public address in the settings file; Output's "About addresses" keeps naming the source. Verify with Playwright `site.spec.ts` (shown with no public base set, absent with `canvas_metatag_public_base` set), then check it in the browser on site-4 and attach a screenshot. (Recorded by `harden-template-scope`.)
+
 ## 7. Integration
 
 - [ ] 7.1 Run the whole PHPUnit suite (kernel and unit), vitest and the Playwright suites touched above on site-4, one browser suite at a time; verify all pass and the extension build is current.

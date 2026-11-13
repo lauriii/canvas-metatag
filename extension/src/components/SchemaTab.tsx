@@ -15,6 +15,7 @@ import {
   chipsIn,
   dateText,
   fill,
+  inSentence,
   inherited,
   jsonStrings,
   plain,
@@ -513,8 +514,12 @@ export function SchemaTab() {
     }
   })();
   const lineId = `${typeField.id}-line`;
+  // Read-only without a type, there is nothing to choose and nothing to say.
+  const bare = typeField.disabled && !chosen && !typeField.message && !missing.length;
   const describedBy =
-    [typeField.aside && typeField.asideId, lineId].filter(Boolean).join(' ');
+    [typeField.aside && typeField.asideId, !bare && lineId]
+      .filter(Boolean)
+      .join(' ') || undefined;
 
   return (
     <>
@@ -552,7 +557,7 @@ export function SchemaTab() {
             <Select.Trigger
               id={typeField.id}
               className="seo-select-box"
-              placeholder="Choose a type"
+              placeholder={typeField.disabled ? 'None' : 'Choose a type'}
               aria-describedby={describedBy}
             >
               {type.label}
@@ -596,7 +601,7 @@ export function SchemaTab() {
               search.
             </span>
           </div>
-        ) : (
+        ) : bare ? null : (
           <Guide id={lineId}>
             {chosen
               ? type.hint
@@ -677,12 +682,19 @@ export function SchemaTab() {
         <NavRow
           label="Custom JSON-LD"
           value={stored.custom ? `${customType}In use` : 'Off'}
-          onClick={() => openSheet({ kind: 'custom' })}
+          // Read-only and empty, the sheet would hold an empty box only.
+          onClick={
+            stored.custom || state.readonly === 'no'
+              ? () => openSheet({ kind: 'custom' })
+              : undefined
+          }
         />
-        <NavRow
-          label="View output"
-          onClick={() => openSheet({ kind: 'output', section: 'schema' })}
-        />
+        {server.preview && (
+          <NavRow
+            label="View output"
+            onClick={() => openSheet({ kind: 'output', section: 'schema' })}
+          />
+        )}
       </List>
     </>
   );
@@ -708,10 +720,15 @@ export function CustomJson() {
   );
   const area = useRef<HTMLTextAreaElement>(null);
   useEffect(() => area.current?.focus(), []);
+  const target = state.server?.target;
   return (
     <>
       <p className="seo-sheet-intro">
-        Added to this page's structured data. Values in braces are filled in.
+        Added to{' '}
+        {target?.scope === 'template'
+          ? `every ${inSentence(target.label)}'s`
+          : "this page's"}{' '}
+        structured data. Values in braces are filled in.
       </p>
       <div className="seo-json-wrap">
         <Field

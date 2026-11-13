@@ -401,7 +401,7 @@ export function Field(
   },
 ) {
   const field = useField(props);
-  const { stageVisible } = useApp();
+  const { stageVisible, state } = useApp();
   const issue = useIssue(props.scope, props.path);
   const { meter } = props;
   const guideId = `${field.id}-guide`;
@@ -454,12 +454,18 @@ export function Field(
   } else if (
     field.focused &&
     props.resolved !== undefined &&
+    // Without a node to preview, no value has a result.
+    state.server?.preview &&
     (props.noStage || !stageVisible)
   ) {
     guide = (
       <Guide id={guideId} count={count}>
         →{' '}
-        <span className="seo-guide-resolved" title={props.resolved}>
+        <span
+          className="seo-guide-resolved"
+          title={props.resolved}
+          dir="auto"
+        >
           {props.resolved}
         </span>
       </Guide>

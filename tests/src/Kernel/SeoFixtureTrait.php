@@ -22,8 +22,10 @@ use Drupal\Tests\media\Traits\MediaTypeCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
 use Drupal\user\UserInterface;
+use Masterminds\HTML5;
 use Symfony\Component\DependencyInjection\Definition;
 use Symfony\Component\DependencyInjection\Reference;
+use Symfony\Component\HttpFoundation\Response;
 
 /**
  * The site the resolver, adapter and API tests share.
@@ -117,7 +119,7 @@ trait SeoFixtureTrait {
    * after the entity or the role it came from was saved.
    */
   protected function forgetAccess(): void {
-    foreach (['media', 'file', 'taxonomy_term'] as $entity_type_id) {
+    foreach (['node', 'media', 'file', 'taxonomy_term'] as $entity_type_id) {
       if ($this->container->get('entity_type.manager')->hasDefinition($entity_type_id)) {
         $this->container->get('entity_type.manager')->getAccessControlHandler($entity_type_id)->resetCache();
       }
@@ -177,7 +179,8 @@ trait SeoFixtureTrait {
     $file = $item?->get('entity')->getValue();
     \assert($file instanceof File);
     $generator = $this->container->get('file_url_generator');
-    $styles = $this->container->get('entity_type.manager')->getStorage('image_style')->loadMultiple(['medium', 'thumbnail']);
+    $styles = $this->container->get('entity_type.manager')->getStorage('image_style')
+      ->loadMultiple(['medium', 'thumbnail']);
     $style = $styles['medium'] ?? $styles['thumbnail'];
     return [
       'url' => $generator->generateAbsoluteString($file->getFileUri()),
@@ -269,6 +272,55 @@ trait SeoFixtureTrait {
       $nodes[substr((string) strrchr($node['@id'] ?? '#', '#'), 1)] = $node;
     }
     return $nodes;
+  }
+
+  /**
+   * Reads the head of an HTML response the way a browser parses it.
+   *
+   * @return array{titles: list<string>, meta: list<array<string, string>>, links: list<array<string, string>>, json_ld: list<array>, injected: int}
+   *   The text of every title; the search and social meta elements and the
+   *   canonical, shortlink and alternate links with their attributes, in
+   *   document order; every JSON-LD script, decoded; and the number of
+   *   elements that only an escaped text could have created.
+   */
+  protected static function readHead(Response $response): array {
+    $document = (new HTML5())->loadHTML((string) $response->getContent());
+    $head = $document->getElementsByTagName('head')->item(0);
+    self::assertNotNull($head);
+    $attributes = static function (\DOMElement $element): array {
+      $map = [];
+      foreach ($element->attributes as $attribute) {
+        $map[$attribute->nodeName] = $attribute->nodeValue;
+      }
+      return $map;
+    };
+    $parsed = ['titles' => [], 'meta' => [], 'links' => [], 'json_ld' => [], 'injected' => 0];
+    foreach ($head->getElementsByTagName('title') as $title) {
+      $parsed['titles'][] = $title->textContent;
+    }
+    foreach ($head->getElementsByTagName('meta') as $meta) {
+      $name = $meta->getAttribute('name');
+      if ($meta->hasAttribute('property') || in_array($name, ['description', 'robots', 'keywords'], TRUE) || str_starts_with($name, 'twitter:')) {
+        $parsed['meta'][] = $attributes($meta);
+      }
+    }
+    foreach ($head->getElementsByTagName('link') as $link) {
+      if (in_array($link->getAttribute('rel'), ['canonical', 'shortlink', 'alternate'], TRUE)) {
+        $parsed['links'][] = $attributes($link);
+      }
+    }
+    // Markup in a text of ours would show as a <b> element or as a script
+    // that is not JSON-LD.
+    $parsed['injected'] = $document->getElementsByTagName('b')->length;
+    foreach ($document->getElementsByTagName('script') as $script) {
+      if ($script->getAttribute('type') === 'application/ld+json') {
+        $parsed['json_ld'][] = json_decode($script->textContent, TRUE, 64, JSON_THROW_ON_ERROR);
+      }
+      elseif (str_contains($script->textContent, 'alert(1)')) {
+        $parsed['injected']++;
+      }
+    }
+    return $parsed;
   }
 
 }

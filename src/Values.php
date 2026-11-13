@@ -208,11 +208,34 @@ final class Values {
    * Output normalization.
    *
    * Control and bidi characters removed, whitespace runs collapsed to one
-   * space, trimmed, then cut to $max code points.
+   * space, trimmed, then cut to $max code points, never inside a character
+   * drawn as one (an emoji sequence, a flag, a letter with its marks).
    */
   public static function plain(string $text, int $max): string {
-    $text = (string) preg_replace('/[ \t\n\r]+/', ' ', self::strip($text));
-    return mb_substr(trim($text, ' '), 0, $max);
+    $text = trim((string) preg_replace('/[ \t\n\r]+/', ' ', self::strip($text)), ' ');
+    return self::whole($text, mb_substr($text, 0, $max));
+  }
+
+  /**
+   * A cut of a text that never ends inside a character drawn as one.
+   *
+   * @param string $full
+   *   The text.
+   * @param string $cut
+   *   A start of it.
+   *
+   * @return string
+   *   The cut, without the grapheme cluster that holds the first code point
+   *   past it, when the cut splits that cluster.
+   */
+  public static function whole(string $full, string $cut): string {
+    $length = mb_strlen($cut);
+    if ($length >= mb_strlen($full)) {
+      return $cut;
+    }
+    preg_match_all('/\X/u', mb_substr($full, 0, $length + 1), $clusters);
+    array_pop($clusters[0]);
+    return implode('', $clusters[0]);
   }
 
   /**
@@ -227,8 +250,8 @@ final class Values {
    *   Plain text; the consumer escapes it.
    */
   public static function texts(array $effective, array $tokens): array {
-    $filled = static fn (mixed $template, int $max): string => self::plain(self::fill(is_string($template) ? $template : '', $tokens), $max);
-    $token = static fn (string $name, int $max): string => self::plain((string) ($tokens[$name] ?? ''), $max);
+    $filled = static fn (mixed $template, int $max): string => self::cut(self::fill(is_string($template) ? $template : '', $tokens), $max);
+    $token = static fn (string $name, int $max): string => self::cut((string) ($tokens[$name] ?? ''), $max);
 
     $title = self::trimSeparators($filled($effective['title'] ?? '', 255), (string) ($tokens['sep'] ?? ''));
     $title = $title !== '' ? $title : $token('title', 255);
@@ -246,6 +269,22 @@ final class Values {
       'social_title' => $social_title !== '' ? $social_title : $token('title', 255),
       'social_description' => $social_description !== '' ? $social_description : $description,
     ];
+  }
+
+  /**
+   * A head text: plain(), ending at a word when one ends near the limit.
+   *
+   * A cut inside a word backs up to the last space when that space is within
+   * the last tenth of the limit; otherwise the plain() cut stands.
+   */
+  private static function cut(string $text, int $max): string {
+    $full = self::plain($text, PHP_INT_MAX);
+    $cut = self::plain($full, $max);
+    if ($cut === $full || str_ends_with($cut, ' ') || ($full[strlen($cut)] ?? '') === ' ') {
+      return rtrim($cut, ' ');
+    }
+    $space = mb_strrpos($cut, ' ');
+    return $space !== FALSE && $space >= $max - intdiv($max, 10) ? mb_substr($cut, 0, $space) : $cut;
   }
 
   /**

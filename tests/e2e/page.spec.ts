@@ -197,7 +197,14 @@ test('Checks lists what is wrong, leads to the field and fixes what is certain',
   await expect(panel).not.toContainText(/score|\d\s?%|\/\s?100/i);
 
   // "Show" closes the sheet, opens the tab and puts the caret in the field.
-  await button(frame, UI.checks.goToTitle).first().click();
+  // Two rows lead to the title: their Shows share a name, not a description.
+  expect(await button(frame, UI.checks.goToTitle).count()).toBeGreaterThan(1);
+  const showTitle = panel
+    .getByRole('listitem')
+    .filter({ hasText: UI.checks.titleLong })
+    .getByRole('button', { name: UI.checks.goToTitle, exact: true });
+  await expect(showTitle).toHaveAccessibleDescription(UI.checks.titleLong);
+  await showTitle.click();
   await expect(panel).toHaveCount(0);
   await expect(tab(frame, UI.tab.search)).toHaveAttribute('aria-selected', 'true');
   await expect(textbox(frame, UI.field.title)).toBeFocused();
@@ -313,8 +320,10 @@ test('publishing puts the override into the page head, once, and Output shows th
   expect(head.jsonLd).toHaveLength(1);
   expect(graphNode(head.jsonLd[0], '#webpage')).toMatchObject({ '@type': 'WebPage', url: canonical });
 
-  // The dialog's Output is that head.
+  // The dialog's Output is that head. Nothing is pending: no marker.
   await button(frame, UI.action.output).click();
+  await expect(sheet(frame, 'Output').getByText(UI.output.updating)).toHaveCount(0);
+  await expect(frame.getByTestId(TEST_ID.output)).not.toHaveAttribute('aria-busy');
   expect(await outputRows(frame)).toMatchObject({
     title: head.titles[0],
     description: pricing.description,
@@ -325,4 +334,41 @@ test('publishing puts the override into the page head, once, and Output shows th
     'og:image': head.meta['og:image'][0],
     'twitter:card': 'summary_large_image',
   });
+
+  // Opened right after an edit, Output says it is catching up, then shows
+  // the new title. The write is held back so that the words get to show:
+  // they come only after 400 ms, so that a quick save stays quiet, into a
+  // status region that was there, empty, before them, so that they are
+  // announced.
+  await button(frame, UI.action.back).click();
+  await page.route('**/canvas-metatag/api/draft/**', async (route) => {
+    await new Promise((done) => setTimeout(done, 1500));
+    await route.continue();
+  });
+  await textbox(frame, UI.field.title).fill('Plans and prices {Separator} {Site name}');
+  await frame.locator('body').evaluate((body, words) => {
+    const seen: { region?: number; words?: number } = {};
+    Object.assign(window, { seen });
+    new MutationObserver(() => {
+      const region = body.querySelector('[role="status"].seo-updating-live');
+      if (region) {
+        seen.region ??= performance.now();
+        if (region.textContent?.includes(words)) {
+          seen.words ??= performance.now();
+        }
+      }
+    }).observe(body, { childList: true, subtree: true, characterData: true });
+  }, UI.output.updating);
+  await button(frame, UI.action.output).click();
+  const output = sheet(frame, 'Output');
+  const rows = frame.getByTestId(TEST_ID.output);
+  await expect(output.getByRole('status').filter({ hasText: UI.output.updating })).toBeVisible();
+  const seen = await frame.locator('body').evaluate(() => (window as unknown as { seen: { region: number; words: number } }).seen);
+  // The timer starts with the region; the observer notes it a moment later.
+  expect(seen.words - seen.region).toBeGreaterThanOrEqual(350);
+  await expect(rows).toHaveAttribute('aria-busy', 'true');
+  await expect(output.getByText(UI.output.updating)).toHaveCount(0, { timeout: 30_000 });
+  await expect(rows).not.toHaveAttribute('aria-busy');
+  expect((await outputRows(frame)).title).toBe('Plans and prices | Example');
+  await page.unrouteAll();
 });

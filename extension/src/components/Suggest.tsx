@@ -378,6 +378,7 @@ export function TextSuggest(props: {
         <div className="seo-tray-refine">
           <input
             className="seo-input"
+            dir="auto"
             aria-label="Refine"
             placeholder="Shorter, mention the free pilot…"
             maxLength={200}

@@ -56,7 +56,7 @@ version), the page is served with core's head and the error is logged under
 | Scope | Where you edit it | Saved | Goes live |
 |---|---|---|---|
 | **This page** | The editor of a Canvas page | Automatically, into the page's Canvas draft | When the page is published in Canvas |
-| **Every \<Type\>**, for example "Every Article" | The editor of the content type's Full content template, with a page to preview | Automatically, into the template's Canvas draft | When the template is published in Canvas |
+| **Every \<Type\>**, for example "Every Article" | The editor of the content type's Full content template, previewing one of its items | Automatically, into the template's Canvas draft | When the template is published in Canvas |
 | **Site** | Anywhere in Canvas | With "Save for whole site" | Immediately |
 
 A page setting wins over the site's, and a content type's setting wins over the
@@ -73,6 +73,11 @@ a template, the content type's own fields. `{author}` publishes the display
 name of the content's author, which is the account's login name unless
 something changes it. To publish another name, install a module that changes
 display names, or bind "Author name" to a byline field in the template.
+
+Where a value is "the first" field of a kind (the description of a content
+item is its first formatted text with a summary, its page image the first
+image that resolves), first means the order of the content type's form. Fields
+not on the form come last.
 
 ## Permissions
 
@@ -199,6 +204,11 @@ marked `UPSTREAM(canvas)`; ARCHITECTURE.md lists every ask:
 - A configuration import that changes a template's SEO setting discards that
   template's unpublished Canvas draft on the target site, as Canvas does for
   any other change to a template.
+- When updating from an earlier version: a content type whose form shows
+  its fields in another order than their machine names may now take another
+  field for its description or page image (see "The three scopes"). The
+  dialog's previews show it before anything is published, and cached pages
+  are refreshed when the form changes.
 - To keep a staging site out of search engines, override the site setting in
   its `settings.php`. The dialog shows such pages as hidden and says the
   setting comes from outside:
@@ -237,6 +247,8 @@ locked while someone edits them: the last save wins.
   dialog's fields show the stored setting while its previews and the output
   use the override.
 - Changing `canvas_metatag_public_base` takes a cache rebuild.
+- A content type with no content yet shows its SEO settings read-only: Canvas
+  keeps no draft for its template until there is an item to preview.
 - Tested in Chromium on a single-language site. Translations are covered by
   kernel tests; a multilingual site, screen readers, Firefox and Safari were
   not tested in a browser.

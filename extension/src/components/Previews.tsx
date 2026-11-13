@@ -2,7 +2,13 @@ import { CodeIcon, ImageIcon } from '@radix-ui/react-icons';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import { breadcrumb, previewText, socialImage } from '../model';
+import {
+  LARGE_CARD_WIDTH,
+  breadcrumb,
+  previewNote,
+  previewText,
+  socialImage,
+} from '../model';
 import { PICKED } from './MediaPicker';
 import { IconBtn, InfoTip, Sk, SparkleIcon } from './ui';
 
@@ -164,6 +170,12 @@ export function SearchPreview() {
     1000,
   );
   const template = target.scope === 'template';
+  const note = previewNote({
+    template,
+    published: target.published,
+    node: server.preview?.published !== false,
+    label: target.label,
+  });
   const on = (path: 'title' | 'description') =>
     focusField === path ||
     (trial !== null && trial[path] !== view.texts[path]) ||
@@ -180,16 +192,12 @@ export function SearchPreview() {
           <>
             {template ? (
               <>
-                Previewing <em>{server.preview?.label ?? ''}</em>
+                Previewing <em dir="auto">{server.preview?.label ?? ''}</em>
               </>
             ) : (
               <span>Search result</span>
             )}
-            {!target.published && (
-              <span>
-                · {template ? 'Template not in use yet' : 'Not published yet'}
-              </span>
-            )}
+            {note.suffix && <span>· {note.suffix}</span>}
             {view.hidden && <span>· Hidden from search</span>}
           </>
         )
@@ -197,14 +205,7 @@ export function SearchPreview() {
       buttons={
         <>
           <OutputButton />
-          <InfoTip
-            label="About this preview"
-            text={`An estimate. Search engines sometimes rewrite titles and descriptions.${
-              template
-                ? ` Switch the previewed ${target.label} with the preview picker in the top bar.`
-                : ''
-            }`}
-          />
+          <InfoTip label="About this preview" text={note.info} />
         </>
       }
     >
@@ -218,11 +219,15 @@ export function SearchPreview() {
         <div className="seo-result-site">
           <Favicon site={site} />
           <div>
-            <div className="seo-result-name">{site}</div>
-            <div className="seo-result-address">{crumbs}</div>
+            <div className="seo-result-name" dir="auto">
+              {site}
+            </div>
+            <div className="seo-result-address" dir="auto">
+              {crumbs}
+            </div>
           </div>
         </div>
-        <div className="seo-result-title">
+        <div className="seo-result-title" dir="auto">
           <span
             className="seo-part"
             data-on={on('title')}
@@ -231,7 +236,11 @@ export function SearchPreview() {
             {title}
           </span>
         </div>
-        <div className="seo-result-text" data-muted={muted || undefined}>
+        <div
+          className="seo-result-text"
+          dir="auto"
+          data-muted={muted || undefined}
+        >
           <span
             className="seo-part"
             data-on={on('description')}
@@ -293,10 +302,21 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
   const { state, trial, focusField, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
+  const target = server.target;
+  // At template scope, a node visitors cannot see yet.
+  const unpublished =
+    target?.scope === 'template' && server.preview?.published === false
+      ? previewNote({
+          template: true,
+          published: target.published,
+          node: false,
+          label: target.label,
+        }).unpublished
+      : '';
   const [broken, setBroken] = useState<string | null>(null);
   const texts = { ...view.texts, ...trial };
   const { image } = socialImage(state, view, PICKED);
-  const large = image !== null && image.width >= 600;
+  const large = image !== null && image.width >= LARGE_CARD_WIDTH;
   // The image on screen changes only once the next one has loaded, and
   // a large card waits for the file itself rather than show its thumbnail.
   const [front, setFront] = useState<{ src: string; prev?: string } | null>(
@@ -342,9 +362,12 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
             {!large && (
               <span>
                 ·{' '}
-                {image ? 'Small card: image under 600 px wide' : 'Small card: no image'}
+                {image
+                  ? `Small card: image under ${LARGE_CARD_WIDTH} px wide`
+                  : 'Small card: no image'}
               </span>
             )}
+            {unpublished && <span>· Not published yet</span>}
           </>
         )
       }
@@ -352,6 +375,9 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
         <>
           {props.suggest}
           <OutputButton />
+          {unpublished && (
+            <InfoTip label="About this preview" text={unpublished} />
+          )}
         </>
       }
     >
@@ -388,8 +414,10 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
           )}
         </div>
         <div className="seo-social-text">
-          <span className="seo-social-host">{host}</span>
-          <span className="seo-social-title">
+          <span className="seo-social-host" dir="auto">
+            {host}
+          </span>
+          <span className="seo-social-title" dir="auto">
             <span
               className="seo-part"
               data-on={on('social.title', 'social_title')}
@@ -398,7 +426,7 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
               {texts.social_title}
             </span>
           </span>
-          <span className="seo-social-description">
+          <span className="seo-social-description" dir="auto">
             <span
               className="seo-part"
               data-on={on('social.description', 'social_description')}

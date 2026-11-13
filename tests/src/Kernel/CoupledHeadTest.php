@@ -21,7 +21,6 @@ use Drupal\Tests\canvas\Traits\GenerateComponentConfigTrait;
 use Drupal\Tests\content_translation\Traits\ContentTranslationTestTrait;
 use Drupal\user\Entity\Role;
 use Drupal\views\Entity\View;
-use Masterminds\HTML5;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -308,6 +307,34 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
     Node::load($node->id())?->set('field_byline', 'Ada Lovelace')->save();
     self::assertSame(['Ada Lovelace: Hello'], self::readHead($this->get($path))['titles']);
 
+    // The form's order decides which image is the page image: moving a
+    // field on the form invalidates the page.
+    $this->createField('field_photo', 'entity_reference', 'Photo', ['target_type' => 'media'], [
+      'handler' => 'default:media',
+      'handler_settings' => ['target_bundles' => ['image' => 'image']],
+    ]);
+    $photo = $this->createImage('Article photo', ['alt' => 'A portrait']);
+    // Loaded again: the cached article predates the field.
+    $this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id())
+      ?->set('field_photo', $photo->id())->save();
+    self::assertSame($this->imageOf($hero)['url'], self::meta(self::readHead($this->get($path)))['og:image']);
+    self::assertSame('HIT', $this->get($path)->headers->get('X-Drupal-Cache'));
+    $this->container->get('entity_display.repository')->getFormDisplay('node', 'article')
+      ->setComponent('field_photo', ['weight' => 1])
+      ->setComponent('field_hero', ['weight' => 2])
+      ->save();
+    $response = $this->get($path);
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame($this->imageOf($photo)['url'], self::meta(self::readHead($response))['og:image']);
+    // Moving the field on the existing form invalidates it again.
+    self::assertSame('HIT', $this->get($path)->headers->get('X-Drupal-Cache'));
+    $this->container->get('entity_display.repository')->getFormDisplay('node', 'article')
+      ->setComponent('field_photo', ['weight' => 3])
+      ->save();
+    $response = $this->get($path);
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame($this->imageOf($hero)['url'], self::meta(self::readHead($response))['og:image']);
+
     // A node without a template and a Views route that lists the article:
     // what they answer with the module is what they answer without it.
     // Without the author line, whose "Member for" changes while the test
@@ -399,55 +426,6 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
     $response = $this->request(Request::create($path));
     self::assertSame(Response::HTTP_OK, $response->getStatusCode(), $path);
     return $response;
-  }
-
-  /**
-   * Reads the head of an HTML response the way a browser parses it.
-   *
-   * @return array{titles: list<string>, meta: list<array<string, string>>, links: list<array<string, string>>, json_ld: list<array>, injected: int}
-   *   The text of every title; the search and social meta elements and the
-   *   canonical, shortlink and alternate links with their attributes, in
-   *   document order; every JSON-LD script, decoded; and the number of
-   *   elements that only an escaped text could have created.
-   */
-  private static function readHead(Response $response): array {
-    $document = (new HTML5())->loadHTML((string) $response->getContent());
-    $head = $document->getElementsByTagName('head')->item(0);
-    self::assertNotNull($head);
-    $attributes = static function (\DOMElement $element): array {
-      $map = [];
-      foreach ($element->attributes as $attribute) {
-        $map[$attribute->nodeName] = $attribute->nodeValue;
-      }
-      return $map;
-    };
-    $parsed = ['titles' => [], 'meta' => [], 'links' => [], 'json_ld' => [], 'injected' => 0];
-    foreach ($head->getElementsByTagName('title') as $title) {
-      $parsed['titles'][] = $title->textContent;
-    }
-    foreach ($head->getElementsByTagName('meta') as $meta) {
-      $name = $meta->getAttribute('name');
-      if ($meta->hasAttribute('property') || in_array($name, ['description', 'robots', 'keywords'], TRUE) || str_starts_with($name, 'twitter:')) {
-        $parsed['meta'][] = $attributes($meta);
-      }
-    }
-    foreach ($head->getElementsByTagName('link') as $link) {
-      if (in_array($link->getAttribute('rel'), ['canonical', 'shortlink', 'alternate'], TRUE)) {
-        $parsed['links'][] = $attributes($link);
-      }
-    }
-    // Markup in a text of ours would show as a <b> element or as a script
-    // that is not JSON-LD.
-    $parsed['injected'] = $document->getElementsByTagName('b')->length;
-    foreach ($document->getElementsByTagName('script') as $script) {
-      if ($script->getAttribute('type') === 'application/ld+json') {
-        $parsed['json_ld'][] = json_decode($script->textContent, TRUE, 64, JSON_THROW_ON_ERROR);
-      }
-      elseif (str_contains($script->textContent, 'alert(1)')) {
-        $parsed['injected']++;
-      }
-    }
-    return $parsed;
   }
 
 }

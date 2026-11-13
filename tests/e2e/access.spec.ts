@@ -196,6 +196,28 @@ test('the three tabs and the Checks sheet work by keyboard, pass an accessibilit
     });
   });
 
+  await test.step('every Show on the Checks sheet is named for its field and described by its issue', async () => {
+    await checks.click();
+    const shows = await sheet(frame, 'Checks')
+      .getByRole('button', { name: /^Show\b/ })
+      .evaluateAll((buttons) =>
+        buttons.map((one) => ({
+          name: one.getAttribute('aria-label') ?? '',
+          issue: one.ownerDocument.getElementById(one.getAttribute('aria-describedby') ?? '')?.textContent ?? '',
+        })),
+      );
+    expect(shows.length).toBeGreaterThan(1);
+    for (const { name, issue } of shows) {
+      expect(name).toMatch(UI.checks.show);
+      expect(issue).not.toBe('');
+    }
+    // Two Shows that lead to one field differ in their issue.
+    const told = shows.map(({ name, issue }) => `${name} / ${issue}`);
+    expect(new Set(told).size).toBe(told.length);
+    await button(frame, UI.action.back).click();
+    await expect(sheet(frame, 'Checks')).toHaveCount(0);
+  });
+
   await test.step('at 200% zoom nothing scrolls sideways', async () => {
     // The frame keeps its size when the browser zooms, so zooming to 200%
     // gives the dialog half the width to lay its content out in.
@@ -216,3 +238,47 @@ test('the three tabs and the Checks sheet work by keyboard, pass an accessibilit
     });
   });
 });
+
+// Opened in a window of that height, or opened at 900 px and the window
+// made short: the dialog then moves up to where Canvas opens it.
+for (const [height, opened] of [
+  [350, 350],
+  [420, 420],
+  [350, 900],
+]) {
+  test(`in a window 1440 x ${height} (opened at ${opened}) the frame fits and the title is reached by keyboard`, async ({
+    drupal,
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: opened });
+    await drupal.login(USERS.editor);
+    await openPage(page, pricing.id);
+    const frame = await openSeo(page);
+    const title = textbox(frame, UI.field.title);
+    await expect(title).toBeEnabled();
+    await page.setViewportSize({ width: 1440, height });
+    const iframe = page.locator(SEO_IFRAME);
+    await expect.poll(async () => (await iframe.boundingBox())!.y).toBeLessThanOrEqual(height * 0.2 + 60);
+    const box = await iframe.boundingBox();
+    expect(box!.y + box!.height).toBeLessThanOrEqual(height);
+    // Canvas alone would leave the frame 300 px less than the window; the
+    // view below the dialog's header keeps room for a field and its label.
+    expect(box!.height).toBeGreaterThan(height - 300);
+    expect((await frame.locator('.seo-frame > .seo-body').boundingBox())!.height).toBeGreaterThanOrEqual(150);
+
+    await tab(frame, UI.tab.search).focus();
+    for (let presses = 0; presses < 12; presses++) {
+      if (await title.evaluate((element) => element === document.activeElement)) {
+        break;
+      }
+      await page.keyboard.press('Tab');
+    }
+    await expect(title).toBeFocused();
+    // The field and its label are both whole in view, not under the header.
+    await expect(title).toBeInViewport({ ratio: 1 });
+    await expect(frame.locator('label', { hasText: /^Title$/ }).first()).toBeInViewport({ ratio: 1 });
+    // Without scrolling the editor's own page.
+    expect(await page.evaluate(() => [scrollY, document.scrollingElement?.scrollTop ?? 0])).toEqual([0, 0]);
+    await page.screenshot({ path: test.info().outputPath(`dialog-1440x${height}-from-${opened}.png`) });
+  });
+}

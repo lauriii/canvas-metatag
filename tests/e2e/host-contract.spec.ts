@@ -138,6 +138,47 @@ test('the dialog frame is named, sized, and follows the editor until a side-menu
   expect((await iframe.boundingBox())?.width).toBeCloseTo(468, 0);
   await expect(frame.getByTestId(TEST_ID.search)).toContainText(PAGES.pricing.title);
 
+  // The frame sits in the dialog's scroll container; Canvas sizes both to
+  // the window less 300 px, and host.fitFrame() grows both to the space
+  // below the dialog's heading.
+  const sizes = () =>
+    iframe.evaluate((element) => {
+      const panel = element.closest('[role="dialog"]');
+      let box = element.parentElement;
+      while (box && box !== panel && !/auto|scroll/.test(getComputedStyle(box).overflowY)) {
+        box = box.parentElement;
+      }
+      const rect = element.getBoundingClientRect();
+      const dialog = panel?.getBoundingClientRect();
+      return {
+        contained: !!panel && !!box && box !== panel,
+        height: rect.height,
+        bottom: rect.bottom,
+        box: box ? parseFloat(getComputedStyle(box).maxHeight) : NaN,
+        panelTop: dialog?.top ?? NaN,
+        panelBottom: dialog?.bottom ?? NaN,
+      };
+    });
+  let size = await sizes();
+  expect(size.contained).toBe(true);
+  expect(size.height).toBeGreaterThanOrEqual(1000 - 300);
+  expect(size.box).toBeCloseTo(size.height, 0);
+  // Opened at 1000 px tall, then the window gets short: the dialog moves up
+  // to where Canvas opens it in a 420 px window, a fifth from the top.
+  await page.setViewportSize({ width: 1440, height: 420 });
+  await expect.poll(async () => (await sizes()).bottom).toBeLessThanOrEqual(420);
+  size = await sizes();
+  expect(size.panelTop).toBeLessThanOrEqual(420 * 0.2 + 1);
+  expect(size.height).toBeGreaterThan(420 - 300);
+  expect(size.box).toBeCloseTo(size.height, 0);
+  // A tall window: the frame ends inside the window and inside the dialog,
+  // and is never shorter than Canvas makes it.
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await expect.poll(async () => (await sizes()).height).toBeGreaterThanOrEqual(1000 - 300);
+  size = await sizes();
+  expect(size.bottom).toBeLessThanOrEqual(1000);
+  expect(size.bottom).toBeLessThanOrEqual(size.panelBottom);
+
   // The bridge tells the frame when the preview was rendered again.
   const message = frame.locator('body').evaluate(
     () =>

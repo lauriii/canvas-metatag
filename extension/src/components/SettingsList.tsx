@@ -15,14 +15,21 @@ export const List = (props: { children: ReactNode }) => (
   <div className="seo-list">{props.children}</div>
 );
 
-/** A setting in a row: its label (and a second line), its aside, its control. */
+/**
+ * A setting in a row: its label (and a second line), its aside, its control.
+ * Read-only, the control gives way to its value in words, where the values
+ * of the other rows are.
+ */
 export function Row(
   props: FieldOptions & {
     second?: ReactNode;
+    /** The value in words, shown instead of the control when read-only. */
+    value: string;
     control(field: FieldParts & { describedBy?: string }): ReactNode;
   },
 ) {
   const field = useField(props);
+  const still = field.disabled;
   const errorId = `${field.id}-error`;
   const describedBy =
     [field.aside && field.asideId, field.message && errorId]
@@ -34,13 +41,18 @@ export function Row(
       ref={field.ref}
       data-path={props.path}
       data-disabled={field.disabled || undefined}
+      data-static={still ? '' : undefined}
       onFocus={field.onFocus}
       onBlur={field.onBlur}
     >
       <div className="seo-row-label">
         {/* The aside sits on the label's line: the control never wraps for it. */}
         <span className="seo-row-head">
-          <label htmlFor={field.id} id={field.labelId} tabIndex={-1}>
+          <label
+            htmlFor={still ? undefined : field.id}
+            id={field.labelId}
+            tabIndex={-1}
+          >
             {props.label}
           </label>
           <span
@@ -54,7 +66,13 @@ export function Row(
         {props.second && <small>{props.second}</small>}
       </div>
       <div className="seo-row-end">
-        {props.control({ ...field, describedBy })}
+        {still ? (
+          <span className="seo-row-value">
+            <span>{props.value}</span>
+          </span>
+        ) : (
+          props.control({ ...field, describedBy })
+        )}
       </div>
       {field.message && (
         <Guide id={errorId} tone="error" role="alert">
@@ -114,12 +132,22 @@ export function Disclosure(props: {
   );
 }
 
-/** A row that opens a sheet. */
+/** A row that opens a sheet; without `onClick`, its label and value only. */
 export function NavRow(props: {
   label: string;
   value?: string;
-  onClick(): void;
+  onClick?(): void;
 }) {
+  if (!props.onClick) {
+    return (
+      <div className="seo-row" data-static="">
+        <span className="seo-row-label">{props.label}</span>
+        <span className="seo-row-value">
+          {props.value && <span>{props.value}</span>}
+        </span>
+      </div>
+    );
+  }
   return (
     <button
       type="button"

@@ -16,12 +16,14 @@ import {
   chipsIn,
   dateText,
   diff,
+  dirOf,
   displayLabels,
   draftPayload,
   fieldNames,
   fill,
   footer,
   getPath,
+  inSentence,
   inherited,
   initialState,
   insertChip,
@@ -32,6 +34,7 @@ import {
   openPending,
   pendingFor,
   plain,
+  previewNote,
   previewText,
   prune,
   readPending,
@@ -111,6 +114,7 @@ const payload = (over: Partial<StatePayload> = {}): StatePayload => ({
     id: '8',
     label: 'Pricing',
     url: 'https://www.example.com/pricing',
+    published: true,
   },
   tokens: {
     title: { label: 'Page title', type: 'text', value: 'Pricing' },
@@ -414,6 +418,59 @@ describe('measure, truncate and the meter', () => {
     expect(truncate('one two three', 100, 'f', fake)).toBe('one two…');
     expect(truncate('abcdefghijkl', 50, 'f', fake)).toBe('abcd…');
     expect(truncate('one two three', 100, 'f', null)).toBe('one two three');
+  });
+
+  it('dirOf() finds the direction dir="auto" gives', () => {
+    // cspell:ignore مرحبا שלום
+    expect(dirOf('مرحبا')).toBe('rtl');
+    // Digits and punctuation are skipped, as dir="auto" skips them.
+    expect(dirOf('2026: שלום')).toBe('rtl');
+    expect(dirOf('\u{1E900}')).toBe('rtl');
+    expect(dirOf('Hello مرحبا')).toBe('ltr');
+    expect(dirOf('')).toBe('ltr');
+  });
+
+  it('previewNote(): one "not" in the caption, both in the ⓘ', () => {
+    const note = (template: boolean, published: boolean, node = true) =>
+      previewNote({ template, published, node, label: 'Event' });
+    const estimate =
+      'This preview is an estimate; search engines sometimes rewrite titles and descriptions.';
+    const node =
+      "This event isn't published yet. Values that only editors can see are left out.";
+    expect(note(false, true)).toEqual({ suffix: null, unpublished: '', info: estimate });
+    expect(note(false, false).suffix).toBe('Not published yet');
+    expect(note(true, true)).toEqual({
+      suffix: null,
+      unpublished: '',
+      info: `${estimate} Switch the previewed event with the preview picker in the top bar.`,
+    });
+    expect(note(true, false).suffix).toBe('Template not in use yet');
+    expect(note(true, true, false)).toEqual({
+      suffix: 'Not published yet',
+      unpublished: node,
+      info: `${node} ${estimate}`,
+    });
+    // An unpublished node under a template not in use: the node's state in
+    // the caption, both in the ⓘ.
+    expect(note(true, false, false)).toEqual({
+      suffix: 'Not published yet',
+      unpublished: `${node} The template is not in use yet.`,
+      info: `${node} The template is not in use yet. ${estimate}`,
+    });
+  });
+
+  it('inSentence() keeps an abbreviation', () => {
+    expect(inSentence('Event')).toBe('event');
+    expect(inSentence('Basic page')).toBe('basic page');
+    expect(inSentence('FAQ')).toBe('FAQ');
+    expect(inSentence('FAQ page')).toBe('FAQ page');
+  });
+
+  it('truncate() never cuts inside a character drawn as one', () => {
+    // The family is five code points, 50 px; only one cluster fits.
+    const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}';
+    expect(truncate(`ab${family}cd`, 60, 'f', fake)).toBe('ab…');
+    expect(truncate(`ab${family}cd`, 85, 'f', fake)).toBe(`ab${family}…`);
   });
 
   it('truncate() wraps before it cuts when there are more lines', () => {
@@ -1280,6 +1337,12 @@ describe('footer and strips', () => {
       dot: 'gray',
       text: 'Read-only',
       actions: ['output'],
+    });
+    // A template with nothing to preview has no output to show.
+    expect(at(run(ready(), { type: 'readonly', readonly: 'empty' }))).toEqual({
+      dot: 'gray',
+      text: 'Read-only',
+      actions: [],
     });
   });
 

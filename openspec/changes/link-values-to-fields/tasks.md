@@ -71,6 +71,22 @@ follow-up").
 
 - [ ] 8.1 Run every suite as in 5.1, plus the `phpunit (canvas dev)` job. Verify all are green and `extension/dist` matches a fresh build.
 
+
+## 9. Findings from the complex-content review
+
+Recorded by `harden-template-scope`, which fixes what today's code keeps. Do
+each with the group named in brackets.
+
+- [ ] 9.1 [3.8] A structured data enum linked to a field shows the linked box with the field's label and the previewed value, never an empty select; choosing a fixed option is an explicit "Use a fixed value" step that names what it replaces. Verify with `values.test.ts` (`rowsFor` on an enum detail stored as `{field: field_event_status}`) and Playwright `template-complex.spec.ts` (Every Event › Schema › Status shows the linked Status box).
+- [ ] 9.2 [3.4, 3.8] Text values (title parts, description, social texts) offer date fields disabled with "A date, not text", so a date never reaches text as an ISO string while the menu showed it in words; structured data date details keep ISO. Verify with `values.test.ts` (date entries disabled for a text slot) and `ApiTest::testWritesFollowTheShownValues` (a text value linked to a date field is refused with "Choose a field from the list."; the converter of 2.1 logs such a value instead of linking it, checked in `LegacyTest`).
+- [ ] 9.3 [3.8] Choosing an entry in the link menu moves focus to the linked box synchronously, before the menu closes, so a key pressed at once reaches the box. Verify with Playwright `template.spec.ts` (Enter on Summary, then Backspace at once unlinks).
+- [ ] 9.4 [3.8, 7.5] No machine names in the link menu or boxes: two entries with the same label are told apart by their group (the Description fact vs "‹Type› › Description"); a linked box's value at rest is one line with an ellipsis, never wrapped mid-word, with the full value on focus or hover. Verify with `values.test.ts` (labels of a fact and a field both called Description) and Playwright `template-complex.spec.ts` (Every Product at 200 % zoom: the Currency box on one line).
+- [ ] 9.5 [3.9] At template scope, link states in Checks name the previewed item ("‹Field› is empty for this ‹type›, so its default is used"), list every affected link or "and N more", and use the distinct Show names `harden-template-scope` adds. Verify with `checks.test.ts`.
+- [ ] 9.6 [3.2] When the title is longer than 255 characters, the main part is shortened at a word boundary so that the ending stays whole; the cut rules of `harden-template-scope` (never inside a character, at a word near the limit) still apply. Verify with new rows in `tests/fixtures/text-cases.json` run by `ValuesTest` and `model.test.ts`, and `ComplexTemplateTest` (`event_long` ends with "| Events").
+- [ ] 9.7 [delta rebase] When rebasing the `dynamic-values` delta onto `harden-template-scope`'s archived text, the Description and Image facts keep "the order of the type's form" (not "field order"). Verify with `openspec validate link-values-to-fields --strict` and `ResolverTest::testFacts` with swapped form weights.
+- [ ] 9.8 [7.3] The caption's "Not published yet" from `harden-template-scope` stays; its explanation changes from "Values that only editors can see are left out." to the editor-access rule for nodes visitors cannot view yet. Verify with Playwright `template-complex.spec.ts` (`event_unpublished`).
+- [ ] 9.9 [3.8] The new controls (`LinkedValue`, `ValueControl`, `TitleControl`, `LinkMenu` rows) keep `dir="auto"` on every value. Verify with Playwright `template-complex.spec.ts` (`product_rtl` in a linked box).
+
 ## Workflow follow-up
 
 - If the product owner chooses the fallback: before archiving, remove from the

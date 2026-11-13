@@ -296,7 +296,7 @@ The Description fact MUST be, for a Canvas page, its Canvas description field;
 for a node, the summary of its first formatted text field with a summary, else
 that text cut at a word boundary within 160 characters. The Image fact MUST be,
 for a Canvas page, the image of its image media; for a node, the first image
-field, in field order, that resolves.
+field that resolves. "First" MUST follow the order of the type's form.
 
 #### Scenario: A node's description
 
@@ -308,13 +308,18 @@ field, in field order, that resolves.
 - **WHEN** an article's first image field references unpublished media and its second a published public image
 - **THEN** its Image fact MUST be the second image
 
+#### Scenario: The form decides which image is first
+
+- **WHEN** the Person type's form shows a Photo field above an Avatar field, both with a public image, and Avatar's machine name sorts first
+- **THEN** its Image fact MUST be the Photo field's image
+
 ### Requirement: Field values are plain values of the first item
 
 A field link MUST give the value of the field's first item. Formatted text MUST
-become plain text: tags removed, entities decoded, whitespace collapsed, with a
-space between blocks. A description linked to formatted text MUST be cut at a
-word boundary within 160 characters. Text typed into a plain text field MUST
-NOT be stripped.
+become plain text: the content of script, style and template elements removed,
+tags removed, entities decoded, whitespace collapsed, with a space between
+blocks. A description linked to formatted text MUST be cut at a word boundary
+within 160 characters. Text typed into a plain text field MUST NOT be stripped.
 
 #### Scenario: A field with several values
 
@@ -325,6 +330,11 @@ NOT be stripped.
 
 - **WHEN** a value links to a formatted text field that holds `<p>One</p><p>Two &amp; <b>three</b></p>`
 - **THEN** the value MUST be "One Two & three"
+
+#### Scenario: Formatted text with a script and a style block
+
+- **WHEN** a product's body holds `<p>Ask us</p><script>alert(1)</script><style>p{color:red}</style>` and no summary
+- **THEN** a value linked to the body and the product's Description fact MUST be "Ask us"
 
 ### Requirement: Other field kinds give their natural value
 

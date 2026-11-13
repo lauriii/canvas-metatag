@@ -55,6 +55,14 @@ Playwright runs one spec at a time.
 - [ ] 8.2 Run every suite: PHPUnit unit and kernel, the AI submodule's tests, `npm run verify`, the build-assets check, and each Playwright project one at a time; an axe scan of the Schema view. Verify all are green.
 - [ ] 8.3 Browser check on the farm site: a product page (needs an image, then can show), the pricing page as a monthly product (doesn't fit) and after "Change to plans for a service", an event without a start date, an About page, a page with custom JSON-LD (moved notice, hidden question to fix), Output, Checks, Site currency with its save effect. Save a screenshot of each.
 
+
+## 9. Findings from the complex-content review
+
+Recorded by `harden-template-scope`. Do each with the group named in brackets.
+
+- [ ] 9.1 [2.2, 6.1] A required fact that resolves but fails its kind or pattern is reported as `dropped` with its value and reason, not as missing, and Checks words the fix: 'Currency gives "Euro (€)"; a three-letter code such as EUR is needed.' Verify with `SchemaGraphReportTest` (a `priceCurrency` of "Euro (€)" in `dropped`, absent from `withheld.missing`) and `checks.test.ts` (the wording; no "Add Currency").
+- [ ] 9.2 [6.1] At template scope, a missing required fact names the previewed item in the verdict's words ("Needs Ends: empty for this event"), and is listed once even when the same value also feeds a text value. Verify with `checks.test.ts` (Every Event previewing an event without an end date: one row).
+
 ## Workflow follow-up
 
 - Archive after `link-values-to-fields`; this change's `seo-checks` delta is

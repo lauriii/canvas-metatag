@@ -43,8 +43,10 @@ import {
   type View,
   applyChanges,
   canon,
+  catchingUp,
   draftPayload,
   footer,
+  inSentence,
   initialState,
   openPending,
   pendingFor,
@@ -195,6 +197,8 @@ export default function App() {
   const [host] = useState(() => createHost());
   const [api] = useState(() => createApi(host.basePath()));
   const [measurer] = useState(createMeasurer);
+  // Short editor windows: the frame takes the height there is.
+  useEffect(() => host.fitFrame(), [host]);
   const [state, rawDispatch] = useReducer(reducer, undefined, () =>
     initialState(host.context()),
   );
@@ -255,6 +259,10 @@ export default function App() {
     (ctx: HostContext, payload: StatePayload): State['readonly'] => {
       if (!payload.target || ctx.kind === 'none') {
         return 'no';
+      }
+      // Canvas keeps no draft for a template without a node to preview.
+      if (!payload.preview) {
+        return 'empty';
       }
       if (!payload.can.target) {
         return 'access';
@@ -697,7 +705,8 @@ export default function App() {
   );
   const issues = useMemo(() => {
     const server = state.server;
-    if (!server?.target || !shownView) {
+    // Nothing to judge without a node to preview.
+    if (!server?.target || !server.preview || !shownView) {
       return [];
     }
     return checks({
@@ -1055,9 +1064,15 @@ function useNotes(): string[] {
   const server = state.server!;
   return [
     state.scope === 'site' && !server.target
-      ? state.ctx.kind === 'none' && state.ctx.template
-        ? 'SEO for a content type is set in its Full content template, with a page to preview.'
-        : 'Open a page or a content template to edit its SEO.'
+      ? // The Full template route of a type that has none; another template.
+        state.ctx.kind === 'template'
+        ? 'This content type has no Full content template yet. Add one to set its SEO.'
+        : state.ctx.kind === 'none' && state.ctx.template
+          ? 'SEO for a content type is set in its Full content template.'
+          : 'Open a page or a content template to edit its SEO.'
+      : null,
+    state.scope === 'target' && state.readonly === 'empty' && server.target
+      ? `No ${inSentence(server.target.label)} yet. Add one to preview and edit these settings.`
       : null,
     state.scope === 'site' && !server.can.site
       ? 'Only people who administer SEO site settings can change these. You are viewing them.'
@@ -1258,6 +1273,33 @@ function Ready(props: {
   );
 }
 
+/**
+ * Output's "Updating…": a polite status region that is there, empty, from
+ * the start, and gets its words only after 400 ms, so that a quick save stays
+ * quiet and a slow one is announced.
+ */
+function Updating({ busy }: { busy: boolean }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setShown(false);
+      return;
+    }
+    const timer = setTimeout(() => setShown(true), 400);
+    return () => clearTimeout(timer);
+  }, [busy]);
+  return (
+    <span role="status" className="seo-updating-live">
+      {busy && shown && (
+        <span className="seo-updating">
+          <span className="seo-spinner" aria-hidden />
+          Updating…
+        </span>
+      )}
+    </span>
+  );
+}
+
 function SheetHost(props: { sheet: SheetState; onClose(): void }) {
   const { sheet, onClose } = props;
   const { state, dispatch, closeSheet } = useApp();
@@ -1279,11 +1321,15 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
         title="Output"
         focusBack
         end={
-          <InfoTip
-            label="About addresses"
-            text={originNote(server)}
-            size={28}
-          />
+          <>
+            {/* The view behind the sheet, with the save status, is inert. */}
+            <Updating busy={catchingUp(state)} />
+            <InfoTip
+              label="About addresses"
+              text={originNote(server)}
+              size={28}
+            />
+          </>
         }
         onClose={onClose}
       >
@@ -1296,6 +1342,8 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
     return (
       <Sheet
         title="Custom JSON-LD"
+        // A read-only editor cannot take focus: Back does, so Esc works.
+        focusBack={state.readonly !== 'no'}
         end={
           set &&
           state.readonly === 'no' && (

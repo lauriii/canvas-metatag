@@ -9,8 +9,9 @@ import { defineConfig, devices } from '@playwright/test';
  * carrying the test cookie. `ignoreHTTPSErrors` covers a self-signed
  * certificate.
  *
- * The three seeds of CanvasMetatagTestSetup are the projects `coupled`,
- * `headless` and `ai`. `host-contract` is the coupled seed too: it is a project
+ * The four seeds of CanvasMetatagTestSetup are the projects `coupled`,
+ * `headless`, `ai` and `complex` (the coupled site plus the complex content
+ * fixture). `host-contract` is the coupled seed too: it is a project
  * of its own only so that it runs first, and so that a Canvas change which
  * breaks the editor integration fails once, loudly, instead of in every spec.
  * Use `--no-deps` to run one project without it.
@@ -47,5 +48,6 @@ export default defineConfig({
     },
     { name: 'headless', testMatch: 'headless.spec.ts', dependencies: ['host-contract'], use },
     { name: 'ai', testMatch: 'ai.spec.ts', dependencies: ['host-contract'], use },
+    { name: 'complex', testMatch: 'template-complex.spec.ts', dependencies: ['host-contract'], use },
   ],
 });

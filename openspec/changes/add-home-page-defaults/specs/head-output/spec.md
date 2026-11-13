@@ -30,10 +30,10 @@ pages per language.
 Changing any of these MUST invalidate an owned page: the entity, the site
 settings, the site name, timezone and front page, the alias the front page
 setting names, URL language negotiation, the template, the content type's
-fields and the media types, the media, files and labels used, the anonymous
-role, and the public base (headless-head). A node page the module does not own
-MUST be invalidated when a content template is added or changed. Installing
-the module MUST invalidate rendered caches.
+fields, the order of its form and the media types, the media, files and labels
+used, the anonymous role, and the public base (headless-head). A node page the
+module does not own MUST be invalidated when a content template is added or
+changed. Installing the module MUST invalidate rendered caches.
 
 #### Scenario: A dependency changes
 
@@ -54,6 +54,11 @@ the module MUST invalidate rendered caches.
 
 - **WHEN** the module is installed on a site with cached pages
 - **THEN** rendered caches MUST be invalidated, so that no cached page keeps core's canonical next to the module's
+
+#### Scenario: The form's order changes
+
+- **WHEN** a site builder moves a person's Photo field below its Avatar field on the Person form, and both hold a public image
+- **THEN** the cached person page MUST be invalidated and its `og:image` MUST become the Avatar image
 
 #### Scenario: The front page alias moves
 

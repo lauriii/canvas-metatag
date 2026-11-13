@@ -39,17 +39,19 @@ export function SocialTab() {
 
   return (
     <>
-      <SocialPreview
-        suggest={
-          <SuggestButton
-            id={suggestId}
-            label="Suggest title and description"
-            variant="ghost"
-            open={suggesting}
-            onClick={() => setSuggesting(!suggesting)}
-          />
-        }
-      />
+      {server.preview && (
+        <SocialPreview
+          suggest={
+            <SuggestButton
+              id={suggestId}
+              label="Suggest title and description"
+              variant="ghost"
+              open={suggesting}
+              onClick={() => setSuggesting(!suggesting)}
+            />
+          }
+        />
+      )}
       {suggesting && (
         <TextSuggest
           fields={['social.title', 'social.description']}

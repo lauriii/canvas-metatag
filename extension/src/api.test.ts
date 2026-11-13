@@ -56,7 +56,7 @@ const failure = async (promise: Promise<unknown>): Promise<ApiError> => {
 describe('requests', () => {
   it('builds the state query for each context, on the base path', async () => {
     const fake = fakeFetch({
-      'api/state': [json({}), json({}), json({}), json({})],
+      'api/state': [json({}), json({}), json({}), json({}), json({})],
     });
     const api = createApi('/sub/', fake.fetchFn);
     await api.getState(PAGE, 'en');
@@ -67,11 +67,18 @@ describe('requests', () => {
       bundle: 'article',
       previewId: '11',
     });
+    await api.getState({
+      kind: 'template',
+      id: 'node.article.full',
+      bundle: 'article',
+      previewId: null,
+    });
     await api.getState({ kind: 'none', template: true });
     expect(fake.urls()).toEqual([
       '/sub/canvas-metatag/api/state?entity_type=canvas_page&id=8&langcode=en',
       '/sub/canvas-metatag/api/state?entity_type=canvas_page&id=8',
       '/sub/canvas-metatag/api/state?entity_type=content_template&id=node.article.full&preview=11',
+      '/sub/canvas-metatag/api/state?entity_type=content_template&id=node.article.full',
       '/sub/canvas-metatag/api/state',
     ]);
     // A read needs no token.
@@ -321,6 +328,32 @@ describe('errors', () => {
     ).toMatchObject({
       code: 'rate_limited',
     });
+  });
+
+  it('a type without a Full template reads as Site settings', async () => {
+    const missing = json(
+      { error: { code: 'not_found', message: 'No such template.' } },
+      404,
+    );
+    const site = { target: null, site: {} };
+    const fake = fakeFetch({
+      'api/state': [missing, json(site), missing.clone()],
+    });
+    const api = createApi('/', fake.fetchFn);
+    const template = {
+      kind: 'template',
+      id: 'node.page.full',
+      bundle: 'page',
+      previewId: null,
+    } as const;
+    expect(await api.getState(template)).toEqual(site);
+    expect(fake.urls()).toEqual([
+      '/canvas-metatag/api/state?entity_type=content_template&id=node.page.full',
+      '/canvas-metatag/api/state',
+    ]);
+    // With a node to preview, a missing template stays an error.
+    const error = await failure(api.getState({ ...template, previewId: '4' }));
+    expect(error.code).toBe('not_found');
   });
 
   it('an HTML 403 becomes forbidden', async () => {

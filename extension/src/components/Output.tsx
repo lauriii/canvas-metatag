@@ -2,6 +2,7 @@ import { CheckIcon, CopyIcon } from '@radix-ui/react-icons';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
+import { catchingUp } from '../model';
 import type { Head, StatePayload } from '../types';
 import { Btn, reveal } from './ui';
 
@@ -135,6 +136,8 @@ export function OutputSheet(props: { section?: 'schema' }) {
   const head = server.resolved?.head;
   const list = head ? rows(head) : [];
   const graph = jsonLd(head);
+  // Rows that are about to change are not current.
+  const busy = catchingUp(state) || undefined;
   const schema = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (props.section === 'schema') {
@@ -163,7 +166,7 @@ export function OutputSheet(props: { section?: 'schema' }) {
               label="Copy tags"
             />
           </div>
-          <dl className="seo-kv" data-testid="seo-output">
+          <dl className="seo-kv" data-testid="seo-output" aria-busy={busy}>
             {list.map((row, index) => (
               <div key={index} style={{ display: 'contents' }}>
                 <dt>{row.name}</dt>
@@ -181,6 +184,7 @@ export function OutputSheet(props: { section?: 'schema' }) {
               <pre
                 className="seo-code"
                 tabIndex={0}
+                aria-busy={busy}
                 role="group"
                 aria-label="Structured data JSON"
               >

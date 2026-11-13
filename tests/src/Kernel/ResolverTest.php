@@ -308,7 +308,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     ], $tokens['field.field_hero']);
     $values = array_map(static fn (array $token): string => $token['value'], $tokens);
     $long = trim(str_repeat('Lorem ipsum dolor sit amet. ', 10));
-    // Compared without regard to order: fields come in definition order.
+    // Compared without regard to order: without a form, fields come by name.
     self::assertEquals([
       'title' => 'Hello',
       // The formatted text with a summary: no summary, so its text, cut at a
@@ -333,7 +333,8 @@ final class ResolverTest extends CanvasKernelTestBase {
       'field.field_level' => 'Professional',
       'field.field_teaser' => 'Short & sweet',
       // Blocks are apart, inline markup keeps its words whole.
-      'field.field_notes' => 'One Two three alert(1) H2O in Canvasville Two',
+      // A script's content never displays.
+      'field.field_notes' => 'One Two three H2O in Canvasville Two',
       'field.field_body' => $long,
       'field.field_count' => '42',
       'field.field_price' => '49.90',
@@ -356,9 +357,8 @@ final class ResolverTest extends CanvasKernelTestBase {
       ['width' => 640, 'height' => 480, 'alt' => 'A photo', 'name' => 'A photo'],
       array_intersect_key($tokens['field.field_photo']['image'], ['name' => 1, 'alt' => 1, 'width' => 1, 'height' => 1]),
     );
-    // {image} is the first image in field-definition order.
-    $first = current(array_intersect(array_keys($tokens), ['field.field_hero', 'field.field_photo']));
-    self::assertSame($tokens[$first]['image'], $tokens['image']['image']);
+    // {image} is the first image; without a form, by name.
+    self::assertSame($tokens['field.field_hero']['image'], $tokens['image']['image']);
     self::assertSame('Byline', $tokens['field.field_byline']['label']);
     foreach ([
       'taxonomy_term:' . $topic->id(),
@@ -377,27 +377,86 @@ final class ResolverTest extends CanvasKernelTestBase {
     // The file object is the one the node's field item loads, so it is
     // changed only when it is saved as well.
     $node->set('field_body', ['value' => '<p>Text</p>', 'summary' => 'A <i>short</i> summary.'])->save();
-    if ($first === 'field.field_hero') {
-      $article_hero->setUnpublished()->save();
-    }
-    else {
-      $photo->setFileUri('temporary://photo.png');
-      $photo->save();
-    }
+    $article_hero->setUnpublished()->save();
     $this->forgetAccess();
     $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
     self::assertSame('A short summary.', $tokens['description']['value']);
     self::assertSame('A short summary.', $tokens['field.field_body']['value']);
-    self::assertNull($tokens[$first]['image']);
+    self::assertNull($tokens['field.field_hero']['image']);
+    self::assertSame($tokens['field.field_photo']['image'], $tokens['image']['image']);
     self::assertNotNull($tokens['image']['image']);
-    $article_hero->setUnpublished()->save();
     $photo->setFileUri('temporary://photo.png');
     $photo->save();
     $this->forgetAccess();
     $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
     self::assertNull($tokens['field.field_photo']['image']);
-    self::assertNull($tokens['field.field_hero']['image']);
     self::assertNull($tokens['image']['image']);
+
+    // The content of script, style and template elements never displays.
+    $hidden = '<script>alert(1)</script><style>p{color:red}</style><template><p>Later</p></template>';
+    $node->set('field_body', ['value' => '<p>Ask us</p>' . $hidden, 'summary' => ''])->save();
+    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
+    self::assertSame('Ask us', $tokens['field.field_body']['value']);
+    self::assertSame('Ask us', $tokens['description']['value']);
+    // Also with ">" in a quoted attribute, and a template inside another.
+    $hidden = '<script data-x="a>b">alert(1)</script><template><template>Inner</template>Outer</template>';
+    $node->set('field_body', ['value' => '<p>Ask us</p>' . $hidden . '<p>today</p>', 'summary' => ''])->save();
+    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
+    self::assertSame('Ask us today', $tokens['field.field_body']['value']);
+
+    // The cut {description} never ends inside a character drawn as one.
+    $family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+    foreach ([
+      [str_repeat('a', 157) . $family . ' tail', str_repeat('a', 157)],
+      [str_repeat('a', 159) . "e\u{301} tail", str_repeat('a', 159)],
+    ] as [$body, $description]) {
+      $node->set('field_body', ['value' => "<p>$body</p>", 'summary' => ''])->save();
+      $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
+      self::assertSame($description, $tokens['description']['value']);
+    }
+  }
+
+  /**
+   * The first field of a kind is the first on the type's form.
+   */
+  public function testFormOrder(): void {
+    $resolver = $this->resolver();
+    $handler = ['handler' => 'default:media', 'handler_settings' => ['target_bundles' => ['image' => 'image']]];
+    $this->createField('field_photo', 'entity_reference', 'Photo', ['target_type' => 'media'], $handler);
+    $this->createField('field_avatar', 'entity_reference', 'Avatar', ['target_type' => 'media'], $handler);
+    $this->createField('field_note', 'string', 'Note');
+    $photo = $this->createImage('Photo', ['alt' => 'A photo']);
+    $avatar = $this->createImage('Avatar', ['alt' => 'An avatar']);
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Ada',
+      'field_photo' => $photo->id(),
+      'field_avatar' => $avatar->id(),
+    ]);
+    $node->save();
+    $image = fn (): ?array => $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata())['image']['image'];
+
+    // Without a form, by name; the head waits for a form to be created.
+    self::assertSame($this->imageOf($avatar), $image());
+    $head = fn (): array => $resolver->resolve($this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id()))['cacheability']->getCacheTags();
+    self::assertContains('config:entity_form_display_list', $head());
+    self::assertSame(['field.field_avatar', 'field.field_note', 'field.field_photo'], array_keys(array_filter($resolver->tokenTypes('node', 'article'), static fn (string $name): bool => str_starts_with($name, 'field.'), ARRAY_FILTER_USE_KEY)));
+
+    // The form puts the photo first; a field not on the form comes last.
+    $display = $this->container->get('entity_display.repository')->getFormDisplay('node', 'article')
+      ->setComponent('field_photo', ['weight' => 1])
+      ->setComponent('field_avatar', ['weight' => 2])
+      ->removeComponent('field_note');
+    $display->save();
+    self::assertSame($this->imageOf($photo), $image());
+    self::assertSame(['field.field_photo', 'field.field_avatar', 'field.field_note'], array_keys(array_filter($resolver->tokenTypes('node', 'article'), static fn (string $name): bool => str_starts_with($name, 'field.'), ARRAY_FILTER_USE_KEY)));
+
+    // The head depends on the form.
+    self::assertContains('config:core.entity_form_display.node.article.default', $head());
+
+    // Moving the photo below the avatar changes {image}.
+    $display->setComponent('field_photo', ['weight' => 3])->save();
+    self::assertSame($this->imageOf($avatar), $image());
   }
 
   /**

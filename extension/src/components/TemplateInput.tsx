@@ -18,7 +18,9 @@ import { useApp } from '../App';
 import {
   chipsIn,
   dateText,
+  dirOf,
   displayLabels,
+  inSentence,
   insertChip,
   removeChip,
   seedCaret,
@@ -77,6 +79,8 @@ export function TemplateInput(props: {
   const { dispatch, state } = useApp();
   const { tokens } = props;
   const labels = displayLabels(tokens);
+  // Without a page or node to fill them in, values are unknown, not empty.
+  const resolvable = !!state.server?.resolved;
   const input = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
@@ -99,7 +103,7 @@ export function TemplateInput(props: {
   const target = state.server?.target;
   const typeLabel = target?.scope === 'template' ? target.label : 'Page';
   const empty = `Empty for this ${
-    target?.scope === 'template' ? target.label.toLowerCase() : 'page'
+    target?.scope === 'template' ? inSentence(target.label) : 'page'
   }`;
 
   const text = draft ?? toDisplay(props.value, tokens);
@@ -331,7 +335,9 @@ export function TemplateInput(props: {
           key={chip.start}
           className="seo-chip"
           data-name={chip.name}
-          data-empty={tokens[chip.name].value.trim() === '' || undefined}
+          data-empty={
+            (resolvable && tokens[chip.name].value.trim() === '') || undefined
+          }
         >
           <span className="seo-brace">{'{'}</span>
           {chip.label}
@@ -343,6 +349,46 @@ export function TemplateInput(props: {
     pieces.push(shown.slice(at));
     return pieces;
   };
+
+  // At rest without a value of its own: what the field inherits, as its
+  // pattern's values or as text. With nothing to fill in, where it comes from.
+  const restPattern =
+    props.pattern &&
+    tokensIn(props.pattern).length > 0 &&
+    (props.inherited || !resolvable)
+      ? toDisplay(props.pattern, tokens)
+      : null;
+  const rest =
+    text !== ''
+      ? ''
+      : (restPattern ??
+        (props.inherited ||
+          (!resolvable && props.inheritedFrom
+            ? `Same as ${props.inheritedFrom}`
+            : '')));
+
+  // What the field inherits, in words, for those who cannot see it painted:
+  // "Inherited from the template: Page title, Separator, News."
+  const spoken =
+    restPattern !== null
+      ? restPattern
+          .split(/\{([^{}]+)\}/)
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(', ')
+      : null;
+  const description =
+    text !== ''
+      ? chips.length > 0
+        ? 'Values in braces are filled in automatically.'
+        : undefined
+      : spoken
+        ? `${props.inheritedFrom ? `Inherited from ${props.inheritedFrom}` : 'Inherits'}: ${spoken}.`
+        : rest && rest !== props.inherited
+          ? `${rest}.`
+          : props.inheritedFrom
+            ? `Inherited from ${props.inheritedFrom}.`
+            : undefined;
 
   const tipToken = tip && tokens[tip.name];
   const insertable = props.insert !== false && !props.disabled;
@@ -376,12 +422,17 @@ export function TemplateInput(props: {
         >
           {/* The menu opens against the whole box. */}
           <Popover.Anchor className="seo-template-anchor" />
-          <div className="seo-template-mirror" ref={mirror} aria-hidden>
-            {text === '' && props.inherited ? (
-              <span className="seo-inherited" lang={props.lang}>
-                {props.pattern && tokensIn(props.pattern).length
-                  ? paint(toDisplay(props.pattern, tokens))
-                  : props.inherited}
+          {/* The direction of the text in the field, as the field has it;
+              empty, the direction of what it inherits. */}
+          <div
+            className="seo-template-mirror"
+            ref={mirror}
+            dir={text === '' ? (rest ? dirOf(rest) : undefined) : 'auto'}
+            aria-hidden
+          >
+            {rest ? (
+              <span className="seo-inherited" lang={props.lang} dir="auto">
+                {restPattern !== null ? paint(restPattern) : rest}
               </span>
             ) : (
               paint(text)
@@ -394,6 +445,7 @@ export function TemplateInput(props: {
             id={props.id}
             rows={1}
             lang={props.lang}
+            dir={text === '' && rest ? dirOf(rest) : 'auto'}
             spellCheck
             value={text}
             placeholder={props.inherited}
@@ -401,13 +453,7 @@ export function TemplateInput(props: {
             aria-required={props.required || undefined}
             aria-invalid={props.invalid || undefined}
             aria-describedby={props.describedBy}
-            aria-description={
-              text === '' && props.inheritedFrom
-                ? `Inherited from ${props.inheritedFrom}.`
-                : chips.length > 0
-                  ? 'Values in braces are filled in automatically.'
-                  : undefined
-            }
+            aria-description={description}
             onChange={(event) => {
               const next = event.target.value;
               if (composing.current) {
@@ -491,6 +537,7 @@ export function TemplateInput(props: {
             <input
               ref={filterField}
               placeholder="Filter values"
+              dir="auto"
               aria-label="Filter values"
               aria-controls={menuId}
               aria-activedescendant={
@@ -536,7 +583,10 @@ export function TemplateInput(props: {
                       onClick={() => insert(name)}
                     >
                       <span>{labels[name]}</span>
-                      <span data-empty={!value || undefined}>
+                      <span
+                        data-empty={!value || undefined}
+                        dir={value ? 'auto' : undefined}
+                      >
                         {value || empty}
                       </span>
                     </div>

@@ -268,9 +268,9 @@ describe('checks()', () => {
     ],
     [
       'image-small',
-      'improve',
+      'info',
       { resolved: { image: { ...IMAGE, width: 800, height: 420 } } },
-      ['Use a larger social image', 'The social image is 800 x 420. Use at least 1200 x 630 for a large card.'],
+      ['The social image could be sharper', 'The social image is 800\u00a0×\u00a0420. It works as a large card; 1200\u00a0×\u00a0630 looks sharper.'],
     ],
     [
       'image-ratio',
@@ -830,13 +830,45 @@ describe('rules with conditions', () => {
     expect(find({ site: {} }, 'image-preview')).toBeDefined();
   });
 
-  it('image-small names the thumbnail under 600 x 315', () => {
+  it('image-small follows the link preview: a thumbnail under 600 px wide to improve, a large card good to know', () => {
+    const small = (width: number, height: number) =>
+      find({ resolved: { image: { ...IMAGE, width, height } } }, 'image-small');
+    expect(small(400, 400)).toMatchObject({
+      severity: 'improve',
+      detail:
+        'The social image is 400\u00a0×\u00a0400. Most link previews show it as a small thumbnail.',
+    });
+    expect(small(800, 420)).toMatchObject({
+      severity: 'info',
+      message: 'The social image could be sharper',
+      detail:
+        'The social image is 800\u00a0×\u00a0420. It works as a large card; 1200\u00a0×\u00a0630 looks sharper.',
+    });
+    expect(small(1200, 630)).toBeUndefined();
+  });
+
+  it('a large card that is cropped too is one row, good to know', () => {
+    const issues = checks(
+      input({ resolved: { image: { ...IMAGE, width: 800, height: 1000 } } }),
+    );
+    expect(ids(issues).filter((id) => id.startsWith('image-'))).toEqual([
+      'image-small',
+    ]);
+    expect(issues.find((issue) => issue.id === 'image-small')).toMatchObject({
+      severity: 'info',
+      message: 'The social image could be sharper',
+      detail:
+        'The social image is 800\u00a0×\u00a01000. It works as a large card, cropped; 1200\u00a0×\u00a0630 fits best.',
+    });
     expect(
-      find(
-        { resolved: { image: { ...IMAGE, width: 400, height: 210 } } },
-        'image-small',
-      )!.detail,
-    ).toBe('The social image is 400 x 210. It will show as a small thumbnail.');
+      issues.find((issue) => issue.id === 'image-small')?.detail,
+    ).not.toContain('for a large card');
+    // A thumbnail keeps its cropping apart: one is to improve.
+    expect(
+      ids(
+        checks(input({ resolved: { image: { ...IMAGE, width: 400, height: 400 } } })),
+      ).filter((id) => id.startsWith('image-')),
+    ).toEqual(['image-small', 'image-ratio']);
   });
 
   it('token-empty: one row per value, not for names outside the vocabulary', () => {
