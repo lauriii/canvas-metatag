@@ -278,7 +278,7 @@ final class ComplexContent {
     // deletes their nodes.
     foreach (['node', 'taxonomy_term', 'media', 'file', 'user'] as $entity_type_id) {
       $keys = match ($entity_type_id) {
-        'node' => array_reverse(array_keys(self::nodes())),
+        'node' => array_reverse(array_keys(self::nodes() + self::previewNodes())),
         'taxonomy_term' => array_keys(self::terms()),
         'media' => array_keys(self::media()),
         'file' => array_keys(self::files()),
@@ -477,14 +477,140 @@ final class ComplexContent {
     $directory = self::DIRECTORY;
     \Drupal::service('file_system')->prepareDirectory($directory, FileSystemInterface::CREATE_DIRECTORY);
     $uri = $directory . '/' . strtr($key, '_', '-') . '.png';
+    self::paint($uri, $key, $width, $height);
+    return \Drupal::entityTypeManager()->getStorage('file')->create(['uri' => $uri, 'status' => 1]);
+  }
+
+  /**
+   * Writes a PNG of an exact size: a gradient of its own hue and its name.
+   *
+   * Each image is told apart in a preview, and its size shows how it crops.
+   */
+  private static function paint(string $uri, string $key, int $width, int $height): void {
     $image = imagecreatetruecolor($width, $height);
     \assert($image !== FALSE);
-    imagefill($image, 0, 0, (int) imagecolorallocate($image, 0x2f, 0x4f, 0x6f));
+    $hue = hexdec(substr(md5($key), 0, 2)) / 255;
+    for ($y = 0; $y < $height; $y++) {
+      [$r, $g, $b] = self::rgb($hue, 0.45, 0.62 - 0.3 * $y / $height);
+      imageline($image, 0, $y, $width, $y, (int) imagecolorallocate($image, $r, $g, $b));
+    }
+    // The built-in font is ASCII, 9 by 15 pixels: draw it small, scale it up.
+    $label = ucfirst(strtr($key, '_', ' ')) . " - {$width}x{$height}";
+    $text = imagecreatetruecolor(9 * strlen($label), 15);
+    \assert($text !== FALSE);
+    imagefill($text, 0, 0, (int) imagecolorallocate($text, 0, 0, 0));
+    imagecolortransparent($text, (int) imagecolorallocate($text, 0, 0, 0));
+    imagestring($text, 5, 0, 0, $label, (int) imagecolorallocate($text, 255, 255, 255));
+    $scale = max(1, intdiv((int) ($width * 0.8), imagesx($text)));
+    imagecopyresized($image, $text, intdiv($width - imagesx($text) * $scale, 2), intdiv($height - 15 * $scale, 2), 0, 0, imagesx($text) * $scale, 15 * $scale, imagesx($text), 15);
     $stream = fopen($uri, 'wb');
     \assert($stream !== FALSE);
     imagepng($image, $stream);
     fclose($stream);
-    return \Drupal::entityTypeManager()->getStorage('file')->create(['uri' => $uri, 'status' => 1]);
+  }
+
+  /**
+   * HSL to RGB, each 0–1 in and 0–255 out.
+   */
+  private static function rgb(float $h, float $s, float $l): array {
+    $c = (1 - abs(2 * $l - 1)) * $s;
+    $x = $c * (1 - abs(fmod($h * 6, 2) - 1));
+    [$r, $g, $b] = [[$c, $x, 0], [$x, $c, 0], [0, $c, $x], [0, $x, $c], [$x, 0, $c], [$c, 0, $x]][(int) ($h * 6) % 6];
+    $m = $l - $c / 2;
+    return array_map(static fn (float $v): int => (int) round(($v + $m) * 255), [$r, $g, $b]);
+  }
+
+  /**
+   * Content for looking at the templates on a site; tests don't use it.
+   *
+   * Needs install() first. Adds announcements, repaints the images, and makes
+   * the most complete node of each type the most recently changed one, which
+   * is the node Canvas opens a content template with.
+   *
+   * @return array<string, string>
+   *   Content template id => path of its editor, showing that node.
+   */
+  public static function preview(): array {
+    $repository = \Drupal::service('entity.repository');
+    $author = $repository->loadEntityByUuid('user', self::uuid('author'))
+      ?? throw new \RuntimeException('Install the fixture first (install.php).');
+    foreach (self::files() as $key => [$width, $height]) {
+      if ($file = $repository->loadEntityByUuid('file', self::uuid($key))) {
+        self::paint($file->getFileUri(), $key, $width, $height);
+        image_path_flush($file->getFileUri());
+      }
+    }
+    $ids = [];
+    foreach (['file' => self::files(), 'media' => self::media(), 'taxonomy_term' => self::terms()] as $entity_type_id => $made) {
+      foreach (array_keys($made) as $key) {
+        $ids[$entity_type_id][$key] = (int) $repository->loadEntityByUuid($entity_type_id, self::uuid($key))?->id();
+      }
+    }
+    foreach (self::previewNodes() as $key => $values) {
+      self::ensure('node', $key, fn () => \Drupal::entityTypeManager()->getStorage('node')->create(self::resolve($values, $ids) + [
+        'uid' => $author->id(),
+        'status' => 1,
+      ]));
+    }
+    $now = \Drupal::time()->getRequestTime();
+    $links = [];
+    foreach (array_keys(self::nodes() + self::previewNodes()) as $key) {
+      $node = $repository->loadEntityByUuid('node', self::uuid($key));
+      $best = in_array($key, self::SHOWCASE, TRUE);
+      // Older than any other content, so a site's own articles come first.
+      $node->setChangedTime($best ? $now : strtotime('2020-01-01T00:00:00Z'))->save();
+      if ($best) {
+        foreach (array_keys(self::templates()) as $id) {
+          if (str_starts_with($id, "node.{$node->bundle()}.")) {
+            $links[$id] = '/canvas/template/node/' . $node->bundle() . '/' . explode('.', $id)[2] . '/' . $node->id();
+          }
+        }
+      }
+    }
+    return $links;
+  }
+
+  /**
+   * The node each content template is previewed with.
+   */
+  private const SHOWCASE = [
+    'event_full',
+    'product_floor',
+    'recipe_bread',
+    'job_developer',
+    'person_mira',
+    'announcement_hours',
+  ];
+
+  /**
+   * Nodes only preview() adds: tests rely on Announcement having none.
+   */
+  private static function previewNodes(): array {
+    return [
+      // The fixture's own products test edge cases: long or unsafe markup.
+      'product_floor' => [
+        'type' => 'product',
+        'title' => 'Oak floor lamp',
+        'body' => self::body('<p>A tall reading lamp in solid oak, turned by hand and finished with natural oil.</p><ul><li>Warm 2700 K light</li><li>Dimmable</li><li>Fabric cable, 3 m</li></ul>', 'A tall reading lamp in solid oak.'),
+        'field_price' => '249.00',
+        'field_currency' => 'EUR',
+        'field_sku' => 'LAMP-OAK-02',
+        'field_gallery' => ['@media.lamp_side', '@media.lamp_front'],
+        'field_category' => '@taxonomy_term.lamps',
+        'path' => ['alias' => '/complex/products/oak-floor-lamp'],
+      ],
+      'announcement_tickets' => [
+        'type' => 'announcement',
+        'title' => 'Season tickets on sale',
+        'body' => self::body('<p>Twelve concerts for the price of nine, on sale until the end of August.</p>', 'Twelve concerts for the price of nine.'),
+      ],
+      'announcement_hours' => [
+        'type' => 'announcement',
+        'title' => 'New summer opening hours',
+        'body' => self::body('<p>From June to August the box office is open every day from noon to 8 pm, and an hour before every concert.</p>', 'The box office is open every day from noon.'),
+        'path' => ['alias' => '/complex/news/summer-opening-hours'],
+      ],
+    ];
   }
 
   /**
