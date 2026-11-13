@@ -1475,9 +1475,9 @@ textarea.seo-input {
 .seo-menu.rt-PopoverContent {
   display: flex;
   flex-direction: column;
-  width: min(300px, calc(100vw - 16px));
+  width: min(340px, calc(100vw - 16px));
   min-width: 0;
-  max-height: min(320px, var(--radix-popover-content-available-height));
+  max-height: min(360px, var(--radix-popover-content-available-height));
   padding: 0;
   overflow: hidden;
   border-radius: var(--seo-radius-surface);
@@ -1522,8 +1522,7 @@ textarea.seo-input {
 }
 .seo-menu-item {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
   min-height: 32px;
   padding: 6px 10px;
   border-radius: var(--seo-radius-control);
@@ -1536,15 +1535,15 @@ textarea.seo-input {
   flex: none;
 }
 .seo-menu-item > :last-child {
-  max-width: 150px;
-  margin-left: auto;
+  /* The value under its label, over the menu's width: two lines at most. */
+  display: -webkit-box;
   overflow: hidden;
   color: var(--seo-ink-2);
   font-size: 12px;
   line-height: 16px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .seo-menu-item > [data-empty] {
   font-style: italic;

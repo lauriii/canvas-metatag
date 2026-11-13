@@ -34,6 +34,9 @@ import {
 import type { TokenInfo } from '../types';
 import { BracesIcon, IconBtn, reveal } from './ui';
 
+/** The insert menu's width, as in styles.css. */
+const MENU_WIDTH = 340;
+
 /** A value as the menu and the chip tooltip show it: dates in words. */
 function shown(token: TokenInfo): string {
   return token.type === 'datetime' ? dateText(token.value) : token.value;
@@ -91,6 +94,7 @@ export function TemplateInput(props: {
   const [menu, setMenu] = useState<{
     brace: boolean;
     side: 'top' | 'bottom';
+    align: 'start' | 'end';
   } | null>(null);
   const [filter, setFilter] = useState('');
   const [active, setActive] = useState(0);
@@ -165,10 +169,16 @@ export function TemplateInput(props: {
     setFilter('');
     setActive(0);
     // The side is chosen once: filtering never flips the menu over the field.
+    // A field in the right-hand column opens it leftwards, inside the dialog.
     const rect = box.current?.getBoundingClientRect();
     const below = rect ? window.innerHeight - rect.bottom : Infinity;
     const above = rect?.top ?? 0;
-    setMenu({ brace, side: below >= 240 || below >= above ? 'bottom' : 'top' });
+    const width = Math.min(MENU_WIDTH, window.innerWidth - 16);
+    setMenu({
+      brace,
+      side: below >= 240 || below >= above ? 'bottom' : 'top',
+      align: !rect || rect.left + width <= window.innerWidth - 8 ? 'start' : 'end',
+    });
   }
 
   function insert(name: string) {
@@ -521,7 +531,7 @@ export function TemplateInput(props: {
         <Popover.Content
           className="seo-menu"
           aria-label="Insert a value"
-          align="start"
+          align={menu?.align ?? 'start'}
           side={menu?.side ?? 'bottom'}
           avoidCollisions={false}
           sideOffset={6}
@@ -586,6 +596,7 @@ export function TemplateInput(props: {
                       <span
                         data-empty={!value || undefined}
                         dir={value ? 'auto' : undefined}
+                        title={value || undefined}
                       >
                         {value || empty}
                       </span>
