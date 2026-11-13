@@ -32,6 +32,11 @@ part unlinkable alone.
 - **WHEN** a builder chooses "Venue › Address" for the Venue group of Every Event
 - **THEN** name, street, postal code, city and country MUST each link to the venue's field, and the bar MUST read "All 5 parts of Venue linked to Venue › Address" with Undo
 
+#### Scenario: A venue with its address in separate fields
+
+- **WHEN** Every Event's Venue references venues whose street, postal code, city and country are separate text fields
+- **THEN** "Link all parts to" MUST offer Venue, show which venue field each part will link to (by field type and label) before anything is written, link the confirmed parts in one draft write, and name the parts it could not match so the builder can link them through Venue › ‹field›
+
 ### Requirement: A linked group box only opens its sheet
 
 A linked group box MUST open its sheet on click, Enter, Space or Alt+↓.

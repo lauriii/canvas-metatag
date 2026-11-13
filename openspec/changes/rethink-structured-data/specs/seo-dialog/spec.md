@@ -112,6 +112,28 @@ MUST NOT be kinds.
 - **WHEN** the stored type is Blog post
 - **THEN** the kind MUST read "An article" and More details MUST show "Kind of article: Blog post"
 
+### Requirement: The kind always reads what search engines get
+
+"A web page" MUST be a kind the editor can choose. The field and the kinds
+sheet MUST always show the kind that is output, marked "Default" when it is
+inherited, never an empty or "Choose" state, read-only included. Choosing
+the inherited kind MUST show it as chosen.
+
+#### Scenario: A new page
+
+- **WHEN** an editor opens Schema on a page with no stored type
+- **THEN** the field MUST read "A web page" and the kinds sheet MUST have "A web page" selected and marked "Default"
+
+#### Scenario: Back to a web page
+
+- **WHEN** an editor changes an article to "A web page"
+- **THEN** the field MUST read "A web page", the output graph MUST have no main node, and after the draft is saved and the dialog reopened the field MUST still read "A web page"
+
+#### Scenario: A translation of an article
+
+- **WHEN** a translation's default-language version is an article and the editor chooses "A web page"
+- **THEN** the translation MUST store `WebPage` and its output MUST be a web page while the default-language version stays an article
+
 ### Requirement: Changing the kind names what is removed
 
 When choosing another kind would remove typed values, the dialog MUST say

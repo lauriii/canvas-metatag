@@ -13,6 +13,11 @@ to improve.
 - **WHEN** an event's venue has no country
 - **THEN** Checks MUST list "Add the country to the venue's address" to improve, with "An address needs a street or city, and a country."
 
+#### Scenario: A template's missing part that a reference can fill
+
+- **WHEN** Every Event's Street address is empty and its Venue references venues with a Street field
+- **THEN** the guidance under Street address and the Checks row MUST offer "Link to Venue › Street", which links it in one action, and MUST NOT only ask to add a value the template cannot type
+
 #### Scenario: Pay in the wrong order
 
 - **WHEN** a job's linked pay has From 5000 and To 4200
