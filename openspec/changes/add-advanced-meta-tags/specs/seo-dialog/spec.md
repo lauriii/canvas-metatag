@@ -211,10 +211,11 @@ about one of its rows.
 
 ### Requirement: Sheets cover the view
 
-Checks, Output, Choose image, Custom JSON-LD and Other tags MUST open as sheets
-that cover the dialog, with "Back" and a title. Only one MUST be open at a
-time, and the view behind it MUST be out of reach. Escape or Back MUST close it
-and return focus to what opened it, else to the scope button.
+Checks, Output, Choose image, Add your own JSON-LD and Other tags MUST open
+as sheets that cover the dialog, with "Back" and a title. Only one MUST be
+open at a time, and the view behind it MUST be out of reach. Escape or Back
+MUST go up one level in a sheet that has levels, and otherwise close it and
+return focus to what opened it, else to the scope button.
 
 #### Scenario: Escape from Checks
 

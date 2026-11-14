@@ -14,10 +14,10 @@ Playwright runs one spec at a time.
 
 - [ ] 2.1 Registry: `kind` blocks, `say` sentence variants, `variant_of`, `need`, `option_labels`, `per_item`; new type `Service`; Product and Service `billing`; Product `sold_here` (`emit: false`); `offers_seller` nested conditional ref; Event `organizer`; Person `worksFor`; availability keeps `BackOrder`; `currency` kind with the site default. Verify with `SchemaGraphTest` (Service node with `provider`; `priceSpecification` for P1M and P1Y and none for once; `seller` only when sold here; `organizer` defaults to the identity) and `ValuesTest` (currency codes, `sold_here` values).
 - [ ] 2.2 Report members from `build()`: `unknown_type`, `dropped` (key, raw value, reason), `withheld.missing`, `nodes` with origins, `sources` per prop branch. Verify with a new unit `SchemaGraphReportTest`.
-- [ ] 2.3 `schema.skip`: cleaned in `Values` on every read and write path, honoured in `build()`, custom JSON-LD unchanged. Verify with `ValuesTest` and `SchemaGraphTest` (a skipped `#faq` absent, the stored JSON intact).
+- [ ] 2.3 `schema.skip`: cleaned in `Values` on every read and write path, honoured in `build()`, keyed by `@id`; custom JSON-LD unchanged except that leaving out an item without an `@id` gives it one first. Verify with `ValuesTest` and `SchemaGraphTest` (a skipped `#faq` absent, the stored JSON intact; an item without `@id` gets `#faqpage` and is skipped).
 - [ ] 2.4 Site `currency` in config schema, `Values` site rules and `putSite`. Verify with `ValuesTest` ("€" refused, "EUR" kept) and `ApiTest::testSite`.
 - [ ] 2.5 One image chain for products (social override, then page image, never the site default). Verify with `ResolverTest::testProductImage`.
-- [ ] 2.6 Split `Resolver::report()` from `resolve()`; only `ApiController::state()` calls it; it adds `features` and `rules` (G1, G2, G7 over the merged graph, G9, G10, hidden-text inputs). Verify with a new kernel `DeliveryPathTest` (a spy proves `page_attachments` and the headless decorator never reach `features()` or the rules) and `ApiTest::testPageState` / `testTemplateState` (the report members present).
+- [ ] 2.6 Split `Resolver::report()` from `resolve()`; only `ApiController::state()` calls it; it adds `features` and `rules` (G1, G2, G7 over the merged graph, narrowed as in design.md decision 8, G9, G10, hidden-text inputs). Verify with a new kernel `DeliveryPathTest` (a spy proves `page_attachments` and the headless decorator never reach `features()` or the rules) and `ApiTest::testPageState` / `testTemplateState` (the report members present).
 - [ ] 2.7 Site-save effect: `putSite` dry run lists the published targets whose structured data would change, at most 25 named. Verify with `ApiTest::testSiteSaveEffect`.
 
 ## 3. Strings
@@ -40,11 +40,11 @@ Playwright runs one spec at a time.
 ## 5. Output and your own JSON-LD
 
 - [ ] 5.1 Output's structured data outline (main first, type, `@id`, origin, left-out and retired reasons), Show JSON-LD, Copy, Test this page (published URL or copy for drafts). Verify with Playwright `page.spec.ts` (outline rows; "Copied. Paste the code into the test.").
-- [ ] 5.2 Rename the custom JSON-LD sheet "Add your own JSON-LD", open it from Output and from "Added by hand"; inline verdicts, G1/G2/G7/G10 lines and the hidden-text line with its two actions; the one-release moved notice on pages with custom JSON-LD. Verify with Playwright `page.spec.ts` (notice shown once per page, G1 line, Leave it out removes the node from Output and keeps the JSON).
+- [ ] 5.2 Rename the custom JSON-LD sheet "Add your own JSON-LD", open it from Output and from "Added by hand"; inline verdicts, G1/G2/G7/G10 lines and the hidden-text line with its two actions; the one-release moved notice on pages with custom JSON-LD. Verify with Playwright `page.spec.ts` (notice shown once per page, G1 line with the identity's full address, Leave it out removes the node from Output and keeps the JSON).
 
 ## 6. Checks
 
-- [ ] 6.1 `checks.ts`: rows from `features`, `rules` and report members with the stage's words; severity per design.md decision 9; price parity with currency adjacency and period words; dates four ways; images by file URI; ratings; linked and fact values. Verify with `checks.test.ts` (each severity; "2,500 customers" not a price; "€2,500 / month" against a one-time price; a hidden question to fix; a review of the identity to fix; "doesn't fit" not counted).
+- [ ] 6.1 `checks.ts`: rows from `features`, `rules` and report members with the stage's words; severity per design.md decision 9; price parity with currency adjacency and period words; dates four ways; images by file URI; ratings; linked and fact values. Verify with `checks.test.ts` (each severity; "2,500 customers" not a price; "€2,500 / month" against a one-time price; a hidden question to fix; a review of the identity to fix; an aggregate rating of an organization with the identity's `url` to fix; an employer rating of another company not listed; "doesn't fit" not counted).
 
 ## 7. AI proposals
 

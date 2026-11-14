@@ -40,7 +40,8 @@ populated without JSON.
   one field. Codes use a searchable picker, and six or fewer choices are
   checkbox rows. Durations use one box with two numbers. Opening hours are a
   week. Linked pairs stack. At most four facts sit above More details.
-  There is no "Add item" repeater anywhere.
+  There is no "Add item" repeater for the registry's facts (hand-added
+  items get a form, with lists, in `extend-structured-data-by-id`).
 - **Honest defaults.** The publisher is the organizer, employer or author by
   default on a Canvas page, where the sentence shows it and Checks notes it.
   On a template it is answered once per type. A country is suggested, never
@@ -80,6 +81,13 @@ populated without JSON.
   are structure the editor made.
 - **Decision 2:** neutral wording ("In search results"); source addresses
   only in `data/search-features.json`.
+- **Product owner, 2026-11-13: hand-added JSON-LD can be filled as a form or
+  as JSON** (PO-DECISIONS item 11, built in `extend-structured-data-by-id`).
+  Read with it: decision 3's "typed lines of repeating content are never
+  allowed" governs the module's own facts. Hand-added JSON-LD could always
+  repeat anything; extend's form only shows it. This change's controls take a
+  shape so that form can reuse them; nothing in the coverage contract counts
+  hand-added JSON-LD as a route.
 - **Decision 6:** Plans for a service stays the kind for memberships and
   several plans.
 - **Decision 9:** new props are `ai: false` except plain text, and AI tests

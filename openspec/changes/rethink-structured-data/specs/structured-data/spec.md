@@ -110,11 +110,17 @@ none. A currency MUST be a three-letter code from the ISO 4217 list.
 
 ### Requirement: A hand-added item can be left out until it is on the page
 
-A page or template MAY list hand-added items to leave out. A listed item MUST
-NOT be emitted; the rest of the custom JSON-LD MUST be emitted as before. The
-stored custom JSON-LD MUST be unchanged.
+A page or template MAY list hand-added items to leave out, by their `@id`. A
+listed item MUST NOT be emitted; the rest of the custom JSON-LD MUST be
+emitted as before. The stored custom JSON-LD MUST be unchanged, except that
+an item without an `@id` MUST first be given one.
 
 #### Scenario: Leaving out a question nobody can see
 
 - **WHEN** the editor leaves out the hand-added `#faq` item
 - **THEN** the graph MUST have no `#faq` node, and the custom JSON-LD MUST still hold it
+
+#### Scenario: Leaving out an item without an id
+
+- **WHEN** the editor leaves out a hand-added `FAQPage` that has no `@id`
+- **THEN** the item MUST be given the `@id` `#faqpage`, that id MUST be listed, and the bar MUST say "Gave the item the id #faqpage so it can be left out."

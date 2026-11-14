@@ -17,7 +17,7 @@ owner's go (proposal.md, "Non-goals reopened"). Start only after
 
 - [ ] 3.1 `SchemaGraph` parts at `{url}#c-{uuid}`, `hasPart`, offers attached only under a confirmed accepting kind, `left_out` otherwise, per-version items with `skipped_parts`. Verify with `SchemaGraphTest` (two pages sharing a UUID get two ids; an unconfirmed pricing page has no Service; a newer version drops Starter) and `IdsSnapshotTest`.
 - [ ] 3.2 `Proposer::suggest()` in `report()`: order of preference, header/footer and text-only components ignored, ties to the earliest, Service for pricing unless set up as goods, `mode: auto` read from component ids at delivery. Verify with a new unit `ProposerTest` and `DeliveryPathTest` (the proposer is not called at delivery except the auto check).
-- [ ] 3.3 `schema.main`, inherited by translations; `main_missing`. Verify with `ResolverTest::testMainPart` (a French translation inherits; a removed component withholds the main node).
+- [ ] 3.3 `schema.main` (extend's key) also holds `c-<uuid>`, inherited by translations, while a hand-added `#‹name›` value keeps extend's meaning and is not inherited; `main_missing`. Verify with `ResolverTest::testMainPart` (a French translation inherits a part; a hand-added main stays per translation; a removed component withholds the main node).
 - [ ] 3.4 `VideoPage` type and the `video` rules entry with the watch-page rule. Verify with `SearchFeaturesTest` (not shown here; needs a thumbnail) and `SchemaGraphTest`.
 
 ## 4. Dialog

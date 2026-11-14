@@ -27,7 +27,9 @@ the dialog stays one column of one-line values; nothing is populated from
 content visitors can't see; nothing is stated about the site that the page
 doesn't say.
 
-**Non-Goals:** typed repeaters; a general nested-object or JSON editor;
+**Non-Goals:** typed repeaters and a general nested-object or JSON editor
+for the registry's facts (hand-added items get a form in
+`extend-structured-data-by-id`, PO decision of 2026-11-13);
 parsing free text into addresses, hours, prices or durations; estimates;
 reverse queries at delivery; per-node overrides; component mapping kinds
 (derive owns them, D1–D7).
@@ -79,7 +81,10 @@ file. For every type and every scope where it is offered:
 
 `coverage.test.ts` (vitest) runs the same walk over the registry the client
 receives. Every offered prop has a control (`controlFor()`), and every
-linkable kind has a link-menu filter. Both sides read the same fixture list.
+linkable kind has a link-menu filter. `controlFor()` takes a value shape and
+its attributes (kind, unit, codes, max, list), not a registry key, so
+`extend-structured-data-by-id` can drive the same controls from what a
+hand-added detail expects. Both sides read the same fixture list.
 
 `PopulateEveryTypeTest` builds each fixture with empty `custom` and `extend`.
 It compares the graph and verdict, and checks every emitted value against

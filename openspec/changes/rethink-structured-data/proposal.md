@@ -48,8 +48,9 @@ first of seven changes (see "Depends on / followed by").
 - **Custom JSON-LD moves behind Code** as "Add your own JSON-LD", with a
   one-release notice where it was. Its items read back as "Added by hand",
   get verdicts, and text in them that is not on the page is **to fix**, with
-  "Leave it out until it's on the page". Reviews of your own organization are
-  reported over the whole graph.
+  "Leave it out until it's on the page". Reviews and ratings of your own
+  organization are reported over the whole graph; a rating of another
+  company is not.
 - **Output shows the graph as an outline** (main thing first, origin, `@id`,
   left-out and retired items with reasons), then the exact JSON, Copy and a
   hand-off to a structured data test.
@@ -73,8 +74,10 @@ first of seven changes (see "Depends on / followed by").
   show. Nothing documents that structured data earns AI citations; the
   search features' own documentation says no special structured data is
   needed for AI features.
-- Ratings and reviews as kinds or defaults; a schema.org vocabulary bundle at
-  runtime; conversion of existing custom JSON-LD.
+- Ratings and reviews as kinds or defaults; a schema.org vocabulary at
+  runtime; conversion of existing custom JSON-LD. (`extend-structured-data-by-id`
+  later adds a form for hand-added items and a vocabulary the site downloads,
+  product owner, 2026-11-13.)
 - Merchant shipping and return policies.
 
 No README non-goal is reopened by this change.
@@ -88,6 +91,16 @@ No README non-goal is reopened by this change.
    file.
 2. **Plans for a service in this change** and the guard that keeps
    memberships and subscriptions out of shopping listings. Recommended: yes.
+
+## Decisions this relies on
+
+- **Product owner, 2026-11-13: hand-added JSON-LD can be filled as a form or
+  as JSON** (PO-DECISIONS item 11; built in `extend-structured-data-by-id`).
+  This change narrows its review rule for it: a review or aggregate rating is
+  "of your own organization" only when its subject is the site's identity or
+  an organization with the identity's address or profiles, so an employer
+  rating of another company is not flagged. The G1 line points at the
+  identity by its full address, which today's validator accepts.
 
 ## Depends on / followed by
 

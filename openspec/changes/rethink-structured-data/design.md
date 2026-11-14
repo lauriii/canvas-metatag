@@ -33,7 +33,8 @@ states. This change uses them unchanged.
 - Reading Canvas component trees (next change).
 - Live verdicts while typing (the stage refreshes from the server after a
   draft write; a client mirror is `extend-structured-data-by-id`).
-- A schema.org vocabulary at runtime.
+- A schema.org vocabulary at runtime (`extend-structured-data-by-id` adds one
+  that the site downloads).
 
 ## Decisions
 
@@ -152,11 +153,18 @@ counts; linked and fact values too. Never codes or identifiers.
 
 ### 8. Hand-added items: verdicts, rules and a skip list
 
-Custom nodes are unchanged in storage. New `schema.skip`: keys of hand-added
-items left out until they are on the page. The G-rules run over the merged
-graph: G1 second identity, G2 dangling `@id`, G7 reviews or ratings of the
-identity or of an organization node, G9 unknown stored kind, G10 relative
-address. Hidden hand-added text is to fix.
+Custom nodes are unchanged in storage, except that leaving out an item
+without an `@id` first gives it one (`#‹type in lowercase›`, made unique on
+the page, never a module id). New `schema.skip`: the `@id`s, as written, of
+hand-added items left out until they are on the page. The G-rules run over
+the merged graph: G1 second identity (its line points at the identity by its
+full address, `{home}#identity`), G2 dangling `@id`, G7 a `Review` or
+`AggregateRating` (not an `EmployerAggregateRating`) whose `itemReviewed`
+resolves to the identity or to an organization whose `url` or `sameAs`
+matches the identity's, G9 unknown stored kind, G10 relative address. Hidden
+hand-added text is to fix. G7 is narrowed on purpose: the review rule is
+about an entity that controls the reviews of itself, and the employer rating
+documentation has no such clause, so a rating of another company is fine.
 
 ### 9. Severity
 
@@ -172,7 +180,7 @@ title; G1, G2, G10. Good to know: retired features in use, no search feature,
 |---|---|---|
 | `schema` (page, template) | `type` | unchanged; new id `Service` |
 | | `props` | new keys `billing`, `sold_here`, `organizer`, `worksFor`; `offers_priceCurrency` of kind `currency` |
-| | `skip` | new: list of hand-added item keys |
+| | `skip` | new: list of hand-added items' `@id`s |
 | `canvas_metatag.site` | `currency` | new: an ISO 4217 code or empty |
 
 ## Migration Plan

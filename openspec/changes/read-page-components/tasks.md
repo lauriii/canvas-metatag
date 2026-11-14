@@ -19,7 +19,7 @@ reader has no visible effect until group 3.
 
 ## 3. Breadcrumbs
 
-- [ ] 3.1 `Resolver` asks the breadcrumb builder for the route when a breadcrumb block renders; `SchemaGraph` adds `{url}#breadcrumb` and the page node's `breadcrumb`; `#breadcrumb` reserved for custom nodes. Verify with `SchemaGraphTest` (four items, last without `item`; no list without the block; a custom `#breadcrumb` dropped) and `ResolverTest::testBreadcrumb` (absolute links on the public base, cache tags of the tree).
+- [ ] 3.1 `Resolver` asks the breadcrumb builder for the route when a breadcrumb block renders; `SchemaGraph` adds `{url}#breadcrumb` and the page node's `breadcrumb`; `#breadcrumb` reserved for custom nodes by adding `breadcrumb` (page-anchored) to `SchemaGraph::MODULE_IDS` from `extend-structured-data-by-id`, so saving a hand-added `#breadcrumb` is refused and the post-update rule renames stored ones. Verify with `SchemaGraphTest` (four items, last without `item`; no list without the block; a stored custom `#breadcrumb` dropped and reported), `ModuleIdsTest` (the breadcrumb id is on the list) and `ValuesTest` (a new hand-added `#breadcrumb` refused) and `ResolverTest::testBreadcrumb` (absolute links on the public base, cache tags of the tree).
 - [ ] 3.2 `breadcrumb` entry in `data/search-features.json` and the regenerated strings. Verify with `SearchFeaturesTest` (four items can show; one item needs 2 items) and the strings CI job.
 - [ ] 3.3 The Schema view shows the "Breadcrumb" line and Output lists the node with origin "This page". Verify with Playwright `schema.spec.ts` on a farm page that renders a breadcrumb.
 - [ ] 3.4 Headless: the content API's structured data carries the same list. Verify with `HeadlessHeadTest::testBreadcrumb`.
