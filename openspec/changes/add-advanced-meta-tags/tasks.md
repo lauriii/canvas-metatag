@@ -67,6 +67,11 @@ group 1.
 - [ ] 6.10 Docs: README (Other tags, headless note on rendering `head.meta` and `head.link` on the server, the upstream ask for fixed-key frontends), ARCHITECTURE.md §3, §4, §6, §8, §15, §17, §19; `.cspell-project-words.txt`. Verify with the cspell and PHPCS CI jobs.
 - [ ] 6.11 Browser check on site-4: the sheet at page, type and site scope, a row open, the paste list, a refusal, Output; save screenshots next to F04 to F08 and F10.
 
+## 6b. Sharing keys (after `strengthen-zero-config-defaults`)
+
+- [ ] 6b.1 Leave out Metatag tags whose key is or starts with a sharing key the module owns (`og:image`, `og:title`, `og:description`, `og:locale`, `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description`) and the `image_src` link; keep this change's fixed-row order with `og:locale`, `og:locale:alternate`, `og:image:type` and the front page icon links of `strengthen-zero-config-defaults`. Verify with `MetatagCoexistenceTest::testSharingKeys` (Metatag's `og:image:url`, `twitter:image` and `twitter:title` absent on an owned page, in coupled HTML and `head.meta`) and `CoupledHeadTest::testShareRows` still green.
+- [ ] 6b.2 The Checks row offering a Metatag default `og:image` as the site's image. Verify with `checks.test.ts` (media image: action selects "Use this image"; a plain address: action leads to Site › Sharing; editors see nothing).
+
 ## 7. Integration
 
 - [ ] 7.1 Run every PHPUnit suite and each Playwright project (`host-contract`, `coupled`, `headless`, `ai`) one at a time on site-4; all green. Verify by the run output.

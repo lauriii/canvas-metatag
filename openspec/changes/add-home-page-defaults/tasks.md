@@ -60,6 +60,17 @@ attached to the merge request.
 - [ ] 6.4 Add the read-only "Home page" row to Site (owned page, set by alias, listing, node, language without a home page) with actions gated on site configuration permission; verify with `tests/e2e/site.spec.ts` cases for each state and `tests/e2e/access.spec.ts` for a user who may administer SEO settings but not site configuration, then check it in the browser on site-4 and attach screenshots.
 
 - [ ] 6.5 When the public base comes from the request, Site settings tells administrators, once and in plain words, that each address visitors use (for example http and https) points at itself, and how to set one public address in the settings file; Output's "About addresses" keeps naming the source. Verify with Playwright `site.spec.ts` (shown with no public base set, absent with `canvas_metatag_public_base` set), then check it in the browser on site-4 and attach a screenshot. (Recorded by `harden-template-scope`.)
+- [ ] 6.6 [delta rebase] Rebase this change's `seo-checks` block "Checks describe the page or template being edited" onto the second `harden-template-scope`'s text: at template scope the Checks sheet names the previewed node once, on one line, and issue sentences say "this ‹type›" (scenarios "A template is checked against its preview", "A very long node title", "A template that is hidden from search" ("Show this article in search", kept beside this change's "Show your home page in search"), "A value empty for the previewed node" and "Shown in search, not saved yet"; this change's own block, whose detail "MUST name 'Hello world'", gives way to them); the front page rules keep naming the front node ("This also applies to your home page Welcome."). Verify with `openspec validate add-home-page-defaults --strict` and `checks.test.ts` (a template rendering the front page: "this article" in the detail, the front node's name only in the home page sentence). (Recorded by `harden-template-scope`, second round.)
+
+## 6b. A vaguely named front page (after `strengthen-zero-config-defaults`)
+
+The front page's fallback to the identity description, and the identity description as the site card's line, moved to `describe-the-publisher` (its group 1b), which runs after this change and adds that description.
+
+- [ ] 6b.1 Title and `og:title` of a vaguely named owned front page (design D10): the Site name, plus the separator and Drupal's slogan when set; a real name unchanged; a title or social title of its own unchanged. Verify with `ResolverTest` cases ("Home" without and with a slogan; "Etusivu" on the Finnish front page; "Industrial pumps for breweries"; a social title set; a page named "Home" that is not the front page keeps "Home").
+- [ ] 6b.2 The site card for such a front page when its chain ends at a card, with Drupal's slogan as its line when set. Verify with `ResolverTest` (the `og:image` address is the site card's; its `og:image:alt` is "{Site name}: {line}") and `ShareRouteTest::testSiteCard` from `strengthen-zero-config-defaults` (the fetched PNG is 1200 × 630).
+- 6b.3 Moved to `describe-the-publisher` task 1b.1 (the front page's description falls back to the identity description, never the slogan).
+- [ ] 6b.4 Checks wording: "Say what the site offers" detail, the site card row. Verify with `checks.test.ts` cases for each. ("From the site's description" moved to `describe-the-publisher` task 1b.3.)
+- [ ] 6b.5 Browser check on site-4 with the front page named "Home": the Social preview shows the site card, Output shows the title "Humanify Studio", Checks lists "Say what the site offers"; rename the page and see the page card and title change. Save screenshots.
 
 ## 7. Integration
 
@@ -69,6 +80,6 @@ attached to the merge request.
 
 ## Workflow follow-up
 
-- Archive after `link-values-to-fields` and `add-advanced-meta-tags`. This change's blocks for `seo-checks` "Title rules" and `site-seo` "Without a page in context, site settings preview a published page" are written on `link-values-to-fields`; its block for `site-seo` "The identity says who runs the site" modifies a requirement `add-advanced-meta-tags` adds. If either change's text changes before it archives, re-derive these blocks from its archived text.
+- Archive after `link-values-to-fields`, `add-advanced-meta-tags` and `strengthen-zero-config-defaults` (group 6b uses the site card). Archive before `describe-the-publisher`, which modifies this change's `seo-checks` block "Description rules" and its `structured-data` block, and adds the front page's fallback to the identity description. This change's blocks for `seo-checks` "Title rules" and `site-seo` "Without a page in context, site settings preview a published page" are written on `link-values-to-fields`; its block for `site-seo` "The identity says who runs the site" modifies a requirement `add-advanced-meta-tags` adds. If either change's text changes before it archives, re-derive these blocks from its archived text.
 - `add-advanced-meta-tags` records in its design that its open question on Metatag's front-page defaults is answered here (task 2.8).
 - Archive after review; verify the archived specs.

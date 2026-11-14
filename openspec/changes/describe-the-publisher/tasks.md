@@ -1,13 +1,22 @@
 # Tasks
 
-Needs `rethink-structured-data`, `read-page-components` and
-`add-home-page-defaults`.
+Needs `rethink-structured-data`, `read-page-components`,
+`strengthen-zero-config-defaults` and `add-home-page-defaults`; runs after the
+last two.
 
 ## 1. Identity depth
 
 - [ ] 1.1 Config schema and `Values` rules for `site_name`, `description`, `email`, `telephone`, `address`, `opening_hours`, `subtype`. Verify with `ValuesTest` (an address without a country refused; hours in order; unknown subtype refused) and `ApiTest::testSite`.
 - [ ] 1.2 `SchemaGraph` identity and website nodes: subtype, contact details, `PostalAddress`, `openingHoursSpecification`, website name from `site_name`. Verify with `SchemaGraphTest` (a Store; a separate site name; output unchanged when the new keys are empty).
 - [ ] 1.3 `local-business` rules entry, regenerated strings. Verify with `SearchFeaturesTest` (store with and without hours; organization not evaluated).
+
+- [ ] 1.4 Logo fallback to the default theme's own logo through the logo rule of `strengthen-zero-config-defaults`, and `slogan` from Drupal's slogan in the page's language. Verify with `SchemaGraphTest` (theme logo as `{home}#logo`; core's logo gives no logo node; slogan present and never the description) and `ResolverTest` (a theme logo path outside the theme refused).
+
+## 1b. The identity description on the home page (moved from `add-home-page-defaults` group 6b)
+
+- [ ] 1b.1 The owned front page's description falls back to the identity description, cut like any derived description, never to the slogan, and no other page gets it. Verify with `ResolverTest` (front page; About page; slogan only) and `HeadlessHeadTest` (same in `head.meta`). (Was `add-home-page-defaults` 6b.3.)
+- [ ] 1b.2 The site card's line falls back to the identity description shortened at its first clause when Drupal has no slogan. Verify with `ShareCardTest` (the farm site's description gives "Human expertise that amplifies what your AI agents can do"; a slogan wins; neither gives no line) and `ResolverTest` (the front page named "Home" without a slogan: its `og:image:alt` is "{Site name}: {line}" with that line). (Was the identity-description half of `add-home-page-defaults` 6b.2 and of the site card line in `strengthen-zero-config-defaults`.)
+- [ ] 1b.3 Checks on the front page without a description of its own: with an identity description, no "Add a description" and the description field says "From the site's description"; without one, "Add a description" as `add-home-page-defaults` words it. Verify with `checks.test.ts` cases for both. (Was part of `add-home-page-defaults` 6b.4.)
 
 ## 2. Linked identity
 
@@ -24,10 +33,14 @@ Needs `rethink-structured-data`, `read-page-components` and
 
 - [ ] 4.1 README (the publisher, linking to the footer, what a profile is); ARCHITECTURE.md §7, §13, §17. Verify with the cspell CI job.
 - [ ] 4.2 Run every suite as in `rethink-structured-data` 8.2 plus the Canvas contract job. Verify all are green.
-- [ ] 4.3 Browser check on the farm site: Site stage, linking Profiles to the footer with ticks, a local business with hours, the save bar, the drift row. Save a screenshot of each.
+- [ ] 4.3 Browser check on the farm site: Site stage, linking Profiles to the footer with ticks, a local business with hours, the save bar, the drift row; with no slogan and an identity description, the front page named "Home" shows that description in Output and the site card line in the Social preview, and Checks says "From the site's description". Save a screenshot of each.
 
 ## Workflow follow-up
 
-- Archive after `add-home-page-defaults`, `rethink-structured-data` and
-  `read-page-components`.
+- Archive after `add-home-page-defaults`, `strengthen-zero-config-defaults`,
+  `rethink-structured-data` and `read-page-components`. The `structured-data`
+  and `seo-checks` ("Description rules") blocks here are written on
+  `add-home-page-defaults`' text and the `share-images` block on
+  `strengthen-zero-config-defaults`' text; if theirs changes before they
+  archive, re-derive these blocks.
 - Review `data/profile-hosts.json` with the rules file's yearly review.

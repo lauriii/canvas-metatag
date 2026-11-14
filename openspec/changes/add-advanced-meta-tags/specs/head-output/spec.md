@@ -129,6 +129,15 @@ MUST be built without them and the error logged.
 - **WHEN** a Metatag default uses a value of the current user
 - **THEN** owned pages MUST carry no Metatag tag, the page cache MUST still serve them, and the error MUST be logged once per request under `canvas_metatag`
 
+### Requirement: Metatag's sharing tags are left out
+
+On an owned page, a Metatag tag whose key is or starts with `og:image`, `og:title`, `og:description`, `og:locale`, `twitter:card`, `twitter:image`, `twitter:title` or `twitter:description`, and the `image_src` link, MUST be left out, so that every consumer reads the module's shared image and title.
+
+#### Scenario: Sharing keys from Metatag
+
+- **WHEN** Metatag's global defaults hold `og:image:url`, `twitter:image` and `twitter:title`
+- **THEN** an owned page MUST carry none of them, in coupled HTML and in `head.meta`
+
 ## MODIFIED Requirements
 
 ### Requirement: Effective values layer the target over the site
@@ -165,15 +174,17 @@ translation inherits is in page-seo.
 
 The head MUST consist of the title and these rows, in this order: meta
 `description`, meta `robots`, the AI use tags, `og:type`, `og:site_name`,
-`og:title`, `og:description`, `og:url`, `og:image`, `og:image:width`,
-`og:image:height`, `og:image:alt`, `article:published_time`,
-`article:modified_time`, `article:expiration_time`, the card hint, the
-verification codes, then the other meta tags; then the canonical link, the
-hreflang links, the other links, and the JSON-LD script.
+`og:locale`, `og:locale:alternate`, `og:title`, `og:description`, `og:url`,
+`og:image`, `og:image:type`, `og:image:width`, `og:image:height`,
+`og:image:alt`, `article:published_time`, `article:modified_time`,
+`article:expiration_time`, the card hint, the verification codes, then the
+other meta tags; then the canonical link, the hreflang links, the icon links,
+the other links, and the JSON-LD script. Empty rows and links that are not
+absolute http(s) URLs MUST be left out.
 
 #### Scenario: Nothing to say
 
-- **WHEN** a page has no description, no title, no image and no site default image
+- **WHEN** a page has no description, no title and no image, and the site's choice for pages without an image is "No image"
 - **THEN** the description, `og:title`, `og:description` and every `og:image` row MUST be left out
 - **AND** the title MUST be the site name
 

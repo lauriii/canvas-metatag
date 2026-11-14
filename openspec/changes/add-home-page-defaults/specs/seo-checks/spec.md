@@ -256,7 +256,7 @@ page's name.
 #### Scenario: The page is named Home
 
 - **WHEN** the English front page is named "Home" and has no title or social title of its own
-- **THEN** "Say what the site offers" MUST be listed to improve, its first action MUST lead to Canvas's page title, and its detail MUST say that search engines and shared links read "Home" from the page's name
+- **THEN** "Say what the site offers" MUST be listed to improve, its first action MUST lead to Canvas's page title, and its detail MUST say that the home page shares as "Humanify Studio" and that renaming the page says what the site offers
 
 #### Scenario: A title that is only the brand
 
@@ -346,13 +346,18 @@ kinds, MUST be listed to improve, saying to describe each item on its own page.
 ### Requirement: The home page's share image is chosen on purpose
 
 On the front page, when the shared image comes from the page's own image
-rather than a chosen social image or the site default, a good-to-know row MUST
-say so and lead to the social image.
+rather than a chosen social image or the site's image, or is the site card, a
+good-to-know row MUST say so and lead to the social image.
 
 #### Scenario: The hero image is shared
 
 - **WHEN** the front page has no social image and its page image resolves
 - **THEN** "Links to your home page show the page's image" MUST be listed as good to know
+
+#### Scenario: The site card is shared
+
+- **WHEN** the front page named "Home" has no image and shares the site card
+- **THEN** "Links to your home page show your logo and site name" MUST be listed as good to know
 
 ### Requirement: The site name is one name
 

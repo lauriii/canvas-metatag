@@ -69,6 +69,15 @@ as guidance with "Use it". Never applied by itself.
 `putSite` dry run (from `rethink-structured-data`) names where the change
 goes live; the button reads "Save and apply".
 
+### 7. The identity description on the home page
+
+Moved from `add-home-page-defaults` D10 on 2026-11-14, when this change
+moved after it. The identity description is a site-wide text, so only the
+owned front page falls back to it (cut like any derived description) when it
+has no description of its own; no other page gets it. Drupal's slogan is a
+tagline, never a description. The site card's line is the slogan, else the
+identity description shortened at its first clause.
+
 ## Canvas internals relied on
 
 Region component trees and the front page tree, through `Sources` (rows added

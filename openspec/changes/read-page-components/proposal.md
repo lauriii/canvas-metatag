@@ -56,9 +56,13 @@ the breadcrumb actually shows.
 - **Depends on `rethink-structured-data`** (rules file, report, verdict
   lines) and **`link-values-to-fields`** groups 6–7 (the `Sources` class,
   its account rule and the Canvas contract CI job).
-- **Followed by** `set-up-types-from-templates`, `describe-the-publisher` and
+- **Followed by** `strengthen-zero-config-defaults` (inserted right after
+  this change: a Canvas page's first component image, its own text and its
+  first heading, read through `instances()` and `Sources::evaluate()`),
+  `set-up-types-from-templates`, `describe-the-publisher` and
   `derive-structured-data-from-components`, which read components through
-  it.
+  it. Nothing in this change's scope changes for that consumer; its budgets
+  apply to it unchanged.
 
 ## Capabilities
 

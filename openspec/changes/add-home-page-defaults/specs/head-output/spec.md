@@ -155,3 +155,31 @@ canonical MUST stay the entity's own URL.
 
 - **WHEN** `/?page=1` and `/?page=2` of a paged front page are requested in turn
 - **THEN** each response MUST carry its own canonical, and the second request of each MUST be a cache hit
+
+### Requirement: A vaguely named front page is titled by the site
+
+When the owned front page has no title of its own and its name is empty, the Site name, an alternate name or a vague word in its language, its title MUST be the Site name, followed by the separator and Drupal's slogan when one is set, and its `og:title` MUST be the same unless a social title is set. A front page with a real name MUST keep the usual title.
+
+#### Scenario: A front page named Home
+
+- **WHEN** the English front page is named "Home", the site is named "Humanify Studio" and Drupal has no slogan
+- **THEN** its title and its `og:title` MUST both be "Humanify Studio"
+
+#### Scenario: A slogan
+
+- **WHEN** the same front page's site has the slogan "Human expertise for AI-made work"
+- **THEN** its title and `og:title` MUST be "Humanify Studio | Human expertise for AI-made work"
+
+#### Scenario: A real name
+
+- **WHEN** the front page is named "Industrial pumps for breweries"
+- **THEN** its title MUST be "Industrial pumps for breweries | Humanify Studio"
+
+### Requirement: A vaguely named front page shares the site card
+
+When the image chain of a front page titled by the site ends at a card, the card MUST be the site card (share-images), not a card of the page's name.
+
+#### Scenario: Shared in a chat app
+
+- **WHEN** the front page named "Home" has no image and is shared in a chat app on a site with a logo
+- **THEN** the preview MUST show a 1200 × 630 image with the logo and "Humanify Studio", and no "Home"
