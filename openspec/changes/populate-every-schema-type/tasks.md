@@ -86,9 +86,11 @@ echo/test providers only and fail if any other provider is called.
 
 ## 10. Findings from the complex-content review
 
-Recorded by `harden-template-scope`. Do it with group 2.
+Recorded by `harden-template-scope`. Do these with group 2.
 
 - [ ] 10.1 [2.6] An image detail of the main node (Article `image`, Person `image`, Product `image`) that resolves to the same file as the page image references `{url}#primaryimage` by `@id` instead of repeating an inline `ImageObject`; a different file stays inline. Verify with `SchemaGraphTest` (same file gives `{"@id": "…#primaryimage"}`; another file stays inline) and the updated `tests/fixtures/graphs/*.json`.
+- [ ] 10.2 [3.8] A non-list fact linked to a multi-value field says "First of ‹n›" in the menu and in the box's tooltip, so the dialog says that only the first item is used. Verify with `extension/src/checks.test.ts` and Playwright `schema-event.spec.ts`.
+- [ ] 10.3 [2.1] The `dynamic-values` block keeps `harden-template-scope`'s sentence endings: a full stop after a heading, list item, definition, table row or caption, and after the text before a list, unless it ends in a sentence or clause mark. Items split from one long text are not given one. Verify with `ResolverTest` (the heading-and-list scenario) and `NormaliseTest::testHtmlListItemsSplit`.
 
 ## Workflow follow-up
 
