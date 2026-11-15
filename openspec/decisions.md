@@ -176,3 +176,15 @@ The SEO dialog's visual rules (tokens, components, review checklist) are in
     - A preview pattern match is enough; no preview token required.
     - With several frontends, an unnamed request gets no addresses.
     - Lands last, after make-the-module-agent-ready.
+15. close-known-limitations (the README's known limitations)
+    - An unpublished media translation moves on to the next image and says
+      why; it does not fall back to another translation.
+    - An overridden template SEO field shows the value that applies, locked,
+      and says where it can be changed.
+    - Private and undeclared file systems: an information row in the status
+      report, not a warning.
+    - A dialog write that crosses a publish is written again once, into a new
+      draft.
+    - Browser, language and screen-reader coverage is its own change,
+      test-in-every-engine-and-language, queued right after.
+    - Canvas proposals stay drafts in the change; nothing is posted upstream.
