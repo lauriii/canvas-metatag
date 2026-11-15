@@ -96,6 +96,16 @@ The card hint MUST be `summary_large_image` when the image sent is at least 600 
 - **WHEN** the image sent is 180 by 180 pixels, a chosen image sent as its original
 - **THEN** the card hint MUST be `summary`
 
+#### Scenario: A square logo
+
+- **WHEN** the image sent is 400 by 400 pixels, an original file sent because the site cannot make images
+- **THEN** the card hint MUST be `summary`
+
+#### Scenario: A wide banner
+
+- **WHEN** the image sent is 1200 by 150 pixels, an original file sent because the site cannot make images
+- **THEN** the card hint MUST be `summary`
+
 #### Scenario: A made card
 
 - **WHEN** a page shares a card made from its title

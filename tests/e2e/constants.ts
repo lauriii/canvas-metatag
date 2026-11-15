@@ -102,6 +102,8 @@ export const COMPLEX = {
   },
   /** A recipe written from right to left. */
   recipeRtl: { id: 20, title: 'שקשוקה' },
+  /** Its image is a 400 × 400 logo: a small card. */
+  job: { id: 21, title: 'Senior Drupal developer' },
   /** The Announcement type has no content; its template stores this title. */
   announcement: { title: '{Page title} {Separator} News' },
   /** What the Event template's live and draft title patterns end with. */
@@ -181,6 +183,7 @@ export const UI = {
     draftTemplate: 'Draft · goes live when you publish the template',
     restored: "Restored a change that hadn't been saved",
     readOnly: 'Read-only',
+    unstored: 'This change could not be stored in the draft',
     siteLive: 'Live site settings',
     siteUnsaved: 'Unsaved changes · not live yet',
     siteSaved: 'Saved · live now',

@@ -193,9 +193,15 @@ anonymous visitor may see: field, media, file and label access run for the
 anonymous account (`Resolver::allowed()`), images must be public files.
 Formatted text is reduced to plain text in `Resolver::text()`: the content of
 `script`, `style` and `template` elements is removed first (also when the
-element is not closed), then tags. The stored value is read, never the
-format's output: filters could render embedded entities for the current user
-into a cached, shared head.
+element is not closed), then tags. The end of each heading, list item,
+definition, table row and caption, and the start of each list and heading, is
+marked before tags go; after entities are decoded a mark becomes a full stop,
+unless it follows a sentence or clause mark (Latin, CJK in full- and
+half-width forms, Arabic, Urdu or Devanagari; closing quotes and brackets
+after it included) or nothing, so "Made to last", a nested list and a table
+read as sentences, not as one run-on line. The stored value is read, never
+the format's output: filters could render embedded entities for the current
+user into a cached, shared head.
 
 The dialog shows tokens as labelled chips (`{Page title}`); `model.ts`
 converts labels to stored names on commit (`toStored()`), also inside custom
@@ -301,6 +307,13 @@ Custom nodes can point at ours; they can never replace or extend them.
 | canonical, hreflang alternates | `<link>` via `html_head` (not `html_head_link`, so no Link headers) | `head.link[]` |
 | JSON-LD | one `<script type="application/ld+json">` | `head.script[0]` with `textContent` as an object |
 
+The card hint is `summary_large_image` from an effective image of 600 × 157
+px (`Resolver::LARGE_CARD`), else `summary`; the dialog's link preview draws a
+large card by the same rule (`LARGE_CARD` and `smallCard()` in `model.ts`,
+whose numbers also word the reason in its About this preview tip and, through
+`largeCardNeeds()`, the size Checks ask for), so the card the head asks for
+is the card the editor sees.
+
 Rows with an empty value are omitted; a link whose `href` is not an absolute
 http(s) URL is dropped. The coupled adapter also removes core's canonical and
 shortlink (`entity_view_alter`) and content_translation's hreflang links
@@ -342,7 +355,16 @@ and a hash. The dialog reads, through `host.ts`:
   (`canvas/api/v0/layout-content-template/node.{bundle}.full/{previewId}`),
 - the langcode, from the page's auto-save key `canvas_page:{id}:{langcode}`.
 
-No token, no write: without both, the target scope is read-only.
+No token, no write: without both, the target scope is read-only. Right after
+a load (another page, or another node in a template's preview) the editor has
+not stored the new draft yet: for up to 2 s that state is not shown, the
+fields stay as they were and a change typed meanwhile waits for the token.
+Stored later than that, the change is kept (the footer says it is not stored)
+and goes out once the token is there. A change left in session storage is
+restored or offered only for a writable target; a load that came before the
+token looks at it again once the token is there. Another node in the same
+template's preview keeps the view, its values and any change typed while the
+node loads (phase `refreshing`), instead of the loading placeholder.
 
 ### The write procedure
 
@@ -682,14 +704,14 @@ skip the CSRF check):
 | `HeadlessHeadTest` | the content API head, preview drafts, routes left alone, the runtime requirement | PHPUnit (kernel) |
 | `MetatagCoexistenceTest` | Metatag silent where the head is ours, widgets hidden | PHPUnit (kernel) |
 | `ApiTest` | route requirements, state (incl. a template without a node to preview), site (incl. a stored value carried forward), media, writes follow shown values | PHPUnit (kernel) |
-| `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node, heads and structured data, drafts, headless | PHPUnit (kernel) |
+| `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node (headings, list items and table rows as sentences), heads and structured data (a square logo's small card), hidden references published and deleted (coupled and headless), drafts, headless | PHPUnit (kernel) |
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest` | access, caps, flood, error codes, nothing logged or written; provider resolution, prompts, output cleaning | PHPUnit (kernel, submodule) |
 | `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks, API client, host adapter parsing | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
 | Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates bound to fields, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
 | Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider | |
-| Playwright `complex` | template scope on the complex fixture: type fields and their values, previews that follow the editor, an unpublished preview node, a type without content, text direction | |
+| Playwright `complex` | template scope on the complex fixture: type fields and their values, value menus in windows 350 and 420 px tall, by keyboard and to assistive technology, previews that follow the editor (at the view's top, without a message or a status change), Checks against a long title, an unpublished preview node and its information button (click, hover then click, click elsewhere), a square small card for a square logo, a header whose Checks text gives way to a long type name, a type without content, text direction | |
 
 Commands are in the README ("Development"). Kernel tests use Canvas's
 `phpunit.xml.dist`. The Playwright suite installs a seeded sandbox per spec

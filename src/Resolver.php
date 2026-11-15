@@ -62,6 +62,13 @@ final class Resolver {
   ];
 
   /**
+   * From this size an image makes a large card.
+   *
+   * The dialog's link preview uses the same rule (`smallCard()` in model.ts).
+   */
+  private const LARGE_CARD = ['width' => 600, 'height' => 157];
+
+  /**
    * What the dialog calls them.
    */
   private const LABELS = [
@@ -528,7 +535,7 @@ final class Resolver {
       // consumers fall back to the Open Graph values.
       [
         'name' => 'twitter:card',
-        'content' => $image !== NULL && $image['width'] >= 300 && $image['height'] >= 157 ? 'summary_large_image' : 'summary',
+        'content' => $image !== NULL && $image['width'] >= self::LARGE_CARD['width'] && $image['height'] >= self::LARGE_CARD['height'] ? 'summary_large_image' : 'summary',
       ],
     ];
 
@@ -776,17 +783,37 @@ final class Resolver {
    *
    * The content of elements that never display (script, style, template,
    * also nested templates) removed, then tags stripped, entities decoded
-   * once, whitespace collapsed. An opening tag may hold ">" in a quoted
-   * attribute. Should a pattern fail, the text is kept as it was.
+   * once, whitespace collapsed. A heading, list item, definition, table row
+   * or caption ends a sentence, as does the text before a list or a heading:
+   * a full stop follows it unless it ends in a stop, an ellipsis, a question
+   * or exclamation mark, a colon, semicolon or comma, or their equivalents in
+   * other scripts (closing quotes and brackets after it included). Such an
+   * element with no text of its own still ends the text before it. An opening
+   * tag may hold ">" in a quoted attribute. Should a markup pattern fail, the
+   * text is kept as it was; text that is not valid UTF-8 gives an empty
+   * string.
    */
   private static function text(string $html): string {
+    if (!mb_check_encoding($html, 'UTF-8')) {
+      return '';
+    }
+    // The end of a sentence. Entities never decode to a control character,
+    // so only the text's own need removing.
+    $end = "\x01";
+    $html = str_replace($end, '', $html);
     $attributes = '(?:"[^"]*+"|\'[^\']*+\'|[^\'">]++)*+';
     $html = preg_replace('~<(script|style)\b' . $attributes . '>(?:[^<]++|<(?!/\1\s*>))*+(?:</\1\s*>|\z)~i', ' ', $html) ?? $html;
     $html = preg_replace('~<template\b' . $attributes . '>(?:[^<]++|(?R)|<(?!/?template\b))*+(?:</template\s*>|\z)~i', ' ', $html) ?? $html;
+    $html = preg_replace('~</(?:h[1-6]|li|dd|tr|caption)\s*>|<(?:ul|ol|dl|h[1-6])(?=[\s\/>])~i', $end . '$0', $html) ?? $html;
     // A space keeps the words of neighboring blocks apart; inline markup
     // joins its words as written.
-    $html = (string) preg_replace('~<(?=/?(?:p|div|br|li|ul|ol|h[1-6]|td|th|tr|blockquote|pre|hr|dt|dd|section|article|figure|figcaption)\b)~i', ' <', $html);
+    $html = preg_replace('~<(?=/?(?:p|div|br|li|ul|ol|h[1-6]|td|th|tr|blockquote|pre|hr|dt|dd|section|article|figure|figcaption)[\s\/>])~i', ' <', $html) ?? $html;
     $text = Html::decodeEntities(strip_tags($html));
+    // Nested ends are one end; after a sentence or clause mark, or with
+    // nothing before it, an end adds nothing; else a full stop.
+    $ends = '[.!?…:;,。！？、，．：；｡؟۔।॥،؛][\p{Pe}\p{Pf}"\'»]*';
+    // Should this fail, no mark is left in the text.
+    $text = preg_replace(['/\s*\x01(?:\s*\x01)*/u', "/(^|$ends)\x01/u", '/\x01/'], [$end, '$1', '.'], $text) ?? str_replace($end, ' ', $text);
     return trim((string) preg_replace('/\s+/u', ' ', $text));
   }
 

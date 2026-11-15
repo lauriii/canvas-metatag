@@ -2,7 +2,15 @@ import { Select, Switch } from '@radix-ui/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import { inherited, meter, seedTitle, setPath, texts, tokensIn } from '../model';
+import {
+  inherited,
+  meter,
+  seedTitle,
+  setPath,
+  texts,
+  tokensIn,
+  wellFormed,
+} from '../model';
 import type { Robots, Scope, SuggestField } from '../types';
 import { Field, useHeld } from './Field';
 import { SearchPreview } from './Previews';
@@ -422,8 +430,10 @@ export function SearchTab() {
                 value={typing ?? live}
                 onFocus={() => setTyping(live)}
                 onChange={(event) => {
-                  setTyping(event.target.value);
-                  holdDescription(event.target.value);
+                  // Canvas refuses its whole layout for half a character.
+                  const text = wellFormed(event.target.value);
+                  setTyping(text);
+                  holdDescription(text);
                 }}
                 onBlur={handOver}
                 onKeyDown={(event) => {

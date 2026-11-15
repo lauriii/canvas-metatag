@@ -307,12 +307,11 @@ body {
   all: unset;
   box-sizing: border-box;
   display: inline-flex;
-  /* A long name gives way before the header overflows. */
+  /* A long name gives way only when the header has no room left. */
   flex: 0 1 auto;
   align-items: center;
   gap: 4px;
   min-width: 0;
-  max-width: 148px;
   height: var(--seo-control-h-sm);
   margin-left: -8px;
   padding: 0 6px 0 8px;
@@ -323,10 +322,6 @@ body {
   white-space: nowrap;
   cursor: default;
   transition: background-color var(--seo-fast) var(--seo-ease);
-}
-/* Without a Checks button the name takes the room there is. */
-.seo-header:not(:has(> .seo-checks-btn)) > .seo-scope {
-  max-width: none;
 }
 .seo-scope:hover,
 .seo-scope[data-state="open"] {
@@ -480,6 +475,12 @@ h2.seo-scope {
 }
 .seo-checks-short {
   display: none;
+}
+.seo-header[data-tight] .seo-checks-long {
+  display: none;
+}
+.seo-header[data-tight] .seo-checks-short {
+  display: inline;
 }
 @container seo (max-width: 451px) {
   .seo-checks-long {
@@ -693,6 +694,18 @@ h2.seo-scope {
   font-style: normal;
   text-overflow: ellipsis;
 }
+/* In a narrow frame the suffixes give way first, the name only once they
+   are gone: a suffix shows whole or not at all (Stage leaves out a cut one),
+   the previewed node's name is the caption's point. */
+.seo-stage-cap-l > em ~ span,
+.seo-stage-cap-l > span + span {
+  flex-shrink: 1000;
+  min-width: 0;
+  overflow: hidden;
+}
+.seo-stage-cap-l > [data-cut] {
+  display: none;
+}
 /* A cut name's ellipsis leaves up to a letter's width of room after it: the
    suffix moves into it, so both joins of the name look alike. */
 .seo-stage-cap-l > em + span {
@@ -851,11 +864,14 @@ h2.seo-scope {
   overflow-wrap: anywhere;
 }
 .seo-social-host {
+  overflow: hidden;
   color: var(--seo-ink-2);
   font-size: 12px;
   line-height: 16px;
   letter-spacing: 0.02em;
+  text-overflow: ellipsis;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 .seo-social-title {
   display: -webkit-box;
@@ -879,14 +895,19 @@ h2.seo-scope {
 .seo-social[data-layout="compact"] {
   display: flex;
 }
+/* A square thumbnail, as tall as the text beside it at its fullest: host,
+   two title lines and the description. The large card's whole-pixel height
+   is not for it. */
 .seo-social[data-layout="compact"] .seo-social-image {
   flex: none;
   width: 96px;
-  aspect-ratio: 1;
+  height: 96px;
+  aspect-ratio: auto;
 }
 .seo-social[data-layout="compact"] .seo-social-text {
   flex: 1;
   justify-content: center;
+  padding: 8px 12px;
   border-top: 0;
   border-left: 1px solid var(--gray-a3);
 }
@@ -1483,6 +1504,10 @@ textarea.seo-input {
   border-radius: var(--seo-radius-surface);
   box-shadow: var(--seo-shadow-pop);
 }
+/* Closed by a resize: gone at once. */
+.seo-menu.rt-PopoverContent[data-gone] {
+  animation: none;
+}
 .seo-menu-filter {
   display: flex;
   flex: none;
@@ -1512,6 +1537,12 @@ textarea.seo-input {
   min-height: 0;
   padding: 0 6px 6px;
   overflow-y: auto;
+  /* The active entry stays clear of the fade below. */
+  scroll-padding-bottom: 24px;
+}
+/* More values below than the list shows: its end fades. */
+.seo-menu-list[data-more] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 24px), transparent);
 }
 .seo-menu-group {
   padding: 8px 10px 4px;
@@ -2170,6 +2201,9 @@ button.seo-row:focus-visible {
 }
 .seo-checks-against {
   margin: 2px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .seo-checks-against > em {
   color: var(--seo-ink);
@@ -2491,8 +2525,15 @@ button.seo-row:focus-visible {
     font-size: 16px;
     line-height: 22px;
   }
+  /* The value menu hangs from the frame's top edge (TemplateInput). */
   .seo-menu.rt-PopoverContent {
-    max-height: min(60vh, var(--radix-popover-content-available-height));
+    max-height: min(
+      calc(100vh - 16px),
+      var(--radix-popover-content-available-height)
+    );
+  }
+  .seo-menu-hint {
+    display: none;
   }
   .seo-tray-options {
     max-height: 60vh;
@@ -2501,6 +2542,12 @@ button.seo-row:focus-visible {
 }
 
 /* ── 200% zoom ── */
+/* Menus are portaled out of the container: the frame's own width. */
+@media (max-width: 360px) {
+  .seo-menu-hint {
+    display: none;
+  }
+}
 @container seo (max-width: 360px) {
   .seo-header {
     flex-wrap: wrap;
@@ -2581,6 +2628,27 @@ button.seo-row:focus-visible {
   }
   .seo-sheet .seo-body {
     padding: 4px 8px 12px;
+  }
+  /* The small card's text keeps most of the width: a smaller square, at
+     the card's top. */
+  .seo-social[data-layout="compact"] {
+    align-items: flex-start;
+  }
+  .seo-social[data-layout="compact"] .seo-social-image {
+    width: 64px;
+    height: 64px;
+  }
+  .seo-social[data-layout="compact"] .seo-social-text {
+    align-self: stretch;
+    padding: 6px 10px;
+  }
+  /* The whole name, on up to two lines: no hover to read the rest. */
+  .seo-checks-against {
+    display: -webkit-box;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 }
 

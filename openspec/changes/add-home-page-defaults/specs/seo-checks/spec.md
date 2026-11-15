@@ -5,9 +5,10 @@
 Checks MUST be computed for the target, a page or a content type's template,
 from the values the dialog shows, unsaved edits and Canvas's live page title
 and description included. At template scope they MUST be about the node the
-editor previews, except that, when the template renders the front page
-(front-page), the front page visibility rules MUST judge the front node. The
-Site scope MUST have no checks of its own.
+editor previews, named once on one line of the Checks sheet and called "this
+‹type›" in its issues; when the template renders the front page (front-page),
+the front page visibility rules MUST judge the front node. The Site scope MUST
+have no checks of its own.
 
 #### Scenario: Typing changes the checks
 
@@ -17,7 +18,32 @@ Site scope MUST have no checks of its own.
 #### Scenario: A template is checked against its preview
 
 - **WHEN** the dialog edits "Every Article" while the editor previews the article "Hello world"
-- **THEN** the Checks sheet MUST say "Checked against Hello world", and a detail that would say "this page" MUST name "Hello world" instead
+- **THEN** the Checks sheet MUST say "Checked against Hello world", and a detail that would say "this page" MUST say "this article" instead
+
+#### Scenario: A very long node title
+
+- **WHEN** the editor previews an event whose title is 247 characters long
+- **THEN** "Checked against" MUST fit on one line, ending with an ellipsis, with the whole title on hover, and no issue's sentence MUST repeat the title
+
+#### Scenario: A value empty for the previewed node
+
+- **WHEN** "Every Event"'s description holds {Performers} and the previewed event has no performers
+- **THEN** the issue MUST say "Performers is empty for this event", not "Fill in Performers", and be good to know, not counted in the Checks button; the same MUST hold for a value the title or the social texts use
+
+#### Scenario: A structured data property linked to a field empty for the previewed node
+
+- **WHEN** "Every Event" links its Ends property to the field Ends and the previewed event has no end
+- **THEN** the issue MUST say "Ends is empty for this event", be good to know, not counted, and "Event is missing: Ends." MUST NOT be listed
+
+#### Scenario: Shown in search, not saved yet
+
+- **WHEN** an editor clicks "Show in search results" on "Every Article" and the change is not saved yet
+- **THEN** no noindex issue MUST be listed, so nothing says that hiding is set outside SEO: the check that a page is hidden by a setting outside SEO MUST NOT judge an unsaved change by the server's output for the values before it
+
+#### Scenario: A template that is hidden from search
+
+- **WHEN** "Every Article" is set to be hidden from search
+- **THEN** the issue MUST say "Show this article in search"
 
 #### Scenario: Site scope and loading
 

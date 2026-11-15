@@ -67,6 +67,15 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
     element.focus();
   }, []);
 
+  // From Site settings to a page or template still loading: its neutral
+  // name, as the loading view has, never "Site settings".
+  if (!target && state.ctx.kind !== 'none' && state.phase === 'loading') {
+    return (
+      <span className="seo-scope" data-static="">
+        {state.ctx.kind === 'page' ? 'This page' : 'Template'}
+      </span>
+    );
+  }
   if (!target) {
     return (
       <h2
@@ -229,7 +238,26 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
  * shows them: a spinner while saving, a check once saved, a lock when read-only.
  */
 function SaveStatus(props: { footer: Footer; bar: boolean }) {
-  const { footer } = props;
+  const { state } = useApp();
+  // While the target (re)loads the last settled status stays: another
+  // previewed node is not news. (The editor's brief 'store' state after a
+  // load is held back for the whole view, in App.)
+  const ready = state.phase === 'ready';
+  const settled = useRef(props.footer);
+  useLayoutEffect(() => {
+    if (ready) {
+      settled.current = props.footer;
+    }
+  }, [ready, props.footer]);
+  // Site's status is not the next page's: nothing is said until it loads.
+  const footer =
+    state.phase === 'loading' &&
+    state.ctx.kind !== 'none' &&
+    !state.server?.target
+      ? { ...props.footer, dot: 'gray' as const, text: '' }
+      : ready
+        ? props.footer
+        : settled.current;
   const glyph =
     footer.dot === 'spinner'
       ? 'spinner'
@@ -338,16 +366,20 @@ function TabList(props: { value: string }) {
 }
 
 /** The issue count: one quiet button that opens the Checks sheet. */
-function ChecksButton() {
+function ChecksButton(props: { short: boolean }) {
   const { issues, openSheet } = useApp();
   const fix = issues.filter((issue) => issue.severity === 'fix').length;
   const improve = issues.filter((issue) => issue.severity === 'improve').length;
   const text = fix ? `${fix} to fix` : improve ? `${improve} to improve` : 'Checks';
-  return (
+  const all = summary(issues);
+  // The short form ("● 1") counts what the long one does; a tooltip says it
+  // all, only where the visible text does not already.
+  const tip = props.short || (all !== text && (fix || improve) > 0);
+  const button = (
     <button
       type="button"
       className="seo-checks-btn"
-      aria-label={`Checks, ${summary(issues).replace(' · ', ', ').toLowerCase()}`}
+      aria-label={`Checks, ${all.replace(' · ', ', ').toLowerCase()}`}
       onClick={() => openSheet({ kind: 'checks' })}
     >
       {fix ? (
@@ -359,9 +391,15 @@ function ChecksButton() {
       )}
       <span className="seo-checks-long">{text}</span>
       {(fix || improve) > 0 && (
-        <span className="seo-checks-short">{fix + improve}</span>
+        <span className="seo-checks-short">{fix || improve}</span>
       )}
     </button>
+  );
+  // Always mounted, so the button stays the element that opened the sheet.
+  return (
+    <Tooltip content={all} open={tip ? undefined : false}>
+      {button}
+    </Tooltip>
   );
 }
 
@@ -373,14 +411,41 @@ export function Header(props: {
   scrolled: boolean;
   tab: string;
 }) {
-  const { state } = useApp();
+  const { state, issues } = useApp();
   const target = state.scope === 'target' && state.server?.target;
+  // The Checks text gives way before the scope's name does: "● 2" while the
+  // name would be cut. Measured with the long text, set before paint.
+  const header = useRef<HTMLElement>(null);
+  const [short, setShort] = useState(false);
+  const fit = () => {
+    const element = header.current;
+    const name = element?.querySelector('.seo-scope-name');
+    element?.removeAttribute('data-tight');
+    if (element && name && element.querySelector('.seo-checks-btn')) {
+      element.toggleAttribute('data-tight', name.scrollWidth > name.clientWidth);
+    }
+    // The short form shows when tight, or in a narrow frame (styles.css).
+    const long = element?.querySelector('.seo-checks-long');
+    setShort(!!long && getComputedStyle(long).display === 'none');
+  };
+  useLayoutEffect(fit, [target, props.loading, issues]);
+  useLayoutEffect(() => {
+    const observer = new ResizeObserver(() => fit());
+    observer.observe(header.current!);
+    return () => observer.disconnect();
+  }, []);
   return (
-    <header className="seo-header" data-scrolled={props.scrolled || undefined}>
+    <header
+      ref={header}
+      className="seo-header"
+      data-scrolled={props.scrolled || undefined}
+    >
       <ScopeMenu footer={props.footer} bar={props.bar} />
       <SaveStatus footer={props.footer} bar={props.bar} />
       {target && <TabList value={props.tab} />}
-      {target && !props.loading && state.server?.preview && <ChecksButton />}
+      {target && !props.loading && state.server?.preview && (
+        <ChecksButton short={short} />
+      )}
     </header>
   );
 }

@@ -6,7 +6,12 @@ import {
 import { useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import { dimensions, inSentence, type ShownImage } from '../model';
+import {
+  dimensions,
+  imageSize,
+  inSentence,
+  type ShownImage,
+} from '../model';
 import type { MediaItem } from '../types';
 import { Btn, Sk } from './ui';
 
@@ -43,16 +48,6 @@ export function ImageName(props: { name: string }) {
     <>{name}</>
   );
 }
-
-/** "1770 × 996 · 249 KB", the weight when the server knows it. */
-export const imageSize = (image: ShownImage) =>
-  `${dimensions(image.width, image.height)}${
-    image.bytes
-      ? image.bytes >= 1e6
-        ? ` · ${(image.bytes / 1e6).toFixed(1)} MB`
-        : ` · ${Math.max(1, Math.round(image.bytes / 1e3))} KB`
-      : ''
-  }`;
 
 /** What the Choose image sheet needs from the row that opened it. */
 export interface ImageRequest {

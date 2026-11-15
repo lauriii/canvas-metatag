@@ -1,7 +1,20 @@
 import type { FrameLocator, Page } from '@playwright/test';
 
 import { IMAGES, PAGES, SITE_NAME, UI, USERS } from './constants';
-import { button, closeSeo, expect, graphNode, link, openSeo, readHead, sheet, status, test, textbox } from './fixture';
+import {
+  button,
+  closeSeo,
+  expect,
+  graphNode,
+  link,
+  openSeo,
+  readHead,
+  sheet,
+  status,
+  switchPage,
+  test,
+  textbox,
+} from './fixture';
 
 /**
  * Site settings: reached from anywhere, saved explicitly, live at once.
@@ -124,4 +137,31 @@ test('unsaved site edits survive a side-menu click, and hiding the site asks fir
   await button(frame, UI.action.discard).click();
   await expect(shown).toBeChecked();
   await expect(status(frame)).not.toContainText(UI.footer.hidesSite);
+});
+
+test('opening a page from the start screen never shows Site settings while the page loads', async ({ page }) => {
+  const frame = await openSite(page);
+  await expect(frame.getByText(UI.site.hint)).toBeVisible();
+  // Every change to the dialog, from here on: its scope, its status, and
+  // whether Site's own note is still there.
+  await frame.locator('body').evaluate((body, hint) => {
+    const seen: { scope: string; status: string; hint: boolean }[] = [];
+    Object.assign(window, { e2eSeen: seen });
+    new MutationObserver(() =>
+      seen.push({
+        scope: body.querySelector('.seo-scope')?.textContent ?? '',
+        status: body.querySelector('[data-testid="seo-footer-status"]')?.textContent ?? '',
+        hint: !!body.querySelector('.seo-body')?.textContent?.includes(hint),
+      }),
+    ).observe(body, { subtree: true, childList: true, characterData: true });
+  }, UI.site.hint);
+  await switchPage(page, PAGES.about.id);
+  await expect(button(frame, UI.scope.page)).toBeVisible({ timeout: 60_000 });
+  type Seen = { scope: string; status: string; hint: boolean }[];
+  const seen = await frame.locator('body').evaluate(() => (window as Window & { e2eSeen?: Seen }).e2eSeen ?? []);
+  const waiting = seen.slice(seen.findIndex(({ hint }) => !hint));
+  expect(waiting.length).toBeGreaterThan(0);
+  expect(
+    waiting.filter(({ scope, status }) => scope.includes('Site settings') || status.includes(UI.footer.siteLive)),
+  ).toEqual([]);
 });

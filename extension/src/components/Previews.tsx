@@ -1,12 +1,18 @@
 import { CodeIcon, ImageIcon } from '@radix-ui/react-icons';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { useApp } from '../App';
 import {
-  LARGE_CARD_WIDTH,
   breadcrumb,
   previewNote,
   previewText,
+  smallCard,
   socialImage,
 } from '../model';
 import { PICKED } from './MediaPicker';
@@ -60,10 +66,48 @@ export function Stage(props: {
     observer.observe(element);
     return () => observer.disconnect();
   }, [setStageVisible]);
+  // A suffix shows whole or not at all, so that only the subject (the
+  // previewed node's name) can end in an ellipsis; the last one goes first.
+  // What a left-out suffix said is said elsewhere too: the About this
+  // preview tip, or Checks for Site's identity gap. Measured when the
+  // caption's text or width changes, not on every keystroke.
+  const cap = useRef<HTMLDivElement>(null);
+  const fitted = useRef<string | null>(null);
+  const fit = () => {
+    const parts = [
+      ...(cap.current?.querySelectorAll<HTMLElement>(
+        ':scope > em ~ span, :scope > span + span',
+      ) ?? []),
+    ];
+    parts.forEach((part) => part.removeAttribute('data-cut'));
+    const cut = () =>
+      parts.some(
+        (part) =>
+          !part.hasAttribute('data-cut') &&
+          part.scrollWidth > part.clientWidth,
+      );
+    for (let index = parts.length - 1; index >= 0 && cut(); index--) {
+      parts[index].setAttribute('data-cut', '');
+    }
+  };
+  useLayoutEffect(() => {
+    const text = cap.current?.textContent ?? '';
+    if (text !== fitted.current) {
+      fitted.current = text;
+      fit();
+    }
+  });
+  useLayoutEffect(() => {
+    const observer = new ResizeObserver(() => fit());
+    observer.observe(cap.current!);
+    return () => observer.disconnect();
+  }, []);
   return (
     <div className="seo-stage" ref={ref}>
       <div className="seo-stage-cap">
-        <div className="seo-stage-cap-l">{props.caption}</div>
+        <div className="seo-stage-cap-l" ref={cap}>
+          {props.caption}
+        </div>
         {props.buttons && (
           <div className="seo-stage-cap-btns">{props.buttons}</div>
         )}
@@ -175,6 +219,7 @@ export function SearchPreview() {
     published: target.published,
     node: server.preview?.published !== false,
     label: target.label,
+    hidden: view.hidden,
   });
   const on = (path: 'title' | 'description') =>
     focusField === path ||
@@ -316,7 +361,8 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
   const [broken, setBroken] = useState<string | null>(null);
   const texts = { ...view.texts, ...trial };
   const { image } = socialImage(state, view, PICKED);
-  const large = image !== null && image.width >= LARGE_CARD_WIDTH;
+  const small = smallCard(image);
+  const large = !small;
   // The image on screen changes only once the next one has loaded, and
   // a large card waits for the file itself rather than show its thumbnail.
   const [front, setFront] = useState<{ src: string; prev?: string } | null>(
@@ -359,14 +405,7 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
         ) : (
           <>
             <span>Link preview</span>
-            {!large && (
-              <span>
-                ·{' '}
-                {image
-                  ? `Small card: image under ${LARGE_CARD_WIDTH} px wide`
-                  : 'Small card: no image'}
-              </span>
-            )}
+            {small && <span>· Small card</span>}
             {unpublished && <span>· Not published yet</span>}
           </>
         )
@@ -375,8 +414,13 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
         <>
           {props.suggest}
           <OutputButton />
-          {unpublished && (
-            <InfoTip label="About this preview" text={unpublished} />
+          {(small || unpublished) && (
+            <InfoTip
+              label="About this preview"
+              text={[small && `${small}.`, unpublished]
+                .filter(Boolean)
+                .join(' ')}
+            />
           )}
         </>
       }

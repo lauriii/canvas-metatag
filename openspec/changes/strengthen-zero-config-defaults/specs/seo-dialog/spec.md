@@ -14,6 +14,11 @@ The Social view MUST open with the card a shared link shows: the image the serve
 - **WHEN** the image sent is under 600 px wide or under 157 px tall, or there is none
 - **THEN** the card MUST be small and say "Small card: image under 600 px wide", "Small card: image under 157 px tall" or "Small card: no image"
 
+#### Scenario: The card the head asks for
+
+- **WHEN** the image sent is a 400 × 400 logo, an original file sent because the site cannot make images
+- **THEN** the card MUST be small, with a square thumbnail as tall as the card at Canvas's dialog width, and Output MUST show the card hint `summary`
+
 #### Scenario: No social text set
 
 - **WHEN** a page sets no social title or description

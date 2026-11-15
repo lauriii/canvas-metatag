@@ -2,9 +2,11 @@
 // No score. Rules fed by `resolved` describe the saved draft.
 import type { PageFacts } from './host';
 import {
-  LARGE_CARD_WIDTH,
   dimensions,
+  fileSize,
   fill,
+  inSentence,
+  largeCardNeeds,
   meter,
   tokensIn,
   trimSeparators,
@@ -42,10 +44,10 @@ export interface ChecksInput {
   published: boolean;
   /** The content type's name at template scope ("Article"). */
   typeLabel: string;
-  /** The previewed page's label: "this page" at template scope. */
-  previewLabel: string;
   /** The name of the default language, for a setting inherited from it. */
   defaultLanguage: string;
+  /** The robots settings are sent: `resolved`'s robots tag describes them. */
+  robotsSettled: boolean;
   measurer: Measurer;
 }
 
@@ -78,9 +80,6 @@ function words(a: string, b: string): [string[], string[]] {
       .filter((word) => Array.from(word).length >= (latin ? 4 : 2));
   return [split(a), split(b)];
 }
-
-const size = (bytes: number) =>
-  `${(bytes / 1048576).toFixed(1).replace(/\.0$/, '')} MB`;
 
 /** What is missing from the site identity, in words. Empty when complete. */
 export function identityGaps(
@@ -117,9 +116,10 @@ export function checks(input: ChecksInput): Issue[] {
     Object.entries(tokens).map(([name, token]) => [name, token.value]),
   );
   const onPage = input.scope === 'page';
-  // "this page" is the previewed page's label at template scope.
-  const page = onPage ? 'this page' : input.previewLabel;
-  const Page = onPage ? 'This page' : input.previewLabel;
+  // At template scope the previewed node is "this article": the sheet names
+  // it once, above the issues.
+  const page = onPage ? 'this page' : `this ${inSentence(input.typeLabel)}`;
+  const Page = page.charAt(0).toUpperCase() + page.slice(1);
   const jump = (tab: Tab, field: string): Jump => ({
     scope: 'target',
     tab,
@@ -167,6 +167,10 @@ export function checks(input: ChecksInput): Issue[] {
     ['social.description', 'social', effective.social?.description],
   ];
   const reported = new Set<string>();
+  const leftOut = `It is left out for ${page}, and filled in wherever another ${inSentence(input.typeLabel)} has one.`;
+  /** A value the previewed node has none of: a fact at template scope. */
+  const emptyHere = (name: string) =>
+    !!tokens[name] && !tokens[name].value.trim() && !tokens[name].image;
   for (const [field, tab, template] of templates) {
     for (const name of tokensIn(template ?? '')) {
       const token = tokens[name];
@@ -182,9 +186,19 @@ export function checks(input: ChecksInput): Issue[] {
       reported.add(name);
       issues.push({
         id: `token-empty:${name}`,
-        severity: 'improve',
-        message: `Fill in ${token.label} or remove it`,
-        detail: `"${token.label}" is empty for ${page}, so it is left out.`,
+        // A template cannot fill in one event's field: there it is a fact,
+        // good to know, not counted.
+        ...(onPage
+          ? {
+              severity: 'improve' as const,
+              message: `Fill in ${token.label} or remove it`,
+              detail: `"${token.label}" is empty for ${page}, so it is left out.`,
+            }
+          : {
+              severity: 'info' as const,
+              message: `${token.label} is empty for ${page}`,
+              detail: leftOut,
+            }),
         jump: jump(tab, field),
       });
     }
@@ -259,9 +273,12 @@ export function checks(input: ChecksInput): Issue[] {
 
   const cut = (kind: 'title' | 'description', text: string) => {
     const result = meter(kind, text, input.measurer);
-    return result.state === 'long'
-      ? `May be cut off after “…${result.after}”.`
-      : null;
+    // The words' own closing mark would stand beside the sentence's stop
+    // (the marks the server's plain text treats as an end).
+    const after =
+      result.after.replace(/[.!?…:;,。！？、，．：；｡؟۔।॥،؛]+$/u, '') ||
+      result.after;
+    return result.state === 'long' ? `May be cut off after “…${after}”.` : null;
   };
   const titleCut = cut('title', texts.title);
   if (titleCut) {
@@ -312,7 +329,9 @@ export function checks(input: ChecksInput): Issue[] {
   const head = resolved?.head;
   const emitted =
     head?.meta.find((row) => row.name === 'robots')?.content ?? '';
-  const byConfig = !robots.noindex && /(^|,\s*)noindex\b/.test(emitted);
+  // Only the server's output says so, and only once it describes these values.
+  const byConfig =
+    input.robotsSettled && !robots.noindex && /(^|,\s*)noindex\b/.test(emitted);
   const noindex = robots.noindex === true || byConfig;
   const on = (path: string) => input.sources(path) === 'target';
   if (noindex && input.published) {
@@ -320,7 +339,7 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: 'noindex',
       severity: 'improve',
-      message: 'Show this page in search',
+      message: `Show ${page} in search`,
       detail: `Hidden from search engines. Set ${
         {
           target: onPage ? 'on this page' : `for every ${input.typeLabel}`,
@@ -419,13 +438,12 @@ export function checks(input: ChecksInput): Issue[] {
       // The link preview's rule, so the two never disagree: an image that
       // already makes a large card works, and is only good to know, in one
       // row with its cropping.
-      const thumbnail = width < LARGE_CARD_WIDTH;
-      if (small && thumbnail) {
+      if (largeCardNeeds(width, height)) {
         issues.push({
           id: 'image-small',
           severity: 'improve',
           message: 'Use a larger social image',
-          detail: `The social image is ${dimensions(width, height)}. Most link previews show it as a small thumbnail.`,
+          detail: `The social image is ${dimensions(width, height)}. Most link previews show it as a small thumbnail; an image ${largeCardNeeds(width, height)} makes a large card, and ${dimensions(1200, 630)} is best.`,
           jump: at,
         });
       } else if (small) {
@@ -439,7 +457,8 @@ export function checks(input: ChecksInput): Issue[] {
           jump: at,
         });
       }
-      if (cropped && !(small && !thumbnail)) {
+      // A thumbnail is square: only a large card is cropped to 1.91:1.
+      if (cropped && !small) {
         issues.push({
           id: 'image-ratio',
           severity: 'info',
@@ -452,13 +471,16 @@ export function checks(input: ChecksInput): Issue[] {
         issues.push({
           id: 'image-heavy',
           severity: 'info',
-          message: `The social image is ${size(image.bytes)}`,
+          message: `The social image is ${fileSize(image.bytes)}`,
           detail: 'Some services skip images over 5 MB.',
           jump: at,
         });
       }
       if (!FORMATS.includes(image.mime)) {
-        const type = image.mime.replace(/^image\/|\+.*$/g, '').toUpperCase();
+        // "image/x-ms-bmp" is a BMP, "image/svg+xml" an SVG.
+        const type = image.mime
+          .replace(/^image\/(x-(ms-)?)?|\+.*$/g, '')
+          .toUpperCase();
         issues.push({
           id: 'image-format',
           severity: 'improve',
@@ -495,7 +517,7 @@ export function checks(input: ChecksInput): Issue[] {
         message: 'Add a main heading',
         detail: onPage
           ? 'Set one heading in the page to Heading 1. This is done in the page, not here.'
-          : 'Set one heading in this template to Heading 1. This is done in the template, not here.',
+          : "Set one heading in the template's layout to Heading 1. SEO settings cannot set it.",
       });
     }
     const missing = facts.imagesWithoutAlt;
@@ -531,14 +553,38 @@ export function checks(input: ChecksInput): Issue[] {
         jump: prop(key),
       });
     }
+    // At template scope a property linked to fields the previewed node has
+    // no value in is a fact, as an empty value in the texts is.
+    const linked = (key: string) => {
+      const names = tokensIn(
+        schema.props?.[key] ??
+          props.find((item) => item.key === key)?.default ??
+          '',
+      );
+      return !onPage && names.length > 0 && names.every(emptyHere) && names;
+    };
     const recommended = resolved.schema.missing_recommended;
-    if (recommended.length) {
+    const asked = recommended.filter((key) => !linked(key));
+    if (asked.length) {
       issues.push({
         id: 'schema-recommended',
         severity: 'improve',
-        message: `${type.label} is missing: ${recommended.map(label).join(', ')}.`,
-        jump: prop(recommended[0]),
+        message: `${type.label} is missing: ${asked.map(label).join(', ')}.`,
+        jump: prop(asked[0]),
       });
+    }
+    for (const key of recommended) {
+      const names = linked(key);
+      // Said once: a value the texts use is already listed.
+      if (names && !names.every((name) => reported.has(name))) {
+        issues.push({
+          id: `schema-empty:${key}`,
+          severity: 'info',
+          message: `${label(key)} is empty for ${page}`,
+          detail: leftOut,
+          jump: prop(key),
+        });
+      }
     }
   }
   const date = (key: string) => {

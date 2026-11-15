@@ -1,9 +1,11 @@
 import AxeBuilder from '@axe-core/playwright';
+import type { Page } from '@playwright/test';
 
 import { PAGES, SITE_NAME, TEST_ID, UI, USERS } from './constants';
 import {
   SEO_IFRAME,
   button,
+  draftTitle,
   expect,
   isLayoutSave,
   openPage,
@@ -13,6 +15,7 @@ import {
   seoState,
   sheet,
   status,
+  switchPage,
   tab,
   test,
   textbox,
@@ -102,6 +105,101 @@ test('when the editor cannot be read the page is read-only, and the site still s
   await expect(status(frame)).toContainText(UI.footer.siteLive, { timeout: 30_000 });
 });
 
+/**
+ * Hides the page's draft entry from the dialog (which reads the editor
+ * through drupalSettings) until `release()`, as an editor slow to store it
+ * would.
+ */
+async function hideDraft(page: Page, id: number): Promise<() => Promise<void>> {
+  await page.evaluate((id) => {
+    const settings = window.drupalSettings;
+    const real = settings.canvas.store;
+    const key = `canvas/api/v0/layout/canvas_page/${id}`;
+    let hidden = true;
+    let seen: unknown = null;
+    let stripped: Record<string, unknown> = {};
+    const release = () => {
+      hidden = false;
+      // Any action makes the store tell its subscribers.
+      real.dispatch({ type: 'pendingChangesApi/invalidateTags', payload: [{ type: 'PendingChanges', id: 'LIST' }] });
+    };
+    Object.assign(window, { e2eRelease: release });
+    settings.canvas.store = {
+      ...real,
+      getState() {
+        const state = real.getState();
+        if (!hidden) {
+          return state;
+        }
+        const hash = state.publishReview.autoSavesHash;
+        if (hash !== seen) {
+          seen = hash;
+          stripped = { ...hash };
+          delete stripped[key];
+        }
+        return { ...state, publishReview: { ...state.publishReview, autoSavesHash: stripped } };
+      },
+    };
+  }, id);
+  return () => page.evaluate(() => (window as Window & { e2eRelease?: () => void }).e2eRelease?.());
+}
+
+test('a change typed before the editor has stored the draft is saved once it has, however late', async ({
+  drupal,
+  page,
+}) => {
+  await drupal.login(USERS.admin);
+  await openPage(page, pricing.id);
+  const release = await hideDraft(page, pricing.id);
+  const frame = await openSeo(page);
+  const title = textbox(frame, UI.field.title);
+
+  // For 2 s the missing draft is taken for one on its way: the field is
+  // writable. After that it is shown, and the change waits, said so.
+  await expect(title).toBeEnabled();
+  await title.fill('Stored late {Separator} {Site name}');
+  await expect(frame.getByRole('alert').filter({ hasText: UI.strip.cannotSave })).toBeVisible({ timeout: 10_000 });
+  await expect(status(frame)).toContainText(UI.footer.unstored);
+  await expect(title).toHaveValue('Stored late {Separator} {Site name}');
+
+  // Once the editor has stored it, the change goes out by itself.
+  const sent = page.waitForRequest(
+    (request) => request.method() === 'PUT' && request.url().includes('/canvas-metatag/api/draft/'),
+  );
+  await release();
+  await sent;
+  await expect(frame.getByRole('alert').filter({ hasText: UI.strip.cannotSave })).toHaveCount(0);
+  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Stored late {sep} {site}');
+  await expect(status(frame)).toContainText(UI.footer.draftPage, { timeout: 30_000 });
+});
+
+test('a change left behind while the draft was missing is restored once the editor has stored it', async ({
+  drupal,
+  page,
+}) => {
+  await drupal.login(USERS.admin);
+  await openPage(page, pricing.id);
+  const release = await hideDraft(page, pricing.id);
+  const frame = await openSeo(page);
+  const title = textbox(frame, UI.field.title);
+  await title.fill('Left behind {Separator} {Site name}');
+  await expect(status(frame)).toContainText(UI.footer.unstored, { timeout: 10_000 });
+
+  // Away and back while the draft is still missing: the change is kept in
+  // the session, not written, and not looked at while the page can't be.
+  await switchPage(page, PAGES.about.id);
+  await expect(status(frame)).toContainText(`Now editing ${PAGES.about.title}`);
+  await switchPage(page, pricing.id);
+  await expect(status(frame)).toContainText(`Now editing ${pricing.title}`);
+  await expect(title).not.toHaveValue('Left behind {Separator} {Site name}');
+
+  // Once the editor has stored it, the change comes back and goes out.
+  await release();
+  await expect(title).toHaveValue('Left behind {Separator} {Site name}', { timeout: 10_000 });
+  await expect(status(frame)).toContainText(UI.footer.restored);
+  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Left behind {sep} {site}');
+});
+
 test('a save from another session is shown as a conflict, not written over', async ({ drupal, page }) => {
   const { id } = PAGES.about;
   await drupal.login(USERS.admin);
@@ -172,6 +270,25 @@ test('the three tabs and the Checks sheet work by keyboard, pass an accessibilit
     await expect(sheet(frame, 'Checks')).toHaveCount(0);
     await expect(checks).toBeFocused();
 
+    // On the sheet, "About checks" shows its sentence when tabbed to;
+    // Escape hides the sentence and leaves the sheet open.
+    await page.keyboard.press('Enter');
+    const about = button(frame, 'About checks');
+    const focused = () => about.evaluate((element) => element === document.activeElement);
+    for (let presses = 0; presses < 6 && !(await focused()); presses++) {
+      await page.keyboard.press('Shift+Tab');
+    }
+    await expect(about).toBeFocused();
+    const note = (await about.getAttribute('aria-description')) ?? '';
+    const tip = frame.locator('.rt-TooltipContent', { hasText: note });
+    await expect(tip).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(tip).toHaveCount(0);
+    await expect(sheet(frame, 'Checks')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(sheet(frame, 'Checks')).toHaveCount(0);
+    await expect(checks).toBeFocused();
+
     // Tab moves on into the panel; the title field is reached and typed in.
     for (let presses = 0; presses < 12; presses++) {
       if (await title.evaluate((element) => element === document.activeElement)) {
@@ -236,6 +353,19 @@ test('the three tabs and the Checks sheet work by keyboard, pass an accessibilit
       );
       expect(overflowing, view).toEqual([]);
     });
+    // The short Checks form counts what the long one says ("● 1", "1 to fix").
+    const checksButton = button(frame, UI.tab.checks);
+    const long = (await checksButton.locator('.seo-checks-long').textContent()) ?? '';
+    await expect(checksButton.locator('.seo-checks-short')).toBeVisible();
+    await expect(checksButton.locator('.seo-checks-short')).toHaveText(long.split(' ')[0]);
+    // A caption cut short ends in an ellipsis, never mid-letter.
+    await tab(frame, UI.tab.search).click();
+    const cut = await frame.locator('.seo-stage-cap-l').first().evaluate((caption) =>
+      [...caption.children]
+        .filter((part) => part.scrollWidth > part.clientWidth)
+        .map((part) => getComputedStyle(part).textOverflow),
+    );
+    expect(cut.every((overflow) => overflow === 'ellipsis')).toBe(true);
   });
 });
 

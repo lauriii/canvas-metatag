@@ -131,8 +131,12 @@ export function ChecksSheet() {
         {summary(issues)}
       </h3>
       {target.scope === 'template' && (
-        <p className="seo-meta seo-checks-against">
-          Checked against <em>{server.preview?.label ?? ''}</em>
+        // One line, however long the node's title: whole on hover.
+        <p
+          className="seo-meta seo-checks-against"
+          title={server.preview?.label}
+        >
+          Checked against <em dir="auto">{server.preview?.label ?? ''}</em>
         </p>
       )}
       {counted.length === 0 && info.length === 0 && (

@@ -173,6 +173,21 @@ export const fill = (template: string, values: Record<string, string>) =>
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
 /**
+ * The first `max` characters drawn as one, and "…" when there were more.
+ */
+export function clip(text: string, max: number): string {
+  let out = '';
+  let count = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    if (count++ === max) {
+      return `${out}…`;
+    }
+    out += segment;
+  }
+  return text;
+}
+
+/**
  * A text's direction from its first letter, as `dir="auto"` finds it. Engines
  * have no Bidi_Class escape, so the right-to-left scripts are listed.
  */
@@ -662,6 +677,16 @@ const withValue = <S extends Scope>(
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'loading':
+      if (action.refresh) {
+        // The same template: its values and the view stay. A save under way
+        // is for the node being left, and is not waited for.
+        return {
+          ...state,
+          phase: 'refreshing',
+          ctx: action.ctx,
+          save: { ...state.save, target: { phase: 'idle' } },
+        };
+      }
       return {
         ...state,
         phase: 'loading',
@@ -686,6 +711,8 @@ export function reducer(state: State, action: Action): State {
         : state.server?.target
           ? state.scope
           : 'target';
+      // A change typed while another preview loaded is still to be sent.
+      const kept = state.phase === 'refreshing' && unsent(state);
       return {
         ...state,
         phase: 'ready',
@@ -694,11 +721,15 @@ export function reducer(state: State, action: Action): State {
         scope,
         tab: state.tabs[scope],
         edits: {
-          target: payload.target?.values ?? {},
+          target: kept ? state.edits.target : (payload.target?.values ?? {}),
           // Unsaved site edits survive the editor moving.
           site: state.siteDirty ? state.edits.site : payload.site,
         },
-        sent: null,
+        sent: kept ? state.sent : null,
+        save: {
+          ...state.save,
+          target: { phase: kept ? 'pending' : 'idle' },
+        },
         readonly: action.readonly,
         flash: action.flash ?? null,
       };
@@ -737,7 +768,10 @@ export function reducer(state: State, action: Action): State {
         return state;
       }
       const { scope, path } = action;
-      let { value } = action;
+      let value =
+        typeof action.value === 'string'
+          ? wellFormed(action.value)
+          : action.value;
       // Deleting one's words from a seeded page title returns to the inherited title.
       if (
         scope === 'target' &&
@@ -861,6 +895,19 @@ export const unsent = (state: State): boolean => {
   );
 };
 
+/**
+ * The robots settings are not yet what the server's output describes; other
+ * unsent fields leave its robots tag true, so typing elsewhere moves nothing.
+ */
+export const robotsUnsent = (state: State): boolean => {
+  const robots = (values?: SeoValues | null) => canon(values?.robots ?? {});
+  const mine = robots(state.edits.target);
+  return (
+    (state.sent === null || mine !== robots(JSON.parse(state.sent))) &&
+    mine !== robots(state.server?.target?.values)
+  );
+};
+
 // Derived values: computed with useMemo, never stored.
 
 export interface View {
@@ -942,9 +989,10 @@ export function view(state: State): View | null {
     (row) => row.name === 'robots',
   )?.content;
   const noindex = effective.robots?.noindex === true;
-  // The server's output describes the working copy only once nothing is unsent.
+  // The server's robots tag describes the working copy only once its robots
+  // settings are sent.
   const byConfig =
-    !noindex && !unsent(state) && /(^|,\s*)noindex\b/.test(robots ?? '');
+    !noindex && !robotsUnsent(state) && /(^|,\s*)noindex\b/.test(robots ?? '');
   const from = (path: string) => source(path, layers);
   return {
     tokens,
@@ -1216,6 +1264,8 @@ export function previewNote(note: {
   /** At template scope, the previewed node is published. */
   node: boolean;
   label: string;
+  /** Hidden from search: the caption says so too. */
+  hidden?: boolean;
 }): { suffix: string | null; unpublished: string; info: string } {
   const type = inSentence(note.label);
   const draftNode = note.template && !note.node;
@@ -1226,6 +1276,7 @@ export function previewNote(note: {
     : '';
   const estimate =
     'This preview is an estimate; search engines sometimes rewrite titles and descriptions.';
+  // Whatever the caption adds is said here too: a narrow caption leaves it out.
   return {
     suffix:
       draftNode || !note.published
@@ -1234,22 +1285,92 @@ export function previewNote(note: {
           : 'Not published yet'
         : null,
     unpublished,
-    info: draftNode
-      ? `${unpublished} ${estimate}`
-      : note.template
-        ? `${estimate} Switch the previewed ${type} with the preview picker in the top bar.`
-        : estimate,
+    info: [
+      draftNode
+        ? unpublished
+        : note.published
+          ? ''
+          : note.template
+            ? 'The template is not in use yet.'
+            : "This page isn't published yet.",
+      note.hidden ? 'It is hidden from search engines.' : '',
+      estimate,
+      note.template && !draftNode
+        ? `Switch the previewed ${type} with the preview picker in the top bar.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
   };
 }
 
 // Footer and strips: what the shell says, as data.
 
-/** From this width most link previews show the image as a large card. */
-export const LARGE_CARD_WIDTH = 600;
+/**
+ * The smallest image most link previews show as a large card: 600 px wide,
+ * and as tall as the card hint's own minimum. The head's card hint uses the
+ * same rule (Resolver::LARGE_CARD).
+ */
+const LARGE_CARD = { width: 600, height: 157 } as const;
+
+/** What an image is short of for a large card ("600 px wide"); '' if nothing. */
+const shortOf = (width: number, height: number) =>
+  width < LARGE_CARD.width
+    ? `${LARGE_CARD.width} px wide`
+    : height < LARGE_CARD.height
+      ? `${LARGE_CARD.height} px tall`
+      : '';
+
+/** Why the link preview draws a small card; '' for a large one. */
+export function smallCard(image: { width: number; height: number } | null) {
+  if (!image) {
+    return 'Small card: no image';
+  }
+  const short = shortOf(image.width, image.height);
+  return short && `Small card: image under ${short}`;
+}
+
+/** The least an image needs for a large card ("at least 600 px wide"); '' when it has it. */
+export function largeCardNeeds(width: number, height: number) {
+  const short = shortOf(width, height);
+  return short && `at least ${short}`;
+}
+
+/**
+ * A file size as the 5 MB rule counts it (1 MB = 1024 × 1024 bytes):
+ * "10.2 MB", "840 KB".
+ */
+export function fileSize(bytes: number): string {
+  const kb = Math.max(1, Math.round(bytes / 1024));
+  return kb < 1024
+    ? `${kb} KB`
+    : `${(bytes / 1048576).toFixed(1).replace(/\.0$/, '')} MB`;
+}
+
+/** Half of a character drawn with two UTF-16 units. */
+const LONE_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Text cut inside a character (half an emoji pasted) cannot be sent as JSON:
+ * the half becomes the replacement character, which can.
+ */
+export const wellFormed = (text: string) =>
+  text.replace(LONE_SURROGATE, '\uFFFD');
 
 /** "1200 × 630", never broken across lines. */
 export const dimensions = (width: number, height: number) =>
   `${width} × ${height}`;
+
+/** "1770 × 996 · 249 KB", the weight when the server knows it. */
+export const imageSize = (image: {
+  width: number;
+  height: number;
+  bytes?: number;
+}) =>
+  `${dimensions(image.width, image.height)}${
+    image.bytes ? ` · ${fileSize(image.bytes)}` : ''
+  }`;
 
 /**
  * A change is on its way to the server, or its output is being read back:
@@ -1377,6 +1498,44 @@ export function footer(state: State): Footer {
     actions: ['output'],
   };
 }
+
+/**
+ * The message for a load that edits something else: another page or another
+ * language, also under the same title, never another node in a template's
+ * preview (the caption names that one). Identity is the draft's key.
+ */
+export function nowEditing(
+  was: StatePayload['target'] | undefined,
+  next: StatePayload['target'],
+): string | undefined {
+  if (!next || next.auto_save_key === was?.auto_save_key) {
+    return undefined;
+  }
+  return `Now editing ${next.scope === 'page' ? next.label : `Every ${next.label}`}`;
+}
+
+/**
+ * Whether no other read-only state has been seen since the last load: a
+ * 'store' state still fresh came with the load, one reached later (on a
+ * save) did not.
+ */
+export const freshStore = (
+  fresh: boolean,
+  phase: State['phase'],
+  readonly: State['readonly'],
+): boolean => (phase !== 'ready' ? true : readonly !== 'store' ? false : fresh);
+
+/**
+ * Whether the editor's 'store' state is a draft on its way, which the dialog
+ * holds back for up to 2 s: one that came with the load, never a language
+ * mismatch between the editor and the server, which is known at load.
+ */
+export const holdsStore = (
+  phase: State['phase'],
+  readonly: State['readonly'],
+  fresh: boolean,
+  mismatch: boolean,
+): boolean => phase === 'ready' && readonly === 'store' && fresh && !mismatch;
 
 export const MESSAGES = {
   failed: "Couldn't save · your changes are kept here",

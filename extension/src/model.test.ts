@@ -14,6 +14,7 @@ import {
   canon,
   cascade,
   chipsIn,
+  clip,
   dateText,
   diff,
   dirOf,
@@ -26,6 +27,13 @@ import {
   inSentence,
   inherited,
   initialState,
+  fileSize,
+  imageSize,
+  largeCardNeeds,
+  nowEditing,
+  smallCard,
+  freshStore,
+  holdsStore,
   insertChip,
   jsonStrings,
   measure,
@@ -38,6 +46,7 @@ import {
   previewText,
   prune,
   readPending,
+  robotsUnsent,
   reducer,
   removeChip,
   saveDraft,
@@ -366,6 +375,16 @@ describe('seedTitle()', () => {
     );
   });
 
+  it('half of a character, as a cut paste leaves it, becomes the replacement character', () => {
+    const typed = run(
+      ready(),
+      edit('description', 'Cut \uD83D here, whole \uD83D\uDE00, end \uDE00'),
+    );
+    expect(typed.edits.target.description).toBe(
+      'Cut \uFFFD here, whole \uD83D\uDE00, end \uFFFD',
+    );
+  });
+
   it('an override equal to the empty seed is removed again (page scope)', () => {
     const typed = run(ready(), edit('title', 'Plans {sep} {site}'));
     expect(typed.edits.target.title).toBe('Plans {sep} {site}');
@@ -438,13 +457,25 @@ describe('measure, truncate and the meter', () => {
     const node =
       "This event isn't published yet. Values that only editors can see are left out.";
     expect(note(false, true)).toEqual({ suffix: null, unpublished: '', info: estimate });
-    expect(note(false, false).suffix).toBe('Not published yet');
+    // What the caption adds is in the ⓘ too: a narrow caption leaves it out.
+    expect(note(false, false)).toEqual({
+      suffix: 'Not published yet',
+      unpublished: '',
+      info: `This page isn't published yet. ${estimate}`,
+    });
+    expect(
+      previewNote({ template: false, published: true, node: true, label: 'Page', hidden: true }).info,
+    ).toBe(`It is hidden from search engines. ${estimate}`);
     expect(note(true, true)).toEqual({
       suffix: null,
       unpublished: '',
       info: `${estimate} Switch the previewed event with the preview picker in the top bar.`,
     });
-    expect(note(true, false).suffix).toBe('Template not in use yet');
+    expect(note(true, false)).toEqual({
+      suffix: 'Template not in use yet',
+      unpublished: '',
+      info: `The template is not in use yet. ${estimate} Switch the previewed event with the preview picker in the top bar.`,
+    });
     expect(note(true, true, false)).toEqual({
       suffix: 'Not published yet',
       unpublished: node,
@@ -797,6 +828,50 @@ describe('reducer', () => {
     });
   });
 
+  it('another preview of the same template keeps the view, and a change typed meanwhile', () => {
+    const template = target({
+      scope: 'template',
+      entity_type: 'content_template',
+      id: 'node.event.full',
+      label: 'Event',
+      auto_save_key: 'content_template:node.event.full',
+      values: { title: 'Saved' },
+    });
+    const one = { kind: 'template', id: 'node.event.full', bundle: 'event', previewId: '1' } as const;
+    const two = { ...one, previewId: '2' } as const;
+    const state = reducer(initialState(one), {
+      type: 'loaded',
+      ctx: one,
+      payload: payload({ target: template }),
+      readonly: 'no',
+    });
+    const refreshing = run(state, { type: 'loading', ctx: two, refresh: true });
+    expect(refreshing).toMatchObject({
+      phase: 'refreshing',
+      ctx: two,
+      edits: { target: { title: 'Saved' } },
+    });
+    expect(refreshing.server).toBe(state.server);
+    const answer = {
+      type: 'loaded',
+      ctx: two,
+      payload: payload({ target: template }),
+      readonly: 'store',
+    } as const;
+    // Typed meanwhile: kept, and waiting to be sent.
+    const typed = run(refreshing, edit('title', 'Typed'), answer);
+    expect(typed).toMatchObject({
+      phase: 'ready',
+      edits: { target: { title: 'Typed' } },
+      save: { target: { phase: 'pending' } },
+    });
+    // Nothing typed: the server's values.
+    expect(run(refreshing, answer)).toMatchObject({
+      edits: { target: { title: 'Saved' } },
+      save: { target: { phase: 'idle' } },
+    });
+  });
+
   it('each scope remembers its tab', () => {
     const state = run(
       ready(),
@@ -919,7 +994,15 @@ describe('view()', () => {
       },
     ]);
     // While typing, the client's own text.
-    expect(view(run(state, edit('title', 'Mine')))!.texts.title).toBe('Mine');
+    const typed = run(state, edit('title', 'Mine'));
+    expect(view(typed)!.texts.title).toBe('Mine');
+    // Typing elsewhere leaves the server's robots tag true; a robots change
+    // not yet sent does not.
+    expect(view(typed)).toMatchObject({ hidden: true, hiddenBy: 'config' });
+    expect(robotsUnsent(typed)).toBe(false);
+    const snippet = run(state, edit('robots.max_snippet', 50));
+    expect(robotsUnsent(snippet)).toBe(true);
+    expect(view(snippet)).toMatchObject({ hidden: false, hiddenBy: null });
   });
 });
 
@@ -1799,5 +1882,111 @@ describe('fixes from the reviews', () => {
     const shown = run(hidden, edit('robots.noindex', false));
     expect(view(shown)!.hidden).toBe(false);
     expect(strips(shown, view(shown), false)).toEqual([]);
+  });
+});
+
+describe('largeCardNeeds()', () => {
+  it('needs 600 px of width and 157 of height, as the head\'s card hint', () => {
+    expect(
+      [
+        [400, 400],
+        [600, 315],
+        [1200, 630],
+        [1200, 150],
+        [599, 630],
+        [600, 157],
+      ].map(([width, height]) => largeCardNeeds(width, height)),
+    ).toEqual([
+      'at least 600 px wide',
+      '',
+      '',
+      'at least 157 px tall',
+      'at least 600 px wide',
+      '',
+    ]);
+  });
+
+  it('says why a card is small, from the same numbers', () => {
+    expect(
+      [null, { width: 400, height: 400 }, { width: 1200, height: 150 }, { width: 600, height: 157 }].map(
+        smallCard,
+      ),
+    ).toEqual([
+      'Small card: no image',
+      'Small card: image under 600 px wide',
+      'Small card: image under 157 px tall',
+      '',
+    ]);
+  });
+});
+
+describe('fileSize()', () => {
+  it('counts as the 5 MB rule does, in one unit base everywhere', () => {
+    expect(
+      [10665459, 5 * 1048576, 1048575, 1048576 - 600, 2048, 100].map(fileSize),
+    ).toEqual(['10.2 MB', '5 MB', '1 MB', '1023 KB', '2 KB', '1 KB']);
+    // The image field says what the weight row says.
+    expect(imageSize({ width: 1200, height: 630, bytes: 10665459 })).toBe(
+      '1200\u00a0×\u00a0630 · 10.2 MB',
+    );
+    expect(imageSize({ width: 1200, height: 630 })).toBe('1200\u00a0×\u00a0630');
+  });
+});
+
+describe('holdsStore()', () => {
+  it('holds the store state that came with a load, never a language mismatch', () => {
+    expect(holdsStore('ready', 'store', true, false)).toBe(true);
+    // A mismatch is known at load: shown at once.
+    expect(holdsStore('ready', 'store', true, true)).toBe(false);
+    // One reached later, on a save, shows at once.
+    expect(holdsStore('ready', 'store', false, false)).toBe(false);
+    expect(holdsStore('ready', 'no', true, false)).toBe(false);
+    expect(holdsStore('loading', 'store', true, false)).toBe(false);
+  });
+
+  it('a store state is fresh from a load until another state is seen', () => {
+    let fresh = freshStore(false, 'loading', 'no');
+    expect(fresh).toBe(true);
+    fresh = freshStore(fresh, 'ready', 'store');
+    expect(fresh).toBe(true);
+    fresh = freshStore(fresh, 'ready', 'no');
+    expect(fresh).toBe(false);
+    // The same state later, on a save, is not fresh.
+    expect(freshStore(fresh, 'ready', 'store')).toBe(false);
+    expect(freshStore(fresh, 'refreshing', 'store')).toBe(true);
+  });
+});
+
+describe('nowEditing()', () => {
+  const template = target({
+    scope: 'template',
+    entity_type: 'content_template',
+    id: 'node.event.full',
+    label: 'Event',
+    auto_save_key: 'content_template:node.event.full:en',
+  });
+
+  it('is quiet when only the previewed node changes', () => {
+    expect(nowEditing(template, { ...template, values: { title: 'x' } })).toBeUndefined();
+  });
+
+  it('names another page, also under the same title, and another language', () => {
+    const pricing = target();
+    expect(nowEditing(pricing, target({ id: '9', auto_save_key: 'canvas_page:9:en' }))).toBe(
+      'Now editing Pricing',
+    );
+    expect(nowEditing(pricing, target({ auto_save_key: 'canvas_page:8:fi' }))).toBe('Now editing Pricing');
+    expect(nowEditing(pricing, template)).toBe('Now editing Every Event');
+    expect(nowEditing(pricing, null)).toBeUndefined();
+  });
+});
+
+describe('clip()', () => {
+  it('keeps a short text, cuts a long one after whole characters', () => {
+    expect(clip('Oak', 3)).toBe('Oak');
+    expect(clip('Oak lamp', 3)).toBe('Oak…');
+    // A family emoji and a flag are one character each.
+    expect(clip('👨‍👩‍👧🇫🇮 lamp', 2)).toBe('👨‍👩‍👧🇫🇮…');
+    expect(Array.from(clip('a'.repeat(6000), 150))).toHaveLength(151);
   });
 });

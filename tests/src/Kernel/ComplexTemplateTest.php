@@ -333,8 +333,9 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $node = $this->node('product_lamp');
     $tokens = $this->resolver()->tokens($node, 'node', 'product', new CacheableMetadata());
     $body = $tokens['field.body']['value'];
-    self::assertStringStartsWith('Made to last Solid oak, turned by hand & finished with natural oil.', $body);
-    self::assertStringEndsWith('Warm 2700 K light Dimmable Fabric cable, 2 m Height 45 cm Weight 1.2 kg Questions? Ask us 💡', $body);
+    // The heading, the list items and the table rows end their sentences.
+    self::assertStringStartsWith('Made to last. Solid oak, turned by hand & finished with natural oil.', $body);
+    self::assertStringEndsWith('Warm 2700 K light. Dimmable. Fabric cable, 2 m. Height 45 cm. Weight 1.2 kg. Questions? Ask us 💡', $body);
     self::assertStringNotContainsString('<', $body);
     foreach (['field.body', 'description'] as $name) {
       self::assertStringNotContainsString('alert(1)', $tokens[$name]['value'], $name);
@@ -524,6 +525,8 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     self::assertSame('website', $meta['og:type']);
     self::assertSame($this->fileUrl('logo'), $meta['og:image']);
     self::assertSame(['400', '400'], [$meta['og:image:width'], $meta['og:image:height']]);
+    // A square logo makes a small card, as the dialog's link preview shows.
+    self::assertSame('summary', $meta['twitter:card']);
     self::assertArrayNotHasKey('og:image:alt', $meta);
     self::assertSame(['identity', 'website', 'webpage', 'primaryimage'], array_keys(self::graph($heads['job_developer'])));
 
@@ -614,6 +617,74 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       // image field and the site no default image.
       'venue unpublished' => ['MISS', 'Midsummer Night Concert at', 'The stage at dusk', $url, 'HIT', 'Table lamps'],
       'poster unpublished' => ['MISS', 'Midsummer Night Concert at', NULL, NULL, 'HIT', 'Table lamps'],
+    ], $seen);
+  }
+
+  /**
+   * A hidden reference that becomes visible, or is deleted, updates the head.
+   *
+   * The head of a node whose references visitors cannot see depends on those
+   * references too: publishing one shows it at once, deleting one empties it.
+   */
+  public function testHiddenReferencesChange(): void {
+    $event = ContentTemplate::load('node.event.full');
+    self::assertInstanceOf(ContentTemplate::class, $event);
+    $values = $event->getThirdPartySetting('canvas_metatag', 'values');
+    $event->setThirdPartySetting('canvas_metatag', 'values', [
+      'title' => '{title} at {field.field_venue}',
+      'description' => '{field.field_performers}',
+    ] + $values)->save();
+    $product = ContentTemplate::load('node.product.full');
+    self::assertInstanceOf(ContentTemplate::class, $product);
+    $values = $product->getThirdPartySetting('canvas_metatag', 'values');
+    $product->setThirdPartySetting('canvas_metatag', 'values', ['social' => ['image' => '{field.field_gallery}']] + $values)->save();
+
+    $event_path = $this->complex['path']['event_hidden_refs'];
+    $product_path = '/node/' . $this->complex['node']['product_rtl'];
+    $read = function () use ($event_path, $product_path): array {
+      $event = $this->get($event_path);
+      $product = $this->get($product_path);
+      $head = self::readHead($event);
+      return [
+        $event->headers->get('X-Drupal-Cache'),
+        $head['titles'][0],
+        self::meta($head)['description'] ?? NULL,
+        $product->headers->get('X-Drupal-Cache'),
+        self::meta(self::readHead($product))['og:image'] ?? NULL,
+      ];
+    };
+    $publish = function (string $entity_type_id, string $key): void {
+      $entity = $entity_type_id === 'node' ? $this->node($key) : $this->entity($entity_type_id, $key);
+      \assert($entity instanceof NodeInterface || $entity instanceof MediaInterface);
+      $entity->setPublished()->save();
+      $this->forgetAccess();
+    };
+
+    $seen = [];
+    $seen['before'] = $read();
+    $seen['again'] = $read();
+    $publish('node', 'venue_hidden');
+    $seen['venue published'] = $read();
+    // The first performer, not the second, who was there all along.
+    $publish('node', 'person_hidden');
+    $seen['first performer published'] = $read();
+    $publish('media', 'lamp_prototype');
+    $seen['first gallery image published'] = $read();
+    $this->node('venue_hidden')->delete();
+    $this->forgetAccess();
+    $seen['venue deleted'] = $read();
+
+    $title = 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮 at';
+    // With no performer to show, the description is the node's own.
+    $own = 'Bring your own instrument. 🎶';
+    $image = $this->fileUrl('lamp_prototype');
+    self::assertSame([
+      'before' => ['MISS', $title, $own, 'MISS', NULL],
+      'again' => ['HIT', $title, $own, 'HIT', NULL],
+      'venue published' => ['MISS', "$title Rehearsal Room B", $own, 'HIT', NULL],
+      'first performer published' => ['MISS', "$title Rehearsal Room B", 'Unannounced guest', 'HIT', NULL],
+      'first gallery image published' => ['HIT', "$title Rehearsal Room B", 'Unannounced guest', 'MISS', $image],
+      'venue deleted' => ['MISS', $title, 'Unannounced guest', 'HIT', $image],
     ], $seen);
   }
 
@@ -762,28 +833,36 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
    * The content API carries the same head per type, and drafts for previews.
    */
   public function testHeadless(): void {
-    $modules = ['serialization', 'consumers', 'simple_oauth', 'custom_elements', 'canvas_headless'];
-    if (array_diff($modules, array_keys($this->container->get('extension.list.module')->getList()))) {
-      self::markTestSkipped('canvas_headless or one of its dependencies is not in the codebase.');
-    }
-    $this->enableModules($modules);
-    $this->installEntitySchema('consumer');
-    $this->installEntitySchema('oauth2_token');
-    $this->installConfig(['simple_oauth', 'canvas_headless']);
-    $this->config('canvas_headless.settings')->set('frontends', [['url' => self::FRONTEND, 'components' => []]])->save();
+    $this->enableHeadless();
 
     // Owned types: the resolver's head, on the frontend; images stay on
     // Drupal.
-    foreach (['event_full', 'product_lamp', 'person_mira', 'job_developer'] as $key) {
+    foreach (['event_full', 'event_hidden_refs', 'product_lamp', 'person_mira', 'job_developer'] as $key) {
       $path = $this->complex['path'][$key];
       $head = self::decodeResponse($this->content($path))['head'];
       $expected = $this->resolver()->resolve($this->node($key))['head'];
       self::assertSame(json_decode((string) json_encode($expected), TRUE), $head, $key);
       self::assertSame([['rel' => 'canonical', 'href' => self::FRONTEND . $path]], $head['link'], $key);
       self::assertSame(self::FRONTEND . $path . '#webpage', self::graph($head)['webpage']['@id'], $key);
+      if ($key === 'event_hidden_refs') {
+        // No poster, and no image elsewhere.
+        self::assertArrayNotHasKey('og:image', self::meta($head));
+        continue;
+      }
       self::assertStringStartsWith('http://localhost/', self::meta($head)['og:image'], $key);
     }
     self::assertSame('Midsummer Night Concert | Events', self::decodeResponse($this->content($this->complex['path']['event_full']))['head']['title']);
+    // A change to a referenced media item reaches the cached response.
+    $event_path = $this->complex['path']['event_full'];
+    $response = $this->content($event_path);
+    self::assertSame('HIT', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('An orchestra on an open-air stage at dusk', self::meta(self::decodeResponse($response)['head'])['og:image:alt']);
+    $poster = $this->entity('media', 'poster');
+    \assert($poster instanceof MediaInterface);
+    $poster->set('field_media_image', ['alt' => 'The stage at dusk'] + (array) $poster->get('field_media_image')->first()?->getValue())->save();
+    $response = $this->content($event_path);
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('The stage at dusk', self::meta(self::decodeResponse($response)['head'])['og:image:alt']);
     // Not owned: Canvas's own head.
     self::assertSame(['title' => 'Lakeside Concert Hall'], self::decodeResponse($this->content($this->complex['path']['venue_hall']))['head']);
     self::assertSame(['title' => 'Ruisleipä (Finnish rye bread)'], self::decodeResponse($this->content($this->complex['path']['recipe_bread']))['head']);
@@ -882,6 +961,58 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       'client_instance_id' => self::CLIENT,
       'auto_saves' => [AutoSaveManager::getAutoSaveKey($template) => $auto_save->getClientAutoSaveData($template)],
     ])));
+  }
+
+  /**
+   * A hidden reference that becomes visible, or is deleted, updates the head.
+   *
+   * Apart from testHeadless(), whose preview tokens read the Event template
+   * as the fixture leaves it.
+   */
+  public function testHeadlessHiddenReferences(): void {
+    $this->enableHeadless();
+    $event = ContentTemplate::load('node.event.full');
+    self::assertInstanceOf(ContentTemplate::class, $event);
+    $values = $event->getThirdPartySetting('canvas_metatag', 'values');
+    $event->setThirdPartySetting('canvas_metatag', 'values', ['title' => '{title} at {field.field_venue}'] + $values)->save();
+    $path = $this->complex['path']['event_hidden_refs'];
+    $read = function () use ($path): array {
+      $response = $this->content($path);
+      return [$response->headers->get('X-Drupal-Cache'), self::decodeResponse($response)['head']['title']];
+    };
+
+    $seen = [];
+    $seen['before'] = $read();
+    $seen['again'] = $read();
+    $this->node('venue_hidden')->setPublished()->save();
+    $this->forgetAccess();
+    $seen['venue published'] = $read();
+    $this->node('venue_hidden')->delete();
+    $this->forgetAccess();
+    $seen['venue deleted'] = $read();
+
+    $title = 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮 at';
+    self::assertSame([
+      'before' => ['MISS', $title],
+      'again' => ['HIT', $title],
+      'venue published' => ['MISS', "$title Rehearsal Room B"],
+      'venue deleted' => ['MISS', $title],
+    ], $seen);
+  }
+
+  /**
+   * Enables canvas_headless with one frontend, or skips the test.
+   */
+  private function enableHeadless(): void {
+    $modules = ['serialization', 'consumers', 'simple_oauth', 'custom_elements', 'canvas_headless'];
+    if (array_diff($modules, array_keys($this->container->get('extension.list.module')->getList()))) {
+      self::markTestSkipped('canvas_headless or one of its dependencies is not in the codebase.');
+    }
+    $this->enableModules($modules);
+    $this->installEntitySchema('consumer');
+    $this->installEntitySchema('oauth2_token');
+    $this->installConfig(['simple_oauth', 'canvas_headless']);
+    $this->config('canvas_headless.settings')->set('frontends', [['url' => self::FRONTEND, 'components' => []]])->save();
   }
 
   /**

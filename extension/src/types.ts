@@ -233,7 +233,11 @@ export interface SaveStatus {
 }
 
 export interface State {
-  phase: 'loading' | 'ready' | 'forbidden' | 'error';
+  /**
+   * `refreshing`: another node previewed in the same template; the view
+   * stays as it was until its answer arrives.
+   */
+  phase: 'loading' | 'refreshing' | 'ready' | 'forbidden' | 'error';
   ctx: HostContext;
   /** Last server truth. */
   server: StatePayload | null;
@@ -263,7 +267,7 @@ export interface State {
 }
 
 export type Action =
-  | { type: 'loading'; ctx: HostContext }
+  | { type: 'loading'; ctx: HostContext; refresh?: boolean }
   | {
       type: 'loaded';
       ctx: HostContext;

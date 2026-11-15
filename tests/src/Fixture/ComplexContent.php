@@ -550,6 +550,7 @@ final class ComplexContent {
       self::ensure('node', $key, fn () => \Drupal::entityTypeManager()->getStorage('node')->create(self::resolve($values, $ids) + [
         'uid' => $author->id(),
         'status' => 1,
+        'created' => strtotime('2026-05-04T08:00:00Z'),
       ]));
     }
     $now = \Drupal::time()->getRequestTime();
@@ -557,8 +558,9 @@ final class ComplexContent {
     foreach (array_keys(self::nodes() + self::previewNodes()) as $key) {
       $node = $repository->loadEntityByUuid('node', self::uuid($key));
       $best = in_array($key, self::SHOWCASE, TRUE);
-      // Older than any other content, so a site's own articles come first.
-      $node->setChangedTime($best ? $now : strtotime('2020-01-01T00:00:00Z'))->save();
+      // The others a day after they were created: never changed before
+      // they were published, and still behind the showcase.
+      $node->setChangedTime($best ? $now : min((int) $node->getCreatedTime() + 86400, $now - 1))->save();
       if ($best) {
         foreach (array_keys(self::templates()) as $id) {
           if (str_starts_with($id, "node.{$node->bundle()}.")) {

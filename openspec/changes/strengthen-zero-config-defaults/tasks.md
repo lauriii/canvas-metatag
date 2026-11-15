@@ -98,6 +98,9 @@ leaves the module working; nothing visible changes before group 4.
   chain"), `dynamic-values`, `structured-data`, `site-seo` ("Installed
   defaults"), `seo-dialog` ("The link preview") and `seo-checks` ("Social
   image rules") are written on their text; if theirs changes before they
-  archive, re-derive these blocks.
+  archive, re-derive these blocks. `head-output` "The card hint follows the image
+  size" keeps `harden-template-scope`'s "A square logo" and "A wide banner",
+  and `seo-dialog` "The link preview" its "The card the head asks for", as
+  original files sent when the site cannot make images.
 - `add-advanced-meta-tags` modifies "The head has fixed rows in a fixed order"
   after this change and carries this change's rows in its version.
