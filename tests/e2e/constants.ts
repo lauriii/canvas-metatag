@@ -239,8 +239,18 @@ export const UI = {
     use: 'Use',
     retry: 'Try again',
     disclosure: "Written by AI from this page's text. Check the facts.",
-    invalid: "The AI answer couldn't be used. Try again.",
-    busy: 'The AI service is busy. Try again in a minute.',
+    invalid: "The AI answer couldn't be used.",
+    busy: 'The AI service is busy. Wait a minute, then try again.',
+    blocked:
+      "The site's AI rules stopped this request. Try different wording in Refine, or ask a site administrator.",
+    // Without Refine text, asking again would be stopped again.
+    blockedFinal: "The site's AI rules stopped this request. Ask a site administrator.",
+    notConfigured: "AI suggestions aren't set up on this site yet.",
+    dismiss: 'Dismiss',
+    tray: 'Suggestions',
+    sends: "Sends this page's text to the AI service.",
+    // Typed into Refine, it trips the site guardrail the AI setup adds.
+    policyMarker: '#policy',
     notFound: 'Not found on the page. Check before using.',
   },
 } as const;

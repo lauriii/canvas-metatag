@@ -24,15 +24,18 @@ dialog to learn whether suggestions work.
   social and search fields is refused as `bad_request`. The dialog never
   sends one.
 - **A missing prompt turns suggestions off.** The dialog's
-  `capabilities.ai.reason` gains `no_prompt`, and a request answers
-  `ai_not_configured` without calling the provider.
-- **Guardrail stops.** A stop by the site's global guardrails that reaches
-  the guardrail set's threshold, before or after generation, answers
-  `blocked`. A stop below the threshold lets the answer through, cleaned as
-  any other.
+  `capabilities.ai.reason` gains `no_prompt`, and a request whose prompt is
+  missing answers `ai_not_configured` without calling the provider. The
+  default prompts cannot be deleted, only edited, and every prompt of our
+  types goes on uninstall.
+- **Guardrail stops.** When the scores of the stops of the site's global
+  guardrails, before and after generation, add up to the lowest stop
+  threshold of the attached sets, the request answers `blocked`. Stops below
+  it let the answer through, cleaned as any other.
 - **Status report.** A new "SEO suggestions (Canvas Metatag AI)" entry says
-  which provider, model and operation are used, or why suggestions are off,
-  with a link to the setting that fixes it.
+  which provider and model are used, or why suggestions are off, with a link
+  to the setting that fixes it. A missing prompt is named by its label, with
+  how to add it back.
 - **Kept on purpose.** Answers are read with the AI module's link filter in
   full-trust mode, a plain JSON decode runs before the AI module's JSON
   recovery, and the structured output schema stays in its array form. Every
@@ -41,11 +44,14 @@ dialog to learn whether suggestions work.
   the module's own 30 seconds, and are tagged by prompt kind
   (`canvas_metatag_ai_search`, `_social`, `_schema`). **BREAKING** for anyone
   filtering on the old `canvas_metatag_ai_text` tag.
-- **Errors.** A provider that refuses access or cannot chat maps to
-  `ai_not_configured`; broken output reported by the AI module maps to
-  `invalid_response`. The `blocked` sentence becomes "The site's AI rules
-  stopped this request." because a stop after generation is not about
-  sending.
+- **Errors.** A provider that refuses access, cannot chat or lacks the
+  operation type (`AiAccessDeniedException`, `AiMissingFeatureException`,
+  `AiOperationTypeMissingException`) maps to `ai_not_configured`; broken
+  output reported by the AI module maps to `invalid_response`. The server's
+  `blocked` message becomes "The site's AI rules stopped this request."
+  because a stop after generation is not about sending; the dialog adds the
+  next step that fits the request, and offers Try again only where it can
+  help.
 - **Logging.** The module's failure record keeps code, task, prompt kind and
   exception class and drops the provider's message, which the AI module
   already logs on its own channel.
@@ -72,13 +78,21 @@ None.
 - `modules/canvas_metatag_ai`: `Assistant` (prompt loading, guardrail check,
   timeout, tags), `AiController` (error mapping, log record, mixed-field
   refusal), `AiException` (`blocked` reason), `AiHooks` (runtime
-  requirements), info.yml (version floor), permissions.yml (description),
-  six new files in `config/install` (three prompt types, three prompts).
-- Test module: `EchoSeoProvider` lists its model with the structured
-  response capability. The Playwright AI setup sets the structured response
-  default.
-- Extension: `types.ts` reason union, the Site view's "AI suggestions are off"
-  line, the `blocked` sentence in `Suggest.tsx`, rebuilt `extension/dist`.
+  requirements, a presave hook that ties every prompt of our types to the
+  submodule, an access hook that keeps the default prompts from being
+  deleted), `Routing\RouteSubscriber` (the same check on the delete form),
+  info.yml (version floor), permissions.yml (description), six new files in
+  `config/install` (three prompt types, three prompts).
+- Tests: `AssistantTest`, `AiControllerTest`, new kernel tests
+  `PromptsTest` and `RequirementsTest`, new unit test `ShippedConfigTest`.
+  `EchoSeoProvider` lists its models with the structured response
+  capability. `CanvasMetatagTestSetup` (AI mode) sets the structured
+  response default, an edited search result prompt and a global guardrail.
+- Extension: `types.ts` reason union; `model.ts` (the Site view's "AI
+  suggestions are off" line, the tray's error sentences and whether to offer
+  Try again); `Suggest.tsx`, `Field.tsx` and `ChecksSheet.tsx` (what a
+  suggest control sends, the AI disclosure only with suggestions, Dismiss for
+  a failure that asking again would repeat); rebuilt `extension/dist`.
 - `composer.json`: a `suggest` entry for `drupal/ai`.
 - README and ARCHITECTURE §15 to §17: prompts, guardrails, status report,
   observability caveat, and the AI module APIs the submodule relies on.
@@ -113,6 +127,27 @@ No v1 non-goal is reopened. Bulk editing stays a non-goal.
     prompts, tags and error mapping, and extends `ShippedConfigTest`.
 - If `link-values-to-fields` is archived first, its `ai-suggestions` delta
   must be rewritten without the Prompt Library before this one archives.
+
+## Decisions taken (2026-11-13)
+
+The product owner asked for everything at high quality, with a clean
+experience. Where this change left a decision open, the lead took the default
+(the lead's decision record for the implementation run), so open decisions 1
+to 4 below are settled as their defaults: three prompts with mixed text
+requests refused; only the default prompt is used and the type labels say so;
+the `blocked` sentence "The site's AI rules stopped this request.", with a
+next step the dialog adds after review ("Try different wording in Refine, or
+ask a site administrator." when Refine text was sent, else "Ask a site
+administrator."); the AI module's site-wide timeout. Decision 5 stays out of
+scope. The review's fixes follow the product owner's "experience needs to be
+clean even though we're making this more powerful": a default prompt cannot
+be deleted (one click turned every suggestion off), the dialog's Site line
+says that site administrators can see how to fix it in the status report,
+and a tray never offers Try again where asking again is refused again.
+
+Also binding here (PO decision 9): no paid provider is ever called. The kernel
+tests and the `ai` Playwright project use the echo test providers only, and
+the kernel tests fail if a call is about to reach any other provider.
 
 ## Open decisions
 

@@ -6,6 +6,7 @@ import { ApiError } from './api';
 import type { EditorToken, HostContext } from './host';
 import type {
   Action,
+  AiOffReason,
   Edits,
   Identity,
   Measurer,
@@ -1536,6 +1537,60 @@ export const holdsStore = (
   fresh: boolean,
   mismatch: boolean,
 ): boolean => phase === 'ready' && readonly === 'store' && fresh && !mismatch;
+
+/**
+ * The Site view's line for site administrators when AI suggestions are off.
+ * The SEO settings permission does not open the status report, which names
+ * what is missing and links to where to fix it.
+ */
+export const aiOffText = (reason: AiOffReason | null): string =>
+  `AI suggestions are off: ${
+    {
+      not_usable: "the AI provider isn't ready to use.",
+      no_prompt: 'a suggestion prompt is empty or missing.',
+      no_provider: 'no AI provider is set up.',
+    }[reason ?? 'no_provider']
+  } Site administrators can see how to fix it in the status report.`;
+
+/** Said by every control that asks for a suggestion. */
+export const AI_SENDS = "Sends this page's text to the AI service.";
+
+const ADMIN = 'Ask a site administrator.';
+const AI_ERRORS: Record<string, string> = {
+  ai_not_configured: "AI suggestions aren't set up on this site yet.",
+  quota_exceeded: `The site's AI allowance is used up. ${ADMIN}`,
+  rate_limited: 'The AI service is busy. Wait a minute, then try again.',
+  invalid_response: "The AI answer couldn't be used.",
+  // Drupal's own access check: an expired session or a lost permission.
+  forbidden:
+    'Your session or permissions changed. Reload the editor and try again.',
+};
+const BLOCKED = "The site's AI rules stopped this request.";
+
+/**
+ * The suggestion tray's sentence for a failed request, by error code, and
+ * whether asking again can help. A guardrail stop can be steered round only
+ * by other Refine text: the page text is not changed in the tray.
+ */
+export const aiError = (
+  code: string | null,
+  refined = false,
+): { text: string; retry: boolean } =>
+  code === 'blocked'
+    ? {
+        text: refined
+          ? `${BLOCKED} Try different wording in Refine, or ask a site administrator.`
+          : `${BLOCKED} ${ADMIN}`,
+        retry: refined,
+      }
+    : {
+        text:
+          (code !== null && AI_ERRORS[code]) ||
+          "The AI service didn't answer.",
+        retry: !['ai_not_configured', 'quota_exceeded', 'forbidden'].includes(
+          code ?? '',
+        ),
+      };
 
 export const MESSAGES = {
   failed: "Couldn't save · your changes are kept here",

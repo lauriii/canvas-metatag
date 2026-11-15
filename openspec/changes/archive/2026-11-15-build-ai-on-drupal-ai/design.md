@@ -21,14 +21,15 @@ against the code, with test providers only:
 - The prompt library enforces ids of the form `<type>__<name>`.
 - `PromptJsonDecoder` only tries to parse text that contains `{"`, `{\n`,
   `[{` or a code fence. It returns valid JSON such as `{ "type": …}`,
-  CRLF-pretty-printed JSON or `{\t"…` undecoded.
+  CRLF-pretty-printed JSON or `{\t"…` without decoding it.
 - `setChatStructuredJsonSchema()` with the `StructuredOutputSchema` object
   calls a deprecated method inside the AI module and raises
   `E_USER_DEPRECATED`. The array form does not.
-- The default link filter re-serialises the answer as HTML: `&` becomes
+- The default link filter re-serializes the answer as HTML: `&` becomes
   `&amp;` and `<fresh>` gains a closing tag.
 - Capability flags are advisory. A test provider claims structured output
-  and ignores the schema; ours reports false and honours it.
+  and ignores the schema. Ours claims it for every capability and honours
+  it, so that it can be the structured chat default (task 2.2).
 - `AiExceptionEvent` is dispatched, and the provider's message logged on the
   `ai` channel, only for exceptions thrown inside the provider call.
 
@@ -80,10 +81,39 @@ throws), replaces the variables with `strtr()`, and appends two constants:
 answer shape per task). A missing or blank prompt throws
 `AiException('not_configured')`.
 
+The Prompt Library edits prompts in a Markdown editor, which rewrites what it
+saves. The shipped prompts are written in the form it saves (blank lines
+around lists, `*` bullets, no `HH:MM` that it would escape), so saving one
+unchanged leaves it unchanged; checked on the farm site. The editor's
+suggestion list inserts variables as `{{ name }}`, while the AI module's own
+check and every consumer use `{name}`. Both forms are filled (below), and
+the README says that the Prompt Library's check asks for `{name}`.
+
 Variables are server values only: the configured language name, the clamped
-count, and lists generated from `data/schema-types.json`. Prompt tokens are
-not declared and not replaced: nothing needs them, and they would be a second
-substitution path into the system role.
+count, and lists generated from `data/schema-types.json`. They are filled as
+`{name}` (what the Prompt Library's validation asks for) and `{{ name }}`
+(what its editor inserts), in one `strtr()` pass. Prompt tokens are not
+declared and not replaced: nothing needs them, and they would be a second
+substitution path into the system role. The prompt is read without config
+overrides: a translation would follow the interface language of whoever
+asks, not the page, and the prompt already names the language to write in.
+
+The prompts are protected and cleaned up by `AiHooks` (review round 1):
+
+- The three default prompts cannot be deleted (`hook_ai_prompt_access` forbids
+  `delete`; a route subscriber adds `_entity_access` to the AI module's delete
+  form, which checks only its permission). Deleting one would turn every
+  suggestion off, and getting it back meant retyping it under a hidden
+  machine name. They stay editable; an emptied prompt is `no_prompt`. So one
+  missing prompt still turns every kind off in the dialog (one rule, one
+  sentence), while the server refuses only the kind whose prompt is missing.
+- The AI module's `AiPrompt` does not depend on its type, so a prompt added in
+  the Prompt Library would outlive an uninstall and block a reinstall
+  (`PreExistingConfigException`). `hook_ai_prompt_presave` gives every prompt
+  of our three types the enforced dependency the shipped ones have.
+- The types keep `{language}` and `{count}` required: without `{count}` the
+  model is not told how many variants to write. Prompts without them only
+  arise through configuration, where the server's cap still holds.
 
 Alternatives considered:
 
@@ -93,7 +123,8 @@ Alternatives considered:
 - *A prompt picker form element and a setting.* The ecosystem's pattern for
   "admin picks a prompt", but it needs a settings form and config schema. One
   prompt per type with a fixed id is enough now. The type labels say only the
-  default is used (open decision 2 in the proposal).
+  prompt named "default" is used (open decision 2 in the proposal), and the
+  prompts are labelled "SEO: …" so they read as ours in the shared list.
 - *Two prompt types (text, schema).* Fewer files and no routing. Rejected by
   default because search and social text are edited for different readers
   (open decision 1).
@@ -136,12 +167,22 @@ Alternatives considered:
 
 The site's defaults for `chat_with_structured_response`, else `chat`, stay the
 only configuration. `AiHooks::runtimeRequirements()` (`#[Hook('runtime_requirements')]`,
-`RequirementSeverity`) reports `Assistant::status()` as the four rows in the
-spec, with links to `ai.settings_form`, `ai.admin_providers` and
-`entity.ai_prompt.collection`. `status()` gains `no_prompt`, checked after the
+`RequirementSeverity`) reports `Assistant::status()` as the rows in the
+spec, with links to `ai.settings_form`, `ai.admin_providers`,
+`entity.ai_prompt.collection` and, when a prompt type itself is gone,
+`system.modules_uninstall`. A provider plugin that is no longer installed
+links to the AI settings, where another default is chosen. A missing prompt
+is named by its own label, else by the label in `config/install`, and the
+entry says to add it back with the machine name "default". `status()` gains `no_prompt`, checked after the
 two provider reasons, and still makes no provider call. `defaultProvider()`
-becomes public `provider()` so the entry can name the provider, model and
-operation.
+becomes public `provider()` so the entry can name the provider and model,
+and a public `missingPrompts()` lets it name the missing prompt by its label.
+The operation is not named: it was jargon to the reader, and the AI settings
+link shows it.
+The controller and `Assistant` share `Assistant::isSocial()` and
+`textKind()` for the prompt kind of a text request (the mixed-field check,
+routing, tag, log record), and `AiHooks` derives the prompt types from
+`Assistant::KINDS`.
 
 Alternatives considered:
 
@@ -159,12 +200,12 @@ Alternatives considered:
 
 - *The default link filter.* It corrupts JSON values.
 - *The decoder alone.* It returns valid JSON with leading white space
-  undecoded.
+  without decoding it.
 - *The `StructuredOutputSchema` object.* It raises a deprecation inside the
   AI module 1.5.x. Revisit when the AI module stops calling the deprecated
   method.
-- *Gate on the model's capability flags.* They are not reliable, and our own
-  test provider reports false.
+- *Gate on the model's capability flags.* They are not reliable: a test
+  provider claims structured output and ignores the schema.
 
 ### 7. The site's request timeout
 
@@ -177,8 +218,14 @@ in the proposal keeps a 30-second cap as the alternative.
 The controller's `match` gains `AiException('blocked')` → `blocked`,
 `AiAccessDeniedException` and `AiMissingFeatureException` →
 `ai_not_configured`, and `AiBrokenOutputException` → `invalid_response`. All
-exist in the AI module 1.5.2. The `blocked` message becomes "The site's AI
-rules stopped this request." in `AiController::ERRORS` and in `Suggest.tsx`.
+exist in the AI module 1.5.2. The server's `blocked` message is "The site's
+AI rules stopped this request.", with no next step: only the dialog knows
+whether the request carried Refine text. The dialog adds "Try different
+wording in Refine, or ask a site administrator." when it did, and "Ask a site
+administrator." otherwise (also in the structured data tray), in
+`aiError()` in `model.ts`. That function also says whether asking again can
+help: not for `ai_not_configured`, `quota_exceeded`, a 403, or `blocked`
+without Refine text. Those trays offer only Dismiss.
 
 The log record keeps one line per failure with code, task, prompt kind and
 exception class, and drops `@message`. The record stays, because failures
@@ -213,8 +260,10 @@ gets a table like §11's for them:
 | `ChatInput::setChatStructuredJsonSchema(array)` | structured output | `AssistantTest::testNoDeprecations` |
 | `HostnameFilterDto(fullTrust:)`, `ai.prompt_json_decode` | answer reading | `AssistantTest::testSuggestText`, `testJsonDecoderFallback`, `testBareJsonWithSpaces` |
 | `ai.settings:request_timeout` | timeout | `AssistantTest::testSiteTimeoutApplies` |
-| Exception classes `AiSetupFailureException`, `AiAccessDeniedException`, `AiMissingFeatureException`, `AiBrokenOutputException`, `AiUnsafePromptException`, `AiRateLimitException`, `AiQuotaException` | error codes | `AiControllerTest::testErrorCodes` |
-| Routes `ai.settings_form`, `ai.admin_providers`, `entity.ai_prompt.collection` | status report links | `RequirementsTest` |
+| Exception classes `AiSetupFailureException`, `AiAccessDeniedException`, `AiMissingFeatureException`, `AiOperationTypeMissingException`, `AiBrokenOutputException`, `AiUnsafePromptException`, `AiRateLimitException`, `AiQuotaException` | error codes | `AiControllerTest::testErrorCodes` |
+| Config `ai.ai_prompt.<type>__default`, `ai.ai_prompt_type.<type>`; install and uninstall with enforced module dependencies | prompts | `PromptsTest::testInstallAndUninstall` |
+| Route `entity.ai_prompt.delete_form` (parameter `ai_prompt`) | delete guard | `PromptsTest::testDefaultPromptsCannotBeDeleted` |
+| Routes `ai.settings_form`, `ai.admin_providers`, `entity.ai_prompt.collection`, `system.modules_uninstall` | status report links | `RequirementsTest` |
 
 ## Risks / Trade-offs
 
@@ -224,9 +273,10 @@ gets a table like §11's for them:
   recovers fenced JSON, and the cleaners check every row; otherwise
   `invalid_response`, which fails closed.
 - [Several guardrail sets: the sum blocks where no single set would] → A false
-  `blocked`, which fails closed.
+  `blocked`, possibly after the call was paid for, which fails closed.
+  `AssistantTest::testGuardrailStopIsBlocked` pins it.
 - [An admin adds a prompt of our type and expects it to be used] → The type
-  label says only the default is used. Open decision 2.
+  label says only the prompt named "default" is used. Open decision 2.
 - [The site timeout (60 s) is longer than a proxy's gateway timeout] → The
   dialog already handles a non-JSON 504 as `provider_error`. Open decision 4.
 - [AI request logging stores draft text] → The site's choice; the permission
@@ -244,8 +294,9 @@ gets a table like §11's for them:
   reinstall the submodule (`drush pmu canvas_metatag_ai && drush en
   canvas_metatag_ai`) to get the prompts. It stores no data of its own, so
   nothing is lost.
-- Uninstall removes the prompt types and prompts through their enforced
-  module dependency.
+- Uninstall removes the prompt types and every prompt of them through their
+  enforced module dependency, which `hook_ai_prompt_presave` also gives to
+  prompts saved in the Prompt Library.
 - Rollback is reverting the commits and reinstalling the submodule. The
   prompt configuration is then removed with it.
 - After the first release, new prompt text ships with a post-update that
@@ -254,5 +305,7 @@ gets a table like §11's for them:
 ## Open Questions
 
 - What does an empty `ai_observability.settings:log_tags` mean: log every
-  call or none? Check before the README tells admins to add
-  `canvas_metatag_ai`. It changes only README wording.
+  call or none? Answered during implementation: every call
+  (`AiLoggingEventSubscriber` skips an event only when tags are set and none
+  matches; the settings form says "Keep empty to log events with any tag").
+  The README says so.

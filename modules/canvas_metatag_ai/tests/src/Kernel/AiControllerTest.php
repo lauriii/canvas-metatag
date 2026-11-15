@@ -4,7 +4,14 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\canvas_metatag_ai\Kernel;
 
+use Drupal\ai\Entity\AiGuardrail;
+use Drupal\ai\Entity\AiGuardrailSet;
+use Drupal\ai\Entity\AiPrompt;
 use Drupal\ai\Event\PreGenerateResponseEvent;
+use Drupal\ai\Exception\AiAccessDeniedException;
+use Drupal\ai\Exception\AiBrokenOutputException;
+use Drupal\ai\Exception\AiMissingFeatureException;
+use Drupal\ai\Exception\AiOperationTypeMissingException;
 use Drupal\ai\Exception\AiSetupFailureException;
 use Drupal\ai\Exception\AiUnsafePromptException;
 use Drupal\ai\OperationType\Chat\ChatInput;
@@ -69,6 +76,13 @@ final class AiControllerTest extends CanvasKernelTestBase {
   private array $calls = [];
 
   /**
+   * Providers other than the test providers that a call was about to reach.
+   *
+   * @var list<string>
+   */
+  private array $foreign = [];
+
+  /**
    * When set, what a subscriber of the AI module throws before the call.
    */
   private ?\Throwable $refusal = NULL;
@@ -87,12 +101,17 @@ final class AiControllerTest extends CanvasKernelTestBase {
     parent::setUp();
     $this->installEntitySchema('user');
     $this->installPageEntitySchema();
-    $this->installConfig(['language', 'ai', 'canvas_metatag']);
+    $this->installConfig(['language', 'ai', 'canvas_metatag', 'canvas_metatag_ai']);
     // User 1 is a superuser, so burn it.
     $this->createUser();
     $this->setUpCurrentUser(permissions: self::PERMISSIONS);
 
     $this->container->get('event_dispatcher')->addListener(PreGenerateResponseEvent::EVENT_NAME, function (PreGenerateResponseEvent $event): void {
+      // Only the test providers may ever be called: never a paid one.
+      if (!in_array($event->getProviderId(), ['canvas_metatag_echo', 'echoai'], TRUE)) {
+        $this->foreign[] = $event->getProviderId();
+        throw new \LogicException('Not a test provider.');
+      }
       $this->calls[] = $event;
       if ($this->refusal) {
         throw $this->refusal;
@@ -116,6 +135,14 @@ final class AiControllerTest extends CanvasKernelTestBase {
       }
 
     });
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  protected function tearDown(): void {
+    $this->assertSame([], $this->foreign, 'Only test providers are called.');
+    parent::tearDown();
   }
 
   /**
@@ -249,6 +276,7 @@ final class AiControllerTest extends CanvasKernelTestBase {
       'no language' => array_diff_key(self::text(), ['langcode' => 0]),
       'language of the wrong type' => self::text(['langcode' => ['en']]),
       'unknown field' => self::text(['fields' => ['title', 'canonical']]),
+      'social and search fields mixed' => self::text(['fields' => ['title', 'social.title']]),
       'no fields' => self::text(['fields' => []]),
       'fields of the wrong type' => self::text(['fields' => 'title']),
       'a field of the wrong type' => self::text(['fields' => [['title']]]),
@@ -285,6 +313,9 @@ final class AiControllerTest extends CanvasKernelTestBase {
     $this->assertError(429, 'rate_limited', $this->suggest(self::text()));
     $this->assertError(429, 'rate_limited', $this->suggest(self::schema()));
     $this->assertCount(30, $this->calls);
+    // Refused before the call: neither the bad request nor the flood limit is
+    // logged.
+    $this->assertSame([], array_filter($this->log->records, static fn (string $record): bool => str_starts_with($record, 'canvas_metatag_ai: ')));
 
     // The limit is per user.
     $this->setUpCurrentUser(permissions: self::PERMISSIONS);
@@ -300,11 +331,26 @@ final class AiControllerTest extends CanvasKernelTestBase {
     // A default that names a provider which is no longer installed.
     $this->setDefault('gone', 'echo-json');
     $this->assertError(422, 'ai_not_configured', $this->suggest(self::text()));
-    $this->assertSame([], $this->calls);
+    // A prompt that is empty: suggestions of its kind are off.
+    $this->useEcho();
+    $this->config('ai.ai_prompt.canvas_metatag_search__default')->set('prompt', ' ')->save();
+    $this->assertError(422, 'ai_not_configured', $this->suggest(self::text()));
+    // The other kinds still work. Their one call is the only call so far.
+    $this->assertSame(200, $this->suggest(self::text(['fields' => ['social.title']]))->getStatusCode());
+    $this->assertCount(1, $this->calls);
+    $this->config('ai.ai_prompt.canvas_metatag_search__default')->set('prompt', 'Write it in {language}.')->save();
 
     $this->useEcho();
     $marked = static fn (string $marker): array => self::text(['hint' => "Make it shorter $marker"]);
     $this->assertError(502, 'invalid_response', $this->suggest($marked('#garbage')));
+    // Also from a default for structured chat, which claims structured output.
+    $this->config('ai.settings')
+      ->set('default_providers.chat_with_structured_response.provider_id', 'canvas_metatag_echo')
+      ->set('default_providers.chat_with_structured_response.model_id', 'echo-structured')
+      ->save();
+    $this->assertError(502, 'invalid_response', $this->suggest($marked('#garbage')));
+    $this->assertSame('echo-structured', end($this->calls)->getModelId());
+    $this->config('ai.settings')->clear('default_providers.chat_with_structured_response')->save();
     $this->assertError(429, 'rate_limited', $this->suggest($marked('#rate-limit')));
     $this->assertError(503, 'quota_exceeded', $this->suggest($marked('#quota')));
     $this->assertError(503, 'quota_exceeded', $this->suggest(self::schema(['title' => '#quota'])));
@@ -320,7 +366,44 @@ final class AiControllerTest extends CanvasKernelTestBase {
     $this->assertError(422, 'blocked', $this->suggest(self::text()));
     $this->refusal = new AiSetupFailureException('Could not load the API key.');
     $this->assertError(422, 'ai_not_configured', $this->suggest(self::text()));
+    // A provider that refuses the key or the model, or cannot chat.
+    $this->refusal = new AiAccessDeniedException('Access denied to the model.');
+    $this->assertError(422, 'ai_not_configured', $this->suggest(self::text()));
+    $this->refusal = new AiMissingFeatureException('Chat is not supported.');
+    $this->assertError(422, 'ai_not_configured', $this->suggest(self::text()));
+    $this->refusal = new AiOperationTypeMissingException('The operation type is missing.');
+    $this->assertError(422, 'ai_not_configured', $this->suggest(self::text()));
+    // Broken output, as the AI module reports it.
+    $this->refusal = new AiBrokenOutputException('The output was broken.');
+    $this->assertError(502, 'invalid_response', $this->suggest(self::text()));
     $this->refusal = NULL;
+
+    // A site guardrail that stops the request.
+    AiGuardrail::create([
+      'id' => 'policy',
+      'label' => 'Policy',
+      'description' => '',
+      'guardrail' => 'regexp_guardrail',
+      'guardrail_settings' => [
+        'regexp_pattern' => '/#policy/',
+        'scan_all_user_messages' => FALSE,
+        'violation_message' => 'Stopped by the policy.',
+      ],
+    ])->save();
+    AiGuardrailSet::create([
+      'id' => 'policy',
+      'label' => 'Policy',
+      'description' => '',
+      'stop_threshold' => 1.0,
+      'pre_generate_guardrails' => ['plugin_id' => ['policy']],
+      'post_generate_guardrails' => ['plugin_id' => []],
+    ])->save();
+    $this->config('ai.settings')->set('global_guardrails', ['policy'])->save();
+    $response = $this->suggest($marked('#policy'));
+    $this->assertError(422, 'blocked', $response);
+    // Neutral: only the dialog knows whether the request had Refine text.
+    $this->assertSame("The site's AI rules stopped this request.", self::decodeResponse($response)['error']['message']);
+    $this->assertSame(200, $this->suggest($marked(''))->getStatusCode());
 
     // Anything else the provider throws.
     $this->setDefault('echoai', 'test_exception');
@@ -328,7 +411,7 @@ final class AiControllerTest extends CanvasKernelTestBase {
   }
 
   /**
-   * A failure is logged with task, class and provider message, and no text.
+   * A failure is logged with task, prompt kind and class, and no text.
    */
   public function testNothingOfThePromptIsLogged(): void {
     $this->useEcho();
@@ -336,18 +419,25 @@ final class AiControllerTest extends CanvasKernelTestBase {
       $this->suggest(self::text(['hint' => "Mention the falcon $marker", 'current' => ['title' => 'Old otter title']]));
       $this->suggest(self::schema(['title' => "Zebra crossing guide $marker"]));
     }
+    $this->suggest(self::text(['fields' => ['social.title'], 'hint' => '#rate-limit']));
     $this->setDefault('echoai', 'test_exception');
+    $this->suggest(self::text());
+    // A failure before any provider call: the default names a plugin that
+    // cannot be created, which the AI module does not log.
+    $this->setDefault('gone', 'echo-json');
     $this->suggest(self::text());
 
     $ours = array_values(array_filter($this->log->records, static fn (string $record): bool => str_starts_with($record, 'canvas_metatag_ai: ')));
     $this->assertSame([
-      'canvas_metatag_ai: AI suggestion failed (invalid_response). Task: text. Exception: Drupal\canvas_metatag_ai\AiException. Message: invalid_response',
-      'canvas_metatag_ai: AI suggestion failed (invalid_response). Task: schema. Exception: Drupal\canvas_metatag_ai\AiException. Message: invalid_response',
-      'canvas_metatag_ai: AI suggestion failed (rate_limited). Task: text. Exception: Drupal\ai\Exception\AiRateLimitException. Message: Too Many Requests',
-      'canvas_metatag_ai: AI suggestion failed (rate_limited). Task: schema. Exception: Drupal\ai\Exception\AiRateLimitException. Message: Too Many Requests',
-      'canvas_metatag_ai: AI suggestion failed (quota_exceeded). Task: text. Exception: Drupal\ai\Exception\AiQuotaException. Message: You exceeded your current quota',
-      'canvas_metatag_ai: AI suggestion failed (quota_exceeded). Task: schema. Exception: Drupal\ai\Exception\AiQuotaException. Message: You exceeded your current quota',
-      'canvas_metatag_ai: AI suggestion failed (provider_error). Task: text. Exception: Drupal\ai\Exception\AiResponseErrorException. Message: Simulated provider failure for testing.',
+      'canvas_metatag_ai: AI suggestion failed (invalid_response). Task: text. Prompt: search. Exception: Drupal\canvas_metatag_ai\AiException.',
+      'canvas_metatag_ai: AI suggestion failed (invalid_response). Task: schema. Prompt: schema. Exception: Drupal\canvas_metatag_ai\AiException.',
+      'canvas_metatag_ai: AI suggestion failed (rate_limited). Task: text. Prompt: search. Exception: Drupal\ai\Exception\AiRateLimitException.',
+      'canvas_metatag_ai: AI suggestion failed (rate_limited). Task: schema. Prompt: schema. Exception: Drupal\ai\Exception\AiRateLimitException.',
+      'canvas_metatag_ai: AI suggestion failed (quota_exceeded). Task: text. Prompt: search. Exception: Drupal\ai\Exception\AiQuotaException.',
+      'canvas_metatag_ai: AI suggestion failed (quota_exceeded). Task: schema. Prompt: schema. Exception: Drupal\ai\Exception\AiQuotaException.',
+      'canvas_metatag_ai: AI suggestion failed (rate_limited). Task: text. Prompt: social. Exception: Drupal\ai\Exception\AiRateLimitException.',
+      'canvas_metatag_ai: AI suggestion failed (provider_error). Task: text. Prompt: search. Exception: Drupal\ai\Exception\AiResponseErrorException.',
+      'canvas_metatag_ai: AI suggestion failed (ai_not_configured). Task: text. Prompt: search. Exception: Drupal\Component\Plugin\Exception\PluginNotFoundException.',
     ], $ours);
 
     // No channel received the page, the editor's words or a model's answer.
@@ -359,7 +449,7 @@ final class AiControllerTest extends CanvasKernelTestBase {
       // The model's answers.
       'cannot help', 'Echo title', 'Injected', 'Garden',
       // The prompts.
-      'page_content', 'You write metadata', 'You classify',
+      'page_content', 'You write the text', 'You classify',
     ];
     foreach ($secrets as $secret) {
       $this->assertStringNotContainsString($secret, $log);
@@ -380,8 +470,8 @@ final class AiControllerTest extends CanvasKernelTestBase {
     ];
     $before = $stored();
 
-    $fields = ['title', 'description', 'social.title', 'social.description'];
-    $this->assertSame(200, $this->suggest(self::text(['fields' => $fields]))->getStatusCode());
+    $this->assertSame(200, $this->suggest(self::text(['fields' => ['title', 'description']]))->getStatusCode());
+    $this->assertSame(200, $this->suggest(self::text(['fields' => ['social.title', 'social.description']]))->getStatusCode());
     $this->assertSame(200, $this->suggest(self::schema())->getStatusCode());
     $this->assertError(502, 'invalid_response', $this->suggest(self::text(['hint' => '#garbage'])));
 
@@ -413,6 +503,10 @@ final class AiControllerTest extends CanvasKernelTestBase {
     $this->assertSame(['ai' => ['available' => FALSE, 'reason' => 'no_provider']], $ai());
     $this->useEcho();
     $this->assertSame(['ai' => ['available' => TRUE, 'reason' => NULL]], $ai());
+
+    // A deleted prompt turns suggestions off.
+    AiPrompt::load('canvas_metatag_social__default')->delete();
+    $this->assertSame(['ai' => ['available' => FALSE, 'reason' => 'no_prompt']], $ai());
 
     // Without the AI permission the dialog learns nothing about the provider.
     $this->setUpCurrentUser(permissions: ['edit canvas metatag']);

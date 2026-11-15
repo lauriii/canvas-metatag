@@ -6,8 +6,9 @@ Installing the submodule MUST add three prompt types to the AI module's
 Prompt Library, each with a default prompt: search result, social card and
 structured data. People with the AI module's permission to edit prompts MUST
 be able to change them there, and the next request MUST use the changed
-text. Uninstalling the submodule MUST remove the three types and their
-prompts.
+text. Each prompt type MUST declare its variables as required (the Prompt
+Library then asks for each as `{name}`). Uninstalling the submodule MUST
+remove the three types and every prompt of those types.
 
 #### Scenario: After install
 
@@ -24,11 +25,33 @@ prompts.
 - **WHEN** canvas_metatag_ai is uninstalled
 - **THEN** its three prompt types and their prompts MUST no longer exist
 
+#### Scenario: Prompts added in the Prompt Library
+
+- **WHEN** a site builder adds another prompt to the search result type, canvas_metatag_ai is uninstalled and then installed again
+- **THEN** the added prompt MUST be gone after uninstall, and the install MUST succeed
+
+### Requirement: The default prompts cannot be deleted
+
+The three default prompts MUST NOT be deletable, neither from the Prompt
+Library's list nor at the delete form's address. They MUST stay editable.
+Other prompts of the same types MAY be deleted.
+
+#### Scenario: Deleting a default prompt
+
+- **WHEN** a site builder with the AI module's prompt permission opens the Prompt Library
+- **THEN** the three default prompts MUST offer Edit and not Delete, and their delete form's address MUST answer 403
+
+#### Scenario: Deleting another prompt of the type
+
+- **WHEN** a site builder deletes a prompt they added to the search result type
+- **THEN** the prompt MUST be deleted
+
 ### Requirement: Only the default prompt of each type is used
 
 Each request MUST use the default prompt of its type. Other prompts that
 someone adds to the same type MUST NOT be used. Each prompt type's label MUST
-say that only its default prompt is used.
+say that only its prompt named "default" is used, and each default prompt's
+label MUST start with "SEO: ".
 
 #### Scenario: A second prompt of a type
 
@@ -38,15 +61,17 @@ say that only its default prompt is used.
 #### Scenario: The label
 
 - **WHEN** a site builder opens the Prompt Library
-- **THEN** each of the three prompt types MUST say that only its default prompt is used
+- **THEN** the three prompts MUST read as "SEO: search result text", "SEO: social card text" and "SEO: structured data", and each prompt type MUST read as its prompt's label followed by '(only the prompt named "default" is used)'
 
 ### Requirement: Prompt variables are filled by the server
 
 The server MUST replace `{language}` with the configured name of the
 requested language, `{count}` with the clamped number of variants, and
 `{types}` and `{properties}` with the registry's types and their allowed
-properties. Nothing from the request MUST fill a variable. Tokens in a prompt
-MUST NOT be replaced.
+properties, also where a variable is written `{{ name }}`, as the Prompt
+Library's editor inserts it. Nothing from the request MUST fill a variable.
+Tokens in a prompt MUST NOT be replaced. A translation of a prompt MUST NOT
+be used: the prompt names the language to write in.
 
 #### Scenario: Language and count
 
@@ -55,13 +80,23 @@ MUST NOT be replaced.
 
 #### Scenario: A prompt without a variable
 
-- **WHEN** a site builder removes `{count}` from the search result prompt and an editor asks for 3 variants
+- **WHEN** the search result prompt holds no `{count}` (set through configuration; the Prompt Library requires it) and an editor asks for 3 variants
 - **THEN** the server MUST still return at most 3 variants per field
 
 #### Scenario: A token in a prompt
 
 - **WHEN** a prompt contains `[site:name]`
 - **THEN** the system prompt MUST contain `[site:name]` as written
+
+#### Scenario: Variables as the Prompt Library's editor writes them
+
+- **WHEN** the search result prompt says "Write in `{{ language }}`" (set through configuration: the Prompt Library's check asks for `{language}`) and an editor asks in a language configured as "Suomi"
+- **THEN** the system prompt MUST say "Write in `Suomi`"
+
+#### Scenario: A translated prompt
+
+- **WHEN** the search result prompt has a Finnish translation and a request runs with Finnish as the interface language
+- **THEN** the system prompt MUST start with the untranslated prompt
 
 ### Requirement: The safety text is added in code
 
@@ -72,7 +107,7 @@ The shipped prompts MUST NOT contain this text.
 
 #### Scenario: A prompt rewritten by a site builder
 
-- **WHEN** the search result prompt is set to "Say hello." and an editor asks for title suggestions
+- **WHEN** the search result prompt is set to "Say hello." through configuration and an editor asks for title suggestions
 - **THEN** the system prompt MUST end with the fixed safety text and answer shape, and the dialog MUST still show three title variants
 
 #### Scenario: The shipped prompts
@@ -100,14 +135,14 @@ structured data request MUST use the structured data prompt.
 ### Requirement: A missing prompt turns suggestions off
 
 When the default prompt of any of the three types is missing or empty,
-suggestions MUST be off. `capabilities.ai` MUST then be
+suggestions MUST be off in the dialog. `capabilities.ai` MUST then be
 `{available: false, reason: no_prompt}`, unless a provider reason applies
-first. A suggestion request MUST answer 422 `ai_not_configured`, and the
-provider MUST NOT be called.
+first. A suggestion request whose default prompt is missing or empty MUST
+answer 422 `ai_not_configured`, and the provider MUST NOT be called.
 
 #### Scenario: A deleted prompt
 
-- **WHEN** a site builder deletes the default structured data prompt and the default provider is ready
+- **WHEN** the default structured data prompt is emptied, or removed through configuration, and the default provider is ready
 - **THEN** `capabilities.ai` MUST be `{available: false, reason: no_prompt}`
 
 #### Scenario: A request without its prompt
@@ -143,17 +178,27 @@ MUST NOT block, and the answer MUST then be cleaned like any other.
 - **WHEN** a guardrail set has a stop threshold of 2 and one of its guardrails stops with a score of 1
 - **THEN** the server MUST return the cleaned suggestions
 
+#### Scenario: Stops of two sets add up
+
+- **WHEN** two guardrail sets each have a stop threshold of 2, one stops the page text before generation with a score of 1 and the other stops the answer with a score of 1
+- **THEN** the server MUST answer 422 `blocked`, after the provider was called once: stops of all sets count together, which fails closed
+
 #### Scenario: Blocked in the dialog
 
-- **WHEN** a request is blocked and the editor is in the suggestion tray
-- **THEN** the tray MUST say "The site's AI rules stopped this request.", nothing MUST be written, and "Try again" MUST stay available
+- **WHEN** a text request with Refine text is blocked
+- **THEN** the text suggestion tray MUST say "The site's AI rules stopped this request. Try different wording in Refine, or ask a site administrator.", nothing MUST be written, "Try again" MUST stay available, and the tray MUST NOT say that AI wrote anything
+
+#### Scenario: Blocked without Refine text, or in the structured data tray
+
+- **WHEN** a text request without Refine text, or a structured data request, is blocked
+- **THEN** the tray MUST say "The site's AI rules stopped this request. Ask a site administrator.", nothing MUST be written, and the tray MUST offer only "Dismiss"
 
 ### Requirement: Answers are read as the model wrote them
 
 The server MUST read the answer text without the AI module's link filter
 rewriting it. Well-formed JSON MUST be read as it is, whatever its white
-space. Only an answer that is not JSON MUST go to the AI module's JSON
-recovery. A provider's claim to support structured output MUST NOT be
+space. Only an answer that does not decode to a JSON object or list MUST go
+to the AI module's JSON recovery. A provider's claim to support structured output MUST NOT be
 trusted: the shape is checked on every answer.
 
 #### Scenario: Ampersand and angle brackets
@@ -174,14 +219,15 @@ trusted: the shape is checked on every answer.
 ### Requirement: The status report says whether suggestions work
 
 The site's status report MUST have an entry "SEO suggestions (Canvas Metatag
-AI)". It MUST say which provider, model and operation are used, or why
-suggestions are off, with a link to the page that fixes it. Building it MUST
-NOT call the provider's service.
+AI)". It MUST say which provider and model are used, with a link to the AI
+settings, or why suggestions are off, with a link to the page that fixes it.
+A missing or empty prompt MUST be named by its own label, or by its shipped
+label when it is gone. Building it MUST NOT call the provider's service.
 
 #### Scenario: Suggestions on
 
 - **WHEN** the default provider for structured chat is set up and every prompt exists
-- **THEN** the entry MUST be OK and name the provider, the model and "Chat with structured response"
+- **THEN** the entry MUST be OK, name the provider and the model, and link to the AI settings
 
 #### Scenario: No provider
 
@@ -193,10 +239,25 @@ NOT call the provider's service.
 - **WHEN** the default provider is not set up
 - **THEN** the entry MUST be a warning that names the provider and links to the AI providers page
 
-#### Scenario: A prompt missing
+#### Scenario: Provider no longer installed
 
-- **WHEN** the default social card prompt is deleted
-- **THEN** the entry MUST be a warning that names the missing prompt and links to the Prompt Library
+- **WHEN** the default names a provider plugin that no longer exists
+- **THEN** the entry MUST be a warning that names the plugin id, says it is not installed, and links to the AI settings to choose another default
+
+#### Scenario: A prompt emptied
+
+- **WHEN** the default social card prompt is emptied
+- **THEN** the entry MUST be a warning that names the prompt "SEO: social card text" and links to the Prompt Library
+
+#### Scenario: A prompt removed
+
+- **WHEN** the default structured data prompt is removed through configuration and its type exists
+- **THEN** the entry MUST say to add it in the Prompt Library to the prompt type whose name starts the same, with the machine name "default"
+
+#### Scenario: A prompt type removed
+
+- **WHEN** a prompt type of the submodule is removed through configuration, and its default prompt is missing or empty
+- **THEN** the entry MUST say that the Prompt Library cannot add its prompt, and link to the uninstall page to reinstall the submodule
 
 ## MODIFIED Requirements
 
@@ -259,7 +320,7 @@ provider's service. Other modules MAY change it through
 #### Scenario: Site administrators are told why
 
 - **WHEN** a user who administers SEO site settings and has the AI permission opens Site settings and suggestions are not available
-- **THEN** the dialog MUST say that AI suggestions are off, and whether no provider is set up, the provider is not ready, or a suggestion prompt is missing
+- **THEN** the dialog MUST say that AI suggestions are off, whether no provider is set up, the provider is not ready, or a suggestion prompt is empty or missing, and that site administrators can see how to fix it in the status report (the SEO settings permission does not open it)
 
 ### Requirement: Text suggestions
 
@@ -316,11 +377,22 @@ page members) MAY be left out.
 
 ### Requirement: Failures have stable codes and reveal nothing
 
-Every failure MUST answer `{error: {code, message}}` and nothing else, with the
-module's own message, never the provider's. The codes MUST be:
-`ai_not_configured` (422), `blocked` (422), `rate_limited` (429),
-`quota_exceeded` (503), `invalid_response` (502) and `provider_error` (502).
-The dialog MUST show its own sentence for each code and offer to try again.
+Every failure of a request that passes the route's access check MUST answer
+`{error: {code, message}}` and nothing else, with the module's own message,
+never the provider's. The codes MUST be: `ai_not_configured` (422),
+`blocked` (422), `rate_limited` (429), `quota_exceeded` (503),
+`invalid_response` (502) and `provider_error` (502). The dialog MUST show its
+own sentence for each code, and offer to try again only where that can help.
+
+#### Scenario: Refused by the access check
+
+- **WHEN** the route's access check refuses a request (an expired session or CSRF token, a lost permission)
+- **THEN** the answer MUST be Drupal's own 403, not an error of this module
+
+#### Scenario: Asking again cannot help
+
+- **WHEN** a request fails with `ai_not_configured`, `quota_exceeded`, a 403, or `blocked` without Refine text
+- **THEN** the tray MUST offer only "Dismiss", not "Try again"
 
 #### Scenario: No provider, or a provider that cannot be set up
 
@@ -360,15 +432,26 @@ The dialog MUST show its own sentence for each code and offer to try again.
 #### Scenario: The blocked message
 
 - **WHEN** a request fails with `blocked`
-- **THEN** the message MUST be "The site's AI rules stopped this request."
+- **THEN** the server's message MUST be "The site's AI rules stopped this request.", and the dialog MUST add the next step that fits the request
+
+#### Scenario: Access refused in the dialog
+
+- **WHEN** a suggestion request is refused with 403 by the access check, also after a fresh CSRF token
+- **THEN** the tray MUST say "Your session or permissions changed. Reload the editor and try again."
 
 ### Requirement: Nothing of the prompt is logged
 
-A failure MUST be logged once on the `canvas_metatag_ai` channel with its code,
-the task, the prompt kind and the exception class, and without the provider's
-message. This module MUST NOT log the prompts, the page text, the editor's
-current values and hint, or the model's answer on any channel. Whether the AI
+A failure of a request that passed validation and the flood limit MUST be
+logged once on the `canvas_metatag_ai` channel with its code, the task, the
+prompt kind and the exception class, and without the provider's message.
+This module MUST NOT log the prompts, the page text, the editor's current
+values and hint, or the model's answer on any channel. Whether the AI
 module's own request logging stores them is the site's choice.
+
+#### Scenario: A request refused before the call
+
+- **WHEN** a request is refused with 400 `bad_request` or by the flood limit
+- **THEN** nothing MUST be logged on the `canvas_metatag_ai` channel
 
 #### Scenario: A logged failure
 
@@ -428,8 +511,9 @@ The permission's description MUST say that each request is a paid call and
 sends the page's current text, including unpublished draft text, to the
 provider, and that sites which log AI requests may store that text. Every
 suggest control MUST say that it sends the page's text to the AI service, and
-every suggestion tray MUST end with a note that the text was written by AI and
-its facts need checking.
+every suggestion tray that shows suggestions MUST end with a note that the
+text was written by AI and its facts need checking. A tray that shows an error
+MUST NOT carry that note.
 
 #### Scenario: A suggestion tray
 

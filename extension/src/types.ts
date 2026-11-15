@@ -138,6 +138,9 @@ export interface Target {
   from_default: SeoValues;
 }
 
+/** Why AI suggestions are off, from `capabilities.ai.reason`. */
+export type AiOffReason = 'no_provider' | 'not_usable' | 'no_prompt';
+
 export interface StatePayload {
   langcode: string;
   languages: Record<string, string>;
@@ -146,7 +149,7 @@ export interface StatePayload {
   capabilities: {
     ai: {
       available: boolean;
-      reason: null | 'no_provider' | 'not_usable';
+      reason: AiOffReason | null;
     } | null;
   };
   site: SiteSettings;

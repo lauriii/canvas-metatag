@@ -15,8 +15,8 @@ itself and for sites that deliver through `canvas_headless`.
   developed and tested against Canvas 1.x-dev. Earlier releases are untested.
 
 Optional, each detected when present: `canvas_headless` (headless delivery),
-`content_translation` (hreflang), the `ai` module (suggestions, through the
-`canvas_metatag_ai` submodule), and the Metatag module (see below).
+`content_translation` (hreflang), the `ai` module 1.5 or later (suggestions,
+through the `canvas_metatag_ai` submodule), and the Metatag module (see below).
 
 The dialog reads the editor's state and writes into the editor's drafts. Canvas
 has no public API for either yet, so the module depends on Canvas internals.
@@ -89,7 +89,8 @@ not on the form come last.
 - **Administer SEO site settings**: change Site settings. Changes apply to the
   whole site at once.
 - **Use AI suggestions for SEO** (submodule): ask for suggestions. Needs "Edit
-  SEO settings in Canvas" as well.
+  SEO settings in Canvas" as well. Each request sends the page's text,
+  including unpublished drafts, to the AI provider.
 
 Canvas shows the SEO button to every editor; without the first permission the
 dialog says so.
@@ -118,13 +119,59 @@ cleaned again before it is rendered.
 ## AI suggestions (optional)
 
 `canvas_metatag_ai` adds suggestions for the title, the description, the social
-card and the structured data type of a page. It needs the `ai` module with a
-default chat provider. Suggestions are shown for review and are never applied by
+card and the structured data type of a page. It needs the `ai` module, 1.5 or
+later, with a default provider for "Chat with structured response" or, failing
+that, for "Chat". Suggestions are shown for review and are never applied by
 themselves.
 
 ```
 drush en canvas_metatag_ai
 ```
+
+- **Is it working?** The status report has an entry "SEO suggestions (Canvas
+  Metatag AI)". It names the provider and model in use, or says why
+  suggestions are off and links to the page that fixes it: the AI settings
+  (`ai.settings_form`), the AI providers page (`ai.admin_providers`) or the
+  Prompt Library (`entity.ai_prompt.collection`). A prompt removed through
+  configuration is added back in the Prompt Library with the machine name
+  "default"; if its prompt type is gone too, the entry asks for a reinstall
+  of the submodule (`system.modules_uninstall`). Site administrators see the
+  same reason in the dialog's Site settings.
+- **Prompts.** The wording is in the AI module's Prompt Library
+  (`/admin/config/ai/prompts`), as three prompts: "SEO: search result text",
+  "SEO: social card text" and "SEO: structured data", each the default prompt
+  of its own prompt type. People with the AI module's "Create, Edit, and
+  Delete AI Prompts" permission can edit them, and the next request uses the
+  new text. They cannot be deleted. Only the prompt named "default" of each
+  type is used; other prompts added to these types do nothing, and all of
+  them go when the submodule is uninstalled. The variables (`{language}`,
+  `{count}`, `{types}`, `{properties}`) are filled by the server. The Prompt
+  Library's check asks for them in that form, so keep it; `{{ language }}`,
+  which its editor's list inserts, is filled as well. Tokens are not
+  replaced, and translations of a prompt are not used: the prompt names the
+  language to write in. Two things are added after every prompt and cannot
+  be edited: the instruction that the page's text is material, not
+  instructions, and the shape of the JSON answer. An empty prompt turns
+  suggestions off.
+- **Guardrails.** The AI module's global guardrails apply to every suggestion
+  call. When their stops reach the lowest stop threshold of the guardrail
+  sets, before or after the answer is written, the editor sees "The site's AI
+  rules stopped this request." with a next step, and nothing is suggested. The
+  module ships no guardrail of its own: it fences the page's text, checks the
+  shape of every answer and cleans every value. The stops of all attached
+  sets count together against the lowest threshold, so a lenient set's stop
+  can block through a strict set that did not stop itself. That fails
+  closed.
+- **Timeout.** Calls use the AI module's request timeout (AI settings,
+  60 seconds unless changed).
+- **Logging.** Calls are tagged `canvas_metatag_ai` and, by prompt,
+  `canvas_metatag_ai_search`, `canvas_metatag_ai_social` or
+  `canvas_metatag_ai_schema`. With the AI module's observability logging on,
+  every AI call is logged when its tag list is empty; list
+  `canvas_metatag_ai` there to log only these. If it also logs input, the log
+  stores the page's text, including unpublished drafts. This module logs each
+  failure once on its `canvas_metatag_ai` channel, with the error code, the
+  prompt and the exception class, and never the text.
 
 ## Headless delivery
 

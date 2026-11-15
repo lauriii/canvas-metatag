@@ -11,7 +11,9 @@ import {
 import { ApiError } from '../api';
 import { useApp } from '../App';
 import {
+  AI_SENDS,
   REGISTRY,
+  aiError,
   article,
   dateText,
   inherited,
@@ -27,17 +29,10 @@ import type {
 } from '../types';
 import { Btn, IconBtn, Sk, SparkleIcon, reveal } from './ui';
 
-const ERRORS: Record<string, string> = {
-  ai_not_configured: "AI suggestions aren't set up on this site yet.",
-  blocked: "This text can't be sent to the AI service.",
-  rate_limited: 'The AI service is busy. Try again in a minute.',
-  quota_exceeded:
-    "The site's AI allowance is used up. Ask a site administrator.",
-  invalid_response: "The AI answer couldn't be used. Try again.",
-};
-const errorText = (error: unknown) =>
-  (error instanceof ApiError && ERRORS[error.code]) ||
-  "The AI service didn't answer. Try again.";
+type Failure = ReturnType<typeof aiError>;
+
+const failure = (error: unknown, refined = false): Failure =>
+  aiError(error instanceof ApiError ? error.code : null, refined);
 
 const DISCLOSURE = "Written by AI from this page's text. Check the facts.";
 const TIP = "Suggest with AI · sends this page's text to the AI service";
@@ -69,7 +64,7 @@ export function SuggestIcon(props: {
       tip={TIP}
       side="bottom"
       ai
-      aria-description="Sends this page's text to the AI service."
+      aria-description={AI_SENDS}
       aria-expanded={props.open}
       onClick={props.onClick}
     >
@@ -95,7 +90,7 @@ export function SuggestButton(props: {
       variant={props.variant ?? 'soft'}
       size={props.variant === 'ghost' ? 24 : 32}
       aria-label={props.label}
-      aria-description={TIP}
+      aria-description={AI_SENDS}
       aria-expanded={props.open}
       onClick={props.onClick}
     >
@@ -122,6 +117,8 @@ function usePage() {
 function Tray(props: {
   /** The control that opened it: closing returns focus there. */
   opener: string;
+  /** Something written by AI is shown: the disclosure follows it. */
+  written: boolean;
   onClose(): void;
   children: ReactNode;
 }) {
@@ -130,8 +127,8 @@ function Tray(props: {
   useEffect(() => {
     const element = tray.current;
     element?.focus({ preventScroll: true });
-    // It grows as it unfolds and when the options arrive: its last line,
-    // the AI disclosure, stays in view as it does.
+    // It grows as it unfolds and when the options arrive: its last line
+    // stays in view as it does.
     const observer = new ResizeObserver(() => reveal(element));
     if (element) {
       // The wrap animates open; the tray inside changes with its content.
@@ -165,10 +162,43 @@ function Tray(props: {
           }}
         >
           {props.children}
-          <p className="seo-tray-note">{DISCLOSURE}</p>
+          {props.written && <p className="seo-tray-note">{DISCLOSURE}</p>}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * A failure that asking again would only repeat: the sentence and Dismiss.
+ * The button that asked may have gone with it, so focus goes back to the
+ * tray, which holds the sentence.
+ */
+function Final(props: { text: string; onClose(): void }) {
+  const message = useRef<HTMLParagraphElement>(null);
+  useEffect(() => {
+    const tray = message.current?.closest<HTMLElement>('.seo-tray');
+    const active = document.activeElement;
+    if (tray && (active === document.body || tray.contains(active))) {
+      tray.focus({ preventScroll: true });
+    }
+  }, []);
+  return (
+    <>
+      <p
+        ref={message}
+        className="seo-tray-message"
+        data-tone="error"
+        role="alert"
+      >
+        {props.text}
+      </p>
+      <div className="seo-tray-foot">
+        <Btn variant="soft" onClick={props.onClose}>
+          Dismiss
+        </Btn>
+      </div>
+    </>
   );
 }
 
@@ -202,7 +232,7 @@ export function TextSuggest(props: {
   const [variants, setVariants] = useState<
     Partial<Record<SuggestField, string>>[]
   >([]);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState<Failure>(aiError(null));
   const [selected, setSelected] = useState(0);
   const [hint, setHint] = useState('');
   const [refining, setRefining] = useState(false);
@@ -235,6 +265,7 @@ export function TextSuggest(props: {
 
   const ask = () => {
     const mine = ++calls.current;
+    const refined = hint.trim() !== '';
     setPhase('working');
     setTrial(null);
     api
@@ -261,7 +292,7 @@ export function TextSuggest(props: {
             ...props.fields.map((field) => suggestions[field]?.length ?? 0),
           );
           if (count === 0) {
-            setMessage(ERRORS.invalid_response);
+            setMessage(aiError('invalid_response'));
             setPhase('error');
             return;
           }
@@ -280,7 +311,7 @@ export function TextSuggest(props: {
         },
         (error) => {
           if (mine === calls.current) {
-            setMessage(errorText(error));
+            setMessage(failure(error, refined));
             setPhase('error');
           }
         },
@@ -315,9 +346,22 @@ export function TextSuggest(props: {
     return kind ? meter(kind, applied(variant)[kind], measurer) : null;
   };
 
+  if (phase === 'error' && !message.retry) {
+    return (
+      <Tray opener={props.opener} written={false} onClose={props.onClose}>
+        <Final text={message.text} onClose={props.onClose} />
+      </Tray>
+    );
+  }
+
   return (
-    <Tray opener={props.opener} onClose={props.onClose}>
-      {(state.facts?.text.trim().length ?? 0) < 200 && (
+    <Tray
+      opener={props.opener}
+      written={phase === 'ready'}
+      onClose={props.onClose}
+    >
+      {/* An error tray holds one message. */}
+      {phase !== 'error' && (state.facts?.text.trim().length ?? 0) < 200 && (
         <p className="seo-tray-note" data-tone="improve">
           There is not much text on this page yet, so these may be generic.
         </p>
@@ -325,7 +369,7 @@ export function TextSuggest(props: {
       {phase === 'working' && <Working />}
       {phase === 'error' && (
         <p className="seo-tray-message" data-tone="error" role="alert">
-          {message}
+          {message.text}
         </p>
       )}
       {phase === 'ready' && (
@@ -351,6 +395,12 @@ export function TextSuggest(props: {
                 key={index}
                 value={String(index)}
                 className="seo-tray-option"
+                // The count as words, not as a number in the option's name.
+                aria-description={
+                  result
+                    ? `${result.chars} ${result.chars === 1 ? 'character' : 'characters'}`
+                    : undefined
+                }
               >
                 <span className="seo-tray-text" lang={server.langcode}>
                   {props.fields.map((field, at) =>
@@ -364,6 +414,7 @@ export function TextSuggest(props: {
                 {result && (
                   <span
                     className="seo-tray-count"
+                    aria-hidden
                     data-long={result.state === 'long' || undefined}
                   >
                     {result.chars}
@@ -417,7 +468,10 @@ export function TextSuggest(props: {
                 if (props.onUse(variants[selected])) {
                   props.onClose();
                 } else {
-                  setMessage("The editor didn't take the text. Try again.");
+                  setMessage({
+                    text: "The editor didn't take the text. Try again.",
+                    retry: true,
+                  });
                   setPhase('error');
                 }
               }}
@@ -438,7 +492,7 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
   const [phase, setPhase] = useState<'working' | 'ready' | 'error'>('working');
   const [proposal, setProposal] = useState<SchemaSuggestion | null>(null);
   const [ticked, setTicked] = useState<string[]>([]);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState<Failure>(aiError(null));
   // Another type drops the details of the current one: asked first, as a
   // change of type by hand is.
   const [dropping, setDropping] = useState(0);
@@ -463,7 +517,8 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
       },
       (error) => {
         if (mine === calls.current) {
-          setMessage(errorText(error));
+          // No Refine text to change in this tray.
+          setMessage(failure(error));
           setPhase('error');
         }
       },
@@ -527,12 +582,19 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
   };
 
   return (
-    <Tray opener={props.opener} onClose={props.onClose}>
+    <Tray
+      opener={props.opener}
+      written={phase === 'ready' && !nothing}
+      onClose={props.onClose}
+    >
       {phase === 'working' && <Working />}
-      {phase === 'error' && (
+      {phase === 'error' && !message.retry && (
+        <Final text={message.text} onClose={props.onClose} />
+      )}
+      {phase === 'error' && message.retry && (
         <>
           <p className="seo-tray-message" data-tone="error" role="alert">
-            {message}
+            {message.text}
           </p>
           <div className="seo-tray-foot">
             <Btn variant="soft" onClick={ask}>

@@ -653,6 +653,15 @@ skip the CSRF check):
 | `GET media` | either permission; published image media, per-item view access, public files only |
 | `POST ai/suggest` (submodule) | `use canvas metatag ai` and `edit canvas metatag`, CSRF header, flood 30 per 5 minutes per user |
 
+The submodule's prompts are edited in the AI module's Prompt Library, under
+its restricted `manage ai prompts` permission. What a prompt says cannot
+weaken the fence or the answer shape (section 16), and the status report entry
+links to the AI module's own admin pages, which keep their own access. The
+three default prompts cannot be deleted: `AiHooks` forbids `delete` on them,
+and the submodule's route subscriber adds `_entity_access: ai_prompt.delete`
+to the Prompt Library's delete form, which otherwise checks only the
+permission.
+
 - Input: `Values::clean()` in write mode is the gate; bodies over 128 KiB are
   refused. Output: everything is cleaned again in read mode, every token
   value is what anonymous may see, attributes are escaped by the render
@@ -671,27 +680,96 @@ skip the CSRF check):
 
 ## 16. The AI submodule
 
-`modules/canvas_metatag_ai` adds suggestions; it stores nothing.
+`modules/canvas_metatag_ai` adds suggestions; it stores nothing of its own
+besides the three prompts it installs.
 
 - `AiHooks` implements `hook_canvas_metatag_capabilities_alter`: users with
   `use canvas metatag ai` get `capabilities.ai = {available, reason}` in the
-  state; others get NULL and learn nothing about the provider.
+  state (`no_provider`, `not_usable`, `no_prompt`, in that order); others get
+  NULL and learn nothing about the provider. It also implements
+  `hook_runtime_requirements`: one entry, "SEO suggestions (Canvas Metatag
+  AI)", OK with the provider and model and a link to the AI settings, or a
+  warning with the reason and a link to the AI settings (also for a default
+  whose provider module is gone), the providers page, the Prompt Library (a
+  prompt by its own label, else its shipped one, and the machine name
+  "default" for one that is gone) or, when a prompt type is gone, the
+  uninstall page. Neither calls the provider's service. The prompt types are
+  `canvas_metatag_<kind>` for each of `Assistant::KINDS`. On every prompt of
+  its three types, `hook_ai_prompt_presave` adds an enforced dependency on the
+  submodule (a prompt saved in the Prompt Library depends on nothing, and
+  would outlive an uninstall and block a reinstall);
+  `hook_ai_prompt_access` keeps the default prompts from being deleted.
 - `AiController::suggest()` checks and caps the request (fields, count 1 to 5,
   hint 200, current values 2000, page text 12000 characters, langcode must be
-  a site language), applies flood control, and maps provider exceptions to
-  stable error codes. Provider messages are logged; prompts, page text and
-  answers never are.
-- `Assistant` uses the default provider for structured chat, else chat. The
-  system prompt holds nothing from the request. The page text goes into the
-  user message between `<page_content>` tags; `inline()` folds compatibility
-  forms and strips any delimiter tag, repeatedly. The AI module's hostname
-  filter is bypassed (it HTML-escapes and breaks JSON); instead answers are
-  checked against the requested shape, braces are removed (no planted tokens),
-  values reduced to plain text, text suggestions with a URL dropped, and
-  schema properties checked with `SchemaGraph::validLiteral()`. A schema value
-  is marked unverified unless the page text contains it (dates never verify).
+  a site language, no mix of search and social fields), applies flood control,
+  and maps exceptions to stable error codes. Each failure after the request
+  check and the flood limit is logged once on `canvas_metatag_ai` with the
+  code, task, prompt kind and exception class, also when it happens before
+  the provider call, which the AI module does not log; refused requests are
+  not logged. The provider's message is not logged: the AI module logs it on
+  its own channel, and it may quote the prompt. Prompts, page text and
+  answers are never logged by this module. The `blocked` message names no
+  next step: the dialog's `aiError()` adds the one that fits (other Refine
+  text, or a site administrator) and offers Try again only where asking again
+  can help.
+- `Assistant` uses the default provider for structured chat, else chat, with
+  the AI module's site-wide request timeout. Prompts: three prompt types and
+  their `<type>__default` prompts in `config/install` (`canvas_metatag_search`,
+  `canvas_metatag_social`, `canvas_metatag_schema`, enforced dependency on the
+  submodule). `Assistant::system()` reads `ai.ai_prompt.<type>__default` from
+  configuration without overrides (an entity load fails once its type is
+  gone; a translation would make the instructions depend on who asks), fills
+  `{language}`, `{count}`, `{types}`, `{properties}`, also spelled
+  `{{ name }}` as the Prompt Library's editor inserts them, with one `strtr()`
+  pass from server values only, does not replace tokens, and appends `FENCE`
+  and `SHAPE`, which a site builder cannot edit. A request whose prompt is
+  missing or blank is `not_configured`; the dialog offers no suggestion while
+  any of the three is.
+  Text requests use the social prompt when every field is a social one
+  (`Assistant::isSocial()`, shared with the mixed-field check), else the
+  search prompt; calls are tagged `canvas_metatag_ai` and
+  `canvas_metatag_ai_<kind>`.
+- The system prompt holds nothing from the request. The page text goes into
+  the user message between `<page_content>` tags; `inline()` folds
+  compatibility forms and strips any delimiter tag, repeatedly.
+- Guardrails: the AI module attaches the site's global guardrail sets to every
+  call. After `chat()` and before anything is decoded, `Assistant::stopped()`
+  sums the scores of every `StopResult`, before and after generation, and
+  compares the sum with the lowest stop threshold of the attached sets, as the
+  AI module's automators do. Reaching it is `blocked`; a stop's message, which
+  replaces the answer, is never decoded or shown. A stop below it lets the
+  answer through.
+- Answer reading, each kept because the alternative was shown to fail: the
+  hostname filter is bypassed with `HostnameFilterDto(fullTrust: TRUE)` (the
+  default re-serializes the answer as HTML: `&amp;`, added closing tags); a
+  plain `json_decode()` runs before the AI module's `PromptJsonDecoder`, which
+  only tries text that starts like `{"` or holds a code fence; the structured
+  output schema is passed as an array (the `StructuredOutputSchema` object
+  makes the AI module 1.5 call its own deprecated method); capability flags
+  are not trusted. Answers are checked against the requested shape, braces are
+  removed (no planted tokens), values reduced to plain text, text suggestions
+  with a URL dropped, and schema properties checked with
+  `SchemaGraph::validLiteral()`. A schema value is marked unverified unless
+  the page text contains it (dates never verify).
 - The dialog shows suggestions for review only; an applied suggestion is saved
   like typed text and validated again on save.
+
+### AI module APIs relied on
+
+No Canvas internal comes from the submodule. These AI module (1.5) APIs do;
+each row names the test that fails when it changes.
+
+| API | Used for | Pinned by |
+|---|---|---|
+| `AiProviderPluginManager::getDefaultProviderForOperationType()`, operation ids `chat_with_structured_response`, `chat` | provider resolution | `AssistantTest::testProviderResolutionOrder` |
+| Config `ai.ai_prompt.<type>__default`, key `prompt`; entity types `ai_prompt_type`, `ai_prompt` | prompts | `ShippedConfigTest`, `AssistantTest::testPrompts`, `PromptsTest` |
+| Route `entity.ai_prompt.delete_form` (parameter `ai_prompt`) | delete guard | `PromptsTest::testDefaultPromptsCannotBeDeleted` |
+| `InputInterface::getAllGuardrailResults()`, `getGuardrailSets()`, `AiGuardrailSetInterface::getStopThreshold()`, `StopResult::getScore()`; `ai.settings:global_guardrails` | blocked | `AssistantTest::testGuardrailStopIsBlocked` |
+| `ChatInput::setChatStructuredJsonSchema(array)` | structured output | `AssistantTest::testNoDeprecations` |
+| `HostnameFilterDto(fullTrust:)`, `ai.prompt_json_decode` | answer reading | `AssistantTest::testSuggestText`, `testJsonDecoderFallback`, `testBareJsonWithSpaces` |
+| `ai.settings:request_timeout` | timeout | `AssistantTest::testSiteTimeoutApplies` |
+| Exception classes `AiSetupFailureException`, `AiAccessDeniedException`, `AiMissingFeatureException`, `AiOperationTypeMissingException`, `AiBrokenOutputException`, `AiUnsafePromptException`, `AiRateLimitException`, `AiQuotaException` | error codes | `AiControllerTest::testErrorCodes` |
+| Routes `ai.settings_form`, `ai.admin_providers`, `entity.ai_prompt.collection`, `system.modules_uninstall` | status report links | `RequirementsTest` |
 
 ## 17. Testing
 
@@ -706,11 +784,12 @@ skip the CSRF check):
 | `ApiTest` | route requirements, state (incl. a template without a node to preview), site (incl. a stored value carried forward), media, writes follow shown values | PHPUnit (kernel) |
 | `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node (headings, list items and table rows as sentences), heads and structured data (a square logo's small card), hidden references published and deleted (coupled and headless), drafts, headless | PHPUnit (kernel) |
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
-| `AiControllerTest`, `AssistantTest` | access, caps, flood, error codes, nothing logged or written; provider resolution, prompts, output cleaning | PHPUnit (kernel, submodule) |
+| `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
+| `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
 | `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks, API client, host adapter parsing | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
 | Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates bound to fields, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
-| Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider | |
+| Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider, an edited prompt, and a site guardrail that blocks | |
 | Playwright `complex` | template scope on the complex fixture: type fields and their values, value menus in windows 350 and 420 px tall, by keyboard and to assistive technology, previews that follow the editor (at the view's top, without a message or a status change), Checks against a long title, an unpublished preview node and its information button (click, hover then click, click elsewhere), a square small card for a square logo, a header whose Checks text gives way to a long type name, a type without content, text direction | |
 
 Commands are in the README ("Development"). Kernel tests use Canvas's
@@ -789,7 +868,9 @@ extension/src/checks.ts           the Checks tab's rules
 extension/src/App.tsx             lifecycle: load, follow the editor,
                                   save timer, flush, session storage
 extension/src/components/         one file per tab and shared fields
-modules/canvas_metatag_ai/        suggestions (prompts in Assistant.php)
+modules/canvas_metatag_ai/        suggestions; prompts in config/install
+                                  (Prompt Library), fixed tail in
+                                  Assistant.php
 tests/fixtures/                   cases shared by PHP and TypeScript
 tests/e2e/host-contract.spec.ts   update first when Canvas changes
 ```

@@ -8,6 +8,8 @@ import {
   LIMITS,
   MESSAGES,
   REGISTRY,
+  aiError,
+  aiOffText,
   applyChanges,
   article,
   breadcrumb,
@@ -1882,6 +1884,72 @@ describe('fixes from the reviews', () => {
     const shown = run(hidden, edit('robots.noindex', false));
     expect(view(shown)!.hidden).toBe(false);
     expect(strips(shown, view(shown), false)).toEqual([]);
+  });
+});
+
+describe('aiOffText()', () => {
+  it('says why AI suggestions are off, for each reason, and where to look', () => {
+    const where =
+      ' Site administrators can see how to fix it in the status report.';
+    expect(aiOffText('no_provider')).toBe(
+      `AI suggestions are off: no AI provider is set up.${where}`,
+    );
+    expect(aiOffText('not_usable')).toBe(
+      `AI suggestions are off: the AI provider isn't ready to use.${where}`,
+    );
+    // The status report's words for the same state.
+    expect(aiOffText('no_prompt')).toBe(
+      `AI suggestions are off: a suggestion prompt is empty or missing.${where}`,
+    );
+    // A capabilities alter hook may leave the reason out.
+    expect(aiOffText(null)).toBe(
+      `AI suggestions are off: no AI provider is set up.${where}`,
+    );
+  });
+});
+
+describe('aiError()', () => {
+  it('names the next step for a guardrail stop by whether Refine text was sent', () => {
+    expect(aiError('blocked', true)).toEqual({
+      text: "The site's AI rules stopped this request. Try different wording in Refine, or ask a site administrator.",
+      retry: true,
+    });
+    // Set off by the page text, or in the structured data tray: asking
+    // again is refused again.
+    expect(aiError('blocked')).toEqual({
+      text: "The site's AI rules stopped this request. Ask a site administrator.",
+      retry: false,
+    });
+  });
+
+  it('offers to try again only where that can help', () => {
+    expect(aiError('rate_limited', true)).toEqual({
+      text: 'The AI service is busy. Wait a minute, then try again.',
+      retry: true,
+    });
+    expect(aiError('invalid_response')).toEqual({
+      text: "The AI answer couldn't be used.",
+      retry: true,
+    });
+    for (const code of ['provider_error', 'network', 'bad_request', null]) {
+      expect(aiError(code)).toEqual({
+        text: "The AI service didn't answer.",
+        retry: true,
+      });
+    }
+    expect(aiError('ai_not_configured')).toEqual({
+      text: "AI suggestions aren't set up on this site yet.",
+      retry: false,
+    });
+    expect(aiError('quota_exceeded', true)).toEqual({
+      text: "The site's AI allowance is used up. Ask a site administrator.",
+      retry: false,
+    });
+    // A 403 from Drupal's access check, after a fresh token was tried.
+    expect(aiError('forbidden')).toEqual({
+      text: 'Your session or permissions changed. Reload the editor and try again.',
+      retry: false,
+    });
   });
 });
 

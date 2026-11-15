@@ -17,8 +17,8 @@ declare(strict_types=1);
  *
  * The result is the `capabilities` member of the dialog's state. Its only
  * member is `ai`: NULL when suggestions are not offered to the current user,
- * else a map with `available` (bool) and `reason` (NULL, 'no_provider' or
- * 'not_usable').
+ * else a map with `available` (bool) and `reason` (NULL, 'no_provider',
+ * 'not_usable' or 'no_prompt').
  *
  * @param array<string, mixed> $capabilities
  *   The capabilities; `ai` is NULL when this hook is invoked.

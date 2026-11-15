@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\canvas_metatag\TestSite;
 
+use Drupal\ai\Entity\AiGuardrail;
+use Drupal\ai\Entity\AiGuardrailSet;
 use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\Component;
 use Drupal\canvas\Entity\ContentTemplate;
@@ -48,7 +50,8 @@ if (!\class_exists(TestSetupInterface::class)) {
  * file. Two environment flags choose what is added to the base (coupled) site:
  *
  * - CANVAS_METATAG_E2E_HEADLESS=1 installs canvas_headless with one frontend.
- * - CANVAS_METATAG_E2E_AI=1 installs the AI submodule and its test provider.
+ * - CANVAS_METATAG_E2E_AI=1 installs the AI submodule and its test provider,
+ *   edits the search result prompt and adds a site guardrail (configureAi()).
  * - CANVAS_METATAG_E2E_COMPLEX=1 adds the complex content fixture after the
  *   base site: its nodes are 4 to 24, in the order of COMPLEX_NODES.
  *
@@ -82,6 +85,9 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
   // A page whose published SEO title differs from the inherited one.
   public const string STORED_TITLE = 'Stored';
   public const string STORED_SEO_TITLE = 'Published title {sep} {site}';
+  // A search result prompt without {count}. The Prompt Library's form would
+  // refuse it; a configuration import would not.
+  public const string AI_SEARCH_PROMPT = 'Write the search result title and description of this page in {language}.';
 
   // Image media, by name. Sizes are width x height in pixels.
   public const string IMAGE_HERO = 'E2E Hero';
@@ -165,11 +171,47 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
       $this->installComplexContent();
     }
     if ($ai) {
-      // The provider and model ids are those of canvas_metatag_ai_test.
-      \Drupal::configFactory()->getEditable('ai.settings')
-        ->set('default_providers.chat', ['provider_id' => 'canvas_metatag_echo', 'model_id' => 'echo-json'])
-        ->save();
+      $this->configureAi();
     }
+  }
+
+  /**
+   * Points the AI defaults at the test provider, and adds what a site adds.
+   *
+   * The search result prompt is set in configuration, as an import would
+   * set it, without {count}. A global guardrail stops any request that
+   * contains "#policy".
+   */
+  private function configureAi(): void {
+    // The provider and model ids are those of canvas_metatag_ai_test.
+    $echo = ['provider_id' => 'canvas_metatag_echo', 'model_id' => 'echo-json'];
+    \Drupal::configFactory()->getEditable('ai.settings')
+      ->set('default_providers.chat', $echo)
+      ->set('default_providers.chat_with_structured_response', $echo)
+      ->set('global_guardrails', ['canvas_metatag_e2e'])
+      ->save();
+    \Drupal::configFactory()->getEditable('ai.ai_prompt.canvas_metatag_search__default')
+      ->set('prompt', self::AI_SEARCH_PROMPT)
+      ->save();
+    AiGuardrail::create([
+      'id' => 'canvas_metatag_e2e_policy',
+      'label' => 'Policy marker',
+      'description' => '',
+      'guardrail' => 'regexp_guardrail',
+      'guardrail_settings' => [
+        'regexp_pattern' => '/#policy/',
+        'scan_all_user_messages' => FALSE,
+        'violation_message' => 'Stopped by the site policy.',
+      ],
+    ])->save();
+    AiGuardrailSet::create([
+      'id' => 'canvas_metatag_e2e',
+      'label' => 'Canvas Metatag e2e',
+      'description' => '',
+      'stop_threshold' => 1.0,
+      'pre_generate_guardrails' => ['plugin_id' => ['canvas_metatag_e2e_policy']],
+      'post_generate_guardrails' => ['plugin_id' => []],
+    ])->save();
   }
 
   /**

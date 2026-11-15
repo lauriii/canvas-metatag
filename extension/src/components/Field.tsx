@@ -18,7 +18,7 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
-import { type Meter, source as sourceOf } from '../model';
+import { AI_SENDS, type Meter, source as sourceOf } from '../model';
 import type { Issue, Scope } from '../types';
 import { Btn, SparkleIcon, reveal } from './ui';
 
@@ -360,6 +360,7 @@ export function IssueFix(props: {
       variant="ghost"
       size={24}
       aria-label={`Suggest a ${props.label}`}
+      aria-description={AI_SENDS}
       onClick={props.onSuggest}
     >
       <SparkleIcon width="12" height="12" />

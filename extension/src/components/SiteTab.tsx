@@ -3,7 +3,7 @@ import { Fragment } from 'react';
 
 import { useApp } from '../App';
 import { identityGaps } from '../checks';
-import { siteTexts } from '../model';
+import { aiOffText, siteTexts } from '../model';
 import { Field, useHeld } from './Field';
 import { ImageRow, PICKED, Thumb } from './MediaPicker';
 import { Stage } from './Previews';
@@ -281,12 +281,7 @@ export function SiteView() {
       <Visibility scope="site" />
 
       {server.can.site && ai && !ai.available && (
-        <p className="seo-quiet">
-          AI suggestions are off:{' '}
-          {ai.reason === 'not_usable'
-            ? "the AI provider isn't ready to use."
-            : 'no AI provider is set up.'}
-        </p>
+        <p className="seo-quiet">{aiOffText(ai.reason)}</p>
       )}
     </>
   );

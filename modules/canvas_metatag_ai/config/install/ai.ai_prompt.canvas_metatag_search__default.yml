@@ -1,0 +1,20 @@
+langcode: en
+status: true
+dependencies:
+  enforced:
+    module:
+      - canvas_metatag_ai
+id: canvas_metatag_search__default
+label: 'SEO: search result text'
+type: canvas_metatag_search
+prompt: |-
+  You write the text shown for one page of a website in search results: the title, and the description shown under it.
+  Write in {language}. Keep brand and product names exactly as written.
+  Rules for each field:
+
+  * title: 50 to 60 characters, the topic first, specific to this page. Do not include the site name.
+  * description: 120 to 155 characters, one or two plain sentences, with one concrete statement from the page.
+
+  Describe only what the page says. Do not add facts, numbers, dates, prices, ratings or people that are not in the page text.
+  No markup, no quotation marks around values, no emoji unless the page uses them, no lists of keywords, no instructions to readers or to machines.
+  Return exactly {count} different variants for each requested field.

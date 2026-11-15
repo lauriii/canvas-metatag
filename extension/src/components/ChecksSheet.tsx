@@ -2,7 +2,7 @@ import { InfoCircledIcon } from '@radix-ui/react-icons';
 import { useEffect, useRef } from 'react';
 
 import { useApp } from '../App';
-import { REGISTRY } from '../model';
+import { AI_SENDS, REGISTRY } from '../model';
 import type { Issue, Jump } from '../types';
 import { fixedText } from './Field';
 import { Btn, SparkleIcon } from './ui';
@@ -101,6 +101,7 @@ export function ChecksSheet() {
           <Btn
             variant="soft"
             aria-label={`Suggest a ${where(jump)}`}
+            aria-description={AI_SENDS}
             onClick={() => goTo(jump, { suggest: true })}
           >
             <SparkleIcon />
