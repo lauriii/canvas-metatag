@@ -12,6 +12,9 @@ Each item names the change that implements it, and that change's
 specs and proposals cite them as "(decisions.md, item N)". Add new items at
 the end; never renumber.
 
+The SEO dialog's visual rules (tokens, components, review checklist) are in
+`design-system.md`.
+
 1. link-values-to-fields: FULL PLAN (Canvas entity-field prop sources at
    template scope, contained in one Sources class, pinning tests, and a CI
    job against Canvas's development branch). Not the fallback.

@@ -184,7 +184,7 @@ q82; icons 0.3–4 KB.
 | `c26-unbreakable-word.png` | Hyphen split at 66 px, four letters each side, no false "…" | accepted nit: "gesellsc-haft" (no hyphenation dictionary) |
 | `c27-svg-logo-orange.png` | SVG logo: colour from its source, monogram mark, ink text on orange | 5.61 / 4.63, small text opacity 0.84 |
 | `c33-long-site-name.png` | 61-character Site name cut at a word to 640 px at 26 px | "The Northern Lakes Regional Chamber Music…" |
-| `c35-multicolour-mark.png` | Multicolour transparent mark on a white plate inside the 52 px box; one-line title at the 88 px wide step | 5.61 / 4.58 |
+| `c35-multicolour-mark.png` | Multicolour transparent mark (a sailboat: teal and amber sails on a navy hull) on a white plate inside the 52 px box; one-line title at the 88 px wide step. The mark was redrawn on the committed image after the run; the field and values are the run's | 5.61 / 4.58 |
 | `p01-front-cover.jpg` | Cover crop of a wide photo (1770 × 996) | 105 KB |
 | `p09-real-square.jpg` | Square photo shown whole on its colour wash, rounded, shadowed | 46 KB |
 | `p11-product-on-white.jpg` | Plain-edged product shot continued seamlessly | 9 KB |
