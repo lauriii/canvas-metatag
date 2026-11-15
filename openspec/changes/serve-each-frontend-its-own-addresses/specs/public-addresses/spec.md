@@ -150,11 +150,12 @@ MUST be ignored and reported.
 ### Requirement: Page addresses follow the frontend's form
 
 A page's address MUST be its language's address, followed by its Drupal path
-without the base path and script name, and without Drupal's language prefix
-when the frontend has an address for that language. The request's query MUST
-NOT enter it. With the slash setting, an address with a path MUST end in `/`
-before any query. A path override MUST be put on the same address, in the same
-form. An address on another frontend MUST take that frontend's form.
+without the base path, script name or Drupal's language domain, and without
+Drupal's language prefix when the frontend has an address for that language.
+The request's query MUST NOT enter it. With the slash setting, an address with
+a path MUST end in `/` before any query. A path override MUST be put on the
+same address, in the same form. An address on another frontend MUST take that
+frontend's form.
 
 #### Scenario: A trailing slash
 
@@ -170,6 +171,11 @@ form. An address on another frontend MUST take that frontend's form.
 
 - **WHEN** French has the address `https://fr.example.com` and Drupal's French prefix is `fr`
 - **THEN** the French page `/fr/a-propos` MUST have the canonical `https://fr.example.com/a-propos`, and the English page's French alternate MUST be the same
+
+#### Scenario: A language on its own domain in Drupal too
+
+- **WHEN** Drupal finds French by the domain `fr.cms.example.com`, French has the address `https://fr.example.com`, and the French page `/a-propos` links the French page `/tarifs`
+- **THEN** its canonical link, `og:url`, French alternate and `WebPage` `@id` MUST start with `https://fr.example.com/a-propos`, the linked address MUST be `https://fr.example.com/tarifs`, and no address MUST name `fr.cms.example.com`
 
 #### Scenario: Another locale prefix
 
@@ -228,9 +234,10 @@ JSON-LD script.
 Every image the module emits, made images included, MUST be addressed through
 the frontend's image address: `{base}` is the frontend's public or preview
 address, never a language address; `{path}` the image's root-relative Drupal
-path without Drupal's base path; `{source}` its Drupal address encoded as one
-query value; `{width}` its width. Other files MUST be on `{base}{path}`.
-Without an image address, all MUST be Drupal's own file address.
+path without Drupal's base path; `{source}` its Drupal address as one query
+value; `{width}` its width. Other files MUST be on `{base}{path}`. Without an
+image address, all MUST be Drupal's own file address. A file served from
+another host MUST keep its own address.
 
 #### Scenario: A proxied path
 
@@ -251,6 +258,11 @@ Without an image address, all MUST be Drupal's own file address.
 
 - **WHEN** Drupal runs under `/cms` and the image address is `{base}{path}`
 - **THEN** the image `public://hero.jpg` MUST be `https://www.example.com/sites/default/files/hero.jpg`
+
+#### Scenario: A file served from another host
+
+- **WHEN** the image address is `{base}{path}` and a module that rewrites file addresses serves a page's image `public://hero.jpg` from `https://files.example.net`
+- **THEN** `og:image` MUST be the image's own `https://files.example.net` address
 
 ### Requirement: An image address can only fill in a path
 
@@ -378,16 +390,38 @@ be used while a frontend is configured.
 
 ### Requirement: Addresses are part of the cacheability
 
-Every head MUST depend on the `canvas_headless` settings, also before that
-module is installed, and on the address settings, and a head on the request's
-address MUST vary by site. The `settings.php` public address carries no cache
-tag: a change to it takes effect after a cache rebuild. What the module keeps
-beyond a request MUST hold no built address, or be kept per frontend.
+Every head MUST depend on the `canvas_headless` and address settings, also
+before `canvas_headless` is installed, and vary by the URL's language; a head
+on the request's address MUST vary by site. A `settings.php` change to the
+public base, the public file address or either settings object MUST invalidate
+cached heads by the next cron run or the first request the page cache does not
+answer. What the module keeps beyond a request MUST hold no built address, or
+be kept per frontend.
 
 #### Scenario: A frontend is configured later
 
 - **WHEN** a page was cached on the request's address and a first frontend is then configured
 - **THEN** the cached page MUST be invalidated, in coupled and headless output alike
+
+#### Scenario: The settings file changes
+
+- **WHEN** `/about` is page cached, `settings.php` changes the public base from `https://www.example.org` to `https://www.example.net`, and cron runs
+- **THEN** the next request for `/about` MUST be a page cache miss with its canonical link on `https://www.example.net`
+
+#### Scenario: An override changes before cron
+
+- **WHEN** `/about` is page cached, `settings.php` overrides the frontend's image address with `{base}{path}`, and a request for another page misses the page cache
+- **THEN** the next request for `/about` MUST be a page cache miss with its images on the frontend's address
+
+#### Scenario: Nothing changed
+
+- **WHEN** cron runs and `settings.php` is unchanged
+- **THEN** the next request for a page cached before MUST be a page cache hit
+
+#### Scenario: A language found by its domain
+
+- **WHEN** Drupal finds French by the domain `fr.cms.example.com`, and with the page cache bypassed `/about` is requested twice at each of Drupal's hosts
+- **THEN** the second request at each host MUST be a dynamic page cache hit with its own language's head
 
 #### Scenario: Changing an image address
 
@@ -426,9 +460,9 @@ setting applied, or `unnamed` when nothing was named and none could.
 
 The status report MUST show an error for a public or language address, or the
 public base setting, that is plain http or on a non-public host (as in "Images
-on a host no crawler reaches are left out"), for invalid address settings, and for a
-language Drupal finds by domain with no frontend address. These MUST be
-warnings only where Drupal's own host is a development host: loopback,
+on a host no crawler reaches are left out"), for invalid address settings, and
+for a language Drupal finds by domain that a frontend has no address for. These
+MUST be warnings only where Drupal's own host is a development host: loopback,
 `localhost`, under `localhost`, `test` or `invalid`, or a known local
 development suffix.
 
@@ -441,6 +475,11 @@ development suffix.
 
 - **WHEN** the same configuration is viewed at `http://cms.internal`, or through `drush` on `http://default`
 - **THEN** it MUST show an error
+
+#### Scenario: A language domain without a frontend address
+
+- **WHEN** Drupal finds German by the domain `de.cms.example.com` and `https://shop.example.com` has no German address
+- **THEN** the status report MUST show an error naming German and `https://shop.example.com`
 
 #### Scenario: A development site
 

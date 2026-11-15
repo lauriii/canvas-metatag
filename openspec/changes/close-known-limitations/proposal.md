@@ -143,9 +143,8 @@ Each gap was traced to its root cause in the module, Canvas 1.x and core
   dialog edit leaves a draft in "Review changes" that Canvas never sees as
   unchanged. Both go with the upstream draft.
 - **G8, test coverage.** Firefox, WebKit, multilingual suites, scans of every
-  view and a scripted screen-reader pass are planned in
-  `followups/test-in-every-engine-and-language.md`, to be proposed as their
-  own change.
+  view and a scripted screen-reader pass are their own change,
+  `test-in-every-engine-and-language`.
 - **Not taken up here:**
   - A content type with no content is read-only. It builds on this change's
     `Drafts::write()` and on the server-side draft path from
@@ -174,8 +173,8 @@ posted". Search each queue for an existing issue first.
   `StreamWrapperManager::isPublic()`, and file access that honours declared
   public schemes.
 
-The follow-up's optional draft, `followups/upstream-canvas-test-engines.md`,
-asks Canvas to run its Playwright suite in Firefox and WebKit.
+`test-in-every-engine-and-language` carries its own optional draft, asking
+Canvas to run its Playwright suite in Firefox and WebKit.
 
 When each one lands, the module deletes its mitigation, as design.md says per
 gap. It never runs a fallback path and the upstream API side by side.
@@ -207,7 +206,6 @@ None.
   the command line's `overridden` covers templates and refuses writes.
 - `template-seo` and `site-seo`: settings replaced by configuration are shown
   as they apply and cannot be stored over.
-- `public-addresses`: a file served from another host keeps its address.
 
 ## Dependencies and place in the queue
 
@@ -225,9 +223,9 @@ after it. Every MODIFIED block is written on the text that lands before it:
   dialog cannot show". This change also routes that change's live write through
   `Drafts::write()`, adds the `overridden` field code to its closed list, and
   turns its site-only override check into the shared detector.
-- `serve-each-frontend-its-own-addresses`: public-addresses "Image addresses go
-  through the frontend's image address". Ask that change's owner to take the
-  sentence now; the MODIFIED block then becomes a no-op and is dropped.
+- `serve-each-frontend-its-own-addresses` took the sentence that a file
+  served from another host keeps its own address, with a scenario, so this
+  change has no public-addresses block.
 - Current specs: draft-writes, headless-head, site-seo "Overrides from outside
   apply to the output only".
 

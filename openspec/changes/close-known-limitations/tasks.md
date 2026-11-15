@@ -186,6 +186,6 @@ failure in the merge request.
 
 ## 6. Verification
 
-- [ ] 6.1 Rebase every MODIFIED block on the text that landed: link-values-to-fields, strengthen-zero-config-defaults, make-the-module-agent-ready and serve-each-frontend-its-own-addresses. Drop the public-addresses block if that change took the sentence. Run `openspec validate close-known-limitations --strict` and check each requirement body is under 500 characters.
+- [ ] 6.1 Rebase every MODIFIED block on the text that landed: link-values-to-fields, strengthen-zero-config-defaults and make-the-module-agent-ready. Run `openspec validate close-known-limitations --strict` and check each requirement body is under 500 characters.
 - [ ] 6.2 Run the whole PHPUnit suite (kernel and unit), the "phpunit (canvas dev)" job, vitest, `npm run verify`, and every Playwright suite in Chromium, on site-4, one at a time. All must pass, and the extension build must be current.
 - [ ] 6.3 Final browser pass on site-4 across all phases. Revert every temporary override, language and file move, and end with `farm-env.sh preview`.

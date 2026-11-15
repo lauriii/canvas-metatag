@@ -237,7 +237,7 @@ frontends:
   preview, so the entry follows with no further override. A development
   frontend without an entry gets the defaults. `$config` overrides of this
   object are by index, as for any configuration sequence; keys can't hold
-  addresses.
+  addresses. They invalidate nothing when they change; D16 covers that.
 - **Defaults.** A frontend without an entry, or a member left out, gets: its
   own address as public address, no slash, every language on it, images on
   Drupal, no previews. That is exactly today's first-frontend behaviour.
@@ -307,9 +307,17 @@ Checks flag the ones that name Drupal or a preview host instead.
   status report warns when that frontend does not build the alternate back,
   which is the usual mistake with one brand per language.
 - **Domain negotiation.** With a frontend, a Drupal language domain is never
-  used. Without a language address the module cannot know where that language
-  lives, so its addresses are left out (D12) and the status report shows an
-  error. Without frontends, Drupal's language domains are the public site.
+  used. Core makes a language's address absolute on its domain when that
+  differs from the request's, so the builder keeps only the path, without the
+  domain, base path or prefix, and puts it on the frontend's language address.
+  That one step serves the canonical, `og:url`, hreflang, `@id`s and linked
+  addresses alike. Without a language address the module cannot know where
+  that language lives, so its addresses are left out (D12) and the status
+  report shows an error naming the language and the frontend. Without
+  frontends, Drupal's language domains are the public site.
+- **The language's cache context.** Every head keeps `languages:language_url`,
+  which `canvas_headless` adds to content API responses. The resolver adds it
+  too, so coupled heads don't depend on Canvas for it.
 - **Trailing slash.** One boolean per frontend, applied to page addresses with
   a path, before the query; never to image addresses. Search engines treat `/a`
   and `/a/` as different addresses, so the wrong form points at a redirect.
@@ -365,6 +373,12 @@ no token can form a host.
 image address is set: an optimizer can't serve them, and leaving them out
 would drop valid data. The frontend passes the files path on anyway.
 
+**A file served from another host** keeps its own address: one whose Drupal
+address is on none of Drupal's hosts (the request's, the language domains, the
+public file host), as a module that rewrites file addresses or a remote file
+system makes it. It has no Drupal path a frontend could pass on, and no Drupal
+host to keep out.
+
 **Without a template,** images stay on Drupal's own file address: core's
 `file_public_base_url` when set, else the request host. This keeps
 zero-config sharing working where the CMS is public. On the content API, an
@@ -405,8 +419,9 @@ frontend.
   address or a cache key.
 - **The head.** Every address on the preview address; images through the
   template with `{base}` set to it; language addresses unused, so alternates
-  sit on the preview host with Drupal's prefixes, for reviewers only; and
-  `noindex` merged first into robots.
+  sit on the preview host with Drupal's prefixes, for reviewers only (a
+  language Drupal finds by domain has no prefix, so its addresses are left
+  out, D12); and `noindex` merged first into robots.
 - **The response** is private and never page cached (D4): a preview head is the
   most dangerous head the module builds, and must never reach a shared cache
   that keys on less than the full query.
@@ -425,9 +440,9 @@ a preview then fetches production assets that may not exist yet.
   content API uses it only when it is the only frontend (D2).
 - **`canvas_metatag_public_base`** keeps its documented meaning: it replaces
   the default frontend's public address in this environment, or is the site's
-  public address when no frontend is configured. It still carries no cache
-  tag. Sites that set it because the synced first frontend is a development
-  URL keep working. Other frontends no longer get it.
+  public address when no frontend is configured. A change to it needs no
+  cache rebuild (D16). Sites that set it because the synced first frontend is
+  a development URL keep working. Other frontends no longer get it.
 - **The request host** is used only for Drupal's own pages on a site with no
   frontend and no setting, where it is the site's real host and the page cache
   keys on it. Content API output and commands never use it for page addresses.
@@ -517,8 +532,8 @@ localhost canonical would otherwise go unnoticed.
 
 - **Errors**, warnings on a development host: a public or language address,
   or the setting, that is plain http or on a non-public host; invalid address
-  settings or an invalid setting; a language Drupal finds by domain with no
-  frontend address.
+  settings or an invalid setting; a language Drupal finds by domain that a
+  frontend has no address for.
 - **Warnings:**
   - `canvas_headless` with no frontend and no setting;
   - an entry that applies to no frontend;
@@ -563,6 +578,36 @@ exists. Images that would be on Drush's `http://default` (no image template,
 no `file_public_base_url`, no `--uri`) refuse with `base_unknown`. Today they
 print `http://default/sites/...`.
 
+### D16. Settings-file changes reach cached heads
+
+Saving, importing or applying configuration invalidates its own tag
+(`Config::save()`), and every head carries `config:canvas_headless.settings`
+and `config:canvas_metatag.addresses`. `settings.php` invalidates nothing: the
+public base setting, core's `file_public_base_url`, and `$config` overrides of
+those two objects, which is how staging sets its frontend (D5). A cache
+context can't carry them either: the anonymous page cache answers before
+contexts are read.
+
+- The `Addresses` service hashes what `settings.php` sets: the two settings
+  and `$GLOBALS['config']` for the two objects. Module overrides, such as a
+  language's, are left out, so the hash never varies with the request. The
+  last hash is kept in state.
+- `hook_cron` and a main-request subscriber that runs before the dynamic page
+  cache (priority above 27) compare it, only on requests the page cache did
+  not answer. That costs no config read and one state read, from the state
+  cache core loads on every request anyway.
+- On a difference they invalidate `config:canvas_metatag.addresses` through
+  core's cache tag invalidator, so the page cache, the dynamic page cache and
+  any purger that sends tags to a CDN drop every output holding a built
+  address: heads, coupled and headless, and the command-line report cache.
+  Then they store the new hash and log one notice. A value that differs
+  between web heads invalidates on every flip; the stream of notices names it.
+
+Rejected: a check in a middleware ahead of the page cache (a state read on
+every cached response), a new tag (every head already carries the address
+settings' tag), and keeping the rebuild (a deploy that changes `settings.php`
+without one serves old canonicals until an unrelated save).
+
 ## Cache model
 
 | Layer | Key today | What this change adds | Why it can't cross-serve |
@@ -574,7 +619,8 @@ print `http://default/sites/...`.
 | Edge in front of the frontend | the frontend's own URL | nothing | Each frontend sends its own fixed name; the README's post-deploy check covers a production build that sends a preview name. |
 | Coupled HTML | page cache per Drupal URL | the constant context | Always the default frontend. |
 | Config | `config:canvas_headless.settings` | `config:canvas_metatag.addresses` | Invalidated on change. |
-| `settings.php` base | none | none | A cache rebuild, as today. |
+| `settings.php` values (D16) | none | a stored hash, compared on cron and on requests the page cache did not answer | A change invalidates `config:canvas_metatag.addresses`. |
+| Language | `languages:language_url` on the content API | the same context on every head | A domain or prefix picks the language, and the head varies with it. |
 | Images on Drupal's host | `url.site` | unchanged; dropped where a template builds the address | The template does not depend on the request host. |
 | Kept results | tags only | facts, or a frontend key (D13) | Addresses are built per request. |
 
@@ -609,6 +655,9 @@ hosts add none, because preview responses are not stored.
   loses those rows until it configures addresses. The status report shows an
   error and the release notes say so. That is preferable to emitting
   addresses that are wrong.
+- **A settings-file change waits for cron on a fully cached site,** or for
+  the first request the page cache does not answer. A deploy that runs
+  `drush deploy` rebuilds caches anyway.
 - **Typed addresses stay as typed.** An editor can still name Drupal's host by
   hand. Checks flag it; the guarantee covers what the module builds.
 - **Drupal-hosted images without a template follow core.** A trusted proxy that
@@ -633,7 +682,8 @@ hosts add none, because preview responses are not stored.
   found by domain loses its Drupal-domain addresses until it has a frontend
   address; commands stop printing `http://default` image addresses.
 - README and ARCHITECTURE.md describe the new model. "Image URLs always stay
-  on Drupal" is replaced, and the three-source list is replaced by D10.
+  on Drupal" is replaced, and the three-source list is replaced by D10. Their
+  known limitations lose the language-domain line and the cache-rebuild line.
 
 ## Upstream requests (canvas_headless), drafted, not filed
 

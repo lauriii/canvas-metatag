@@ -1,8 +1,7 @@
-# Canvas: test the editor in Firefox and WebKit (G8 follow-up, optional)
+# Canvas: test the editor in Firefox and WebKit (optional)
 
 **Draft — not posted.** This is for the Canvas issue queue on drupal.org. It
-is optional: the module's own engine runs do not depend on it. It belongs to
-the follow-up change `test-in-every-engine-and-language`. Search the
+is optional: the module's own engine runs do not depend on it. Search the
 queue for an existing issue first. A person posts it; no agent does.
 
 Related, already open, and not drafted again: Canvas's work item 3546597

@@ -30,8 +30,8 @@ decisions".
 - Make G2 independent of Canvas's controller, and tell administrators when it
   falls back.
 - For G8, ship the product fix (values carry their language) and answer how
-  an editor edits a translation; plan the test infrastructure as its own
-  change (`followups/test-in-every-engine-and-language.md`).
+  an editor edits a translation; the test infrastructure is its own change,
+  `test-in-every-engine-and-language`.
 - Write paste-ready upstream drafts for what only Canvas, or core, can finish.
 - Rewrite "Known limitations" so that it lists only what is still true.
 
@@ -375,9 +375,7 @@ accepted draft cost in D2 goes away.
 
 The engine matrix, the multilingual and domain suites, the accessibility
 scans and the screen-reader checklist are a change of their own,
-`test-in-every-engine-and-language`. Its plan is in
-`followups/test-in-every-engine-and-language.md`. What stays here is the
-product side.
+`test-in-every-engine-and-language`. What stays here is the product side.
 
 **Product fix.**
 

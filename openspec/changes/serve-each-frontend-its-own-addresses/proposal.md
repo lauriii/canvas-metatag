@@ -39,6 +39,10 @@ matter to a site with headless frontends:
    auth, a VPN, an internal network) gets dead share images, and a site that
    wants Drupal's address kept out of public output cannot do it.
 
+It also closes two of the README's known limitations: addresses that stay on
+Drupal's domain with a language per domain and a headless frontend, and the
+cache rebuild that a change to `canvas_metatag_public_base` takes.
+
 The research behind this change is summarised in design.md: how Canvas and
 `canvas_headless` identify frontends today (they don't), an audit of every
 address the module and the queued changes emit, how established headless
@@ -83,6 +87,14 @@ and images, and three reviews of the first draft.
   builder for the selected frontend. That closes the bypasses the audit found.
   `{home}` becomes the front page's own address, so the `WebSite` `url` always
   matches the front page's canonical.
+- **Language domains.** While frontends exist, no address names a Drupal
+  language domain. The builder keeps the path and puts it on the frontend's
+  address for that language, for every address above. A language Drupal finds
+  by domain without one is left out, and the status report shows an error.
+- **Settings-file changes apply without a cache rebuild.** The module keeps a
+  hash of the address values `settings.php` sets, compares it on cron and on
+  requests the page cache did not answer, and invalidates every head when it
+  changes. Configuration changes already invalidate through their own tags.
 - **Preview deployments** get every address on their own address, `noindex`,
   and a private response that no shared cache stores.
 - **Drupal's host can be kept out of public output.** With an image address
