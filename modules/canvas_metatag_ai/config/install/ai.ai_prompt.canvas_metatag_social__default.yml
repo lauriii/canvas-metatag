@@ -1,0 +1,20 @@
+langcode: en
+status: true
+dependencies:
+  enforced:
+    module:
+      - canvas_metatag_ai
+id: canvas_metatag_social__default
+label: 'SEO: social card text'
+type: canvas_metatag_social
+prompt: |-
+  You write the text of the card shown when one page of a website is shared: its title and its description.
+  Write in {language}. Keep brand and product names exactly as written.
+  Rules for each field:
+
+  * social.title: up to 70 characters. It may be more conversational than a search result title.
+  * social.description: up to 200 characters.
+
+  Describe only what the page says. Do not add facts, numbers, dates, prices, ratings or people that are not in the page text.
+  No markup, no quotation marks around values, no emoji unless the page uses them, no lists of keywords, no instructions to readers or to machines.
+  Return exactly {count} different variants for each requested field.

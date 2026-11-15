@@ -72,14 +72,26 @@ check again", and MUST never delete anything by itself.
 ### Requirement: Reviews of your own organization are reported
 
 Over the whole graph, a review or an aggregate rating whose subject is the
-site's identity or any organization node MUST be listed to fix with "Not
-eligible for review stars: these are reviews of your own organization." A
-rating value or count that is not on the page MUST be listed to improve.
+site's identity, or an organization whose address or profiles match the
+identity's, MUST be listed to fix with "Not eligible for review stars: these
+are reviews of your own organization." An employer rating, or a rating of
+any other organization, MUST NOT be. A rating value or count that is not on
+the page MUST be listed to improve.
 
 #### Scenario: A rating on the identity
 
-- **WHEN** a hand-added `Review` has `itemReviewed` `{"@id": "/#identity"}`
+- **WHEN** the home address is `https://example.com/` and a hand-added `Review` has `itemReviewed` `{"@id": "https://example.com/#identity"}`
 - **THEN** the row MUST be listed to fix with that sentence
+
+#### Scenario: A copy of the site's organization
+
+- **WHEN** a hand-added `AggregateRating` reviews an `Organization` whose `url` is the identity's
+- **THEN** the row MUST be listed to fix with that sentence
+
+#### Scenario: A rating of another company
+
+- **WHEN** a hand-added `EmployerAggregateRating` or `AggregateRating` reviews an `Organization` named "Acme Logistics" with its own `url`
+- **THEN** no review-of-yourself row MUST be listed
 
 #### Scenario: A rating not on the page
 

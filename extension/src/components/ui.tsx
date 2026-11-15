@@ -9,6 +9,9 @@ import {
   type ReactNode,
   type SVGProps,
   forwardRef,
+  useEffect,
+  useRef,
+  useState,
 } from 'react';
 
 // One button family: solid (the one primary), danger, soft, outline, ghost.
@@ -71,17 +74,103 @@ export const IconBtn = forwardRef<HTMLButtonElement, IconBtnProps>(
 );
 IconBtn.displayName = 'IconBtn';
 
-/** ⓘ: a sentence that is useful once, kept out of the way. */
+/**
+ * ⓘ: a sentence that is useful once, kept out of the way. Hover and focus
+ * show it, as any tooltip; a click or tap pins it, or unpins and hides it,
+ * and a pinned tip stays until Escape, a click elsewhere or a scroll.
+ */
 export function InfoTip(props: { label: string; text: string; size?: 24 | 28 }) {
+  const [open, setOpen] = useState(false);
+  const pinned = useRef(false);
+  // From pointer down to click on the button: Radix's close on pointer down
+  // is the click's to decide, or a tip shown by hover would blink.
+  const pressing = useRef(false);
+  const button = useRef<HTMLButtonElement>(null);
+  // Radix announces every opening, this tip's own too (its hover delay may
+  // run out after a click has pinned it): set while that one is announced.
+  const own = useRef(false);
+  const unpin = () => {
+    pinned.current = false;
+  };
+  // A pinned tip ignores Radix's closes, so two cases are handled here: a
+  // scroll (it would follow its button under the header) and another
+  // tooltip opening (Radix's own event for it), which takes its place.
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    const close = () => {
+      unpin();
+      setOpen(false);
+    };
+    const scrolled = (event: Event) => {
+      if (pinned.current && (event.target as Node).contains?.(button.current)) {
+        close();
+      }
+    };
+    // Radix calls onOpenChange right after its announcement: only then is
+    // it known whose it was.
+    const other = () =>
+      queueMicrotask(() => !own.current && pinned.current && close());
+    window.addEventListener('scroll', scrolled, { capture: true });
+    document.addEventListener('tooltip.open', other);
+    return () => {
+      window.removeEventListener('scroll', scrolled, { capture: true });
+      document.removeEventListener('tooltip.open', other);
+    };
+  }, [open]);
   return (
-    <IconBtn
-      label={props.label}
-      tip={props.text}
-      size={props.size}
-      aria-description={props.text}
+    <Tooltip
+      content={props.text}
+      // Below its button, never over the header: every ⓘ opens one way.
+      side="bottom"
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          own.current = true;
+          queueMicrotask(() => {
+            own.current = false;
+          });
+        }
+        if (next || !(pinned.current || pressing.current)) {
+          setOpen(next);
+        }
+      }}
+      onEscapeKeyDown={unpin}
+      onPointerDownOutside={(event) => {
+        // The button is outside the tip, but its press is its click's.
+        if (button.current?.contains(event.target as Node)) {
+          event.preventDefault();
+        } else {
+          unpin();
+        }
+      }}
     >
-      <InfoCircledIcon aria-hidden />
-    </IconBtn>
+      <IconBtn
+        ref={button}
+        label={props.label}
+        tip=""
+        size={props.size}
+        aria-description={props.text}
+        onPointerDown={() => {
+          pressing.current = true;
+        }}
+        onPointerLeave={() => {
+          pressing.current = false;
+        }}
+        onClick={(event) => {
+          // Not Radix's own close on click. A tip shown by hover or focus
+          // is pinned by the click, not hidden.
+          event.preventDefault();
+          pressing.current = false;
+          pinned.current = !pinned.current;
+          setOpen(pinned.current);
+        }}
+        onBlur={unpin}
+      >
+        <InfoCircledIcon aria-hidden />
+      </IconBtn>
+    </Tooltip>
   );
 }
 

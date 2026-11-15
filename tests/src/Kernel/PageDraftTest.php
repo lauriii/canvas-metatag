@@ -8,6 +8,7 @@ use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Controller\ApiController;
 use Drupal\canvas_metatag\Hook\CanvasMetatagHooks;
+use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\Entity\RevisionableStorageInterface;
 use Drupal\Core\Extension\ModuleInstallerInterface;
@@ -350,6 +351,158 @@ final class PageDraftTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A translation keeps the details of the type its default version publishes.
+   *
+   * While the English draft changes the type, the dialog shows the French
+   * details of the draft type, and a French write keeps those of the
+   * published type. Canvas publishes and discards an entity's translation
+   * drafts together.
+   */
+  public function testTranslationKeepsDetailsOfThePublishedType(): void {
+    $props = ['offers_price' => '25', 'offers_priceCurrency' => 'EUR'];
+    $page = $this->createPage(['canvas_metatag' => '{"schema":{"type":"Product"}}']);
+    $page->addTranslation('fr', ['title' => 'Tarifs'] + $page->toArray())
+      ->set('canvas_metatag', Values::encode(['schema' => ['props' => $props]]))
+      ->save();
+    $query = '/canvas-metatag/api/state?entity_type=canvas_page&id=' . $page->id() . '&langcode=fr';
+    $english = function (array $values) use ($page): void {
+      self::assertSame(Response::HTTP_OK, $this->put($this->stored($page), $values, self::EDITOR)->getStatusCode());
+    };
+    $french = function (string $title) use ($page): void {
+      $response = $this->put($this->stored($page)->getTranslation('fr'), ['title' => $title], self::EDITOR, langcode: 'fr');
+      // The echo is what the dialog shows.
+      self::assertSame('{"values":{"title":' . json_encode($title) . '}}', $response->getContent());
+    };
+    $stored = fn (): array => Values::decode($this->stored($page)->getTranslation('fr')->get('canvas_metatag')->value);
+
+    // The English draft makes it an Article: the French details of an
+    // Article are none, and a French write keeps the Product's, unseen.
+    $english(['schema' => ['type' => 'Article']]);
+    self::assertSame([], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
+    $french('Tarifs');
+    self::assertSame(['schema' => ['props' => $props], 'title' => 'Tarifs'], Values::decode($this->draft($this->stored($page)->getTranslation('fr'))?->get('canvas_metatag')->value));
+    self::assertSame(['title' => 'Tarifs'], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
+
+    // Discarding the type change discards the French draft with it.
+    $response = $this->request(Request::create("/canvas/api/v0/auto-saves/canvas_page/{$page->id()}", 'DELETE'));
+    self::assertSame(Response::HTTP_NO_CONTENT, $response->getStatusCode(), (string) $response->getContent());
+    self::assertNull($this->draft($this->stored($page)->getTranslation('fr')));
+    self::assertSame($props, $stored()['schema']['props']);
+
+    // The type change taken back while it is a draft: the French details are
+    // shown again and publish with the French title.
+    $english(['schema' => ['type' => 'Article']]);
+    $french('Tarifs');
+    $english(['schema' => ['type' => 'Product'], 'title' => 'Plans {sep} {site}']);
+    self::assertSame(['schema' => ['props' => $props], 'title' => 'Tarifs'], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
+    $response = $this->makePublishAllRequest();
+    self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+    self::assertSame(['schema' => ['props' => $props], 'title' => 'Tarifs'], $stored());
+    self::assertSame('25', $this->product($this->stored($page)->getTranslation('fr'))['offers']['price'] ?? NULL);
+
+    // Once the Article is published, the French head has no Product, and
+    // the next French write drops the Product's details.
+    $english(['schema' => ['type' => 'Article']]);
+    self::assertSame(Response::HTTP_OK, $this->makePublishAllRequest()->getStatusCode());
+    self::assertNull($this->product($this->stored($page)->getTranslation('fr')));
+    $french('Tarifs {sep} {site}');
+    self::assertSame('{"title":"Tarifs {sep} {site}"}', $this->draft($this->stored($page)->getTranslation('fr'))?->get('canvas_metatag')->value);
+  }
+
+  /**
+   * Only a translation that inherits the type keeps the published details.
+   *
+   * One with a type of its own, or choosing one, is not affected by the
+   * default's type change: what it writes is what is stored.
+   */
+  public function testTranslationWithItsOwnTypeKeepsNothing(): void {
+    ConfigurableLanguage::createFromLangcode('de')->save();
+    $page = $this->createPage(['canvas_metatag' => '{"schema":{"type":"Product"}}']);
+    $page->addTranslation('fr', ['title' => 'Concert'] + $page->toArray())
+      ->set('canvas_metatag', Values::encode([
+        'schema' => [
+          'type' => 'Event',
+          'props' => ['startDate' => '2026-05-01', 'location_name' => 'Concert hall'],
+        ],
+      ]))
+      ->save();
+    $page->addTranslation('de', ['title' => 'Prices'] + $page->toArray())
+      ->set('canvas_metatag', Values::encode(['schema' => ['props' => ['name' => 'Lamp', 'offers_price' => '25']]]))
+      ->save();
+    $draft = fn (string $langcode): array => Values::decode($this->draft($this->stored($page)->getTranslation($langcode))?->get('canvas_metatag')->value);
+    $put = function (string $langcode, array $values) use ($page): void {
+      $response = $this->put($this->stored($page)->getTranslation($langcode), $values, self::EDITOR, langcode: $langcode);
+      self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+      // The echo is what is stored (key order aside).
+      self::assertEquals(['values' => $values], self::decodeResponse($response));
+    };
+    self::assertSame(Response::HTTP_OK, $this->put($this->stored($page), ['schema' => ['type' => 'Article']], self::EDITOR)->getStatusCode());
+
+    // The French Event loses its venue, in the draft and once published.
+    $event = ['schema' => ['type' => 'Event', 'props' => ['startDate' => '2026-05-01']]];
+    $put('fr', $event);
+    self::assertEquals($event, $draft('fr'));
+
+    // The German page chooses an Event: no Product detail comes with it.
+    $put('de', $event);
+    self::assertEquals($event, $draft('de'));
+
+    $response = $this->makePublishAllRequest();
+    self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+    foreach (['fr', 'de'] as $langcode) {
+      self::assertEquals($event, Values::decode($this->stored($page)->getTranslation($langcode)->get('canvas_metatag')->value), $langcode);
+    }
+  }
+
+  /**
+   * A draft-only translation publishes its value, also the default's.
+   *
+   * Canvas copies only the fields of a new translation that differ from the
+   * stored default translation; the presave hook restores the equal one.
+   */
+  public function testPublishingNewTranslationEqualToDefault(): void {
+    ConfigurableLanguage::createFromLangcode('es')->save();
+    ConfigurableLanguage::createFromLangcode('de')->save();
+    $english = '{"title":"{title}"}';
+    $cases = [
+      'es' => [$english, $english],
+      'de' => ['{"robots":{"noindex":true}}', '{"robots":{"noindex":true}}'],
+      'fr' => [NULL, NULL],
+    ];
+    $page = $this->createPage(['canvas_metatag' => $english]);
+    // Canvas publishes a translation's draft with the default one's.
+    $this->autoSave()->saveEntity((clone $this->stored($page))->set('title', 'Pricing and plans'), self::EDITOR);
+    foreach ($cases as $langcode => [$value]) {
+      // What the editor stores for a version drafted in Canvas, with the
+      // dialog's value.
+      $translation = (clone $this->stored($page))->addTranslation($langcode, ['title' => "Pricing $langcode"]);
+      \assert($translation instanceof Page);
+      $this->autoSave()->saveEntity($translation, self::EDITOR);
+      if ($value !== NULL) {
+        $response = $this->put($translation, Values::decode($value), self::EDITOR, langcode: $langcode);
+        self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+      }
+    }
+    $response = $this->makePublishAllRequest();
+    self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+    $stored = $this->stored($page);
+    foreach ($cases as $langcode => [, $expected]) {
+      self::assertSame($expected, $stored->getTranslation($langcode)->get('canvas_metatag')->value, $langcode);
+    }
+    self::assertSame($english, $stored->get('canvas_metatag')->value);
+
+    // An existing translation is untouched by a later save, also when its
+    // draft holds the default's value: only a new translation is restored.
+    $french = (clone $this->stored($page))->getTranslation('fr');
+    $this->autoSave()->saveEntity($french->set('canvas_metatag', $english), self::EDITOR);
+    self::assertSame($english, $this->draft($this->stored($page)->getTranslation('fr'))?->get('canvas_metatag')->value);
+    $stored = $this->stored($page);
+    $stored->getTranslation('fr')->set('title', 'Tarifs');
+    $stored->save();
+    self::assertNull($this->stored($page)->getTranslation('fr')->get('canvas_metatag')->value);
+  }
+
+  /**
    * A duplicated page keeps its overrides, except the canonical.
    */
   public function testDuplicate(): void {
@@ -467,6 +620,14 @@ final class PageDraftTest extends CanvasKernelTestBase {
     $stored = $this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID)->loadUnchanged($page->id());
     \assert($stored instanceof Page);
     return $stored;
+  }
+
+  /**
+   * The Product node of a page's head, or NULL.
+   */
+  private function product(Page $page): ?array {
+    $graph = $this->container->get(Resolver::class)->resolve($page)['head']['script'][0]['textContent']['@graph'];
+    return array_values(array_filter($graph, static fn (array $node): bool => $node['@type'] === 'Product'))[0] ?? NULL;
   }
 
   /**

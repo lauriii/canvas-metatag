@@ -1,0 +1,18 @@
+langcode: en
+status: true
+dependencies:
+  enforced:
+    module:
+      - canvas_metatag_ai
+id: canvas_metatag_social
+label: 'SEO: social card text (only the prompt named "default" is used)'
+variables:
+  -
+    name: language
+    help_text: 'The name of the language to write in.'
+    required: true
+  -
+    name: count
+    help_text: 'How many variants to write for each field.'
+    required: true
+tokens: {  }

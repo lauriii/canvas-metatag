@@ -2,7 +2,15 @@ import { Select, Switch } from '@radix-ui/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import { inherited, meter, seedTitle, setPath, texts, tokensIn } from '../model';
+import {
+  inherited,
+  meter,
+  seedTitle,
+  setPath,
+  texts,
+  tokensIn,
+  wellFormed,
+} from '../model';
 import type { Robots, Scope, SuggestField } from '../types';
 import { Field, useHeld } from './Field';
 import { SearchPreview } from './Previews';
@@ -72,6 +80,7 @@ export function Visibility(props: { scope: Scope }) {
         scope={scope}
         path={`${prefix}robots.noindex`}
         label="Show in search results"
+        value={robots.noindex === true ? 'Off' : 'On'}
         second={
           robots.noindex === true && (
             <>
@@ -99,6 +108,7 @@ export function Visibility(props: { scope: Scope }) {
           scope={scope}
           path={`${prefix}robots.nofollow`}
           label="Follow links"
+          value={robots.nofollow === true ? 'Off' : 'On'}
           second={robots.nofollow === true && <code>nofollow</code>}
           control={(field) => (
             <Switch
@@ -116,6 +126,11 @@ export function Visibility(props: { scope: Scope }) {
           path={`${prefix}robots.nosnippet`}
           also={[`${prefix}robots.max_snippet`]}
           label="Text previews"
+          value={
+            previews === 'limited'
+              ? `Up to ${limit} characters`
+              : previews[0].toUpperCase() + previews.slice(1)
+          }
           second={
             previews === 'off' ? (
               <code>nosnippet</code>
@@ -195,6 +210,7 @@ export function Visibility(props: { scope: Scope }) {
           scope={scope}
           path={`${prefix}robots.max_image_preview`}
           label="Image previews"
+          value={image[0].toUpperCase() + image.slice(1)}
           second={
             image !== 'large' && <code>max-image-preview:{image}</code>
           }
@@ -338,7 +354,7 @@ export function SearchTab() {
 
   return (
     <>
-      <SearchPreview />
+      {server.preview && <SearchPreview />}
       <Field
         scope="target"
         path="title"
@@ -406,6 +422,7 @@ export function SearchTab() {
                 id={field.id}
                 rows={2}
                 lang={server.langcode}
+                dir="auto"
                 className="seo-input"
                 disabled={field.disabled}
                 aria-describedby={field.describedBy}
@@ -413,8 +430,10 @@ export function SearchTab() {
                 value={typing ?? live}
                 onFocus={() => setTyping(live)}
                 onChange={(event) => {
-                  setTyping(event.target.value);
-                  holdDescription(event.target.value);
+                  // Canvas refuses its whole layout for half a character.
+                  const text = wellFormed(event.target.value);
+                  setTyping(text);
+                  holdDescription(text);
                 }}
                 onBlur={handOver}
                 onKeyDown={(event) => {
@@ -455,6 +474,8 @@ export function SearchTab() {
               onChange={(value) => edit('description', value)}
               inherited={unset.description}
               inheritedFrom={source('description')}
+              // With nothing to fill in: the value it falls back to.
+              pattern={server.resolved ? undefined : '{description}'}
               tokens={view.tokens}
               fields
               multiline

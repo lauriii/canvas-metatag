@@ -112,6 +112,28 @@ MUST NOT be kinds.
 - **WHEN** the stored type is Blog post
 - **THEN** the kind MUST read "An article" and More details MUST show "Kind of article: Blog post"
 
+### Requirement: The kind always reads what search engines get
+
+"A web page" MUST be a kind the editor can choose. The field and the kinds
+sheet MUST always show the kind that is output, marked "Default" when it is
+inherited, never an empty or "Choose" state, read-only included. Choosing
+the inherited kind MUST show it as chosen.
+
+#### Scenario: A new page
+
+- **WHEN** an editor opens Schema on a page with no stored type
+- **THEN** the field MUST read "A web page" and the kinds sheet MUST have "A web page" selected and marked "Default"
+
+#### Scenario: Back to a web page
+
+- **WHEN** an editor changes an article to "A web page"
+- **THEN** the field MUST read "A web page", the output graph MUST have no main node, and after the draft is saved and the dialog reopened the field MUST still read "A web page"
+
+#### Scenario: A translation of an article
+
+- **WHEN** a translation's default-language version is an article and the editor chooses "A web page"
+- **THEN** the translation MUST store `WebPage` and its output MUST be a web page while the default-language version stays an article
+
 ### Requirement: Changing the kind names what is removed
 
 When choosing another kind would remove typed values, the dialog MUST say
@@ -187,7 +209,7 @@ view. Its items MUST read back as "Added by hand: ‹items›." and get verdicts
 #### Scenario: Inline checks
 
 - **WHEN** the sheet holds an `Organization` named like the site's identity
-- **THEN** it MUST say "This is your site's organization. Point to it with “@id”: “/#identity” instead."
+- **THEN** it MUST say "This is your site's organization. Point to it with “@id”: “‹home›#identity” instead.", with the site's home address in place of ‹home›
 
 ### Requirement: An unknown stored kind is said
 
@@ -254,3 +276,37 @@ structured data", each confirmed with "Copied", and "Test this page".
 
 - **WHEN** the target has unpublished changes and the editor presses "Test this page"
 - **THEN** the structured data MUST be copied and the dialog MUST say "Copied. Paste the code into the test."
+
+### Requirement: A content type with nothing to preview is shown read-only
+
+When a type's Full content template has no node to preview, the dialog MUST
+show the template's values at rest, read-only, with no previews, no Output and
+no Checks, and MUST say "No ‹type› yet. Add one to preview and edit these
+settings.". No dynamic value MUST be marked as empty; a field without a value
+of its own MUST show what it inherits, also to assistive technology; a setting
+MUST show its value in words.
+
+#### Scenario: The Announcement type
+
+- **WHEN** the Announcement template stores the title `{title} {sep} News` and the type has no content
+- **THEN** the Search view MUST show that title with its dynamic values as labels, none of them marked as empty, MUST NOT offer to edit it, and MUST say "No announcement yet. Add one to preview and edit these settings."
+
+#### Scenario: Inherited fields
+
+- **WHEN** the Announcement template stores no description and no social title, and the type has no content
+- **THEN** the description MUST show the Description value as a label, and the social title MUST say "Same as the search title", each also in the field's accessible description
+
+#### Scenario: Settings at rest
+
+- **WHEN** the Announcement template sets no robots directive and no structured-data kind, and the type has no content
+- **THEN** "Show in search results" MUST read "On" and "Text previews" "Allowed", with no switch and no menu, and "What this page is" MUST read "A web page" with no sheet to open
+
+#### Scenario: Custom JSON-LD not set
+
+- **WHEN** the Announcement template has no custom JSON-LD and the type has no content
+- **THEN** the Schema view MUST NOT offer "Add your own JSON-LD" and MUST NOT open an empty editor
+
+#### Scenario: The first announcement is added
+
+- **WHEN** an editor adds an announcement while the dialog is open on the Announcement template, and the template editor moves to preview it
+- **THEN** the open dialog MUST follow the editor to the previewed announcement and the values MUST become editable

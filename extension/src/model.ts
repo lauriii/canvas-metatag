@@ -6,6 +6,7 @@ import { ApiError } from './api';
 import type { EditorToken, HostContext } from './host';
 import type {
   Action,
+  AiOffReason,
   Edits,
   Identity,
   Measurer,
@@ -170,7 +171,46 @@ export const fill = (template: string, values: Record<string, string>) =>
     Object.hasOwn(values, name) ? String(values[name]) : '',
   );
 
-/** Output normalization: control and bidi characters removed, whitespace collapsed, trimmed, cut. */
+const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+
+/**
+ * The first `max` characters drawn as one, and "…" when there were more.
+ */
+export function clip(text: string, max: number): string {
+  let out = '';
+  let count = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    if (count++ === max) {
+      return `${out}…`;
+    }
+    out += segment;
+  }
+  return text;
+}
+
+/**
+ * A text's direction from its first letter, as `dir="auto"` finds it. Engines
+ * have no Bidi_Class escape, so the right-to-left scripts are listed.
+ */
+export const dirOf = (text: string): 'rtl' | 'ltr' =>
+  /^\P{L}*[\p{Script=Arabic}\p{Script=Hebrew}\p{Script=Syriac}\p{Script=Thaana}\p{Script=Nko}\p{Script=Samaritan}\p{Script=Mandaic}\p{Script=Adlam}\p{Script=Hanifi_Rohingya}\p{Script=Mende_Kikakui}\p{Script=Imperial_Aramaic}\p{Script=Phoenician}\p{Script=Kharoshthi}\p{Script=Avestan}\p{Script=Old_Hungarian}]/u.test( // cspell:disable-line
+    text,
+  )
+    ? 'rtl'
+    : 'ltr';
+
+/**
+ * A type's label inside a sentence: "Event" reads "event", while a label
+ * that starts with an abbreviation ("FAQ page") stays as written.
+ */
+export const inSentence = (label: string) =>
+  /^\p{Lu}\p{Lu}/u.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1);
+
+/**
+ * Output normalization: control and bidi characters removed, whitespace
+ * collapsed, trimmed, cut to `max` code points, never inside a character drawn
+ * as one (an emoji sequence, a flag, a letter with its marks).
+ */
 export function plain(text: string, max: number): string {
   const clean = text
     // C0 and C1 controls except tab, LF and CR (DEL too, as in PHP); bidi
@@ -182,7 +222,34 @@ export function plain(text: string, max: number): string {
     .replace(/[ \t\n\r]+/g, ' ')
     .replace(/^ +| +$/g, '');
   const points = Array.from(clean);
-  return points.length > max ? points.slice(0, max).join('') : clean;
+  if (points.length <= max) {
+    return clean;
+  }
+  // The cluster that holds the first code point past the limit goes whole.
+  const clusters = Array.from(
+    graphemes.segment(points.slice(0, max + 1).join('')),
+    ({ segment }) => segment,
+  );
+  clusters.pop();
+  return clusters.join('');
+}
+
+/**
+ * A head text: plain(), ending at a word when one ends near the limit. A cut
+ * inside a word backs up to the last space when that space is within the last
+ * tenth of the limit.
+ */
+function cut(text: string, max: number): string {
+  const full = plain(text, Infinity);
+  const short = plain(full, max);
+  if (short === full || short.endsWith(' ') || full[short.length] === ' ') {
+    return short.replace(/ +$/, '');
+  }
+  const points = Array.from(short);
+  const space = points.lastIndexOf(' ');
+  return space >= 0 && space >= max - Math.floor(max / 10)
+    ? points.slice(0, space).join('')
+    : short;
 }
 
 /** A separator is only ever a whole word equal to the {sep} value. */
@@ -211,23 +278,20 @@ export function texts(
 ): Texts {
   const value = (name: string) => tokens[name] ?? '';
   const title =
-    trimSeparators(
-      plain(fill(effective.title ?? '', tokens), 255),
-      value('sep'),
-    ) ||
-    plain(value('title'), 255) ||
-    plain(value('site'), 255);
+    trimSeparators(cut(fill(effective.title ?? '', tokens), 255), value('sep')) ||
+    cut(value('title'), 255) ||
+    cut(value('site'), 255);
   const description =
-    plain(fill(effective.description ?? '', tokens), 1000) ||
-    plain(value('description'), 1000);
+    cut(fill(effective.description ?? '', tokens), 1000) ||
+    cut(value('description'), 1000);
   return {
     title,
     description,
     social_title:
-      plain(fill(effective.social?.title ?? '', tokens), 255) ||
-      plain(value('title'), 255),
+      cut(fill(effective.social?.title ?? '', tokens), 255) ||
+      cut(value('title'), 255),
     social_description:
-      plain(fill(effective.social?.description ?? '', tokens), 1000) ||
+      cut(fill(effective.social?.description ?? '', tokens), 1000) ||
       description,
   };
 }
@@ -343,13 +407,14 @@ function fitting(
   if (end > 0) {
     return text.slice(0, end);
   }
-  // Not even the first word fits: cut inside it.
-  const points = Array.from(text);
-  let count = points.length;
-  while (count > 0 && !fits(points.slice(0, count).join(''))) {
+  // Not even the first word fits: cut inside it, never inside a character
+  // drawn as one.
+  const clusters = Array.from(graphemes.segment(text), ({ segment }) => segment);
+  let count = clusters.length;
+  while (count > 0 && !fits(clusters.slice(0, count).join(''))) {
     count--;
   }
-  return points.slice(0, count).join('');
+  return clusters.slice(0, count).join('');
 }
 
 /**
@@ -613,6 +678,16 @@ const withValue = <S extends Scope>(
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'loading':
+      if (action.refresh) {
+        // The same template: its values and the view stay. A save under way
+        // is for the node being left, and is not waited for.
+        return {
+          ...state,
+          phase: 'refreshing',
+          ctx: action.ctx,
+          save: { ...state.save, target: { phase: 'idle' } },
+        };
+      }
       return {
         ...state,
         phase: 'loading',
@@ -637,6 +712,8 @@ export function reducer(state: State, action: Action): State {
         : state.server?.target
           ? state.scope
           : 'target';
+      // A change typed while another preview loaded is still to be sent.
+      const kept = state.phase === 'refreshing' && unsent(state);
       return {
         ...state,
         phase: 'ready',
@@ -645,11 +722,15 @@ export function reducer(state: State, action: Action): State {
         scope,
         tab: state.tabs[scope],
         edits: {
-          target: payload.target?.values ?? {},
+          target: kept ? state.edits.target : (payload.target?.values ?? {}),
           // Unsaved site edits survive the editor moving.
           site: state.siteDirty ? state.edits.site : payload.site,
         },
-        sent: null,
+        sent: kept ? state.sent : null,
+        save: {
+          ...state.save,
+          target: { phase: kept ? 'pending' : 'idle' },
+        },
         readonly: action.readonly,
         flash: action.flash ?? null,
       };
@@ -688,7 +769,10 @@ export function reducer(state: State, action: Action): State {
         return state;
       }
       const { scope, path } = action;
-      let { value } = action;
+      let value =
+        typeof action.value === 'string'
+          ? wellFormed(action.value)
+          : action.value;
       // Deleting one's words from a seeded page title returns to the inherited title.
       if (
         scope === 'target' &&
@@ -812,6 +896,19 @@ export const unsent = (state: State): boolean => {
   );
 };
 
+/**
+ * The robots settings are not yet what the server's output describes; other
+ * unsent fields leave its robots tag true, so typing elsewhere moves nothing.
+ */
+export const robotsUnsent = (state: State): boolean => {
+  const robots = (values?: SeoValues | null) => canon(values?.robots ?? {});
+  const mine = robots(state.edits.target);
+  return (
+    (state.sent === null || mine !== robots(JSON.parse(state.sent))) &&
+    mine !== robots(state.server?.target?.values)
+  );
+};
+
 // Derived values: computed with useMemo, never stored.
 
 export interface View {
@@ -893,9 +990,10 @@ export function view(state: State): View | null {
     (row) => row.name === 'robots',
   )?.content;
   const noindex = effective.robots?.noindex === true;
-  // The server's output describes the working copy only once nothing is unsent.
+  // The server's robots tag describes the working copy only once its robots
+  // settings are sent.
   const byConfig =
-    !noindex && !unsent(state) && /(^|,\s*)noindex\b/.test(robots ?? '');
+    !noindex && !robotsUnsent(state) && /(^|,\s*)noindex\b/.test(robots ?? '');
   const from = (path: string) => source(path, layers);
   return {
     tokens,
@@ -1155,7 +1253,134 @@ export const sitePaths = (fields: Record<string, string>) =>
     ]),
   );
 
+/**
+ * What a preview's caption adds after its name, and its ⓘ text, from what is
+ * not published: the previewed node (template scope) or the target. One "not"
+ * at a time in the caption: the node's, else the template's.
+ */
+export function previewNote(note: {
+  template: boolean;
+  /** The target, a page or a template, is published (in use). */
+  published: boolean;
+  /** At template scope, the previewed node is published. */
+  node: boolean;
+  label: string;
+  /** Hidden from search: the caption says so too. */
+  hidden?: boolean;
+}): { suffix: string | null; unpublished: string; info: string } {
+  const type = inSentence(note.label);
+  const draftNode = note.template && !note.node;
+  const unpublished = draftNode
+    ? `This ${type} isn't published yet. Values that only editors can see are left out.${
+        note.published ? '' : ' The template is not in use yet.'
+      }`
+    : '';
+  const estimate =
+    'This preview is an estimate; search engines sometimes rewrite titles and descriptions.';
+  // Whatever the caption adds is said here too: a narrow caption leaves it out.
+  return {
+    suffix:
+      draftNode || !note.published
+        ? note.template && !draftNode
+          ? 'Template not in use yet'
+          : 'Not published yet'
+        : null,
+    unpublished,
+    info: [
+      draftNode
+        ? unpublished
+        : note.published
+          ? ''
+          : note.template
+            ? 'The template is not in use yet.'
+            : "This page isn't published yet.",
+      note.hidden ? 'It is hidden from search engines.' : '',
+      estimate,
+      note.template && !draftNode
+        ? `Switch the previewed ${type} with the preview picker in the top bar.`
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' '),
+  };
+}
+
 // Footer and strips: what the shell says, as data.
+
+/**
+ * The smallest image most link previews show as a large card: 600 px wide,
+ * and as tall as the card hint's own minimum. The head's card hint uses the
+ * same rule (Resolver::LARGE_CARD).
+ */
+const LARGE_CARD = { width: 600, height: 157 } as const;
+
+/** What an image is short of for a large card ("600 px wide"); '' if nothing. */
+const shortOf = (width: number, height: number) =>
+  width < LARGE_CARD.width
+    ? `${LARGE_CARD.width} px wide`
+    : height < LARGE_CARD.height
+      ? `${LARGE_CARD.height} px tall`
+      : '';
+
+/** Why the link preview draws a small card; '' for a large one. */
+export function smallCard(image: { width: number; height: number } | null) {
+  if (!image) {
+    return 'Small card: no image';
+  }
+  const short = shortOf(image.width, image.height);
+  return short && `Small card: image under ${short}`;
+}
+
+/** The least an image needs for a large card ("at least 600 px wide"); '' when it has it. */
+export function largeCardNeeds(width: number, height: number) {
+  const short = shortOf(width, height);
+  return short && `at least ${short}`;
+}
+
+/**
+ * A file size as the 5 MB rule counts it (1 MB = 1024 × 1024 bytes):
+ * "10.2 MB", "840 KB".
+ */
+export function fileSize(bytes: number): string {
+  const kb = Math.max(1, Math.round(bytes / 1024));
+  return kb < 1024
+    ? `${kb} KB`
+    : `${(bytes / 1048576).toFixed(1).replace(/\.0$/, '')} MB`;
+}
+
+/** Half of a character drawn with two UTF-16 units. */
+const LONE_SURROGATE =
+  /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/**
+ * Text cut inside a character (half an emoji pasted) cannot be sent as JSON:
+ * the half becomes the replacement character, which can.
+ */
+export const wellFormed = (text: string) =>
+  text.replace(LONE_SURROGATE, '\uFFFD');
+
+/** "1200 × 630", never broken across lines. */
+export const dimensions = (width: number, height: number) =>
+  `${width} × ${height}`;
+
+/** "1770 × 996 · 249 KB", the weight when the server knows it. */
+export const imageSize = (image: {
+  width: number;
+  height: number;
+  bytes?: number;
+}) =>
+  `${dimensions(image.width, image.height)}${
+    image.bytes ? ` · ${fileSize(image.bytes)}` : ''
+  }`;
+
+/**
+ * A change is on its way to the server, or its output is being read back:
+ * what the server resolved is about to change.
+ */
+export const catchingUp = (state: State) =>
+  state.save.target.phase === 'pending' ||
+  state.save.target.phase === 'saving' ||
+  state.save.site.phase === 'saving';
 
 export type FooterAction =
   'output' | 'undo' | 'goto' | 'retry' | 'discard' | 'save' | 'hide';
@@ -1247,7 +1472,11 @@ export function footer(state: State): Footer {
     return { dot: 'ok', text: 'Saved to draft', actions: [] };
   }
   if (state.readonly !== 'no') {
-    return { dot: 'gray', text: 'Read-only', actions: ['output'] };
+    return {
+      dot: 'gray',
+      text: 'Read-only',
+      actions: state.readonly === 'empty' ? [] : ['output'],
+    };
   }
   if (target.has_draft) {
     const name = (langcode: string) => server.languages[langcode] ?? langcode;
@@ -1270,6 +1499,98 @@ export function footer(state: State): Footer {
     actions: ['output'],
   };
 }
+
+/**
+ * The message for a load that edits something else: another page or another
+ * language, also under the same title, never another node in a template's
+ * preview (the caption names that one). Identity is the draft's key.
+ */
+export function nowEditing(
+  was: StatePayload['target'] | undefined,
+  next: StatePayload['target'],
+): string | undefined {
+  if (!next || next.auto_save_key === was?.auto_save_key) {
+    return undefined;
+  }
+  return `Now editing ${next.scope === 'page' ? next.label : `Every ${next.label}`}`;
+}
+
+/**
+ * Whether no other read-only state has been seen since the last load: a
+ * 'store' state still fresh came with the load, one reached later (on a
+ * save) did not.
+ */
+export const freshStore = (
+  fresh: boolean,
+  phase: State['phase'],
+  readonly: State['readonly'],
+): boolean => (phase !== 'ready' ? true : readonly !== 'store' ? false : fresh);
+
+/**
+ * Whether the editor's 'store' state is a draft on its way, which the dialog
+ * holds back for up to 2 s: one that came with the load, never a language
+ * mismatch between the editor and the server, which is known at load.
+ */
+export const holdsStore = (
+  phase: State['phase'],
+  readonly: State['readonly'],
+  fresh: boolean,
+  mismatch: boolean,
+): boolean => phase === 'ready' && readonly === 'store' && fresh && !mismatch;
+
+/**
+ * The Site view's line for site administrators when AI suggestions are off.
+ * The SEO settings permission does not open the status report, which names
+ * what is missing and links to where to fix it.
+ */
+export const aiOffText = (reason: AiOffReason | null): string =>
+  `AI suggestions are off: ${
+    {
+      not_usable: "the AI provider isn't ready to use.",
+      no_prompt: 'a suggestion prompt is empty or missing.',
+      no_provider: 'no AI provider is set up.',
+    }[reason ?? 'no_provider']
+  } Site administrators can see how to fix it in the status report.`;
+
+/** Said by every control that asks for a suggestion. */
+export const AI_SENDS = "Sends this page's text to the AI service.";
+
+const ADMIN = 'Ask a site administrator.';
+const AI_ERRORS: Record<string, string> = {
+  ai_not_configured: "AI suggestions aren't set up on this site yet.",
+  quota_exceeded: `The site's AI allowance is used up. ${ADMIN}`,
+  rate_limited: 'The AI service is busy. Wait a minute, then try again.',
+  invalid_response: "The AI answer couldn't be used.",
+  // Drupal's own access check: an expired session or a lost permission.
+  forbidden:
+    'Your session or permissions changed. Reload the editor and try again.',
+};
+const BLOCKED = "The site's AI rules stopped this request.";
+
+/**
+ * The suggestion tray's sentence for a failed request, by error code, and
+ * whether asking again can help. A guardrail stop can be steered round only
+ * by other Refine text: the page text is not changed in the tray.
+ */
+export const aiError = (
+  code: string | null,
+  refined = false,
+): { text: string; retry: boolean } =>
+  code === 'blocked'
+    ? {
+        text: refined
+          ? `${BLOCKED} Try different wording in Refine, or ask a site administrator.`
+          : `${BLOCKED} ${ADMIN}`,
+        retry: refined,
+      }
+    : {
+        text:
+          (code !== null && AI_ERRORS[code]) ||
+          "The AI service didn't answer.",
+        retry: !['ai_not_configured', 'quota_exceeded', 'forbidden'].includes(
+          code ?? '',
+        ),
+      };
 
 export const MESSAGES = {
   failed: "Couldn't save · your changes are kept here",

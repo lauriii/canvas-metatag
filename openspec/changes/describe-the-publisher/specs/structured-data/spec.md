@@ -43,3 +43,28 @@ page.
 
 - **WHEN** the identity is "Humanify Example Ventures Inc." and the site name is "Humanify Studio"
 - **THEN** the `WebSite` node's `name` MUST be "Humanify Studio" and the identity's "Humanify Example Ventures Inc."
+
+## ADDED Requirements
+
+### Requirement: The identity's logo falls back to the theme's logo
+
+When the identity has no logo, the logo node MUST use the default theme's own logo when it is not core's default and is a public file or a file inside that theme's folder, at its absolute public address. The same logo MUST sign the share images (share-images).
+
+#### Scenario: A theme logo
+
+- **WHEN** the identity has no logo and the default theme has its own logo file
+- **THEN** the identity MUST reference `{home}#logo`, whose `url` is that file's absolute address
+
+#### Scenario: Core's logo
+
+- **WHEN** the identity has no logo and the theme uses core's default logo
+- **THEN** the graph MUST have no logo node
+
+### Requirement: Drupal's slogan is the organization's slogan
+
+When Drupal's site slogan is set, the identity node MUST carry it as `slogan`, in the page's language. It MUST NOT be used as a description.
+
+#### Scenario: A slogan
+
+- **WHEN** Drupal's slogan is "Human expertise for AI-made work"
+- **THEN** the identity node MUST carry `slogan` "Human expertise for AI-made work" and its `description` MUST NOT be the slogan

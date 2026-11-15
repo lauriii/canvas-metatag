@@ -58,3 +58,12 @@ administer site settings, that the codes are not on the home page.
 
 - **WHEN** an editor without the administrative permission opens the same Checks
 - **THEN** that row MUST NOT be listed
+
+### Requirement: A Metatag default image is offered as the site's image
+
+When Metatag's global defaults hold an `og:image` that owned pages no longer carry, site administrators MUST see, as good to know, that the module shares its own images, with "Use it for pages without an image", which selects "Use this image" in Site › Sharing with that image when it is a media item, and otherwise leads there.
+
+#### Scenario: A site that relied on Metatag's image
+
+- **WHEN** Metatag's global defaults hold an `og:image` from a media item and the module is enabled
+- **THEN** a site administrator MUST see the row, and its action MUST select that image in Site › Sharing without saving

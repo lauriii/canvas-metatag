@@ -1,0 +1,187 @@
+{
+  "section": {
+    "name": "Section",
+    "required": [
+      "backgroundColor"
+    ],
+    "props": {
+      "backgroundColor": {
+        "type": "string",
+        "enum": [
+          "cream",
+          "paper",
+          "mist"
+        ],
+        "meta:enum": {
+          "cream": "Cream",
+          "paper": "Paper",
+          "mist": "Mist"
+        },
+        "title": "Background color",
+        "examples": [
+          "cream"
+        ]
+      }
+    },
+    "slots": {
+      "content": {
+        "title": "Content"
+      }
+    }
+  },
+  "grid": {
+    "name": "Grid",
+    "required": [],
+    "props": {},
+    "slots": {
+      "content": {
+        "title": "Content"
+      }
+    }
+  },
+  "heading": {
+    "name": "Heading",
+    "required": [
+      "text"
+    ],
+    "props": {
+      "text": {
+        "type": "string",
+        "title": "Text",
+        "examples": [
+          "We bring human strengths to AI-first teams.",
+          "We make great AI outputs genuinely excellent.",
+          "Our pricing is built for measurable outcomes."
+        ]
+      }
+    },
+    "slots": {}
+  },
+  "paragraph": {
+    "name": "Paragraph",
+    "required": [
+      "text"
+    ],
+    "props": {
+      "text": {
+        "type": "string",
+        "contentMediaType": "text/html",
+        "x-formatting-context": "block",
+        "title": "Text",
+        "examples": [
+          "We partner with AI-native teams to add what machines still struggle to replicate: taste, narrative coherence, emotional resonance, and domain-informed judgment.",
+          "Your agents generate options fast. Our specialists shape those options into work people trust, remember, and act on.",
+          "Choose the model that fits your stage, then scale across strategy, design, and communication with a team that knows how to collaborate with AI systems."
+        ]
+      },
+      "variant": {
+        "type": "string",
+        "enum": [
+          "body",
+          "eyebrow"
+        ],
+        "meta:enum": {
+          "body": "Body",
+          "eyebrow": "Eyebrow"
+        },
+        "title": "Variant",
+        "examples": [
+          "body"
+        ]
+      }
+    },
+    "slots": {}
+  },
+  "card": {
+    "name": "Card",
+    "required": [],
+    "props": {
+      "iconNameFromLucide": {
+        "type": "string",
+        "title": "Icon: Name from Lucide",
+        "examples": [
+          "lightbulb",
+          "book-open",
+          "pen-tool",
+          "megaphone",
+          "file-chart-column-increasing",
+          "presentation"
+        ]
+      },
+      "title": {
+        "type": "string",
+        "title": "Title",
+        "examples": [
+          "Creative direction",
+          "Product storytelling",
+          "Brand and voice systems",
+          "Campaign concepts",
+          "Insight synthesis",
+          "Executive communication"
+        ]
+      },
+      "description": {
+        "type": "string",
+        "contentMediaType": "text/html",
+        "x-formatting-context": "block",
+        "title": "Description",
+        "examples": [
+          "We shape raw ideas and AI-generated directions into clear creative choices your team can execute confidently.",
+          "We turn feature lists and technical outputs into narratives customers understand and care about.",
+          "We define reusable messaging rules so AI outputs stay on-brand across channels, markets, and teams.",
+          "We develop campaign themes and creative briefs that connect business goals to audience needs.",
+          "We combine model output, research, and team context into prioritized insights that drive better decisions.",
+          "We craft high-stakes updates, memos, and presentations with the right tone, structure, and strategic focus."
+        ]
+      }
+    },
+    "slots": {}
+  },
+  "image-feature": {
+    "name": "Image feature",
+    "required": [
+      "image",
+      "title",
+      "description"
+    ],
+    "props": {
+      "image": {
+        "type": "object",
+        "$ref": "json-schema-definitions://canvas.module/image",
+        "title": "Image",
+        "examples": [
+          {
+            "src": "https://placehold.co/1770x1180/png?text=Image+placeholder",
+            "alt": "Image feature placeholder",
+            "width": 1770,
+            "height": 1180
+          }
+        ]
+      },
+      "eyebrow": {
+        "type": "string",
+        "title": "Eyebrow",
+        "examples": [
+          "Human judgment, applied"
+        ]
+      },
+      "title": {
+        "type": "string",
+        "title": "Title",
+        "examples": [
+          "We bring human strengths to AI-first teams."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "contentMediaType": "text/html",
+        "x-formatting-context": "block",
+        "title": "Description",
+        "examples": [
+          "<p>We partner with AI-native teams to add what machines still struggle to replicate: taste, narrative coherence, emotional resonance, and domain-informed judgment.</p>"
+        ]
+      }
+    },
+    "slots": {}
+  }
+}

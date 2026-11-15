@@ -1,0 +1,1570 @@
+<?php
+
+// cspell:disable
+// phpcs:ignoreFile
+
+/**
+ * @file
+ * Reference prototype of the share-image renderer (not module code).
+ *
+ * Stored as .txt so that no linter, autoloader or test runner treats it as
+ * part of the module. Copy it to card.php to run it.
+ *
+ * Kept with the strengthen-zero-config-defaults change so the implementer can
+ * port it into ShareText, ShareCard and ShareImage. It rendered every image in
+ * ../cards/ and the measured values in ../reference.md. Where it and design.md
+ * differ, design.md and the specs win (see ../reference.md, "Where the
+ * prototype differs"). Plain GD with FreeType and no Drupal: one engine, so
+ * every host with GD and FreeType draws the same pixels.
+ *
+ * - card():        the generated 1200x630 card (layouts "page" and "site").
+ * - share_photo(): a page's own image as a 1200x630 version: cover crop for
+ *                  wide images, shown whole for square, tall and panoramic.
+ * - icon():        front page icons from the logo (32, 192, 180).
+ *
+ * Fonts are not included; see ../reference.md, "Fonts".
+ */
+
+declare(strict_types=1);
+
+const CW = 1200;
+const CH = 630;
+
+/* ================================================================ fonts === */
+
+/** A font file with its character map (the coverage check GD lacks). */
+final class Face {
+
+  public array $cmap;
+  private array $adv = [];
+
+  public function __construct(public string $file, public float $scale = 1.0) {
+    $this->cmap = read_cmap($file);
+  }
+
+  public function has(int $cp): bool {
+    return isset($this->cmap[$cp]);
+  }
+
+  /** Advance width of $s at $px pixels (GD takes points: px * 0.75). */
+  public function width(float $px, string $s): float {
+    if ($s === '') {
+      return 0.0;
+    }
+    $k = $px . '|' . $s;
+    if (!isset($this->adv[$k])) {
+      $b = imagettfbbox($px * 0.75 * $this->scale, 0, $this->file, gd_text($s));
+      $this->adv[$k] = (float) $b[2];
+    }
+    return $this->adv[$k];
+  }
+
+  public function draw(\GdImage $im, float $px, float $x, float $y, int $color, string $s): void {
+    imagettftext($im, $px * 0.75 * $this->scale, 0, (int) round($x), (int) round($y), $color, $this->file, gd_text($s));
+  }
+
+}
+
+/** Reads a TrueType cmap (formats 4 and 12) into [codepoint => TRUE]. */
+function read_cmap(string $file): array {
+  $d = file_get_contents($file);
+  $u16 = fn(int $o): int => unpack('n', $d, $o)[1];
+  $u32 = fn(int $o): int => unpack('N', $d, $o)[1];
+  $cmapOff = NULL;
+  for ($i = 0, $n = $u16(4); $i < $n; $i++) {
+    if (substr($d, 12 + 16 * $i, 4) === 'cmap') {
+      $cmapOff = $u32(12 + 16 * $i + 8);
+    }
+  }
+  $best = NULL;
+  for ($i = 0, $n = $u16($cmapOff + 2); $i < $n; $i++) {
+    $r = $cmapOff + 4 + 8 * $i;
+    [$pid, $eid, $off] = [$u16($r), $u16($r + 2), $cmapOff + $u32($r + 4)];
+    $fmt = $u16($off);
+    if ($fmt === 12 && (($pid === 3 && $eid === 10) || $pid === 0)) {
+      $best = [12, $off];
+      break;
+    }
+    if ($fmt === 4 && (($pid === 3 && $eid === 1) || $pid === 0)) {
+      $best = [4, $off];
+    }
+  }
+  $map = [];
+  [$fmt, $off] = $best;
+  if ($fmt === 12) {
+    for ($g = 0, $n = $u32($off + 12); $g < $n; $g++) {
+      $o = $off + 16 + 12 * $g;
+      for ($c = $u32($o), $e = $u32($o + 4); $c <= $e; $c++) {
+        $map[$c] = TRUE;
+      }
+    }
+    return $map;
+  }
+  $segX2 = $u16($off + 6);
+  $ends = $off + 14;
+  $starts = $ends + $segX2 + 2;
+  $deltas = $starts + $segX2;
+  $ranges = $deltas + $segX2;
+  for ($s = 0; $s < $segX2 / 2; $s++) {
+    $e = $u16($ends + 2 * $s);
+    $st = $u16($starts + 2 * $s);
+    $delta = $u16($deltas + 2 * $s);
+    $ro = $u16($ranges + 2 * $s);
+    for ($c = $st; $c <= $e && $c !== 0xFFFF; $c++) {
+      if ($ro === 0) {
+        $gid = ($c + $delta) & 0xFFFF;
+      }
+      else {
+        $gid = $u16($ranges + 2 * $s + $ro + 2 * ($c - $st));
+        $gid = $gid ? ($gid + $delta) & 0xFFFF : 0;
+      }
+      if ($gid) {
+        $map[$c] = TRUE;
+      }
+    }
+  }
+  return $map;
+}
+
+/** libgd decodes "&#N;" in any string: a literal "&" must not start one. */
+function gd_text(string $s): string {
+  return str_replace('&', '&#38;', $s);
+}
+
+final class Fonts {
+
+  public Face $title;
+  public Face $mono;
+  public Face $ui;
+  public Face $meta;
+  public Face $body;
+  public Face $arabic;
+  public Face $arabicBody;
+  public Face $hebrew;
+  public Face $symbols;
+
+  public function __construct(string $dir) {
+    $this->title = new Face("$dir/InterDisplay-SemiBold.ttf");
+    // The monogram uses the title face (one file fewer).
+    $this->mono = $this->title;
+    $this->ui = new Face("$dir/Inter-SemiBold.ttf");
+    $this->meta = new Face("$dir/Inter-Medium.ttf");
+    $this->body = new Face("$dir/Inter-Regular.ttf");
+    // The "full" Noto Arabic build carries the presentation forms GD needs.
+    // SemiBold, the weight of the Latin title.
+    $this->arabic = new Face("$dir/NotoSansArabic-SemiBold.ttf", 0.94);
+    $this->arabicBody = $this->arabic;
+    $this->hebrew = new Face("$dir/NotoSansHebrew-SemiBold.ttf", 0.98);
+    // Instanced at wght 600 and subset to BMP symbols at build time (64 KB).
+    $this->symbols = new Face("$dir/NotoEmoji-SemiBold-BMP.ttf", 0.86);
+  }
+
+}
+
+/* =============================================================== colour === */
+
+function hex2rgb(string $hex): array {
+  $h = ltrim($hex, '#');
+  return [hexdec(substr($h, 0, 2)), hexdec(substr($h, 2, 2)), hexdec(substr($h, 4, 2))];
+}
+
+function rgb2hex(array $c): string {
+  return sprintf('#%02X%02X%02X', ...array_map(fn($v) => max(0, min(255, (int) round($v))), $c));
+}
+
+function lum(array $c): float {
+  $f = function (float $v): float {
+    $v /= 255;
+    return $v <= 0.03928 ? $v / 12.92 : (($v + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * $f($c[0]) + 0.7152 * $f($c[1]) + 0.0722 * $f($c[2]);
+}
+
+function contrast(array $a, array $b): float {
+  [$x, $y] = [lum($a), lum($b)];
+  return (max($x, $y) + 0.05) / (min($x, $y) + 0.05);
+}
+
+function mix(array $a, array $b, float $t): array {
+  return [$a[0] + ($b[0] - $a[0]) * $t, $a[1] + ($b[1] - $a[1]) * $t, $a[2] + ($b[2] - $a[2]) * $t];
+}
+
+function rgb2hsl(array $c): array {
+  [$r, $g, $b] = array_map(fn($v) => $v / 255, $c);
+  $max = max($r, $g, $b);
+  $min = min($r, $g, $b);
+  $l = ($max + $min) / 2;
+  if ($max == $min) {
+    return [0.0, 0.0, $l];
+  }
+  $d = $max - $min;
+  $s = $l > 0.5 ? $d / (2 - $max - $min) : $d / ($max + $min);
+  $h = match ($max) {
+    $r => ($g - $b) / $d + ($g < $b ? 6 : 0),
+    $g => ($b - $r) / $d + 2,
+    default => ($r - $g) / $d + 4,
+  };
+  return [$h / 6, $s, $l];
+}
+
+function hsl2rgb(float $h, float $s, float $l): array {
+  if ($s == 0.0) {
+    return [$l * 255, $l * 255, $l * 255];
+  }
+  $q = $l < 0.5 ? $l * (1 + $s) : $l + $s - $l * $s;
+  $p = 2 * $l - $q;
+  $t = function (float $t) use ($p, $q): float {
+    if ($t < 0) {
+      $t += 1;
+    }
+    if ($t > 1) {
+      $t -= 1;
+    }
+    if ($t < 1 / 6) {
+      return $p + ($q - $p) * 6 * $t;
+    }
+    if ($t < 1 / 2) {
+      return $q;
+    }
+    if ($t < 2 / 3) {
+      return $p + ($q - $p) * (2 / 3 - $t) * 6;
+    }
+    return $p;
+  };
+  return [$t($h + 1 / 3) * 255, $t($h) * 255, $t($h - 1 / 3) * 255];
+}
+
+function col(\GdImage $im, array $rgb, float $opacity = 1.0): int {
+  return imagecolorallocatealpha($im, (int) round($rgb[0]), (int) round($rgb[1]), (int) round($rgb[2]), (int) round(127 * (1 - $opacity)));
+}
+
+/**
+ * The brand colour picked from a logo: the heaviest saturated hue bucket, or
+ * NULL when under 5% of the opaque pixels carry a colour (grey, black logos).
+ */
+function brand_from_logo(?\GdImage $logo): ?array {
+  if (!$logo) {
+    return NULL;
+  }
+  $s = imagecreatetruecolor(48, 48);
+  imagealphablending($s, FALSE);
+  imagesavealpha($s, TRUE);
+  imagecopyresampled($s, $logo, 0, 0, 0, 0, 48, 48, imagesx($logo), imagesy($logo));
+  $bins = [];
+  $count = 0;
+  for ($y = 0; $y < 48; $y++) {
+    for ($x = 0; $x < 48; $x++) {
+      $c = imagecolorat($s, $x, $y);
+      if ((($c >> 24) & 0x7F) > 64) {
+        continue;
+      }
+      $rgb = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
+      [$h, $sat, $l] = rgb2hsl($rgb);
+      $count++;
+      if ($sat < 0.25 || $l < 0.10 || $l > 0.92) {
+        continue;
+      }
+      $k = (int) floor($h * 24) % 24;
+      $bins[$k]['w'] = ($bins[$k]['w'] ?? 0) + $sat;
+      $bins[$k]['px'][] = $rgb;
+    }
+  }
+  if (!$bins || !$count) {
+    return NULL;
+  }
+  uasort($bins, fn($a, $b) => $b['w'] <=> $a['w']);
+  $top = reset($bins);
+  if (count($top['px']) / $count < 0.05) {
+    return NULL;
+  }
+  $avg = [0, 0, 0];
+  foreach ($top['px'] as $p) {
+    for ($i = 0; $i < 3; $i++) {
+      $avg[$i] += $p[$i] / count($top['px']);
+    }
+  }
+  return $avg;
+}
+
+/**
+ * Field colours. The field is the brand colour
+ * with a small span (top L+0.03, bottom L-0.04) and a glow of at most 6%.
+ * Both text colours are tried: white darkens the brand in 0.01 lightness
+ * steps until white reaches 5.5:1 on the lightest point (top plus glow); ink
+ * lightens it until ink reaches 5.5:1 on the darkest point (bottom). Fewest
+ * steps wins, ink paying a bias of 5 steps (lightening a mid red turns it
+ * pink). The titles are large-scale text (WCAG 2.2: 4.5:1 is AAA there);
+ * 5.5:1 keeps a margin for anti-aliasing at a third of the size.
+ */
+const GLOW = 0.06;
+const TITLE_CONTRAST = 5.5;
+
+function theme(?array $brand): array {
+  $white = [255, 255, 255];
+  $ink = [17, 19, 24];
+  if ($brand === NULL) {
+    return ['top' => [34, 37, 44], 'bottom' => [14, 15, 19], 'fg' => $white, 'dark' => TRUE, 'brand' => NULL, 'centre' => NULL, 'steps' => 0, 'tile' => [244, 245, 247], 'tileInk' => [24, 26, 32]];
+  }
+  [$h, $s, $l] = rgb2hsl($brand);
+  $s = min($s, 0.85);
+  $make = fn(float $L): array => [hsl2rgb($h, $s, min(1, $L + 0.03)), hsl2rgb($h, $s, max(0, $L - 0.04))];
+  $white_steps = $ink_steps = NULL;
+  for ($k = 0; $k <= 80 && $l - $k / 100 >= 0.04; $k++) {
+    [$top] = $make($l - $k / 100);
+    if (contrast($white, mix($top, $white, GLOW)) >= TITLE_CONTRAST) {
+      $white_steps = $k;
+      break;
+    }
+  }
+  for ($k = 0; $k <= 80 && $l + $k / 100 <= 0.96; $k++) {
+    [, $bottom] = $make($l + $k / 100);
+    if (contrast($ink, $bottom) >= TITLE_CONTRAST) {
+      $ink_steps = $k;
+      break;
+    }
+  }
+  if ($white_steps === NULL && $ink_steps === NULL) {
+    return theme(NULL);
+  }
+  $useInk = $ink_steps !== NULL && ($white_steps === NULL || $ink_steps + 5 < $white_steps);
+  $L = $useInk ? $l + $ink_steps / 100 : $l - $white_steps / 100;
+  [$top, $bottom] = $make($L);
+  $centre = hsl2rgb($h, $s, $L);
+  return $useInk
+    ? ['top' => $top, 'bottom' => $bottom, 'fg' => $ink, 'dark' => FALSE, 'brand' => $brand, 'centre' => $centre, 'steps' => $ink_steps, 'tile' => $ink, 'tileInk' => $top]
+    : ['top' => $top, 'bottom' => $bottom, 'fg' => $white, 'dark' => TRUE, 'brand' => $brand, 'centre' => $centre, 'steps' => -$white_steps, 'tile' => [255, 255, 255], 'tileInk' => $centre];
+}
+
+/**
+ * The field: a diagonal gradient (lighter top left) with a soft light from
+ * above the centre, painted at 1/8 size and resampled (smooth, no banding).
+ */
+function field(array $theme): \GdImage {
+  [$sw, $sh] = [150, 79];
+  $small = imagecreatetruecolor($sw, $sh);
+  $light = $theme['dark'] ? [255, 255, 255] : [255, 255, 245];
+  for ($y = 0; $y < $sh; $y++) {
+    for ($x = 0; $x < $sw; $x++) {
+      $c = mix($theme['top'], $theme['bottom'], 0.35 * $x / $sw + 0.65 * $y / $sh);
+      $d = hypot(($x - $sw * 0.5) / $sw, ($y + $sh * 0.15) / $sh * 0.9);
+      $c = mix($c, $light, max(0, GLOW - 0.096 * $d));
+      imagesetpixel($small, $x, $y, col($small, $c));
+    }
+  }
+  $im = imagecreatetruecolor(CW, CH);
+  imagecopyresampled($im, $small, 0, 0, 0, 0, CW, CH, $sw, $sh);
+  imagealphablending($im, TRUE);
+  return $im;
+}
+
+/**
+ * The lowest contrast of $fg at $opacity over the field inside $rect, sampled
+ * every 10 px: the measure the card is held to (AA 4.5:1 for small text).
+ */
+function worst_contrast(\GdImage $field, array $fg, float $opacity, array $rect = [0, 0, CW, CH]): float {
+  [$x0, $y0, $x1, $y1] = $rect;
+  $worst = INF;
+  for ($y = max(0, $y0); $y < min(CH, $y1); $y += 10) {
+    for ($x = max(0, $x0); $x < min(CW, $x1); $x += 10) {
+      $c = imagecolorat($field, $x, $y);
+      $bg = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
+      $worst = min($worst, contrast(mix($bg, $fg, $opacity), $bg));
+    }
+  }
+  return $worst;
+}
+
+/** The smallest opacity >= $min that keeps $target contrast over the field. */
+function legible_opacity(\GdImage $field, array $fg, float $min, float $target = 4.5): float {
+  for ($o = $min; $o < 1.0; $o += 0.02) {
+    if (worst_contrast($field, $fg, $o) >= $target) {
+      return round($o, 2);
+    }
+  }
+  return 1.0;
+}
+
+/* ================================================================= text === */
+
+function graphemes(string $s): array {
+  return preg_split('/(\X)/u', $s, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY) ?: [];
+}
+
+/**
+ * The text the card draws. Controls and direction marks go (the layout does
+ * its own ordering). This GD decodes UTF-8 only up to three bytes, so every
+ * grapheme with a character above U+FFFF, a joiner or a keycap is left out of
+ * the image (og:title keeps it); BMP symbols (★ ✓ ☀) stay and are drawn as
+ * monochrome glyphs. A separator left dangling by a removed emoji goes too.
+ */
+function card_text(string $s): string {
+  $s = preg_replace('/[\x{0000}-\x{001F}\x{007F}-\x{009F}\x{200B}\x{200E}\x{200F}\x{202A}-\x{202E}\x{2066}-\x{2069}\x{FEFF}]/u', ' ', $s);
+  $out = '';
+  foreach (graphemes($s) as $g) {
+    if (preg_match('/[\x{10000}-\x{10FFFF}\x{200D}\x{20E3}]/u', $g)) {
+      $out .= ' ';
+      continue;
+    }
+    $out .= preg_replace('/[\x{FE0E}\x{FE0F}]/u', '', $g);
+  }
+  $out = preg_replace('/\s+/u', ' ', $out);
+  $out = preg_replace('/\s+([,.;:!?…)\]])/u', '$1', $out);
+  $out = preg_replace('/([(\[])\s+/u', '$1', $out);
+  // "Launch week 🚀 — five" leaves "week — five": fine. "Hi 👋 — 👋 there" leaves
+  // two separators in a row: keep the first.
+  $out = preg_replace('/(\s[\-–—|·:])(\s[\-–—|·:])+(?=\s)/u', '$1', $out);
+  return trim(preg_replace('/^[\s\-–—|·:,;]+|[\s\-–—|·:,;]+$/u', '', $out));
+}
+
+function is_rtl_cp(int $c): bool {
+  return ($c >= 0x0590 && $c <= 0x08FF) || ($c >= 0xFB1D && $c <= 0xFDFF) || ($c >= 0xFE70 && $c <= 0xFEFF);
+}
+
+function is_arabic_cp(int $c): bool {
+  return ($c >= 0x0600 && $c <= 0x06FF) || ($c >= 0x0750 && $c <= 0x077F) || ($c >= 0xFB50 && $c <= 0xFDFF) || ($c >= 0xFE70 && $c <= 0xFEFF);
+}
+
+/** 'R', 'L' or 'N' for the first strong character of $s. */
+function strong_dir(string $s): string {
+  foreach (mb_str_split($s) as $ch) {
+    $c = mb_ord($ch);
+    if (is_rtl_cp($c) && preg_match('/\p{L}/u', $ch)) {
+      return 'R';
+    }
+    if (preg_match('/\p{L}/u', $ch)) {
+      return 'L';
+    }
+  }
+  return 'N';
+}
+
+/**
+ * Arabic contextual forms from the Presentation Forms-B block (GD has no
+ * shaping). Harakat are dropped: without positioning they would not sit on
+ * their letter. Lam-alef ligatures and the four common Persian letters too.
+ */
+function shape_arabic(string $word): string {
+  static $F = [
+    0x0621 => [0xFE80], 0x0622 => [0xFE81, 0xFE82], 0x0623 => [0xFE83, 0xFE84], 0x0624 => [0xFE85, 0xFE86],
+    0x0625 => [0xFE87, 0xFE88], 0x0626 => [0xFE89, 0xFE8A, 0xFE8B, 0xFE8C], 0x0627 => [0xFE8D, 0xFE8E],
+    0x0628 => [0xFE8F, 0xFE90, 0xFE91, 0xFE92], 0x0629 => [0xFE93, 0xFE94], 0x062A => [0xFE95, 0xFE96, 0xFE97, 0xFE98],
+    0x062B => [0xFE99, 0xFE9A, 0xFE9B, 0xFE9C], 0x062C => [0xFE9D, 0xFE9E, 0xFE9F, 0xFEA0], 0x062D => [0xFEA1, 0xFEA2, 0xFEA3, 0xFEA4],
+    0x062E => [0xFEA5, 0xFEA6, 0xFEA7, 0xFEA8], 0x062F => [0xFEA9, 0xFEAA], 0x0630 => [0xFEAB, 0xFEAC], 0x0631 => [0xFEAD, 0xFEAE],
+    0x0632 => [0xFEAF, 0xFEB0], 0x0633 => [0xFEB1, 0xFEB2, 0xFEB3, 0xFEB4], 0x0634 => [0xFEB5, 0xFEB6, 0xFEB7, 0xFEB8],
+    0x0635 => [0xFEB9, 0xFEBA, 0xFEBB, 0xFEBC], 0x0636 => [0xFEBD, 0xFEBE, 0xFEBF, 0xFEC0], 0x0637 => [0xFEC1, 0xFEC2, 0xFEC3, 0xFEC4],
+    0x0638 => [0xFEC5, 0xFEC6, 0xFEC7, 0xFEC8], 0x0639 => [0xFEC9, 0xFECA, 0xFECB, 0xFECC], 0x063A => [0xFECD, 0xFECE, 0xFECF, 0xFED0],
+    0x0640 => [0x0640, 0x0640, 0x0640, 0x0640],
+    0x0641 => [0xFED1, 0xFED2, 0xFED3, 0xFED4], 0x0642 => [0xFED5, 0xFED6, 0xFED7, 0xFED8], 0x0643 => [0xFED9, 0xFEDA, 0xFEDB, 0xFEDC],
+    0x0644 => [0xFEDD, 0xFEDE, 0xFEDF, 0xFEE0], 0x0645 => [0xFEE1, 0xFEE2, 0xFEE3, 0xFEE4], 0x0646 => [0xFEE5, 0xFEE6, 0xFEE7, 0xFEE8],
+    0x0647 => [0xFEE9, 0xFEEA, 0xFEEB, 0xFEEC], 0x0648 => [0xFEED, 0xFEEE], 0x0649 => [0xFEEF, 0xFEF0], 0x064A => [0xFEF1, 0xFEF2, 0xFEF3, 0xFEF4],
+    0x067E => [0xFB56, 0xFB57, 0xFB58, 0xFB59], 0x0686 => [0xFB7A, 0xFB7B, 0xFB7C, 0xFB7D], 0x0698 => [0xFB8A, 0xFB8B],
+    0x06A9 => [0xFB8E, 0xFB8F, 0xFB90, 0xFB91], 0x06AF => [0xFB92, 0xFB93, 0xFB94, 0xFB95], 0x06CC => [0xFBFC, 0xFBFD, 0xFBFE, 0xFBFF],
+  ];
+  static $LAM_ALEF = [0x0622 => [0xFEF5, 0xFEF6], 0x0623 => [0xFEF7, 0xFEF8], 0x0625 => [0xFEF9, 0xFEFA], 0x0627 => [0xFEFB, 0xFEFC]];
+  $cps = array_values(array_filter(array_map('mb_ord', mb_str_split($word)), fn($c) => !($c >= 0x064B && $c <= 0x065F) && $c !== 0x0670));
+  $joinsNext = fn($c) => isset($F[$c]) && count($F[$c]) === 4;
+  $out = [];
+  for ($i = 0, $n = count($cps); $i < $n; $i++) {
+    $c = $cps[$i];
+    if (!isset($F[$c])) {
+      $out[] = $c;
+      continue;
+    }
+    $prev = $i > 0 && $joinsNext($cps[$i - 1]);
+    if ($c === 0x0644 && $i + 1 < $n && isset($LAM_ALEF[$cps[$i + 1]])) {
+      $out[] = $LAM_ALEF[$cps[$i + 1]][$prev ? 1 : 0];
+      $i++;
+      continue;
+    }
+    $next = $i + 1 < $n && isset($F[$cps[$i + 1]]);
+    $form = match (TRUE) {
+      $prev && $next && $joinsNext($c) => 3,
+      $prev => 1,
+      $next && $joinsNext($c) => 2,
+      default => 0,
+    };
+    $out[] = $F[$c][min($form, count($F[$c]) - 1)];
+  }
+  return implode('', array_map('mb_chr', $out));
+}
+
+/** The face that draws $cp, or NULL: the coverage check before drawing. */
+function face_for(int $cp, Fonts $f, Face $primary): ?Face {
+  if (is_arabic_cp($cp) && $f->arabic->has($cp)) {
+    return $f->arabic;
+  }
+  foreach ([$primary, $f->hebrew, $f->arabic, $f->symbols] as $face) {
+    if ($face->has($cp)) {
+      return $face;
+    }
+  }
+  return NULL;
+}
+
+/**
+ * Words with their direction and same-face segments, already in visual order
+ * inside each word (RTL words reversed by grapheme, digits kept, brackets
+ * mirrored). NULL when any character has no face: the caller then leaves
+ * that text off the card rather than draw boxes.
+ */
+function tokens(string $text, Fonts $f, Face $primary): ?array {
+  $out = [];
+  foreach (preg_split('/ /u', $text, -1, PREG_SPLIT_NO_EMPTY) as $w) {
+    $dir = strong_dir($w);
+    $draw = preg_match('/[\x{0600}-\x{06FF}]/u', $w) ? shape_arabic($w) : $w;
+    if ($dir === 'R') {
+      $parts = preg_split('/(\d+(?:[.,]\d+)*|\X)/u', $draw, -1, PREG_SPLIT_DELIM_CAPTURE | PREG_SPLIT_NO_EMPTY);
+      $draw = implode('', array_map(fn($p) => strtr($p, ['(' => ')', ')' => '(', '[' => ']', ']' => '[']), array_reverse($parts)));
+    }
+    $segs = [];
+    foreach (mb_str_split($draw) as $ch) {
+      $face = face_for(mb_ord($ch), $f, $primary);
+      if (!$face) {
+        return NULL;
+      }
+      if ($segs && end($segs)[0] === $face) {
+        $segs[array_key_last($segs)][1] .= $ch;
+      }
+      else {
+        $segs[] = [$face, $ch];
+      }
+    }
+    $out[] = ['text' => $w, 'dir' => $dir, 'segs' => $segs];
+  }
+  return $out;
+}
+
+function token_width(array $t, float $px): float {
+  $w = 0.0;
+  foreach ($t['segs'] as [$face, $s]) {
+    $w += $face->width($px, $s);
+  }
+  return $w;
+}
+
+function space_width(Face $primary, float $px): float {
+  return max($primary->width($px, 'a a') - $primary->width($px, 'aa'), 0.22 * $px);
+}
+
+function line_width(array $line, float $px, float $space): float {
+  $w = 0.0;
+  foreach ($line as $i => $t) {
+    $w += ($i ? $space : 0) + token_width($t, $px);
+  }
+  return $w;
+}
+
+function wrap_greedy(array $tokens, float $px, float $max, float $space): array {
+  $lines = [[]];
+  $w = 0.0;
+  foreach ($tokens as $t) {
+    $tw = token_width($t, $px);
+    $cur = &$lines[array_key_last($lines)];
+    if ($cur && $w + $space + $tw > $max) {
+      unset($cur);
+      $lines[] = [$t];
+      $w = $tw;
+      continue;
+    }
+    $w += ($cur ? $space : 0) + $tw;
+    $cur[] = $t;
+    unset($cur);
+  }
+  return $lines;
+}
+
+/**
+ * The same number of lines as greedy wrapping, at the narrowest measure that
+ * keeps it (CSS text-wrap: balance). A two-line title breaks at a phrase
+ * boundary instead (before "(" or a lone dash, after ":" ";" ",") when both
+ * lines fit and the shorter is over 0.4 of the longer.
+ */
+function wrap_balanced(array $tokens, float $px, float $max, float $space): array {
+  $n = count(wrap_greedy($tokens, $px, $max, $space));
+  if ($n <= 1) {
+    return wrap_greedy($tokens, $px, $max, $space);
+  }
+  [$lo, $hi] = [$max / $n * 0.8, $max];
+  for ($i = 0; $i < 16; $i++) {
+    $mid = ($lo + $hi) / 2;
+    $try = wrap_greedy($tokens, $px, $mid, $space);
+    $fits = count($try) <= $n && max(array_map(fn($l) => line_width($l, $px, $space), $try)) <= $mid + 0.5;
+    if ($fits) {
+      $hi = $mid;
+    }
+    else {
+      $lo = $mid;
+    }
+  }
+  $lines = wrap_greedy($tokens, $px, $hi, $space);
+  if ($n === 2) {
+    $best = NULL;
+    $bestScore = 0;
+    for ($i = 0; $i < count($tokens) - 1; $i++) {
+      $a = $tokens[$i]['text'];
+      $b = $tokens[$i + 1]['text'];
+      if (!preg_match('/[:;,]$/u', $a) && !preg_match('/^[(\[]/u', $b) && !preg_match('/^[—–-]$/u', $b)) {
+        continue;
+      }
+      $try = [array_slice($tokens, 0, $i + 1), array_slice($tokens, $i + 1)];
+      [$wa, $wb] = [line_width($try[0], $px, $space), line_width($try[1], $px, $space)];
+      $score = min($wa, $wb) / max($wa, $wb);
+      if (max($wa, $wb) <= $max && $score > 0.4 && $score > $bestScore) {
+        [$best, $bestScore] = [$try, $score];
+      }
+    }
+    if ($best) {
+      return $best;
+    }
+  }
+  return $lines;
+}
+
+/**
+ * Splits a token wider than $max into hyphenated pieces (a long URL, a German
+ * compound). at least 4 letters on each
+ * side of a hyphen.
+ */
+function split_long(array $tokens, float $px, float $max): array {
+  $out = [];
+  foreach ($tokens as $t) {
+    if (token_width($t, $px) <= $max || count($t['segs']) !== 1) {
+      $out[] = $t;
+      continue;
+    }
+    [$face, $s] = $t['segs'][0];
+    $pieces = [];
+    $cur = '';
+    foreach (mb_str_split($s) as $ch) {
+      if ($cur !== '' && $face->width($px, $cur . $ch . '-') > $max) {
+        $pieces[] = $cur;
+        $cur = '';
+      }
+      $cur .= $ch;
+    }
+    $pieces[] = $cur;
+    $n = count($pieces);
+    if ($n > 1 && mb_strlen($pieces[$n - 1]) < 4) {
+      $need = 4 - mb_strlen($pieces[$n - 1]);
+      $pieces[$n - 1] = mb_substr($pieces[$n - 2], -$need) . $pieces[$n - 1];
+      $pieces[$n - 2] = mb_substr($pieces[$n - 2], 0, -$need);
+    }
+    foreach ($pieces as $i => $piece) {
+      $last = $i === $n - 1;
+      $piece = ($last || $t['dir'] === 'R') ? $piece : $piece . '-';
+      $out[] = ['text' => $piece, 'dir' => $t['dir'], 'segs' => [[$face, $piece]], 'glue' => !$last];
+    }
+  }
+  return $out;
+}
+
+/** Adds "…" at the logical end of a token, dropping trailing punctuation. */
+function with_ellipsis(array $t): array {
+  if ($t['dir'] === 'R') {
+    $t['segs'][0][1] = '…' . preg_replace('/^[\s,;:.\-–—]+/u', '', $t['segs'][0][1]);
+  }
+  else {
+    $k = array_key_last($t['segs']);
+    $t['segs'][$k][1] = preg_replace('/[\s,;:.\-–—]+$/u', '', $t['segs'][$k][1]) . '…';
+  }
+  return $t;
+}
+
+/**
+ * Fits $text into the first step [px, measure, max lines] that holds it,
+ * with balanced lines. Past the last step: that step's lines, the last one
+ * ending in "…" after a whole word that is not a word of 3 letters or fewer.
+ *
+ * @return array|null
+ *   ['px', 'lines' (token lines, logical order), 'space', 'clamped'], or NULL
+ *   when a character cannot be drawn.
+ */
+function fit(string $text, Fonts $f, Face $primary, array $steps): ?array {
+  $tokens = tokens($text, $f, $primary);
+  if ($tokens === NULL || !$tokens) {
+    return NULL;
+  }
+  $chars = mb_strlen($text);
+  foreach ($steps as $step) {
+    [$px, $max, $maxLines] = $step;
+    // A step may be limited to short texts.
+    if (isset($step[3]) && $chars > $step[3]) {
+      continue;
+    }
+    $space = space_width($primary, $px);
+    $use = $tokens;
+    if (max(array_map(fn($t) => token_width($t, $px), $tokens)) > $max) {
+      // split a long word from the
+      // [66, 1008, 3] step down, not only at the last step.
+      if ($px > 66 || $max < 1000) {
+        continue;
+      }
+      $use = split_long($tokens, $px, $max);
+    }
+    if (count(wrap_greedy($use, $px, $max, $space)) <= $maxLines) {
+      return ['px' => $px, 'lines' => $use === $tokens ? wrap_balanced($use, $px, $max, $space) : wrap_greedy($use, $px, $max, $space), 'space' => $space, 'clamped' => FALSE];
+    }
+  }
+  [$px, $max, $maxLines] = end($steps);
+  $space = space_width($primary, $px);
+  $all = wrap_greedy(split_long($tokens, $px, $max), $px, $max, $space);
+  if (count($all) <= $maxLines) {
+    return ['px' => $px, 'lines' => $all, 'space' => $space, 'clamped' => FALSE];
+  }
+  $lines = array_slice($all, 0, $maxLines);
+  $last = $lines[$maxLines - 1] ?? $lines[array_key_last($lines)];
+  $ell = fn(array $l) => array_merge(array_slice($l, 0, -1), [with_ellipsis(end($l))]);
+  while (count($last) > 1 && (line_width($ell($last), $px, $space) > $max || mb_strlen(end($last)['text']) <= 3)) {
+    array_pop($last);
+  }
+  $lines[array_key_last($lines)] = $ell($last);
+  return ['px' => $px, 'lines' => $lines, 'space' => $space, 'clamped' => TRUE];
+}
+
+/**
+ * Visual order of one line (UAX #9 rule L2 reduced to words): neutral words
+ * take their neighbours' direction when both agree, else the paragraph's;
+ * then runs against the paragraph direction are reversed.
+ */
+function visual(array $line, string $para): array {
+  $n = count($line);
+  $dirs = array_column($line, 'dir');
+  for ($i = 0; $i < $n; $i++) {
+    if ($dirs[$i] !== 'N') {
+      continue;
+    }
+    $b = $para;
+    for ($j = $i - 1; $j >= 0; $j--) {
+      if ($line[$j]['dir'] !== 'N') {
+        $b = $line[$j]['dir'];
+        break;
+      }
+    }
+    $a = $para;
+    for ($j = $i + 1; $j < $n; $j++) {
+      if ($line[$j]['dir'] !== 'N') {
+        $a = $line[$j]['dir'];
+        break;
+      }
+    }
+    $dirs[$i] = $a === $b ? $a : $para;
+  }
+  $runs = [];
+  foreach ($line as $i => $t) {
+    if ($runs && end($runs)['dir'] === $dirs[$i]) {
+      $runs[array_key_last($runs)]['t'][] = $t;
+    }
+    else {
+      $runs[] = ['dir' => $dirs[$i], 't' => [$t]];
+    }
+  }
+  if ($para === 'R') {
+    $runs = array_reverse($runs);
+  }
+  $out = [];
+  foreach ($runs as $r) {
+    array_push($out, ...($r['dir'] === 'R' ? array_reverse($r['t']) : $r['t']));
+  }
+  return $out;
+}
+
+/** Draws one line, aligned 'center', 'left' or 'right' at $x. */
+function draw_line(\GdImage $im, array $line, float $px, float $space, string $para, float $x, float $baseline, int $color, string $align = 'center'): float {
+  $w = line_width($line, $px, $space);
+  $x0 = match ($align) {
+    'center' => $x - $w / 2,
+    'right' => $x - $w,
+    default => $x,
+  };
+  foreach (visual($line, $para) as $i => $t) {
+    if ($i) {
+      $x0 += $space;
+    }
+    foreach ($t['segs'] as [$face, $s]) {
+      $face->draw($im, $px, $x0, $baseline, $color, $s);
+      $x0 += $face->width($px, $s);
+    }
+  }
+  return $w;
+}
+
+/** Letter-spaced single-face text (the label). Returns its width; draws when $im. */
+function tracked(?\GdImage $im, Face $face, float $px, string $s, float $em, float $cx, float $baseline, int $color = 0): float {
+  $chars = mb_str_split($s);
+  $adv = [];
+  foreach ($chars as $i => $ch) {
+    $adv[] = $face->width($px, implode('', array_slice($chars, 0, $i + 1))) - $face->width($px, implode('', array_slice($chars, 0, $i)));
+  }
+  $total = array_sum($adv) + $em * $px * (count($chars) - 1);
+  if ($im) {
+    $x = $cx - $total / 2;
+    foreach ($chars as $i => $ch) {
+      $face->draw($im, $px, $x, $baseline, $color, $ch);
+      $x += $adv[$i] + $em * $px;
+    }
+  }
+  return $total;
+}
+
+/**
+ * The home card's line: the slogan as typed, else the description's first
+ * sentence, shortened at its first clause when over 64 characters.
+ */
+function tagline(string $s): string {
+  $s = trim(preg_replace('/\s+/u', ' ', $s));
+  if (preg_match('/^(.+?[.!?。])(\s|$)/u', $s, $m)) {
+    $s = $m[1];
+  }
+  if (mb_strlen($s) > 64 && preg_match('/^(.{24,}?)(:|;| — | – )/u', $s, $m)) {
+    $s = $m[1];
+  }
+  return $s;
+}
+
+/* =============================================================== images === */
+
+function load_image(string $path): ?\GdImage {
+  $im = @imagecreatefromstring((string) @file_get_contents($path));
+  if (!$im) {
+    return NULL;
+  }
+  imagepalettetotruecolor($im);
+  imagealphablending($im, TRUE);
+  imagesavealpha($im, TRUE);
+  return $im;
+}
+
+function has_alpha(\GdImage $im): bool {
+  $w = imagesx($im);
+  $h = imagesy($im);
+  for ($i = 0; $i < 64; $i++) {
+    foreach ([[(int) ($i * ($w - 1) / 63), 0], [(int) ($i * ($w - 1) / 63), $h - 1], [0, (int) ($i * ($h - 1) / 63)], [$w - 1, (int) ($i * ($h - 1) / 63)]] as [$x, $y]) {
+      if (((imagecolorat($im, $x, $y) >> 24) & 0x7F) > 8) {
+        return TRUE;
+      }
+    }
+  }
+  return FALSE;
+}
+
+/** Anti-aliased rounded corners on an image with alpha. */
+function round_corners(\GdImage $im, float $r): void {
+  $w = imagesx($im);
+  $h = imagesy($im);
+  imagealphablending($im, FALSE);
+  imagesavealpha($im, TRUE);
+  $ri = (int) ceil($r);
+  foreach ([[0, 0, $r, $r], [$w - $ri, 0, $w - $r, $r], [0, $h - $ri, $r, $h - $r], [$w - $ri, $h - $ri, $w - $r, $h - $r]] as [$x0, $y0, $cx, $cy]) {
+    for ($y = $y0; $y < $y0 + $ri; $y++) {
+      for ($x = $x0; $x < $x0 + $ri; $x++) {
+        $inX = $x0 == 0 ? $x + 0.5 < $cx : $x + 0.5 > $cx;
+        $inY = $y0 == 0 ? $y + 0.5 < $cy : $y + 0.5 > $cy;
+        if (!$inX || !$inY) {
+          continue;
+        }
+        $cov = max(0.0, min(1.0, $r - hypot($x + 0.5 - $cx, $y + 0.5 - $cy) + 0.5));
+        $c = imagecolorat($im, $x, $y);
+        $a = 127 - (int) round((127 - (($c >> 24) & 0x7F)) * $cov);
+        imagesetpixel($im, $x, $y, ($c & 0xFFFFFF) | ($a << 24));
+      }
+    }
+  }
+  imagealphablending($im, TRUE);
+}
+
+/** A 1.5 px inner ring along a rounded square, so a tile in the field's own colour keeps an edge. */
+function ring(\GdImage $im, float $r, array $rgb, float $opacity): void {
+  $w = imagesx($im);
+  $h = imagesy($im);
+  imagealphablending($im, TRUE);
+  for ($y = 0; $y < $h; $y++) {
+    for ($x = 0; $x < $w; $x++) {
+      [$px, $py] = [$x + 0.5, $y + 0.5];
+      $qx = max(abs($px - $w / 2) - ($w / 2 - $r), 0);
+      $qy = max(abs($py - $h / 2) - ($h / 2 - $r), 0);
+      $dist = ($qx == 0 && $qy == 0) ? min($px, $py, $w - $px, $h - $py) : $r - hypot($qx, $qy);
+      $cov = max(0.0, min(1.0, 1.5 - abs($dist - 0.75))) * $opacity;
+      if ($cov > 0.01 && $dist >= 0) {
+        imagesetpixel($im, $x, $y, col($im, $rgb, $cov));
+      }
+    }
+  }
+}
+
+/**
+ * the logo trimmed to what it draws. A
+ * transparent logo keeps the box of pixels with GD alpha <= 120; a logo on a
+ * plain light canvas (a wordmark exported on white) keeps the box of pixels
+ * further than RGB 24 from its corner colour. A full-bleed opaque logo (an
+ * app tile) is left whole.
+ */
+function trim_logo(\GdImage $logo): \GdImage {
+  $w = imagesx($logo);
+  $h = imagesy($logo);
+  $alpha = has_alpha($logo);
+  $c0 = imagecolorat($logo, 0, 0);
+  $corner = [($c0 >> 16) & 255, ($c0 >> 8) & 255, $c0 & 255];
+  if (!$alpha && rgb2hsl($corner)[2] < 0.9) {
+    return $logo;
+  }
+  [$x0, $y0, $x1, $y1] = [$w, $h, -1, -1];
+  $step = max(1, (int) floor(max($w, $h) / 400));
+  for ($y = 0; $y < $h; $y += $step) {
+    for ($x = 0; $x < $w; $x += $step) {
+      $c = imagecolorat($logo, $x, $y);
+      $ink = $alpha
+        ? (($c >> 24) & 0x7F) <= 120
+        : sqrt((($c >> 16 & 255) - $corner[0]) ** 2 + (($c >> 8 & 255) - $corner[1]) ** 2 + (($c & 255) - $corner[2]) ** 2) > 24;
+      if ($ink) {
+        [$x0, $y0, $x1, $y1] = [min($x0, $x), min($y0, $y), max($x1, $x), max($y1, $y)];
+      }
+    }
+  }
+  if ($x1 < 0) {
+    return $logo;
+  }
+  [$x0, $y0] = [max(0, $x0 - $step), max(0, $y0 - $step)];
+  [$x1, $y1] = [min($w - 1, $x1 + $step), min($h - 1, $y1 + $step)];
+  $t = imagecreatetruecolor($x1 - $x0 + 1, $y1 - $y0 + 1);
+  imagealphablending($t, FALSE);
+  imagesavealpha($t, TRUE);
+  imagecopy($t, $logo, 0, 0, $x0, $y0, $x1 - $x0 + 1, $y1 - $y0 + 1);
+  imagealphablending($t, TRUE);
+  return $t;
+}
+
+/**
+ * single-colour means >= 90% of the opaque
+ * pixels within RGB distance 40 of their mean.
+ */
+function single_colour(\GdImage $im): bool {
+  $s = imagecreatetruecolor(48, 48);
+  imagealphablending($s, FALSE);
+  imagesavealpha($s, TRUE);
+  imagecopyresampled($s, $im, 0, 0, 0, 0, 48, 48, imagesx($im), imagesy($im));
+  $px = [];
+  for ($y = 0; $y < 48; $y++) {
+    for ($x = 0; $x < 48; $x++) {
+      $c = imagecolorat($s, $x, $y);
+      if ((($c >> 24) & 0x7F) <= 32) {
+        $px[] = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
+      }
+    }
+  }
+  if (!$px) {
+    return FALSE;
+  }
+  $mean = [0, 0, 0];
+  foreach ($px as $p) {
+    for ($k = 0; $k < 3; $k++) {
+      $mean[$k] += $p[$k] / count($px);
+    }
+  }
+  $near = count(array_filter($px, fn($p) => sqrt(($p[0] - $mean[0]) ** 2 + ($p[1] - $mean[1]) ** 2 + ($p[2] - $mean[2]) ** 2) <= 40));
+  return $near / count($px) >= 0.9;
+}
+
+/** Every pixel in $rgb, alpha kept: a single-colour mark in the text colour. */
+function tint(\GdImage $im, array $rgb): \GdImage {
+  $w = imagesx($im);
+  $h = imagesy($im);
+  $t = imagecreatetruecolor($w, $h);
+  imagealphablending($t, FALSE);
+  imagesavealpha($t, TRUE);
+  for ($y = 0; $y < $h; $y++) {
+    for ($x = 0; $x < $w; $x++) {
+      $a = (imagecolorat($im, $x, $y) >> 24) & 0x7F;
+      imagesetpixel($t, $x, $y, imagecolorallocatealpha($t, (int) $rgb[0], (int) $rgb[1], (int) $rgb[2], $a));
+    }
+  }
+  imagealphablending($t, TRUE);
+  return $t;
+}
+
+/**
+ * The logo as a mark $size px tall, measured on its trimmed box.
+ * - opaque, not wide: an app-icon tile (22% corners, hairline ring);
+ * - transparent and single-colour: tinted to the text colour, no plate;
+ * - transparent, multicolour, under 3:1 against the field: on a white plate
+ *   (padding 0.30 x the trimmed height, symmetric);
+ * - wide (over 2.2:1, a wordmark): drawn alone, no site name beside it;
+ * - none: a monogram tile, or nothing when the letter cannot be drawn.
+ */
+function logo_mark(?\GdImage $logo, int $size, array $theme, string $siteName, Fonts $f): ?array {
+  if (!$logo) {
+    $letter = mb_strtoupper(graphemes(card_text($siteName))[0] ?? '');
+    $toks = $letter !== '' ? tokens($letter, $f, $f->mono) : NULL;
+    if (!$toks) {
+      // Never a tile without a glyph in it.
+      return NULL;
+    }
+    $t = imagecreatetruecolor($size, $size);
+    imagefill($t, 0, 0, col($t, $theme['tile']));
+    $px = $size * 0.5;
+    $b = imagettfbbox($px * 0.75, 0, $f->mono->file, gd_text('H'));
+    $capH = $b[1] - $b[7];
+    draw_line($t, $toks, $px, 0, 'L', $size / 2, ($size + $capH) / 2, col($t, $theme['tileInk']));
+    round_corners($t, $size * 0.22);
+    return ['im' => $t, 'w' => $size, 'h' => $size, 'wordmark' => FALSE, 'kind' => 'monogram'];
+  }
+  $logo = trim_logo($logo);
+  $sw = imagesx($logo);
+  $sh = imagesy($logo);
+  $ratio = $sw / $sh;
+  $wordmark = $ratio > 2.2;
+  $alpha = has_alpha($logo);
+  $fieldMid = mix($theme['top'], $theme['bottom'], 0.5);
+  $kind = $alpha ? 'transparent' : 'tile';
+  if ($alpha && single_colour($logo)) {
+    $logo = tint($logo, $theme['fg']);
+    $kind = 'tinted';
+  }
+  $logoColour = brand_from_logo($logo) ?? avg_opaque($logo);
+  $plate = $kind === 'transparent' && $logoColour !== NULL && contrast($logoColour, $fieldMid) < 3.0;
+  $kind = $plate ? 'plate' : $kind;
+  $h = $wordmark ? (int) round($size * 0.82) : $size;
+  $w = (int) round($wordmark ? min($h * $ratio, $size * 7) : $h * min(max($ratio, 0.6), 1.6));
+  // A plated wordmark gets a pill padded 0.30 x its height; a plated mark
+  // stays inside its square box with 16% padding.
+  $pad = $plate ? (int) round($h * ($wordmark ? 0.30 : 0.16)) : 0;
+  if ($plate && !$wordmark) {
+    [$w, $h] = [$w - 2 * $pad, $h - 2 * $pad];
+  }
+  [$W, $H] = [$w + 2 * $pad, $h + 2 * $pad];
+  $m = imagecreatetruecolor($W, $H);
+  imagealphablending($m, FALSE);
+  imagesavealpha($m, TRUE);
+  imagefill($m, 0, 0, imagecolorallocatealpha($m, 0, 0, 0, 127));
+  if ($plate) {
+    imagefilledrectangle($m, 0, 0, $W, $H, col($m, [255, 255, 255]));
+  }
+  imagealphablending($m, TRUE);
+  // A non-wide transparent mark keeps its own ratio inside the box.
+  if (!$wordmark && $alpha) {
+    $r = min($w / $sw, $h / $sh);
+    [$dw, $dh] = [(int) round($sw * $r), (int) round($sh * $r)];
+    imagecopyresampled($m, $logo, $pad + (int) (($w - $dw) / 2), $pad + (int) (($h - $dh) / 2), 0, 0, $dw, $dh, $sw, $sh);
+  }
+  else {
+    imagecopyresampled($m, $logo, $pad, $pad, 0, 0, $w, $h, $sw, $sh);
+  }
+  if ($plate || !$alpha) {
+    round_corners($m, min($W, $H) * ($wordmark ? 0.5 : 0.22));
+    if (!$alpha && !$wordmark) {
+      ring($m, min($W, $H) * 0.22, $theme['dark'] ? [255, 255, 255] : [0, 0, 0], 0.26);
+    }
+  }
+  return ['im' => $m, 'w' => $W, 'h' => $H, 'wordmark' => $wordmark, 'kind' => $kind];
+}
+
+function avg_opaque(\GdImage $im): ?array {
+  $s = imagecreatetruecolor(16, 16);
+  imagealphablending($s, FALSE);
+  imagesavealpha($s, TRUE);
+  imagecopyresampled($s, $im, 0, 0, 0, 0, 16, 16, imagesx($im), imagesy($im));
+  $sum = [0, 0, 0];
+  $n = 0;
+  for ($y = 0; $y < 16; $y++) {
+    for ($x = 0; $x < 16; $x++) {
+      $c = imagecolorat($s, $x, $y);
+      if ((($c >> 24) & 0x7F) > 64) {
+        continue;
+      }
+      $sum = [$sum[0] + (($c >> 16) & 255), $sum[1] + (($c >> 8) & 255), $sum[2] + ($c & 255)];
+      $n++;
+    }
+  }
+  return $n ? array_map(fn($v) => $v / $n, $sum) : NULL;
+}
+
+/* ================================================================= card === */
+
+/**
+ * Renders a generated card, or reports that none can be made.
+ *
+ * No host line (it came from the request, repeated what
+ * every surface prints under the image, and sat where one network overlays
+ * its caption); an undrawable title gives no card (the chain goes on) rather
+ * than the site card; the site card is unavailable when neither a mark nor
+ * the site name can be drawn.
+ *
+ * @param array $c
+ *   - layout: 'page' (title card) or 'site' (vague-named front page).
+ *   - site_name, logo (GdImage|null), brand (rgb|null), dir ('L'|'R').
+ *   - title, label (small line above the title), line (site layout).
+ *
+ * @return array
+ *   ['im' => GdImage|null, 'info' => [...]]: 'im' NULL when unavailable.
+ */
+function card(array $c, Fonts $f): array {
+  $theme = theme($c['brand'] ?? NULL);
+  $dir = $c['dir'] ?? 'L';
+  $layout = $c['layout'];
+  $title = card_text(mb_substr($c['title'] ?? '', 0, 300));
+  $label = card_text(mb_substr($c['label'] ?? '', 0, 300));
+  $info = ['picked' => isset($c['brand']) ? rgb2hex($c['brand']) : NULL, 'centre' => $theme['centre'] ? rgb2hex($theme['centre']) : NULL, 'steps' => $theme['steps'], 'field' => rgb2hex($theme['top']) . '→' . rgb2hex($theme['bottom']), 'text' => rgb2hex($theme['fg'])];
+
+  if ($layout === 'page') {
+    $steps = [
+      // A short title large.
+      [128, 560, 1, 12],
+      // Square-safe: inside the centre 630 px with a 35 px margin.
+      [104, 560, 2], [96, 560, 2], [88, 560, 2],
+      // Then two wide lines (a phrase stays whole), then three square-safe.
+      [88, 980, 2], [76, 580, 3], [76, 1000, 3], [66, 1008, 3], [58, 1008, 4], [52, 1008, 4],
+    ];
+    $para = strong_dir($title);
+    $para = $para === 'N' ? $dir : $para;
+    $fit = $title === '' ? NULL : fit($title, $f, $f->title, $steps);
+    if (!$fit) {
+      return ['im' => NULL, 'info' => $info + ['layout' => 'none', 'why' => $title === '' ? 'title empty after cleaning' : 'title not covered by the bundled fonts: the chain goes on to the site\'s image or none']];
+    }
+  }
+  $im = field($theme);
+  $fg = $theme['fg'];
+  $muted = legible_opacity($im, $fg, 0.70);
+  $info['contrast'] = ['title' => round(worst_contrast($im, $fg, 1.0), 2), 'small' => round(worst_contrast($im, $fg, $muted), 2), 'small_opacity' => $muted];
+
+  if ($layout === 'page') {
+    brand_row($im, $f, $c, $theme, 60);
+    $labelFit = $label !== '' ? label_fit($label, $f) : NULL;
+    $labelPx = $labelFit['px'] ?? 26;
+    $lh = $fit['px'] * leading($fit['px']);
+    $cap = 0.727 * $fit['px'];
+    $gap = 0.36 * $fit['px'] + 12;
+    $block = $cap + (count($fit['lines']) - 1) * $lh + ($labelFit ? 0.727 * $labelPx + $gap : 0);
+    [$top, $bottom] = [136, 548];
+    $y = $top + ($bottom - $top - $block) / 2;
+    if ($labelFit) {
+      draw_label($im, $labelFit, $f, CW / 2, $y + 0.727 * $labelPx, col($im, $fg, $muted));
+      $y += 0.727 * $labelPx + $gap;
+    }
+    $base = $y + $cap;
+    foreach ($fit['lines'] as $line) {
+      draw_line($im, $line, $fit['px'], $fit['space'], $para, CW / 2, $base, col($im, $fg));
+      $base += $lh;
+    }
+    $info += ['layout' => 'page', 'px' => $fit['px'], 'lines' => array_map(fn($l) => implode(' ', array_column($l, 'text')), $fit['lines']), 'clamped' => $fit['clamped'], 'label' => $labelFit['text'] ?? NULL, 'label_px' => $labelFit ? $labelPx : NULL];
+    return ['im' => $im, 'info' => $info];
+  }
+
+  // The site card: the identity, large. Used for the vague-named front page.
+  $mark = logo_mark($c['logo'] ?? NULL, 128, $theme, $c['site_name'], $f);
+  if ($mark && $mark['wordmark']) {
+    $mark = logo_mark($c['logo'], 112, $theme, $c['site_name'], $f);
+  }
+  $name = card_text(mb_substr($c['site_name'], 0, 300));
+  $nameFit = ($mark && $mark['wordmark']) ? NULL : fit($name, $f, $f->title, [[88, 600, 1], [76, 600, 1], [76, 600, 2], [64, 1000, 2], [56, 1000, 2]]);
+  if (!$mark && !$nameFit) {
+    return ['im' => NULL, 'info' => $info + ['layout' => 'none', 'why' => 'neither a logo, a monogram nor the site name can be drawn: the chain goes on']];
+  }
+  $line = card_text(mb_substr($c['line'] ?? '', 0, 300));
+  $lineFit = $line !== '' ? fit($line, $f, $f->body, [[34, 600, 2], [31, 600, 2], [28, 640, 2]]) : NULL;
+  $h = $mark['h'] ?? 0;
+  if ($nameFit) {
+    $h += ($mark ? 40 : 0) + 0.727 * $nameFit['px'] + (count($nameFit['lines']) - 1) * $nameFit['px'] * 1.1;
+  }
+  if ($lineFit) {
+    $h += 46 + 0.727 * $lineFit['px'] + (count($lineFit['lines']) - 1) * $lineFit['px'] * 1.4;
+  }
+  $y = (CH - $h) / 2;
+  if ($mark) {
+    imagecopy($im, $mark['im'], (int) round((CW - $mark['w']) / 2), (int) round($y), 0, 0, $mark['w'], $mark['h']);
+    $y += $mark['h'];
+  }
+  if ($nameFit) {
+    $y += ($mark ? 40 : 0) + 0.727 * $nameFit['px'];
+    $nameDir = strong_dir($name) === 'N' ? $dir : strong_dir($name);
+    foreach ($nameFit['lines'] as $l) {
+      draw_line($im, $l, $nameFit['px'], $nameFit['space'], $nameDir, CW / 2, $y, col($im, $fg));
+      $y += $nameFit['px'] * 1.1;
+    }
+    $y -= $nameFit['px'] * 1.1;
+  }
+  if ($lineFit) {
+    $y += 46 + 0.727 * $lineFit['px'];
+    $lineDir = strong_dir($line) === 'N' ? $dir : strong_dir($line);
+    foreach ($lineFit['lines'] as $l) {
+      draw_line($im, $l, $lineFit['px'], $lineFit['space'], $lineDir, CW / 2, $y, col($im, $fg, max($muted, 0.82)));
+      $y += $lineFit['px'] * 1.4;
+    }
+  }
+  $info += ['layout' => 'site', 'mark' => $mark['kind'] ?? 'none', 'px' => $nameFit['px'] ?? NULL, 'line' => $lineFit ? array_map(fn($l) => implode(' ', array_column($l, 'text')), $lineFit['lines']) : NULL];
+  return ['im' => $im, 'info' => $info];
+}
+
+function leading(float $px): float {
+  return $px >= 84 ? 1.06 : ($px >= 66 ? 1.1 : 1.14);
+}
+
+/**
+ * The label. Cased scripts: capitals, 26 px, 0.10 em tracking. Uncased scripts: as typed, Hebrew 30 px, Arabic 32 px,
+ * drawn at the size they were fitted at.
+ */
+function label_fit(string $label, Fonts $f): ?array {
+  $cased = !preg_match('/[\x{0590}-\x{08FF}]/u', $label);
+  $text = $cased ? mb_strtoupper($label) : $label;
+  if (!tokens($text, $f, $f->ui)) {
+    return NULL;
+  }
+  if ($cased) {
+    while (tracked(NULL, $f->ui, 26, $text, 0.10, 0, 0) > 900 && mb_strlen($text) > 8) {
+      $text = rtrim(mb_substr($text, 0, -2), ' ·') . '…';
+    }
+    return ['text' => $text, 'cased' => TRUE, 'px' => 26];
+  }
+  $px = preg_match('/[\x{0600}-\x{08FF}]/u', $text) ? 32 : 30;
+  $fit = fit($text, $f, $f->ui, [[$px, 900, 1]]);
+  return $fit ? ['text' => $text, 'cased' => FALSE, 'px' => $px, 'fit' => $fit] : NULL;
+}
+
+function draw_label(\GdImage $im, array $lf, Fonts $f, float $cx, float $baseline, int $color): void {
+  if ($lf['cased']) {
+    tracked($im, $f->ui, $lf['px'], $lf['text'], 0.10, $cx, $baseline, $color);
+    return;
+  }
+  $fit = $lf['fit'];
+  draw_line($im, $fit['lines'][0], $fit['px'], $fit['space'], strong_dir($lf['text']), $cx, $baseline, $color);
+}
+
+/**
+ * Logo and site name, centred at the top; mirrored for right-to-left pages.
+ * A long name is cut at a word with "…"
+ * to 640 px at 26 px, never dropped.
+ */
+function brand_row(\GdImage $im, Fonts $f, array $c, array $theme, int $top): void {
+  $mark = logo_mark($c['logo'] ?? NULL, 52, $theme, $c['site_name'], $f);
+  if ($mark && $mark['wordmark']) {
+    $mark = logo_mark($c['logo'], 50, $theme, $c['site_name'], $f);
+    imagecopy($im, $mark['im'], (int) round((CW - $mark['w']) / 2), (int) round($top + (52 - $mark['h']) / 2), 0, 0, $mark['w'], $mark['h']);
+    return;
+  }
+  $name = card_text(mb_substr($c['site_name'], 0, 300));
+  $fit = fit($name, $f, $f->ui, [[30, 640, 1], [26, 640, 1]]);
+  if (!$fit && tokens($name, $f, $f->ui)) {
+    $words = preg_split('/ /u', $name, -1, PREG_SPLIT_NO_EMPTY);
+    while (count($words) > 1 && !$fit) {
+      array_pop($words);
+      $try = rtrim(implode(' ', $words), ' ,;:.-–—') . '…';
+      $fit = fit($try, $f, $f->ui, [[26, 640, 1]]);
+    }
+  }
+  $gap = 16;
+  $markW = $mark['w'] ?? 0;
+  $nameW = $fit ? line_width($fit['lines'][0], $fit['px'], $fit['space']) : 0;
+  $total = $markW + ($fit && $mark ? $gap : 0) + $nameW;
+  $x = (CW - $total) / 2;
+  $rtl = ($c['dir'] ?? 'L') === 'R';
+  if ($mark) {
+    $markX = $rtl ? $x + $total - $markW : $x;
+    imagecopy($im, $mark['im'], (int) round($markX), $top, 0, 0, $mark['w'], $mark['h']);
+  }
+  if ($fit) {
+    $nameX = ($rtl || !$mark) ? $x : $x + $markW + $gap;
+    $baseline = $top + ($mark['h'] ?? 52) / 2 + 0.727 * $fit['px'] / 2;
+    $nd = strong_dir($name) === 'N' ? 'L' : strong_dir($name);
+    draw_line($im, $fit['lines'][0], $fit['px'], $fit['space'], $nd, $nameX, $baseline, col($im, $theme['fg']), 'left');
+  }
+}
+
+/* ======================================================== share photos === */
+
+/**
+ * 'cover', 'frame' or 'skip' for a candidate image, by its upright size.
+ * Cover from 4:3 (1.30) to 2.4:1, and only
+ * when that needs at most 1.25x upscaling; a chosen image is
+ * never skipped from 200 x 200 up and never upscaled.
+ */
+function classify(int $w, int $h, bool $chosen = FALSE): string {
+  if ($chosen ? ($w < 200 || $h < 200) : ($w < 600 || $h < 315)) {
+    return 'skip';
+  }
+  $r = $w / $h;
+  $scale = max(CW / $w, CH / $h);
+  return ($r >= 1.30 && $r <= 2.4 && $scale <= ($chosen ? 1.0 : 1.25)) ? 'cover' : 'frame';
+}
+
+/**
+ * the stored camera orientation is
+ * applied before anything else, so phone photos share upright.
+ */
+function orient(\GdImage $im, int $orientation): \GdImage {
+  $flip = in_array($orientation, [2, 4, 5, 7], TRUE);
+  $angle = match ($orientation) {
+    3, 4 => 180,
+    5, 6 => 270,
+    7, 8 => 90,
+    default => 0,
+  };
+  if ($angle) {
+    $im = imagerotate($im, $angle, 0);
+  }
+  if ($flip) {
+    imageflip($im, IMG_FLIP_HORIZONTAL);
+  }
+  return $im;
+}
+
+function exif_orientation(string $path): int {
+  $e = @exif_read_data($path);
+  return (int) ($e['Orientation'] ?? 1);
+}
+
+/** Crop to 1200x630 around the focal point (centre unless one is set). */
+function cover(\GdImage $src, float $fx = 0.5, float $fy = 0.5): \GdImage {
+  $sw = imagesx($src);
+  $sh = imagesy($src);
+  $scale = max(CW / $sw, CH / $sh);
+  [$cw, $ch] = [CW / $scale, CH / $scale];
+  $cx = max(0, min($sw - $cw, $sw * $fx - $cw / 2));
+  $cy = max(0, min($sh - $ch, $sh * $fy - $ch / 2));
+  $dst = imagecreatetruecolor(CW, CH);
+  imagecopyresampled($dst, $src, 0, 0, (int) round($cx), (int) round($cy), CW, CH, (int) round($cw), (int) round($ch));
+  return $dst;
+}
+
+/** Mean edge colour and its spread (a plain studio background has little). */
+function edge_stats(\GdImage $src): array {
+  $w = imagesx($src);
+  $h = imagesy($src);
+  $px = [];
+  for ($i = 0; $i < 64; $i++) {
+    foreach ([[(int) ($i * ($w - 1) / 63), 0], [(int) ($i * ($w - 1) / 63), $h - 1], [0, (int) ($i * ($h - 1) / 63)], [$w - 1, (int) ($i * ($h - 1) / 63)]] as [$x, $y]) {
+      $c = imagecolorat($src, $x, $y);
+      // transparent pixels carry no colour.
+      if ((($c >> 24) & 0x7F) <= 8) {
+        $px[] = [($c >> 16) & 255, ($c >> 8) & 255, $c & 255];
+      }
+    }
+  }
+  if (count($px) < 64) {
+    return [[255, 255, 255], 0.0, count($px) / 256];
+  }
+  $mean = [0, 0, 0];
+  foreach ($px as $p) {
+    for ($k = 0; $k < 3; $k++) {
+      $mean[$k] += $p[$k] / count($px);
+    }
+  }
+  $var = 0;
+  foreach ($px as $p) {
+    for ($k = 0; $k < 3; $k++) {
+      $var += ($p[$k] - $mean[$k]) ** 2 / (3 * count($px));
+    }
+  }
+  return [$mean, sqrt($var), count($px) / 256];
+}
+
+/**
+ * A square, tall or panoramic image shown whole, never cut into a band.
+ * Plain edges (a product on white) continue seamlessly; anything else sits
+ * inset with 16 px corners and a soft shadow on a field made from a 3x2
+ * sample of the image itself: colour and light only, so nothing in the
+ * picture (faces, text) can ghost through.
+ */
+function frame(\GdImage $src, float $maxScale = 1.25, ?array $plain = NULL): array {
+  $sw = imagesx($src);
+  $sh = imagesy($src);
+  [$edge, $spread] = edge_stats($src);
+  if ($plain) {
+    [$edge, $spread] = [$plain, 0.0];
+  }
+  $out = imagecreatetruecolor(CW, CH);
+  if ($spread < 6) {
+    imagefill($out, 0, 0, col($out, $edge));
+    $h = CH;
+    $w = (int) round($sw * $h / $sh);
+    if ($w > CW) {
+      $w = CW;
+      $h = (int) round($sh * $w / $sw);
+    }
+    if ($w > $sw * $maxScale) {
+      [$w, $h] = [(int) round($sw * $maxScale), (int) round($sh * $maxScale)];
+    }
+    imagecopyresampled($out, $src, (int) ((CW - $w) / 2), (int) ((CH - $h) / 2), 0, 0, $w, $h, $sw, $sh);
+    return [$out, 'frame, seamless on its edge colour ' . rgb2hex($edge)];
+  }
+  $tiny = imagecreatetruecolor(3, 2);
+  imagecopyresampled($tiny, $src, 0, 0, 0, 0, 3, 2, $sw, $sh);
+  $s = [];
+  for ($j = 0; $j < 2; $j++) {
+    for ($i = 0; $i < 3; $i++) {
+      $c = imagecolorat($tiny, $i, $j);
+      // Calmer and darker than the photo, so the photo stays the subject.
+      $s[$j][$i] = mix([($c >> 16) & 255, ($c >> 8) & 255, $c & 255], [0, 0, 0], 0.3);
+    }
+  }
+  // Painted small with bilinear interpolation between the six samples, then
+  // scaled up: a smooth wash of the photo's own colours, no blocks, no shapes.
+  [$gw, $gh] = [150, 79];
+  $g = imagecreatetruecolor($gw, $gh);
+  for ($y = 0; $y < $gh; $y++) {
+    $v = $y / ($gh - 1);
+    for ($x = 0; $x < $gw; $x++) {
+      $u = $x / ($gw - 1) * 2;
+      $i = min(1, (int) floor($u));
+      $top = mix($s[0][$i], $s[0][$i + 1], $u - $i);
+      $bot = mix($s[1][$i], $s[1][$i + 1], $u - $i);
+      imagesetpixel($g, $x, $y, col($g, mix($top, $bot, $v)));
+    }
+  }
+  imagecopyresampled($out, $g, 0, 0, 0, 0, CW, CH, $gw, $gh);
+  $h = CH - 2 * 40;
+  $w = (int) round($sw * $h / $sh);
+  if ($w > CW - 2 * 64) {
+    $w = CW - 2 * 64;
+    $h = (int) round($sh * $w / $sw);
+  }
+  if ($w > $sw * $maxScale) {
+    [$w, $h] = [(int) round($sw * $maxScale), (int) round($sh * $maxScale)];
+  }
+  $x = (int) ((CW - $w) / 2);
+  $y = (int) ((CH - $h) / 2);
+  shadow($out, $x, $y, $w, $h, 16, 36, 10, 0.45);
+  $pic = imagecreatetruecolor($w, $h);
+  imagecopyresampled($pic, $src, 0, 0, 0, 0, $w, $h, $sw, $sh);
+  round_corners($pic, 16);
+  imagealphablending($out, TRUE);
+  imagecopy($out, $pic, $x, $y, 0, 0, $w, $h);
+  return [$out, "frame, whole image {$w}x{$h} inset on its own colours"];
+}
+
+/** A soft shadow, computed at quarter size as an alpha mask and scaled up. */
+function shadow(\GdImage $bg, int $x, int $y, int $w, int $h, int $r, int $blur, int $dy, float $strength): void {
+  $q = 4;
+  [$sw, $sh] = [intdiv(CW, $q), (int) ceil(CH / $q)];
+  $m = imagecreatetruecolor($sw, $sh);
+  imagealphablending($m, FALSE);
+  imagesavealpha($m, TRUE);
+  [$cx, $cy] = [($x + $w / 2) / $q, ($y + $h / 2 + $dy) / $q];
+  [$hw, $hh, $rr, $bb] = [$w / 2 / $q, $h / 2 / $q, $r / $q, $blur / $q];
+  for ($py = 0; $py < $sh; $py++) {
+    for ($px = 0; $px < $sw; $px++) {
+      $qx = abs($px + 0.5 - $cx) - ($hw - $rr);
+      $qy = abs($py + 0.5 - $cy) - ($hh - $rr);
+      $d = hypot(max($qx, 0), max($qy, 0)) + min(max($qx, $qy), 0) - $rr;
+      $t = max(0, min(1, ($d + $bb * 0.3) / $bb));
+      $k = $strength * (1 - $t * $t * (3 - 2 * $t));
+      imagesetpixel($m, $px, $py, imagecolorallocatealpha($m, 0, 0, 0, 127 - (int) round(127 * $k)));
+    }
+  }
+  $full = imagecreatetruecolor(CW, CH);
+  imagealphablending($full, FALSE);
+  imagesavealpha($full, TRUE);
+  imagecopyresampled($full, $m, 0, 0, 0, 0, CW, CH, $sw, $sh);
+  imagealphablending($bg, TRUE);
+  imagecopy($bg, $full, 0, 0, 0, 0, CW, CH);
+}
+
+/**
+ * The page's own image as the shared 1200x630 version, or NULL when it is too
+ * small to share. $orientation is the stored camera orientation (1 = none).
+ * Transparent sources sit on the colour of their opaque
+ * edge pixels, white when under a quarter of the edge is opaque, the neutral
+ * dark field when the subject itself is light; always seamless.
+ */
+function share_photo(\GdImage $src, int $orientation = 1, bool $chosen = FALSE, array $focal = [0.5, 0.5]): ?array {
+  $src = orient($src, $orientation);
+  $kind = classify(imagesx($src), imagesy($src), $chosen);
+  if ($kind === 'skip') {
+    return NULL;
+  }
+  $plain = NULL;
+  if (has_alpha($src)) {
+    [$edge, , $opaque] = edge_stats($src);
+    $bg = $opaque < 0.25 ? [255, 255, 255] : $edge;
+    $subject = avg_opaque($src);
+    if ($subject !== NULL && rgb2hsl($subject)[2] > 0.85 && rgb2hsl($bg)[2] > 0.85) {
+      $bg = [34, 37, 44];
+    }
+    $flat = imagecreatetruecolor(imagesx($src), imagesy($src));
+    imagefill($flat, 0, 0, col($flat, $bg));
+    imagealphablending($flat, TRUE);
+    imagecopy($flat, $src, 0, 0, 0, 0, imagesx($src), imagesy($src));
+    $src = $flat;
+    $plain = $bg;
+    $kind = 'frame';
+  }
+  if ($kind === 'cover') {
+    return [cover($src, ...$focal), 'cover crop to 1200x630 around ' . ($focal === [0.5, 0.5] ? 'the centre' : 'the focal point') . ($orientation > 1 ? ", orientation $orientation applied" : '')];
+  }
+  [$im, $how] = frame($src, $chosen ? 1.0 : 1.25, $plain);
+  return [$im, $how . ($orientation > 1 ? ", orientation $orientation applied" : '')];
+}
+
+/**
+ * Progressive JPEG q82, then q72, then q60 while over 300 KB (the size some
+ * messaging apps drop). The module owns the encoding (an image style
+ * cannot), so a site's global JPEG quality never pushes a share over it.
+ */
+function save_jpeg(\GdImage $im, string $path): array {
+  imageinterlace($im, TRUE);
+  foreach ([82, 72, 60] as $q) {
+    imagejpeg($im, $path, $q);
+    clearstatcache();
+    if (filesize($path) <= 300 * 1024) {
+      break;
+    }
+  }
+  return [filesize($path), $q];
+}
+
+function save_png(\GdImage $im, string $path, bool $alpha = FALSE): int {
+  imagesavealpha($im, $alpha);
+  imagepng($im, $path, 9, PNG_ALL_FILTERS);
+  clearstatcache();
+  return filesize($path);
+}
+
+/* ================================================================ icons === */
+
+/**
+ * Site icons (front page only in this change). 32 and 192 keep a transparent logo transparent, trimmed and
+ * padded 6%; only the 180 px touch icon is opaque (on the field colour, 14%
+ * padding). An opaque logo fills the square. No logo: the card's monogram
+ * (white tile, letter in the field colour), or no icon when it can't be drawn.
+ */
+function icon(?\GdImage $logo, array $theme, string $siteName, Fonts $f, int $size): ?\GdImage {
+  $s = $size * 4;
+  $opaque = $size === 180;
+  $im = imagecreatetruecolor($s, $s);
+  imagealphablending($im, FALSE);
+  imagesavealpha($im, TRUE);
+  imagefill($im, 0, 0, imagecolorallocatealpha($im, 0, 0, 0, 127));
+  imagealphablending($im, TRUE);
+  if ($logo) {
+    $logo = trim_logo($logo);
+  }
+  if ($logo && !has_alpha($logo)) {
+    $sq = min(imagesx($logo), imagesy($logo));
+    imagecopyresampled($im, $logo, 0, 0, (int) ((imagesx($logo) - $sq) / 2), (int) ((imagesy($logo) - $sq) / 2), $s, $s, $sq, $sq);
+  }
+  elseif ($logo) {
+    if ($opaque) {
+      imagefilledrectangle($im, 0, 0, $s, $s, col($im, $theme['centre'] ?? mix($theme['top'], $theme['bottom'], 0.5)));
+      // As on the card: a single-colour mark in the text colour.
+      if (single_colour($logo)) {
+        $logo = tint($logo, $theme['fg']);
+      }
+    }
+    $pad = (int) round($s * ($opaque ? 0.14 : 0.06));
+    $r = imagesx($logo) / imagesy($logo);
+    [$w, $h] = $r >= 1 ? [$s - 2 * $pad, ($s - 2 * $pad) / $r] : [($s - 2 * $pad) * $r, $s - 2 * $pad];
+    imagecopyresampled($im, $logo, (int) (($s - $w) / 2), (int) (($s - $h) / 2), 0, 0, (int) $w, (int) $h, imagesx($logo), imagesy($logo));
+  }
+  else {
+    $mark = logo_mark(NULL, $s, $theme, $siteName, $f);
+    if (!$mark) {
+      return NULL;
+    }
+    if ($opaque) {
+      imagefilledrectangle($im, 0, 0, $s, $s, col($im, $theme['tile']));
+    }
+    imagecopy($im, $mark['im'], 0, 0, 0, 0, $s, $s);
+  }
+  $out = imagecreatetruecolor($size, $size);
+  imagealphablending($out, FALSE);
+  imagesavealpha($out, TRUE);
+  imagecopyresampled($out, $im, 0, 0, 0, 0, $size, $size, $s, $s);
+  return $out;
+}

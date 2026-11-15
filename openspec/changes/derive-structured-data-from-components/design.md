@@ -61,7 +61,12 @@ mapped as things people buy here; a product suggestion carries the "bought
 here" question. `mode: auto` applies at delivery by reading component ids
 only. `schema.main = "c-<uuid>"` stores the editor's pick when there are
 several candidates; translations inherit it with `schema.type`
-(`from_default`). When the stored uuid is not in the tree being built, the
+(`from_default`). `schema.main` is the key `extend-structured-data-by-id`
+added for a hand-added item's `@id` (`#‹name›`, per translation, never
+inherited); this change lets the same key hold `c-<uuid>`, so a page has one
+answer to "what is it mainly about". The proposer reads a stored
+`schema.main` of either form before suggesting a component. Part ids use
+the `c-` prefix that extend already reserves on `SchemaGraph::MODULE_IDS`. When the stored uuid is not in the tree being built, the
 report carries `main_missing`, the main thing is withheld, and nothing is
 re-suggested silently.
 

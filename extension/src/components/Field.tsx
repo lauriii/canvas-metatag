@@ -18,7 +18,7 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
-import { type Meter, source as sourceOf } from '../model';
+import { AI_SENDS, type Meter, source as sourceOf } from '../model';
 import type { Issue, Scope } from '../types';
 import { Btn, SparkleIcon, reveal } from './ui';
 
@@ -360,6 +360,7 @@ export function IssueFix(props: {
       variant="ghost"
       size={24}
       aria-label={`Suggest a ${props.label}`}
+      aria-description={AI_SENDS}
       onClick={props.onSuggest}
     >
       <SparkleIcon width="12" height="12" />
@@ -401,7 +402,7 @@ export function Field(
   },
 ) {
   const field = useField(props);
-  const { stageVisible } = useApp();
+  const { stageVisible, state } = useApp();
   const issue = useIssue(props.scope, props.path);
   const { meter } = props;
   const guideId = `${field.id}-guide`;
@@ -454,12 +455,18 @@ export function Field(
   } else if (
     field.focused &&
     props.resolved !== undefined &&
+    // Without a node to preview, no value has a result.
+    state.server?.preview &&
     (props.noStage || !stageVisible)
   ) {
     guide = (
       <Guide id={guideId} count={count}>
         →{' '}
-        <span className="seo-guide-resolved" title={props.resolved}>
+        <span
+          className="seo-guide-resolved"
+          title={props.resolved}
+          dir="auto"
+        >
           {props.resolved}
         </span>
       </Guide>

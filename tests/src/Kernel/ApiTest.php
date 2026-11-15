@@ -275,6 +275,7 @@ final class ApiTest extends CanvasKernelTestBase {
         'id' => (string) $page->id(),
         'label' => 'Draft title',
         'url' => 'http://localhost/pricing',
+        'published' => TRUE,
       ],
       'tokens' => [
         'title' => ['label' => 'Page title', 'type' => 'text', 'value' => 'Draft title'],
@@ -473,6 +474,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'id' => (string) $node->id(),
       'label' => 'Hello',
       'url' => 'http://localhost/node/' . $node->id(),
+      'published' => TRUE,
     ], $state['preview']);
     // The tokens every entity has, then one per supported field.
     self::assertSame(
@@ -526,9 +528,29 @@ final class ApiTest extends CanvasKernelTestBase {
     $this->container->get('config.factory')->clearStaticCache();
     $this->container->get('entity_type.manager')->getStorage(ContentTemplate::ENTITY_TYPE_ID)->resetCache();
 
+    // An unpublished node to preview with is named as such.
+    $draft_node = Node::create([
+      'type' => 'article',
+      'title' => 'Draft',
+      'status' => FALSE,
+      'uid' => $this->author->id(),
+    ]);
+    $draft_node->save();
+    $this->setUpCurrentUser(permissions: [
+      ...self::VISITOR,
+      ContentTemplate::ADMIN_PERMISSION,
+      'edit canvas metatag',
+      'bypass node access',
+    ]);
+    $draft_query = '?entity_type=content_template&id=node.article.full&preview=' . $draft_node->id();
+    $unpublished = self::decodeResponse($this->request(Request::create(self::STATE . $draft_query)))['preview'];
+    self::assertSame(['Draft', FALSE], [$unpublished['label'], $unpublished['published']]);
+
     $errors = [
-      '?entity_type=content_template&id=node.article.full' => [400, 'bad_request'],
       $query . '&langcode=en' => [400, 'bad_request'],
+      '?entity_type=content_template&id=node.article.full&langcode=en' => [400, 'bad_request'],
+      '?entity_type=content_template&preview=' . $node->id() => [400, 'bad_request'],
+      '?entity_type=content_template&id=node.article.full&preview[]=1' => [400, 'bad_request'],
       '?entity_type=content_template&id=node.article.full&preview=999' => [404, 'not_found'],
       '?entity_type=content_template&id=node.article.full&preview=' . $note->id() => [404, 'not_found'],
       '?entity_type=content_template&id=node.note.full&preview=' . $note->id() => [404, 'not_found'],
@@ -543,6 +565,55 @@ final class ApiTest extends CanvasKernelTestBase {
     $response = $this->request(Request::create(self::STATE . $query));
     self::assertSame(403, $response->getStatusCode());
     self::assertSame('forbidden', self::decodeResponse($response)['error']['code']);
+  }
+
+  /**
+   * The state of a template without a node to preview: values, no output.
+   */
+  public function testTemplateWithoutNodes(): void {
+    $this->createField('field_byline', 'string', 'Byline');
+    $stored = ['title' => '{title} {sep} News'];
+    $this->createTemplate(TRUE, $stored);
+    ContentTemplate::create([
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'article',
+      'content_entity_type_view_mode' => 'teaser',
+      'component_tree' => [],
+    ])->save();
+    $query = '?entity_type=content_template&id=node.article.full';
+
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, ContentTemplate::ADMIN_PERMISSION, 'edit canvas metatag']);
+    $response = $this->request(Request::create(self::STATE . $query));
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    $state = self::decodeResponse($response);
+    self::assertSame(
+      ['template', 'node.article.full', 'Article', $stored],
+      [$state['target']['scope'], $state['target']['id'], $state['target']['label'], $state['target']['values']],
+    );
+    self::assertNull($state['preview']);
+    self::assertNull($state['resolved']);
+    // The type's vocabulary, without values.
+    self::assertSame(['label' => 'Byline', 'type' => 'text', 'value' => ''], $state['tokens']['field.field_byline']);
+    self::assertSame([''], array_values(array_unique(array_column($state['tokens'], 'value'))));
+
+    // The draft, for who may update the template.
+    $template = ContentTemplate::load('node.article.full');
+    self::assertInstanceOf(ContentTemplate::class, $template);
+    $draft = ['title' => '{title} {sep} Updates'];
+    $this->container->get(AutoSaveManager::class)->saveEntity((clone $template)->setThirdPartySetting('canvas_metatag', 'values', $draft), self::CLIENT);
+    self::assertSame($draft, self::decodeResponse($this->request(Request::create(self::STATE . $query)))['target']['values']);
+
+    // Any other template, or a type without a Full template (Canvas still
+    // serves its route; the dialog then shows Site settings), is not found;
+    // no Canvas access is forbidden.
+    foreach (['node.article.teaser', 'node.page.full'] as $id) {
+      $response = $this->request(Request::create(self::STATE . "?entity_type=content_template&id=$id"));
+      $code = self::decodeResponse($response)['error']['code'];
+      self::assertSame([404, 'not_found'], [$response->getStatusCode(), $code], $id);
+    }
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag']);
+    $response = $this->request(Request::create(self::STATE . $query));
+    self::assertSame([403, 'forbidden'], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
   }
 
   /**
@@ -593,6 +664,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'id' => (string) $newer->id(),
       'label' => 'Newer',
       'url' => 'http://localhost/newer',
+      'published' => TRUE,
     ], $state['preview']);
     self::assertNull($state['target']);
     self::assertSame('Newer', $state['tokens']['title']['value']);
@@ -714,6 +786,34 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame(['ai' => NULL], self::decodeResponse($this->request(Request::create(self::STATE)))['capabilities']);
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag', 'use canvas metatag ai']);
     self::assertSame(['ai' => ['available' => FALSE, 'reason' => 'no_provider']], self::decodeResponse($this->request(Request::create(self::STATE)))['capabilities']);
+  }
+
+  /**
+   * A site value sent back exactly as stored is kept, also when it fails.
+   */
+  public function testSiteKeepsStoredValue(): void {
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, 'administer canvas metatag']);
+    // A configuration import stored a title with an unknown value.
+    $title = '{field.field_x} {sep} {site}';
+    $this->config('canvas_metatag.site')->set('values.title', $title)->save();
+    $state = self::decodeResponse($this->request(Request::create(self::STATE)));
+    self::assertSame($title, $state['site']['values']['title']);
+
+    // Changing only the logo is accepted; the title stays as stored.
+    $logo = $this->createImage('Logo');
+    $identity = ['logo' => $logo->uuid()] + $state['site']['identity'];
+    $response = $this->putSite(['identity' => $identity, 'values' => $state['site']['values']]);
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    self::assertSame($title, self::decodeResponse($response)['site']['values']['title']);
+    self::assertSame($logo->uuid(), $this->config('canvas_metatag.site')->get('identity.logo'));
+    self::assertSame($title, $this->config('canvas_metatag.site')->get('values.title'));
+
+    // Changing the title is validated as usual.
+    $values = ['title' => '{field.field_x} {sep} Example'] + $state['site']['values'];
+    $response = $this->putSite(['identity' => $identity, 'values' => $values]);
+    self::assertSame(422, $response->getStatusCode());
+    self::assertSame(['title'], array_keys(self::decodeResponse($response)['error']['fields']));
+    self::assertSame($title, $this->config('canvas_metatag.site')->get('values.title'));
   }
 
   /**

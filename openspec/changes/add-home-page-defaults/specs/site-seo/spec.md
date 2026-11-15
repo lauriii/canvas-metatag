@@ -3,13 +3,14 @@
 ### Requirement: The identity says who runs the site
 
 The identity MUST hold the kind (organization or person), a name, the title
-separator, a logo, a default social image, up to ten profile addresses, up to
-ten verification codes and up to five alternate names.
+separator, a logo, a default social image, what pages without an image share,
+a colour, up to ten profile addresses, up to ten verification codes and up to
+five alternate names.
 
 #### Scenario: Exporting the identity
 
 - **WHEN** an administrator has set every identity member and the site settings are exported
-- **THEN** the export MUST hold the kind, the name, the separator, the logo, the default image, the profile addresses, the verification codes and the alternate names under `identity`
+- **THEN** the export MUST hold the kind, the name, the separator, the logo, the default image, the sharing choice, the colour, the profile addresses, the verification codes and the alternate names under `identity`
 
 ### Requirement: Without a page in context, site settings preview a published page
 

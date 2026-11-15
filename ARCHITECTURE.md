@@ -175,20 +175,33 @@ substituted value again, so a field value cannot inject a token.
 | Token | Value | Type |
 |---|---|---|
 | `{title}` | the entity label | text |
-| `{description}` | page: Canvas's description field; node: first `text_with_summary` field's summary, else its text cut at 160 | text |
+| `{description}` | page: Canvas's description field; node: the first `text_with_summary` field's summary, else its text cut at 160 | text |
 | `{site}` | identity name, else `system.site:name` | text |
 | `{sep}` | identity separator | text |
 | `{url}` | the entity's own public URL | url |
 | `{author}` | owner's label (`view label` access) | text |
 | `{published}`, `{modified}` | `created`, `changed` as ISO 8601 in the site timezone | datetime |
-| `{image}` | page: its `image` media; node: first image field that resolves | image |
+| `{image}` | page: its `image` media; node: the first image field that resolves | image |
 | `{field.NAME}` | node templates: each configurable field of a supported type, delta 0 | by field type |
 
 The vocabulary of a bundle is `Resolver::tokenTypes()`; write mode refuses an
-unknown token, and an image token in text. Every token value is what an
+unknown token, and an image token in text. Its fields, and so "first" above,
+follow the order of the bundle's `default` form display; fields not on the
+form come last, by machine name. The head carries that form display's cache
+tag (section 13). Every token value is what an
 anonymous visitor may see: field, media, file and label access run for the
 anonymous account (`Resolver::allowed()`), images must be public files.
-Formatted text is reduced to plain text in `Resolver::text()`.
+Formatted text is reduced to plain text in `Resolver::text()`: the content of
+`script`, `style` and `template` elements is removed first (also when the
+element is not closed), then tags. The end of each heading, list item,
+definition, table row and caption, and the start of each list and heading, is
+marked before tags go; after entities are decoded a mark becomes a full stop,
+unless it follows a sentence or clause mark (Latin, CJK in full- and
+half-width forms, Arabic, Urdu or Devanagari; closing quotes and brackets
+after it included) or nothing, so "Made to last", a nested list and a table
+read as sentences, not as one run-on line. The stored value is read, never
+the format's output: filters could render embedded entities for the current
+user into a cached, shared head.
 
 The dialog shows tokens as labelled chips (`{Page title}`); `model.ts`
 converts labels to stored names on commit (`toStored()`), also inside custom
@@ -222,9 +235,16 @@ social_title       = fill(social.title)         -> else {title}
 social_description = fill(social.description)   -> else description
 ```
 
-Each is passed through `Values::plain()`: controls removed, whitespace
-collapsed, trimmed, cut to its limit in code points. The output is plain text;
-the consumer escapes it.
+Each is cut by `Values::cut()`: `Values::plain()` removes controls,
+collapses whitespace, trims and cuts to the limit in code points, never inside
+an extended grapheme cluster (an emoji sequence, a flag, a letter with its
+marks is left out whole; PCRE `\X`, `Intl.Segmenter` in `model.ts`). A cut
+inside a word then backs up to the last space when that space is within the
+last tenth of the limit, and the title's separator check removes a separator
+the cut left at the end. Structured data values, URLs and the site name get
+`plain()` only. A node's `{description}` cut from its text (160 code points,
+at a word) drops a split cluster the same way (`Values::whole()`). The output
+is plain text; the consumer escapes it.
 
 ### Other outputs
 
@@ -287,6 +307,13 @@ Custom nodes can point at ours; they can never replace or extend them.
 | canonical, hreflang alternates | `<link>` via `html_head` (not `html_head_link`, so no Link headers) | `head.link[]` |
 | JSON-LD | one `<script type="application/ld+json">` | `head.script[0]` with `textContent` as an object |
 
+The card hint is `summary_large_image` from an effective image of 600 × 157
+px (`Resolver::LARGE_CARD`), else `summary`; the dialog's link preview draws a
+large card by the same rule (`LARGE_CARD` and `smallCard()` in `model.ts`,
+whose numbers also word the reason in its About this preview tip and, through
+`largeCardNeeds()`, the size Checks ask for), so the card the head asks for
+is the card the editor sees.
+
 Rows with an empty value are omitted; a link whose `href` is not an absolute
 http(s) URL is dropped. The coupled adapter also removes core's canonical and
 shortlink (`entity_view_alter`) and content_translation's hreflang links
@@ -328,7 +355,16 @@ and a hash. The dialog reads, through `host.ts`:
   (`canvas/api/v0/layout-content-template/node.{bundle}.full/{previewId}`),
 - the langcode, from the page's auto-save key `canvas_page:{id}:{langcode}`.
 
-No token, no write: without both, the target scope is read-only.
+No token, no write: without both, the target scope is read-only. Right after
+a load (another page, or another node in a template's preview) the editor has
+not stored the new draft yet: for up to 2 s that state is not shown, the
+fields stay as they were and a change typed meanwhile waits for the token.
+Stored later than that, the change is kept (the footer says it is not stored)
+and goes out once the token is there. A change left in session storage is
+restored or offered only for a writable target; a load that came before the
+token looks at it again once the token is there. Another node in the same
+template's preview keeps the view, its values and any change typed while the
+node loads (phase `refreshing`), instead of the loading placeholder.
 
 ### The write procedure
 
@@ -369,6 +405,15 @@ Details that matter:
   auto-saved entity and converts only the fields in its form. The
   `canvas_metatag` field has no form display, so it is carried forward, and so
   is the template's third-party setting.
+- A value sent back exactly as the draft (or the stored entity) holds it is
+  carried forward although it no longer passes (`ApiController::carry()`):
+  read mode keeps it, and every other field must stay savable. Site saves do
+  the same against the stored site values.
+- A page translation's details (`schema.props`) belong to the type it
+  inherits from the default translation's draft. While that type differs from
+  the published one, `putPage()` writes the translation's details of the
+  published type along, unseen and never echoed, so that taking the type
+  change back loses none of them.
 - A 422 that names new paths is not counted as an attempt: those fields are
   marked refused (the footer says "other changes saved") and the PUT is resent
   with the refused paths at their last confirmed value. A refused field never
@@ -442,6 +487,8 @@ loudly.
 | Layout save starts from the auto-saved entity and converts only form fields (`ApiLayoutController::post()`, `ClientDataToEntityConverter`) | the whole draft transport | an editor save would erase the dialog's value | `PageDraftTest::testWriteThenEditorSave`, `testUnchangedLayoutRoundTripCreatesNoDraft`, `TemplateDraftTest::testWriteThenEditorSaves`, `page.spec.ts` |
 | Publish stores the field / third-party setting and enables the template (`ApiAutoSaveController`) | going live | values would not publish | `PageDraftTest::testPublish`, `TemplateDraftTest::testPublish`, `page.spec.ts`, `template.spec.ts` |
 | A draft of a never-published translation is kept under its own key and added on publish | `ApiController::translation()`, `Resolver::layers()`, install | that translation's SEO cannot be opened | `PageDraftTest::testDraftOfAnUnpublishedTranslation` |
+| Publishing a draft-only translation copies only the fields that differ from the stored default translation (`ApiAutoSaveController::applyAutoSaveTranslationSnapshots()`); its auto-save entry still exists during the save | `CanvasMetatagHooks::pagePresave()` restores a value equal to the default's | a new translation whose value equals the default's is published without it again (once Canvas compares against nothing, the hook finds nothing to do and can go) | `PageDraftTest::testPublishingNewTranslationEqualToDefault` |
+| An entity's translation drafts are published and discarded together, from the default translation's entry (`includeSiblingTranslationAutoSaves()`, `getTranslationGroupAutoSaves()`) | `putPage()` keeping a translation's details of the published type | a translation published alone, while the default's type change is a draft, would keep details the dialog cannot show (no loss) | `PageDraftTest::testTranslationKeepsDetailsOfThePublishedType` |
 | `onCanvasConfigEntitySave()` drops a template draft when the stored template changes | `canvas_metatag_uninstall()` writes drafts back | uninstall loses or keeps template drafts | `InstallTest::testUninstallAndReinstall` |
 | `Entity\ContentTemplate::loadForEntity($entity, 'full')`, `getTargetEntityTypeId()`, `getMode()`, `getTargetBundle()`; config name `canvas.content_template.*.*.*` (schema) | `Resolver::owns()/layers()`, hooks, `ApiController`, config schema | node ownership; failures are caught and logged (head lost, page served) | `ResolverTest::testOwnershipAndLayers`, `CoupledHeadTest::testNodeAndOtherRoutes` |
 | `Entity\Page`: base fields `description`, `image`, `created`, `changed`, owner; route `entity.canvas_page.canonical` | `Resolver::tokens()`, hooks | tokens and the coupled head | `ResolverTest::testTokens`, `CoupledHeadTest::testPage` |
@@ -468,8 +515,11 @@ guessed write.
 | `drupalSettings.canvas.canvasLayoutRequestInProgress`, `canvasLayoutRequestComplete` event | the write may race an editor save (read-back still retries) | `host-contract.spec.ts` "signal idle", `page.spec.ts` rapid edits |
 | Preview iframe `iframe[data-canvas-preview="true"][data-canvas-swap-active="true"]`, same-origin document, `<main>` | Checks and AI lose page facts | `host-contract.spec.ts` "exposes every path" |
 | `canvas:data:subscribe:previewHtml` bridge message (supported API) | facts not refreshed | `host-contract.spec.ts` |
-| Editor routes `/editor/canvas_page/{id}`, `/template/{type}/{bundle}/{mode}/{id}` (mirror `extractEntityParams`) | wrong or no context | `host.test.ts`, `host-contract.spec.ts` |
+| Editor routes `/editor/canvas_page/{id}`, `/template/{type}/{bundle}/{mode}/{id}`, and `/template/node/{bundle}/full` for a type without content (mirror `extractEntityParams`) | wrong or no context | `host.test.ts`, `host-contract.spec.ts` |
 | Dialog frame behavior (named, sized, survives editor navigation until a side-menu click) | layout or lifecycle | `host-contract.spec.ts` "dialog frame" |
+| The frame's nearest scrolling ancestor inside `[role="dialog"]` is the dialog's scroll container; Canvas sizes it and the frame to `calc(100vh - 300px)`; the panel has a `max-height` and a bottom padding (`host.fitFrame()`) | the frame keeps Canvas's height (no worse than before) | `host-contract.spec.ts` "dialog frame", `host.test.ts` |
+| The dialog panel opens a fifth of the window from the top by a `translate()`, leaving `top` free (`host.fitFrame()` moves a dialog opened in a taller window up with `top`) | the dialog stays where it opened; the frame keeps the room below it | `host-contract.spec.ts` "dialog frame" (panel top at 420 px) |
+| Closing the dialog removes the iframe without unmounting the extension's React tree (`host.fitFrame()` undoes itself on the frame's `pagehide`) | none: React's cleanup also undoes it | `host.test.ts` "is undone when the frame goes away" |
 
 ### UPSTREAM(canvas) asks
 
@@ -487,6 +537,14 @@ guessed write.
    `@internal` (Canvas's own `@todo` already points that way).
 5. `@drupal-canvas/headless-next` should map `article:*` and `og:image:*`, and
    render `head.script` (README).
+6. A viewport-aware height and position for the extension dialog: Canvas
+   leaves the frame 300 px less than the window and keeps the dialog where it
+   opened, so a dialog opened at 900 px tall and then made 350 px tall has a
+   92 px frame (48 px of view). It replaces `host.fitFrame()`, which moves the
+   dialog up and gives it a 202 px frame there.
+7. Publishing a translation that exists only as a draft should compare its
+   fields against nothing, not against the default translation. It replaces
+   `CanvasMetatagHooks::pagePresave()`.
 
 ## 12. Headless delivery
 
@@ -546,7 +604,7 @@ account; both page caches stay effective.
 | the content language | context `languages:language_content` | `resolve()` |
 | site settings, with overrides | `config:canvas_metatag.site` | `site()` |
 | site name, front page, timezone | `config:system.site`, `config:system.date` | `tokens()`, `url()` |
-| node field definitions, media type sources | `entity_field_info`, `config:media_type_list` | `tokens()` (non-page bundles) |
+| node field definitions, media type sources, the order of the form | `entity_field_info`, `config:media_type_list`, the bundle's default form display (its list tag while it does not exist: creating it invalidates only that) | `tokens()` (non-page bundles) |
 | the template | its tags; without one the `content_template` list tag | `layers()`; coupled node pages that are not owned also get the list tag (`pageAttachments()`) |
 | a draft (previews only) | the auto-save entry (`canvas__auto_save`) | `layers()`, decorator |
 | media, files, referenced labels | their tags | `mediaImage()`, `usable()`, `label()` |
@@ -575,6 +633,8 @@ key would mix them).
   the editor's auto-save key. `ApiController::translation()` accepts a
   translation that exists only as a Canvas draft (state `published: false`),
   for users with update access.
+- A translation that exists only as a draft is published with its own value,
+  also when it equals the default translation's (`pagePresave()`, section 11).
 - Hreflang lists published translations only, with `x-default`.
 - Site and template patterns and the identity name are config `string`, the
   same in every language (non-goal).
@@ -592,6 +652,15 @@ skip the CSRF check):
 | `PUT site` | `administer canvas metatag` (restricted), CSRF header |
 | `GET media` | either permission; published image media, per-item view access, public files only |
 | `POST ai/suggest` (submodule) | `use canvas metatag ai` and `edit canvas metatag`, CSRF header, flood 30 per 5 minutes per user |
+
+The submodule's prompts are edited in the AI module's Prompt Library, under
+its restricted `manage ai prompts` permission. What a prompt says cannot
+weaken the fence or the answer shape (section 16), and the status report entry
+links to the AI module's own admin pages, which keep their own access. The
+three default prompts cannot be deleted: `AiHooks` forbids `delete` on them,
+and the submodule's route subscriber adds `_entity_access: ai_prompt.delete`
+to the Prompt Library's delete form, which otherwise checks only the
+permission.
 
 - Input: `Values::clean()` in write mode is the gate; bodies over 128 KiB are
   refused. Output: everything is cleaned again in read mode, every token
@@ -611,45 +680,117 @@ skip the CSRF check):
 
 ## 16. The AI submodule
 
-`modules/canvas_metatag_ai` adds suggestions; it stores nothing.
+`modules/canvas_metatag_ai` adds suggestions; it stores nothing of its own
+besides the three prompts it installs.
 
 - `AiHooks` implements `hook_canvas_metatag_capabilities_alter`: users with
   `use canvas metatag ai` get `capabilities.ai = {available, reason}` in the
-  state; others get NULL and learn nothing about the provider.
+  state (`no_provider`, `not_usable`, `no_prompt`, in that order); others get
+  NULL and learn nothing about the provider. It also implements
+  `hook_runtime_requirements`: one entry, "SEO suggestions (Canvas Metatag
+  AI)", OK with the provider and model and a link to the AI settings, or a
+  warning with the reason and a link to the AI settings (also for a default
+  whose provider module is gone), the providers page, the Prompt Library (a
+  prompt by its own label, else its shipped one, and the machine name
+  "default" for one that is gone) or, when a prompt type is gone, the
+  uninstall page. Neither calls the provider's service. The prompt types are
+  `canvas_metatag_<kind>` for each of `Assistant::KINDS`. On every prompt of
+  its three types, `hook_ai_prompt_presave` adds an enforced dependency on the
+  submodule (a prompt saved in the Prompt Library depends on nothing, and
+  would outlive an uninstall and block a reinstall);
+  `hook_ai_prompt_access` keeps the default prompts from being deleted.
 - `AiController::suggest()` checks and caps the request (fields, count 1 to 5,
   hint 200, current values 2000, page text 12000 characters, langcode must be
-  a site language), applies flood control, and maps provider exceptions to
-  stable error codes. Provider messages are logged; prompts, page text and
-  answers never are.
-- `Assistant` uses the default provider for structured chat, else chat. The
-  system prompt holds nothing from the request. The page text goes into the
-  user message between `<page_content>` tags; `inline()` folds compatibility
-  forms and strips any delimiter tag, repeatedly. The AI module's hostname
-  filter is bypassed (it HTML-escapes and breaks JSON); instead answers are
-  checked against the requested shape, braces are removed (no planted tokens),
-  values reduced to plain text, text suggestions with a URL dropped, and
-  schema properties checked with `SchemaGraph::validLiteral()`. A schema value
-  is marked unverified unless the page text contains it (dates never verify).
+  a site language, no mix of search and social fields), applies flood control,
+  and maps exceptions to stable error codes. Each failure after the request
+  check and the flood limit is logged once on `canvas_metatag_ai` with the
+  code, task, prompt kind and exception class, also when it happens before
+  the provider call, which the AI module does not log; refused requests are
+  not logged. The provider's message is not logged: the AI module logs it on
+  its own channel, and it may quote the prompt. Prompts, page text and
+  answers are never logged by this module. The `blocked` message names no
+  next step: the dialog's `aiError()` adds the one that fits (other Refine
+  text, or a site administrator) and offers Try again only where asking again
+  can help.
+- `Assistant` uses the default provider for structured chat, else chat, with
+  the AI module's site-wide request timeout. Prompts: three prompt types and
+  their `<type>__default` prompts in `config/install` (`canvas_metatag_search`,
+  `canvas_metatag_social`, `canvas_metatag_schema`, enforced dependency on the
+  submodule). `Assistant::system()` reads `ai.ai_prompt.<type>__default` from
+  configuration without overrides (an entity load fails once its type is
+  gone; a translation would make the instructions depend on who asks), fills
+  `{language}`, `{count}`, `{types}`, `{properties}`, also spelled
+  `{{ name }}` as the Prompt Library's editor inserts them, with one `strtr()`
+  pass from server values only, does not replace tokens, and appends `FENCE`
+  and `SHAPE`, which a site builder cannot edit. A request whose prompt is
+  missing or blank is `not_configured`; the dialog offers no suggestion while
+  any of the three is.
+  Text requests use the social prompt when every field is a social one
+  (`Assistant::isSocial()`, shared with the mixed-field check), else the
+  search prompt; calls are tagged `canvas_metatag_ai` and
+  `canvas_metatag_ai_<kind>`.
+- The system prompt holds nothing from the request. The page text goes into
+  the user message between `<page_content>` tags; `inline()` folds
+  compatibility forms and strips any delimiter tag, repeatedly.
+- Guardrails: the AI module attaches the site's global guardrail sets to every
+  call. After `chat()` and before anything is decoded, `Assistant::stopped()`
+  sums the scores of every `StopResult`, before and after generation, and
+  compares the sum with the lowest stop threshold of the attached sets, as the
+  AI module's automators do. Reaching it is `blocked`; a stop's message, which
+  replaces the answer, is never decoded or shown. A stop below it lets the
+  answer through.
+- Answer reading, each kept because the alternative was shown to fail: the
+  hostname filter is bypassed with `HostnameFilterDto(fullTrust: TRUE)` (the
+  default re-serializes the answer as HTML: `&amp;`, added closing tags); a
+  plain `json_decode()` runs before the AI module's `PromptJsonDecoder`, which
+  only tries text that starts like `{"` or holds a code fence; the structured
+  output schema is passed as an array (the `StructuredOutputSchema` object
+  makes the AI module 1.5 call its own deprecated method); capability flags
+  are not trusted. Answers are checked against the requested shape, braces are
+  removed (no planted tokens), values reduced to plain text, text suggestions
+  with a URL dropped, and schema properties checked with
+  `SchemaGraph::validLiteral()`. A schema value is marked unverified unless
+  the page text contains it (dates never verify).
 - The dialog shows suggestions for review only; an applied suggestion is saved
   like typed text and validated again on save.
+
+### AI module APIs relied on
+
+No Canvas internal comes from the submodule. These AI module (1.5) APIs do;
+each row names the test that fails when it changes.
+
+| API | Used for | Pinned by |
+|---|---|---|
+| `AiProviderPluginManager::getDefaultProviderForOperationType()`, operation ids `chat_with_structured_response`, `chat` | provider resolution | `AssistantTest::testProviderResolutionOrder` |
+| Config `ai.ai_prompt.<type>__default`, key `prompt`; entity types `ai_prompt_type`, `ai_prompt` | prompts | `ShippedConfigTest`, `AssistantTest::testPrompts`, `PromptsTest` |
+| Route `entity.ai_prompt.delete_form` (parameter `ai_prompt`) | delete guard | `PromptsTest::testDefaultPromptsCannotBeDeleted` |
+| `InputInterface::getAllGuardrailResults()`, `getGuardrailSets()`, `AiGuardrailSetInterface::getStopThreshold()`, `StopResult::getScore()`; `ai.settings:global_guardrails` | blocked | `AssistantTest::testGuardrailStopIsBlocked` |
+| `ChatInput::setChatStructuredJsonSchema(array)` | structured output | `AssistantTest::testNoDeprecations` |
+| `HostnameFilterDto(fullTrust:)`, `ai.prompt_json_decode` | answer reading | `AssistantTest::testSuggestText`, `testJsonDecoderFallback`, `testBareJsonWithSpaces` |
+| `ai.settings:request_timeout` | timeout | `AssistantTest::testSiteTimeoutApplies` |
+| Exception classes `AiSetupFailureException`, `AiAccessDeniedException`, `AiMissingFeatureException`, `AiOperationTypeMissingException`, `AiBrokenOutputException`, `AiUnsafePromptException`, `AiRateLimitException`, `AiQuotaException` | error codes | `AiControllerTest::testErrorCodes` |
+| Routes `ai.settings_form`, `ai.admin_providers`, `entity.ai_prompt.collection`, `system.modules_uninstall` | status report links | `RequirementsTest` |
 
 ## 17. Testing
 
 | Suite | Proves | Run |
 |---|---|---|
 | `tests/src/Unit/ValuesTest`, `SchemaGraphTest` | validation (refused and accepted cases), encoding, cascade, text outputs, separators; registry, ids, withheld nodes, custom JSON-LD, encoder safety; the shared fixtures `tests/fixtures/text-cases.json` and `graphs/*.json` | PHPUnit |
-| `ResolverTest` | ownership, layers, tokens and access, the head, cacheability and drafts, the public base | PHPUnit (kernel) |
-| `PageDraftTest`, `TemplateDraftTest` | the draft transport against real Canvas: editor saves carry our value, the conflict rule, publish, translations (incl. draft-only), refusals, duplicate | PHPUnit (kernel) |
+| `ResolverTest` | ownership, layers, tokens and access, the form's order, the head, cacheability and drafts, the public base | PHPUnit (kernel) |
+| `PageDraftTest`, `TemplateDraftTest` | the draft transport against real Canvas: editor saves carry our value, the conflict rule, publish, translations (incl. draft-only, the details of a published type, a new translation equal to the default), refusals, duplicate | PHPUnit (kernel) |
 | `CoupledHeadTest` | the HTML head an anonymous visitor gets, with both page caches; non-owned routes untouched; a failing build serves core's head | PHPUnit (kernel) |
 | `HeadlessHeadTest` | the content API head, preview drafts, routes left alone, the runtime requirement | PHPUnit (kernel) |
 | `MetatagCoexistenceTest` | Metatag silent where the head is ours, widgets hidden | PHPUnit (kernel) |
-| `ApiTest` | route requirements, state, site, media, writes follow shown values | PHPUnit (kernel) |
+| `ApiTest` | route requirements, state (incl. a template without a node to preview), site (incl. a stored value carried forward), media, writes follow shown values | PHPUnit (kernel) |
+| `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node (headings, list items and table rows as sentences), heads and structured data (a square logo's small card), hidden references published and deleted (coupled and headless), drafts, headless | PHPUnit (kernel) |
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
-| `AiControllerTest`, `AssistantTest` | access, caps, flood, error codes, nothing logged or written; provider resolution, prompts, output cleaning | PHPUnit (kernel, submodule) |
+| `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
+| `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
 | `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks, API client, host adapter parsing | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
-| Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, templates bound to fields, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom | |
-| Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider | |
+| Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates bound to fields, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
+| Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider, an edited prompt, and a site guardrail that blocks | |
+| Playwright `complex` | template scope on the complex fixture: type fields and their values, value menus in windows 350 and 420 px tall, by keyboard and to assistive technology, previews that follow the editor (at the view's top, without a message or a status change), Checks against a long title, an unpublished preview node and its information button (click, hover then click, click elsewhere), a square small card for a square logo, a header whose Checks text gives way to a long type name, a type without content, text direction | |
 
 Commands are in the README ("Development"). Kernel tests use Canvas's
 `phpunit.xml.dist`. The Playwright suite installs a seeded sandbox per spec
@@ -679,6 +820,15 @@ limitations of the implementation:
   public files is treated as missing.
 - Custom JSON-LD is decoded as arrays on output, so an empty object or an
   object with only numeric keys is emitted as a list.
+- A content type's Full template with no content to preview is read-only in
+  the dialog: without a preview node Canvas keeps no draft entry to write
+  under (section 9). It needs a Canvas write path for templates without a
+  preview entity.
+- `host.fitFrame()` follows the editor's window, not a drag of the dialog: a
+  dialog dragged down keeps the height it had, and a resize keeps the drag
+  (the panel's place is measured once, at open). In a window 350 px tall the
+  view below the dialog's header is 158 px: the dialog stays below the
+  editor's top bar.
 - `templateContext()` reads the template's values itself (override-free)
   while `Resolver::layers()` reads them with overrides, so under a config
   override of a template's setting the dialog's values and its preview can
@@ -718,7 +868,9 @@ extension/src/checks.ts           the Checks tab's rules
 extension/src/App.tsx             lifecycle: load, follow the editor,
                                   save timer, flush, session storage
 extension/src/components/         one file per tab and shared fields
-modules/canvas_metatag_ai/        suggestions (prompts in Assistant.php)
+modules/canvas_metatag_ai/        suggestions; prompts in config/install
+                                  (Prompt Library), fixed tail in
+                                  Assistant.php
 tests/fixtures/                   cases shared by PHP and TypeScript
 tests/e2e/host-contract.spec.ts   update first when Canvas changes
 ```

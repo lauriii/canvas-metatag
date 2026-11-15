@@ -25,6 +25,7 @@ use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 // cspell:ignore Tarifs tarifs ville amet Canvasville Preise Accueil
+// cspell:ignore مرحبا عنوان शीर्षक
 /**
  * Tests ownership, layers, tokens, URLs, the head and its cacheability.
  */
@@ -308,7 +309,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     ], $tokens['field.field_hero']);
     $values = array_map(static fn (array $token): string => $token['value'], $tokens);
     $long = trim(str_repeat('Lorem ipsum dolor sit amet. ', 10));
-    // Compared without regard to order: fields come in definition order.
+    // Compared without regard to order: without a form, fields come by name.
     self::assertEquals([
       'title' => 'Hello',
       // The formatted text with a summary: no summary, so its text, cut at a
@@ -333,7 +334,8 @@ final class ResolverTest extends CanvasKernelTestBase {
       'field.field_level' => 'Professional',
       'field.field_teaser' => 'Short & sweet',
       // Blocks are apart, inline markup keeps its words whole.
-      'field.field_notes' => 'One Two three alert(1) H2O in Canvasville Two',
+      // A script's content never displays.
+      'field.field_notes' => 'One Two three. H2O in Canvasville. Two.',
       'field.field_body' => $long,
       'field.field_count' => '42',
       'field.field_price' => '49.90',
@@ -356,9 +358,8 @@ final class ResolverTest extends CanvasKernelTestBase {
       ['width' => 640, 'height' => 480, 'alt' => 'A photo', 'name' => 'A photo'],
       array_intersect_key($tokens['field.field_photo']['image'], ['name' => 1, 'alt' => 1, 'width' => 1, 'height' => 1]),
     );
-    // {image} is the first image in field-definition order.
-    $first = current(array_intersect(array_keys($tokens), ['field.field_hero', 'field.field_photo']));
-    self::assertSame($tokens[$first]['image'], $tokens['image']['image']);
+    // {image} is the first image; without a form, by name.
+    self::assertSame($tokens['field.field_hero']['image'], $tokens['image']['image']);
     self::assertSame('Byline', $tokens['field.field_byline']['label']);
     foreach ([
       'taxonomy_term:' . $topic->id(),
@@ -377,27 +378,116 @@ final class ResolverTest extends CanvasKernelTestBase {
     // The file object is the one the node's field item loads, so it is
     // changed only when it is saved as well.
     $node->set('field_body', ['value' => '<p>Text</p>', 'summary' => 'A <i>short</i> summary.'])->save();
-    if ($first === 'field.field_hero') {
-      $article_hero->setUnpublished()->save();
-    }
-    else {
-      $photo->setFileUri('temporary://photo.png');
-      $photo->save();
-    }
+    $article_hero->setUnpublished()->save();
     $this->forgetAccess();
     $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
     self::assertSame('A short summary.', $tokens['description']['value']);
     self::assertSame('A short summary.', $tokens['field.field_body']['value']);
-    self::assertNull($tokens[$first]['image']);
+    self::assertNull($tokens['field.field_hero']['image']);
+    self::assertSame($tokens['field.field_photo']['image'], $tokens['image']['image']);
     self::assertNotNull($tokens['image']['image']);
-    $article_hero->setUnpublished()->save();
     $photo->setFileUri('temporary://photo.png');
     $photo->save();
     $this->forgetAccess();
     $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
     self::assertNull($tokens['field.field_photo']['image']);
-    self::assertNull($tokens['field.field_hero']['image']);
     self::assertNull($tokens['image']['image']);
+
+    // The content of script, style and template elements never displays.
+    $hidden = '<script>alert(1)</script><style>p{color:red}</style><template><p>Later</p></template>';
+    $node->set('field_body', ['value' => '<p>Ask us</p>' . $hidden, 'summary' => ''])->save();
+    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
+    self::assertSame('Ask us', $tokens['field.field_body']['value']);
+    self::assertSame('Ask us', $tokens['description']['value']);
+    // Also with ">" in a quoted attribute, and a template inside another.
+    $hidden = '<script data-x="a>b">alert(1)</script><template><template>Inner</template>Outer</template>';
+    $node->set('field_body', ['value' => '<p>Ask us</p>' . $hidden . '<p>today</p>', 'summary' => ''])->save();
+    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
+    self::assertSame('Ask us today', $tokens['field.field_body']['value']);
+
+    // A heading, list item, definition, table row or caption ends a
+    // sentence, as does the text before a list; paragraphs are spaced.
+    foreach ([
+      '<h2>Made to last</h2><p>Solid oak.</p><ul><li>Dimmable</li><li>Fabric cable, 3 m.</li></ul>' => 'Made to last. Solid oak. Dimmable. Fabric cable, 3 m.',
+      '<p>One</p><p>Two &amp; <b>three</b></p>' => 'One Two & three',
+      '<h2>Questions?</h2>' => 'Questions?',
+      '<ul><li><a href="/x">Oak.</a></li></ul>' => 'Oak.',
+      '<ul><li><h3>Nested</h3></li></ul><dl><dt>Term</dt><dd>Its meaning</dd></dl>' => 'Nested. Term Its meaning.',
+      '<ul><li>Features<ul><li>Dimmable</li></ul></li></ul>' => 'Features. Dimmable.',
+      '<table><caption>Sizes</caption><tr><th>Height</th><td>45 cm</td></tr><tr><th>Weight</th><td>1.2 kg</td></tr></table>' => 'Sizes. Height 45 cm. Weight 1.2 kg.',
+      // Only a sentence or clause mark ends one: a closing bracket does not.
+      '<h2>Price (USD)</h2><p>From 49</p>' => 'Price (USD). From 49',
+      '<h2>"Made to last."</h2><h2>Oak, ash,</h2>' => '"Made to last." Oak, ash,',
+      "<h2>Marked\x01</h2><p>\x01Text</p>" => 'Marked. Text',
+      // The text before a heading ends too.
+      '<p>Buy now</p><h2>Specs</h2>' => 'Buy now. Specs.',
+      // Marks of other scripts, full-width forms included, spare it.
+      '<h2>見出し：</h2><p>本文</p><h2>見出し。</h2>' => '見出し： 本文. 見出し。',
+      '<h2>مرحبا،</h2><p>x</p><h2>عنوان؟</h2><ul><li>نص،</li></ul>' => 'مرحبا، x. عنوان؟ نص،',
+      '<h2>शीर्षक॥</h2><h2>a؛</h2><h2>b；</h2><h2>c．</h2>' => 'शीर्षक॥ a؛ b； c．',
+      // A custom element is not a list; its words join as written.
+      '<p>Hello <ul-thing>world</ul-thing></p>' => 'Hello world',
+      // Text that is not valid UTF-8 gives nothing, never a mark.
+      "<p>Ask us</p><h2>\xff bad</h2><p>x</p>" => '',
+    ] as $html => $text) {
+      $node->set('field_body', ['value' => $html, 'summary' => ''])->save();
+      $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
+      self::assertSame($text, $tokens['field.field_body']['value'], $html);
+    }
+
+    // The cut {description} never ends inside a character drawn as one.
+    $family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+    foreach ([
+      [str_repeat('a', 157) . $family . ' tail', str_repeat('a', 157)],
+      [str_repeat('a', 159) . "e\u{301} tail", str_repeat('a', 159)],
+    ] as [$body, $description]) {
+      $node->set('field_body', ['value' => "<p>$body</p>", 'summary' => ''])->save();
+      $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
+      self::assertSame($description, $tokens['description']['value']);
+    }
+  }
+
+  /**
+   * The first field of a kind is the first on the type's form.
+   */
+  public function testFormOrder(): void {
+    $resolver = $this->resolver();
+    $handler = ['handler' => 'default:media', 'handler_settings' => ['target_bundles' => ['image' => 'image']]];
+    $this->createField('field_photo', 'entity_reference', 'Photo', ['target_type' => 'media'], $handler);
+    $this->createField('field_avatar', 'entity_reference', 'Avatar', ['target_type' => 'media'], $handler);
+    $this->createField('field_note', 'string', 'Note');
+    $photo = $this->createImage('Photo', ['alt' => 'A photo']);
+    $avatar = $this->createImage('Avatar', ['alt' => 'An avatar']);
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Ada',
+      'field_photo' => $photo->id(),
+      'field_avatar' => $avatar->id(),
+    ]);
+    $node->save();
+    $image = fn (): ?array => $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata())['image']['image'];
+
+    // Without a form, by name; the head waits for a form to be created.
+    self::assertSame($this->imageOf($avatar), $image());
+    $head = fn (): array => $resolver->resolve($this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id()))['cacheability']->getCacheTags();
+    self::assertContains('config:entity_form_display_list', $head());
+    self::assertSame(['field.field_avatar', 'field.field_note', 'field.field_photo'], array_keys(array_filter($resolver->tokenTypes('node', 'article'), static fn (string $name): bool => str_starts_with($name, 'field.'), ARRAY_FILTER_USE_KEY)));
+
+    // The form puts the photo first; a field not on the form comes last.
+    $display = $this->container->get('entity_display.repository')->getFormDisplay('node', 'article')
+      ->setComponent('field_photo', ['weight' => 1])
+      ->setComponent('field_avatar', ['weight' => 2])
+      ->removeComponent('field_note');
+    $display->save();
+    self::assertSame($this->imageOf($photo), $image());
+    self::assertSame(['field.field_photo', 'field.field_avatar', 'field.field_note'], array_keys(array_filter($resolver->tokenTypes('node', 'article'), static fn (string $name): bool => str_starts_with($name, 'field.'), ARRAY_FILTER_USE_KEY)));
+
+    // The head depends on the form.
+    self::assertContains('config:core.entity_form_display.node.article.default', $head());
+
+    // Moving the photo below the avatar changes {image}.
+    $display->setComponent('field_photo', ['weight' => 3])->save();
+    self::assertSame($this->imageOf($avatar), $image());
   }
 
   /**
@@ -531,6 +621,21 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame('override', $resolved['image']['source']);
     // Too small for the large card.
     self::assertSame('summary', $meta['twitter:card']);
+    // The large card needs 600 x 157, as the dialog's link preview does.
+    $cards = [];
+    foreach ([[400, 400], [600, 315], [1200, 630], [1200, 150], [599, 630], [600, 157]] as [$width, $height]) {
+      $image = $this->createImage("Card $width x $height", ['width' => $width, 'height' => $height]);
+      $page = $this->createPage(['canvas_metatag' => Values::encode(['social' => ['image' => $image->uuid()]])]);
+      $cards["$width x $height"] = self::meta($resolver->resolve($page)['head'])['twitter:card'];
+    }
+    self::assertSame([
+      '400 x 400' => 'summary',
+      '600 x 315' => 'summary_large_image',
+      '1200 x 630' => 'summary_large_image',
+      '1200 x 150' => 'summary',
+      '599 x 630' => 'summary',
+      '600 x 157' => 'summary_large_image',
+    ], $cards);
     self::assertArrayNotHasKey('og:image:alt', $meta);
     $graph = self::graph($resolved['head']);
     self::assertSame('http://localhost/love#webpage', $graph['webpage']['@id']);

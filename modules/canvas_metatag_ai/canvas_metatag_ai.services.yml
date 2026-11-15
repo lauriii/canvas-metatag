@@ -6,6 +6,7 @@ services:
     arguments:
       $aiProvider: '@ai.provider'
       $jsonDecoder: '@ai.prompt_json_decode'
+  Drupal\canvas_metatag_ai\Routing\RouteSubscriber: ~
   logger.channel.canvas_metatag_ai:
     parent: logger.channel_base
     arguments: ['canvas_metatag_ai']

@@ -2,7 +2,7 @@ import { InfoCircledIcon } from '@radix-ui/react-icons';
 import { useEffect, useRef } from 'react';
 
 import { useApp } from '../App';
-import { REGISTRY } from '../model';
+import { AI_SENDS, REGISTRY } from '../model';
 import type { Issue, Jump } from '../types';
 import { fixedText } from './Field';
 import { Btn, SparkleIcon } from './ui';
@@ -64,7 +64,8 @@ export function ChecksSheet() {
     );
   };
 
-  const actions = (issue: Issue) => {
+  /** `titleId`: the row's sentence, which describes its Show. */
+  const actions = (issue: Issue, titleId: string) => {
     const { fix, jump } = issue;
     return (
       <>
@@ -100,6 +101,7 @@ export function ChecksSheet() {
           <Btn
             variant="soft"
             aria-label={`Suggest a ${where(jump)}`}
+            aria-description={AI_SENDS}
             onClick={() => goTo(jump, { suggest: true })}
           >
             <SparkleIcon />
@@ -109,7 +111,10 @@ export function ChecksSheet() {
         {jump && (
           <Btn
             variant="ghost"
+            // Named for its field, described by its issue: several issues
+            // can lead to one field.
             aria-label={`Show ${where(jump)}`}
+            aria-describedby={titleId}
             onClick={() => goTo(jump)}
           >
             Show
@@ -127,8 +132,12 @@ export function ChecksSheet() {
         {summary(issues)}
       </h3>
       {target.scope === 'template' && (
-        <p className="seo-meta seo-checks-against">
-          Checked against <em>{server.preview?.label ?? ''}</em>
+        // One line, however long the node's title: whole on hover.
+        <p
+          className="seo-meta seo-checks-against"
+          title={server.preview?.label}
+        >
+          Checked against <em dir="auto">{server.preview?.label ?? ''}</em>
         </p>
       )}
       {counted.length === 0 && info.length === 0 && (
@@ -149,7 +158,7 @@ export function ChecksSheet() {
             >
               <h4 id={`seo-checks-${group.severity}`}>{group.label}</h4>
               <ul>
-                {rows.map((issue) => (
+                {rows.map((issue, index) => (
                   <li key={issue.id} className="seo-check">
                     <span className="seo-check-mark" aria-hidden>
                       {issue.severity === 'info' ? (
@@ -162,11 +171,18 @@ export function ChecksSheet() {
                       )}
                     </span>
                     <div>
-                      <p className="seo-check-title">{issue.message}</p>
+                      <p
+                        className="seo-check-title"
+                        id={`seo-check-${group.severity}-${index}`}
+                      >
+                        {issue.message}
+                      </p>
                       {issue.detail && (
                         <p className="seo-check-detail">{issue.detail}</p>
                       )}
-                      <div className="seo-check-actions">{actions(issue)}</div>
+                      <div className="seo-check-actions">
+                        {actions(issue, `seo-check-${group.severity}-${index}`)}
+                      </div>
                     </div>
                   </li>
                 ))}

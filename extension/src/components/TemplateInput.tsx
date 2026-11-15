@@ -7,18 +7,23 @@ import {
   type MouseEvent,
   type ReactNode,
   type SyntheticEvent,
+  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
   useRef,
   useState,
 } from 'react';
+import { flushSync } from 'react-dom';
 
 import { useApp } from '../App';
 import {
   chipsIn,
+  clip,
   dateText,
+  dirOf,
   displayLabels,
+  inSentence,
   insertChip,
   removeChip,
   seedCaret,
@@ -31,6 +36,15 @@ import {
 } from '../model';
 import type { TokenInfo } from '../types';
 import { BracesIcon, IconBtn, reveal } from './ui';
+
+/** The insert menu's width, as in styles.css. */
+const MENU_WIDTH = 340;
+
+/** The frame height up to which the menu takes the frame, as in styles.css. */
+const SHORT_FRAME = 420;
+
+/** The characters of a value an entry shows, and so its accessible name. */
+const ENTRY_CHARS = 150;
 
 /** A value as the menu and the chip tooltip show it: dates in words. */
 function shown(token: TokenInfo): string {
@@ -77,17 +91,31 @@ export function TemplateInput(props: {
   const { dispatch, state } = useApp();
   const { tokens } = props;
   const labels = displayLabels(tokens);
+  // Without a page or node to fill them in, values are unknown, not empty.
+  const resolvable = !!state.server?.resolved;
   const input = useRef<HTMLTextAreaElement>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const filterField = useRef<HTMLInputElement>(null);
+  const list = useRef<HTMLDivElement | null>(null);
   // An input method composes in the field's own text; it is handed over at the end.
   const composing = useRef(false);
   const [draft, setDraft] = useState<string | null>(null);
   const [menu, setMenu] = useState<{
     brace: boolean;
     side: 'top' | 'bottom';
+    align: 'start' | 'end';
   } | null>(null);
+  // In a short frame the menu hangs from the frame's top edge: no side of
+  // the field has room for two entries. Kept after closing, so the menu
+  // leaves from where it was.
+  const frameTop = useRef<{ getBoundingClientRect(): DOMRect } | null>(null);
+  // Its width there: the column's, so that it covers the header row whole.
+  const [short, setShort] = useState<number | null>(null);
+  // Closed by a resize: no exit animation.
+  const [gone, setGone] = useState(false);
+  // The field the menu fills, by its label: a short frame's menu covers it.
+  const [into, setInto] = useState('');
   const [filter, setFilter] = useState('');
   const [active, setActive] = useState(0);
   const [tip, setTip] = useState<{
@@ -99,7 +127,7 @@ export function TemplateInput(props: {
   const target = state.server?.target;
   const typeLabel = target?.scope === 'template' ? target.label : 'Page';
   const empty = `Empty for this ${
-    target?.scope === 'template' ? target.label.toLowerCase() : 'page'
+    target?.scope === 'template' ? inSentence(target.label) : 'page'
   }`;
 
   const text = draft ?? toDisplay(props.value, tokens);
@@ -119,6 +147,10 @@ export function TemplateInput(props: {
     }
   };
   useLayoutEffect(placeCaret);
+  // Whether the caret is where someone put it. Focus by Tab leaves it at the
+  // start, where a value is rarely meant: one chosen then goes at the end.
+  // A caret anywhere else was put there.
+  const placed = useRef(false);
 
   /**
    * Hands over a new display text. `at`: the caret, in that text. `chosen`:
@@ -157,19 +189,85 @@ export function TemplateInput(props: {
     }
   }, [menu]);
 
+  // A frame resized across the short-frame line leaves the menu where it no
+  // longer fits: it closes, and the field has focus again.
+  useEffect(() => {
+    if (!menu) {
+      return;
+    }
+    const resized = () => {
+      if ((window.innerHeight <= SHORT_FRAME) !== (short !== null)) {
+        if (menu.brace) {
+          setDraft(null);
+        }
+        // Gone at once, with no exit animation drawn where it no longer fits.
+        flushSync(() => {
+          setGone(true);
+          setMenu(null);
+        });
+        input.current?.focus();
+      }
+    };
+    window.addEventListener('resize', resized);
+    return () => window.removeEventListener('resize', resized);
+  }, [menu, short]);
+
   function openMenu(brace: boolean) {
     setFilter('');
     setActive(0);
     // The side is chosen once: filtering never flips the menu over the field.
+    // A field in the right-hand column opens it leftwards, inside the dialog.
     const rect = box.current?.getBoundingClientRect();
     const below = rect ? window.innerHeight - rect.bottom : Infinity;
     const above = rect?.top ?? 0;
-    setMenu({ brace, side: below >= 240 || below >= above ? 'bottom' : 'top' });
+    let width = Math.min(MENU_WIDTH, window.innerWidth - 16);
+    const fits = window.innerHeight > SHORT_FRAME;
+    if (!fits && rect) {
+      // From the column's left edge, also for a field in the right-hand
+      // column, so that the menu never covers the field's own buttons, and
+      // as wide as the column, so that no word of the header shows beside
+      // it. A new object each time, so that Radix measures it again.
+      const column = box.current?.closest('.seo-body');
+      let left = rect.left;
+      if (column) {
+        const style = getComputedStyle(column);
+        left =
+          column.getBoundingClientRect().left + parseFloat(style.paddingLeft);
+        width = Math.min(
+          column.clientWidth -
+            parseFloat(style.paddingLeft) -
+            parseFloat(style.paddingRight),
+          window.innerWidth - 16,
+        );
+      }
+      const edge = DOMRect.fromRect({
+        x: Math.min(left, window.innerWidth - width - 8),
+        y: 8,
+        width: 0,
+        height: 0,
+      });
+      frameTop.current = { getBoundingClientRect: () => edge };
+    }
+    setShort(!fits && rect ? width : null);
+    setGone(false);
+    setInto(input.current?.labels?.[0]?.textContent?.trim() ?? '');
+    setMenu({
+      brace,
+      side: !fits || below >= 240 || below >= above ? 'bottom' : 'top',
+      align:
+        !fits || !rect || rect.left + width <= window.innerWidth - 8
+          ? 'start'
+          : 'end',
+    });
   }
 
   function insert(name: string) {
-    const at = input.current?.selectionStart ?? text.length;
+    const from = input.current?.selectionStart ?? text.length;
+    const at = placed.current || from > 0 ? from : text.length;
+    placed.current = true;
     const out = insertChip(text, chips, at, labels[name], !!menu?.brace);
+    // The field takes the next key at once, not when the menu has gone.
+    input.current?.focus();
     setMenu(null);
     setDraft(null);
     change(out.text, out.caret, true);
@@ -313,6 +411,25 @@ export function TemplateInput(props: {
       }
     }
   };
+  // A list with more below than it shows fades at its end.
+  const cue = () => {
+    const element = list.current;
+    element?.toggleAttribute(
+      'data-more',
+      element.scrollTop + element.clientHeight < element.scrollHeight - 1,
+    );
+  };
+  // The list mounts a render after the menu opens (a portal), and gets its
+  // height when the menu is placed: watched from when it is there.
+  const watch = useRef<ResizeObserver | null>(null);
+  const listRef = useCallback((element: HTMLDivElement | null) => {
+    list.current = element;
+    watch.current?.disconnect();
+    watch.current = element ? new ResizeObserver(cue) : null;
+    watch.current?.observe(element!);
+  }, []);
+  useEffect(cue, [filter]);
+
   // The active row stays in sight as the arrows move.
   useEffect(() => {
     if (menu && found[active]) {
@@ -331,7 +448,9 @@ export function TemplateInput(props: {
           key={chip.start}
           className="seo-chip"
           data-name={chip.name}
-          data-empty={tokens[chip.name].value.trim() === '' || undefined}
+          data-empty={
+            (resolvable && tokens[chip.name].value.trim() === '') || undefined
+          }
         >
           <span className="seo-brace">{'{'}</span>
           {chip.label}
@@ -344,7 +463,49 @@ export function TemplateInput(props: {
     return pieces;
   };
 
+  // At rest without a value of its own: what the field inherits, as its
+  // pattern's values or as text. With nothing to fill in, where it comes from.
+  const restPattern =
+    props.pattern &&
+    tokensIn(props.pattern).length > 0 &&
+    (props.inherited || !resolvable)
+      ? toDisplay(props.pattern, tokens)
+      : null;
+  const rest =
+    text !== ''
+      ? ''
+      : (restPattern ??
+        (props.inherited ||
+          (!resolvable && props.inheritedFrom
+            ? `Same as ${props.inheritedFrom}`
+            : '')));
+
+  // What the field inherits, in words, for those who cannot see it painted:
+  // "Inherited from the template: Page title, Separator, News."
+  const spoken =
+    restPattern !== null
+      ? restPattern
+          .split(/\{([^{}]+)\}/)
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(', ')
+      : null;
+  const description =
+    text !== ''
+      ? chips.length > 0
+        ? 'Values in braces are filled in automatically.'
+        : undefined
+      : spoken
+        ? `${props.inheritedFrom ? `Inherited from ${props.inheritedFrom}` : 'Inherits'}: ${spoken}.`
+        : rest && rest !== props.inherited
+          ? `${rest}.`
+          : props.inheritedFrom
+            ? `Inherited from ${props.inheritedFrom}.`
+            : undefined;
+
   const tipToken = tip && tokens[tip.name];
+  // The menu may cover the field (a short frame), so its filter names it.
+  const filterName = into ? `Insert into ${into}` : 'Insert a value';
   const insertable = props.insert !== false && !props.disabled;
   const trail = (insertable ? 1 : 0) + (props.trailing ? 1 : 0);
 
@@ -374,14 +535,22 @@ export function TemplateInput(props: {
           onMouseMove={onMouseMove}
           onMouseLeave={() => setTip(null)}
         >
-          {/* The menu opens against the whole box. */}
-          <Popover.Anchor className="seo-template-anchor" />
-          <div className="seo-template-mirror" ref={mirror} aria-hidden>
-            {text === '' && props.inherited ? (
-              <span className="seo-inherited" lang={props.lang}>
-                {props.pattern && tokensIn(props.pattern).length
-                  ? paint(toDisplay(props.pattern, tokens))
-                  : props.inherited}
+          {/* The menu opens against the whole box, or the frame's top. */}
+          <Popover.Anchor
+            className="seo-template-anchor"
+            virtualRef={short !== null ? frameTop : undefined}
+          />
+          {/* The direction of the text in the field, as the field has it;
+              empty, the direction of what it inherits. */}
+          <div
+            className="seo-template-mirror"
+            ref={mirror}
+            dir={text === '' ? (rest ? dirOf(rest) : undefined) : 'auto'}
+            aria-hidden
+          >
+            {rest ? (
+              <span className="seo-inherited" lang={props.lang} dir="auto">
+                {restPattern !== null ? paint(restPattern) : rest}
               </span>
             ) : (
               paint(text)
@@ -394,6 +563,7 @@ export function TemplateInput(props: {
             id={props.id}
             rows={1}
             lang={props.lang}
+            dir={text === '' && rest ? dirOf(rest) : 'auto'}
             spellCheck
             value={text}
             placeholder={props.inherited}
@@ -401,13 +571,7 @@ export function TemplateInput(props: {
             aria-required={props.required || undefined}
             aria-invalid={props.invalid || undefined}
             aria-describedby={props.describedBy}
-            aria-description={
-              text === '' && props.inheritedFrom
-                ? `Inherited from ${props.inheritedFrom}.`
-                : chips.length > 0
-                  ? 'Values in braces are filled in automatically.'
-                  : undefined
-            }
+            aria-description={description}
             onChange={(event) => {
               const next = event.target.value;
               if (composing.current) {
@@ -434,10 +598,27 @@ export function TemplateInput(props: {
               setDraft(null);
               change(event.currentTarget.value);
             }}
-            onKeyDown={onKeyDown}
+            onKeyDown={(event) => {
+              if (
+                event.key.length === 1 ||
+                /^(Arrow|Home|End|Page|Backspace|Delete|Enter)/.test(event.key)
+              ) {
+                placed.current = true;
+              }
+              onKeyDown(event);
+            }}
+            onPointerUp={() => {
+              placed.current = true;
+            }}
             onSelect={onSelect}
             onPaste={onPaste}
-            onFocus={placeCaret}
+            onFocus={(event) => {
+              // Back from the menu, the caret is still the one placed.
+              if (!(event.relatedTarget as Element | null)?.closest('.seo-menu')) {
+                placed.current = false;
+              }
+              placeCaret();
+            }}
             onBlur={(event) => props.onBlur?.(event)}
           />
           {trail > 0 && (
@@ -474,24 +655,40 @@ export function TemplateInput(props: {
         </div>
         <Popover.Content
           className="seo-menu"
-          aria-label="Insert a value"
-          align="start"
+          data-gone={gone || undefined}
+          aria-label={into ? `Insert a value into ${into}` : 'Insert a value'}
+          align={menu?.align ?? 'start'}
           side={menu?.side ?? 'bottom'}
           avoidCollisions={false}
-          sideOffset={6}
+          sideOffset={short !== null ? 0 : 6}
           collisionPadding={8}
-          onCloseAutoFocus={(event) => {
-            // Back to the field, with its caret where it was.
-            event.preventDefault();
+          style={short !== null ? { width: short } : undefined}
+          // Escape, too, hands the next key to the field at once, at the
+          // end while its caret was never placed (as a value would go).
+          onEscapeKeyDown={() => {
+            if (!placed.current) {
+              caret.current = text.length;
+            }
             input.current?.focus();
+          }}
+          onCloseAutoFocus={(event) => {
+            // Back to the field, with its caret where it was, unless focus
+            // has already moved on (a choice or Escape gave it to the field
+            // at once; a Tab or a click may have taken it since).
+            event.preventDefault();
+            const active = document.activeElement;
+            if (!active || active === document.body || active.closest('.seo-menu')) {
+              input.current?.focus();
+            }
           }}
         >
           <div className="seo-menu-filter">
             <MagnifyingGlassIcon aria-hidden />
             <input
               ref={filterField}
-              placeholder="Filter values"
-              aria-label="Filter values"
+              placeholder={filterName}
+              dir="auto"
+              aria-label={filterName}
               aria-controls={menuId}
               aria-activedescendant={
                 found[active] ? `${menuId}-${found[active]}` : undefined
@@ -506,20 +703,19 @@ export function TemplateInput(props: {
           </div>
           <div
             className="seo-menu-list"
+            ref={listRef}
             role="menu"
             id={menuId}
             aria-label="Values"
+            onScroll={cue}
           >
-            {groups.map((group) => (
+            {groups.map((group, index) => (
               <div
                 key={group.label}
                 role="group"
-                aria-labelledby={`${menuId}-g-${group.label}`}
+                aria-labelledby={`${menuId}-g-${index}`}
               >
-                <div
-                  className="seo-menu-group"
-                  id={`${menuId}-g-${group.label}`}
-                >
+                <div className="seo-menu-group" id={`${menuId}-g-${index}`}>
                   {group.label}
                 </div>
                 {group.names.map((name) => {
@@ -532,12 +728,31 @@ export function TemplateInput(props: {
                       tabIndex={-1}
                       className="seo-menu-item"
                       data-active={found[active] === name || undefined}
-                      onMouseEnter={() => setActive(found.indexOf(name))}
-                      onClick={() => insert(name)}
+                      // A pointer that moves picks; a menu that opens under a
+                      // still pointer keeps its first entry, and the second
+                      // click of a double-click on the insert button inserts
+                      // nothing.
+                      onMouseMove={() => {
+                        const index = found.indexOf(name);
+                        if (index !== active) {
+                          setActive(index);
+                        }
+                      }}
+                      // The filter keeps focus, and with it the keys.
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={(event) => {
+                        if (event.detail <= 1) {
+                          insert(name);
+                        }
+                      }}
                     >
                       <span>{labels[name]}</span>
-                      <span data-empty={!value || undefined}>
-                        {value || empty}
+                      <span
+                        data-empty={!value || undefined}
+                        dir={value ? 'auto' : undefined}
+                        title={value || undefined}
+                      >
+                        {value ? clip(value, ENTRY_CHARS) : empty}
                       </span>
                     </div>
                   );

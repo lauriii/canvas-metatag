@@ -12,8 +12,9 @@ final class AiException extends \RuntimeException {
   /**
    * Constructs the exception.
    *
-   * @param 'not_configured'|'invalid_response' $reason
-   *   Why: no default provider is set, or the answer could not be used.
+   * @param 'not_configured'|'invalid_response'|'blocked' $reason
+   *   Why: no default provider or prompt is set, the answer could not be
+   *   used, or the site's guardrails stopped the call.
    */
   // phpcs:ignore Generic.CodeAnalysis.UselessOverridingMethod.Found -- It declares the public property.
   public function __construct(public readonly string $reason) {

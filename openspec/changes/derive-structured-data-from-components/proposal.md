@@ -69,7 +69,9 @@ the reader's tests and budget from `read-page-components`.
 ## Depends on / followed by
 
 - **Depends on** `rethink-structured-data` (kinds, Service, billing, verdicts,
-  report) and `read-page-components` (the reader and its gates).
+  report), `read-page-components` (the reader and its gates) and
+  `extend-structured-data-by-id` (the `schema.main` key and the module id
+  list with its `c-` prefix).
 - **Followed by** `add-structured-data-diff-and-overview`.
 
 ## Capabilities

@@ -27,8 +27,8 @@ See proposal.md for why. The state this design starts from:
   `canvas_set_homepage`, and flips `configuration.homepagePath` in its editor
   store without a round trip.
 
-Sources used below (fetched 2026-11-13; verbatim quotes and URLs are kept with
-the research notes outside the repository): search engine documentation on
+Sources used below (fetched 2026-11-13; the rules and short verbatim quotes
+behind each decision are in reference.md): search engine documentation on
 site names, title links, snippets, the robots meta tag, site icons,
 localized versions, pagination, duplicate URLs, site verification, and the
 organization, local business, profile page, return policy and shipping policy
@@ -224,14 +224,31 @@ into two depths with one `@id`:
 
 The page is derived, never a setting.
 
-### D10. Title and description: no home rules
+### D10. Title, shared title, image and description of a vaguely named front page
 
-The home page inherits the site's title ending (`link-values-to-fields`, which
-lands before this change) like every page. A brand-first
-title at home is not forced: the title-link guidance allows the site name at
-the start or end. There is no slogan or site-wide description fallback (README
-non-goal kept): a tagline is not a description, and a silent fallback hides the
-gap. The Checks copy asks for a description of the whole site.
+Replaced on 2026-11-14 (product decision 12; the first version said "no home
+rules"). A front page named "Home" shared as "Home" in every chat bubble, and
+the title-link guidance names "Home" as a vague title to avoid.
+
+- **Rule:** when the owned front page's main title part would be its name
+  (no title of its own) and that name is empty, the Site name, an alternate
+  name, or a vague word of the translation's language (the D7 word list), the
+  main part is the Site name and the ending is Drupal's slogan when set, else
+  there is no ending ("Humanify Studio", or "Humanify Studio | Human expertise
+  for AI-made work"). `og:title`, when no social title is set, is the same
+  text. A real name ("Industrial pumps for breweries") is kept as typed and
+  takes the site's ending like every page.
+- **Image:** when the chain of `strengthen-zero-config-defaults` would make a
+  card for such a front page, it makes the site card instead (logo, Site name,
+  Drupal's slogan as its line when set).
+- **Description:** nothing here. The front page's fallback to the identity
+  description, and that description as the site card's line when there is no
+  slogan, moved on 2026-11-14 to `describe-the-publisher`, which adds the
+  identity description and runs after this change (it used to run before,
+  and this change waited for it). The slogan is never a description: a
+  tagline is not a description. No other page gets a site-wide description.
+- The "Say what the site offers" check keeps asking for a real name; its
+  detail says what the page shares today.
 
 ### D11. Site kinds: variants, not rules
 

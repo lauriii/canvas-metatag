@@ -93,11 +93,14 @@ test('an untouched title is inherited; typing keeps the site suffix; reset retur
   await page.keyboard.type(' by {');
   await expect(frame.getByRole('menu')).toBeVisible();
   // The menu's filter takes the keys that follow once it has focus.
-  await expect(frame.getByRole('textbox', { name: 'Filter values' })).toBeFocused();
+  await expect(frame.getByRole('textbox', { name: `Insert into ${UI.field.title}` })).toBeFocused();
+  // A choice hands the next keys to the field at once, after the value.
   await page.keyboard.type('Page t');
   await page.keyboard.press('Enter');
-  await expect(title).toHaveValue('Pricing plans by {Page title} {Separator} {Site name}');
-  await expect(preview).toContainText('Pricing plans by Pricing | Example');
+  await page.keyboard.type(' AFTER');
+  await expect(title).toHaveValue('Pricing plans by {Page title} AFTER {Separator} {Site name}');
+  await expect(preview).toContainText('Pricing plans by Pricing AFTER | Example');
+  await expect.poll(() => stored(page, pricing.id)).toContain('{title} AFTER');
 
   // Reset removes the override, and with it the draft.
   await button(frame, `Reset ${UI.field.title}`).click();
@@ -174,6 +177,101 @@ test("the description is Canvas's own field, handed over once when the field is 
   expect(saves.length).toBeLessThanOrEqual(2);
   expect(saves.filter((code) => code !== 200)).toEqual([]);
   await expect(description).toHaveValue('Plans that grow with your team.');
+
+  // Half a character pasted (a lone surrogate, which Canvas refuses as JSON)
+  // becomes the replacement character before Canvas gets it: its save works.
+  saves.length = 0;
+  await description.focus();
+  await description.evaluate((element) => {
+    const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    set.call(element, 'Plans that grow \uD83C');
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(description).toHaveValue('Plans that grow \uFFFD');
+  await description.blur();
+  await expect(page.locator(canvasDescription)).toHaveValue('Plans that grow \uFFFD');
+  await expect.poll(() => saves.length, { timeout: 30_000 }).toBeGreaterThan(0);
+  await page.waitForTimeout(2_000);
+  expect(saves.filter((code) => code !== 200)).toEqual([]);
+  await expect(page.getByText('An unexpected error has occurred')).toHaveCount(0);
+  // Back to what the tests that follow expect.
+  await description.fill('Plans that grow with your team.');
+  await description.blur();
+  await expect(page.locator(canvasDescription)).toHaveValue('Plans that grow with your team.');
+  await expect.poll(() => saves.length, { timeout: 30_000 }).toBeGreaterThan(1);
+});
+
+test('the action bar keeps the end of the view, or the field in use, in sight', async ({ page }) => {
+  const frame = await open(page);
+  await page.setViewportSize({ width: 1440, height: 500 });
+  await tab(frame, UI.tab.social).click();
+  const view = frame.locator('.seo-frame > .seo-body');
+  const bar = frame.locator('.seo-bar');
+  const socialTitle = textbox(frame, UI.field.socialTitle);
+  const socialDescription = textbox(frame, UI.field.socialDescription);
+  await socialTitle.fill('{Page title} shared');
+  await socialDescription.fill('{Page title} words');
+  await expect(status(frame)).toContainText(UI.footer.draftPage, { timeout: 30_000 });
+  await expect(bar).toHaveCount(0);
+  expect(await view.evaluate((element) => element.scrollHeight > element.clientHeight + 40)).toBe(true);
+  /**
+   * Removes the field's value by keyboard, without scrolling the view to it:
+   * "Removed Page title" comes in the bar.
+   */
+  const removeValue = async (field: Locator) => {
+    await field.evaluate((element: HTMLTextAreaElement) => {
+      element.focus({ preventScroll: true });
+      const after = element.value.indexOf('}') + 1;
+      element.setSelectionRange(after, after);
+    });
+    await page.keyboard.press('Backspace');
+    await expect(bar).toBeVisible({ timeout: 30_000 });
+  };
+
+  // At the end of the view when the bar comes: still at its end, above it.
+  await view.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await removeValue(socialDescription);
+  await expect(socialDescription).toHaveValue(/^ ?words$/);
+  await expect
+    .poll(() => view.evaluate((element) => element.scrollTop >= element.scrollHeight - element.clientHeight - 2))
+    .toBe(true);
+  expect(await view.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await frame.locator('body').screenshot({ path: test.info().outputPath('bar-at-end.png') });
+  await expect(bar).toHaveCount(0, { timeout: 30_000 });
+
+  // Mid-view, the field in use at the view's lower edge: the field and its
+  // message stay in sight above the bar.
+  const field = frame.locator('.seo-field[data-path="social.title"]');
+  await field.evaluate((element) => {
+    const scroller = element.closest('.seo-body')!;
+    scroller.scrollTop += element.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom + 4;
+  });
+  expect(await view.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(
+    await view.evaluate((element) => element.scrollTop < element.scrollHeight - element.clientHeight - 2),
+  ).toBe(true);
+  await removeValue(socialTitle);
+  await expect(socialTitle).toHaveValue(/^ ?shared$/);
+  await expect
+    .poll(() =>
+      field.evaluate((element) => {
+        const box = element.getBoundingClientRect();
+        const view = element.closest('.seo-body')!.getBoundingClientRect();
+        const top = element.ownerDocument.querySelector('.seo-bar')!.getBoundingClientRect().top;
+        return box.top >= view.top - 0.5 && box.bottom <= top + 0.5;
+      }),
+    )
+    .toBe(true);
+  await frame.locator('body').screenshot({ path: test.info().outputPath('bar-mid-view.png') });
+  // Nothing of this test is left for the next ones.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await button(frame, `Reset ${UI.field.socialTitle}`).last().click();
+  await button(frame, `Reset ${UI.field.socialDescription}`).last().click();
+  await expect
+    .poll(async () => (await seoState(page, pageQuery(pricing.id))).target?.values.social, { timeout: 30_000 })
+    .toBeUndefined();
 });
 
 test('Checks lists what is wrong, leads to the field and fixes what is certain', async ({ page }) => {
@@ -197,7 +295,14 @@ test('Checks lists what is wrong, leads to the field and fixes what is certain',
   await expect(panel).not.toContainText(/score|\d\s?%|\/\s?100/i);
 
   // "Show" closes the sheet, opens the tab and puts the caret in the field.
-  await button(frame, UI.checks.goToTitle).first().click();
+  // Two rows lead to the title: their Shows share a name, not a description.
+  expect(await button(frame, UI.checks.goToTitle).count()).toBeGreaterThan(1);
+  const showTitle = panel
+    .getByRole('listitem')
+    .filter({ hasText: UI.checks.titleLong })
+    .getByRole('button', { name: UI.checks.goToTitle, exact: true });
+  await expect(showTitle).toHaveAccessibleDescription(UI.checks.titleLong);
+  await showTitle.click();
   await expect(panel).toHaveCount(0);
   await expect(tab(frame, UI.tab.search)).toHaveAttribute('aria-selected', 'true');
   await expect(textbox(frame, UI.field.title)).toBeFocused();
@@ -271,6 +376,8 @@ test('closing mid-edit, a discard in Canvas and a page switch never lose or misp
   await test.step('the editor moves to another page: the change goes to the page it was made on', async () => {
     await textbox(frame, UI.field.title).fill('Before the switch {Separator} {Site name}');
     await switchPage(page, PAGES.about.id);
+    // Another page is a new target, and the dialog says so.
+    await expect(status(frame)).toContainText(`Now editing ${PAGES.about.title}`);
     await expect(frame.getByTestId(TEST_ID.search)).toContainText(PAGES.about.title);
     await expect
       .poll(() => draftTitle(page, pricing.id), { timeout: 30_000 })
@@ -279,6 +386,27 @@ test('closing mid-edit, a discard in Canvas and a page switch never lose or misp
     const about = await seoState(page, pageQuery(PAGES.about.id));
     expect(about.target?.has_draft).toBe(false);
     expect(about.target?.values).toEqual({});
+  });
+
+  await test.step('there and back: the view stays at its top, and a description typed at once reaches the page', async () => {
+    await tab(frame, UI.tab.social).click();
+    const view = frame.locator('.seo-frame > .seo-body');
+    expect(await view.evaluate((element) => element.scrollTop)).toBe(0);
+    await switchPage(page, pricing.id);
+    // "Now editing" brings the bar: the view makes room, and stays at its top.
+    await expect(status(frame)).toContainText(`Now editing ${pricing.title}`);
+    await page.waitForTimeout(500);
+    expect(await view.evaluate((element) => element.scrollTop)).toBe(0);
+    await switchPage(page, PAGES.about.id);
+    await expect(status(frame)).toContainText(`Now editing ${PAGES.about.title}`);
+    // While Canvas stores the new page's draft the field is writable, and
+    // what is typed there is handed over, not dropped.
+    await tab(frame, UI.tab.search).click();
+    const description = textbox(frame, UI.field.description);
+    await description.fill('Typed right after the switch.');
+    await description.blur();
+    await expect(page.locator(canvasDescription)).toHaveValue('Typed right after the switch.');
+    await expect(description).toHaveValue('Typed right after the switch.');
   });
 });
 
@@ -313,8 +441,10 @@ test('publishing puts the override into the page head, once, and Output shows th
   expect(head.jsonLd).toHaveLength(1);
   expect(graphNode(head.jsonLd[0], '#webpage')).toMatchObject({ '@type': 'WebPage', url: canonical });
 
-  // The dialog's Output is that head.
+  // The dialog's Output is that head. Nothing is pending: no marker.
   await button(frame, UI.action.output).click();
+  await expect(sheet(frame, 'Output').getByText(UI.output.updating)).toHaveCount(0);
+  await expect(frame.getByTestId(TEST_ID.output)).not.toHaveAttribute('aria-busy');
   expect(await outputRows(frame)).toMatchObject({
     title: head.titles[0],
     description: pricing.description,
@@ -325,4 +455,41 @@ test('publishing puts the override into the page head, once, and Output shows th
     'og:image': head.meta['og:image'][0],
     'twitter:card': 'summary_large_image',
   });
+
+  // Opened right after an edit, Output says it is catching up, then shows
+  // the new title. The write is held back so that the words get to show:
+  // they come only after 400 ms, so that a quick save stays quiet, into a
+  // status region that was there, empty, before them, so that they are
+  // announced.
+  await button(frame, UI.action.back).click();
+  await page.route('**/canvas-metatag/api/draft/**', async (route) => {
+    await new Promise((done) => setTimeout(done, 1500));
+    await route.continue();
+  });
+  await textbox(frame, UI.field.title).fill('Plans and prices {Separator} {Site name}');
+  await frame.locator('body').evaluate((body, words) => {
+    const seen: { region?: number; words?: number } = {};
+    Object.assign(window, { seen });
+    new MutationObserver(() => {
+      const region = body.querySelector('[role="status"].seo-updating-live');
+      if (region) {
+        seen.region ??= performance.now();
+        if (region.textContent?.includes(words)) {
+          seen.words ??= performance.now();
+        }
+      }
+    }).observe(body, { childList: true, subtree: true, characterData: true });
+  }, UI.output.updating);
+  await button(frame, UI.action.output).click();
+  const output = sheet(frame, 'Output');
+  const rows = frame.getByTestId(TEST_ID.output);
+  await expect(output.getByRole('status').filter({ hasText: UI.output.updating })).toBeVisible();
+  const seen = await frame.locator('body').evaluate(() => (window as unknown as { seen: { region: number; words: number } }).seen);
+  // The timer starts with the region; the observer notes it a moment later.
+  expect(seen.words - seen.region).toBeGreaterThanOrEqual(350);
+  await expect(rows).toHaveAttribute('aria-busy', 'true');
+  await expect(output.getByText(UI.output.updating)).toHaveCount(0, { timeout: 30_000 });
+  await expect(rows).not.toHaveAttribute('aria-busy');
+  expect((await outputRows(frame)).title).toBe('Plans and prices | Example');
+  await page.unrouteAll();
 });

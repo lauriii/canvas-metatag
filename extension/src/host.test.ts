@@ -134,12 +134,30 @@ describe('parseRoute()', () => {
         previewId: '11',
       },
     ],
-    // No preview node: nothing to resolve against.
-    ['/template/node/article/full', { kind: 'none', template: true }],
+    // A type with no content to preview: the template, without a node.
+    [
+      '/template/node/article/full',
+      {
+        kind: 'template',
+        id: 'node.article.full',
+        bundle: 'article',
+        previewId: null,
+      },
+    ],
+    [
+      '/template/node/article/full/',
+      {
+        kind: 'template',
+        id: 'node.article.full',
+        bundle: 'article',
+        previewId: null,
+      },
+    ],
     [
       '/template/node/article/full/component/1c2f3d4e',
       { kind: 'none', template: true },
     ],
+    ['/template/node/article/teaser', { kind: 'none', template: true }],
     // Another view mode, another entity type.
     ['/template/node/article/teaser/11', { kind: 'none', template: true }],
     ['/template/taxonomy_term/tags/full/3', { kind: 'none', template: true }],
@@ -278,6 +296,15 @@ describe('editorToken()', () => {
       },
       langcode: null,
     });
+    // A template without a node to preview has no entry to write under.
+    expect(
+      host.editorToken({
+        kind: 'template',
+        id: 'node.article.full',
+        bundle: 'article',
+        previewId: null,
+      }),
+    ).toBeNull();
   });
 
   it('passes the entry through untouched', () => {
@@ -687,5 +714,151 @@ describe('onPreviewChange()', () => {
     expect(fake.posted.at(-1)).toEqual({
       type: 'canvas:data:unsubscribe:previewHtml',
     });
+  });
+});
+
+describe('fitFrame()', () => {
+  /**
+   * The dialog as Canvas builds it: the frame in a wrapper in the scroll
+   * container in the panel, 45 px below the panel's top. Canvas opened the
+   * panel `opened` px from the top of the window (a fifth of the window it
+   * opened in).
+   */
+  function dialog(innerHeight: number, opened = 180) {
+    const panel = {
+      style: { top: '' },
+      // Canvas's drag: a translate() the rect includes.
+      drag: 0,
+      getBoundingClientRect: () => ({
+        top: opened + panel.drag + (parseFloat(panel.style.top) || 0),
+      }),
+    };
+    const box = { style: { maxHeight: '' }, parentElement: panel };
+    const wrapper = { style: {}, parentElement: box };
+    const top = Object.assign(new EventTarget(), {
+      innerHeight,
+      getComputedStyle: (element: unknown) => ({
+        overflowY: element === box ? 'auto' : 'visible',
+        maxHeight: element === panel ? `${top.innerHeight * 0.85}px` : 'none',
+        paddingBottom: element === panel ? '16px' : '0px',
+        top: element === panel ? panel.style.top || '0px' : 'auto',
+      }),
+    });
+    const frame = {
+      isConnected: true,
+      setAttribute: vi.fn(),
+      style: { height: 'calc(100vh - 300px)' },
+      parentElement: wrapper,
+      closest: (): unknown => panel,
+      // Canvas's height for the window, unless one was set here.
+      getBoundingClientRect: () => ({
+        top: panel.getBoundingClientRect().top + 45,
+        height: frame.style.height.endsWith('px')
+          ? parseFloat(frame.style.height)
+          : top.innerHeight - 300,
+      }),
+    };
+    const win = Object.assign(new EventTarget(), {
+      parent: top,
+      frameElement: frame,
+    }) as unknown as Window;
+    return { win, top, frame, box, panel };
+  }
+
+  it('grows a short window to the space below the heading, and follows the window', () => {
+    // Opened in this window: Canvas's own place stays.
+    const { win, top, frame, box, panel } = dialog(350, 70);
+    const undo = createHost(win).fitFrame();
+    // 350 less the 115 above the frame, the dialog's 16 px padding and 16
+    // px of window below it.
+    expect(frame.style.height).toBe('203px');
+    expect(box.style.maxHeight).toBe('203px');
+    expect(panel.style.top).toBe('');
+    top.innerHeight = 420;
+    top.dispatchEvent(new Event('resize'));
+    expect(frame.style.height).toBe('273px');
+    undo();
+    expect(frame.style.height).toBe('calc(100vh - 300px)');
+    expect(box.style.maxHeight).toBe('');
+    top.innerHeight = 350;
+    top.dispatchEvent(new Event('resize'));
+    expect(frame.style.height).toBe('calc(100vh - 300px)');
+  });
+
+  it('moves a dialog opened in a taller window up to where Canvas opens it in this one', () => {
+    // Opened at 180 in a 900 px window, which is now 350 px tall.
+    const { win, top, frame, panel } = dialog(350, 180);
+    const undo = createHost(win).fitFrame();
+    expect(panel.style.top).toBe('-110px');
+    expect(frame.style.height).toBe(`${350 - 16 - 16 - 70 - 45}px`);
+    // Taller again: back to Canvas's place.
+    top.innerHeight = 1000;
+    top.dispatchEvent(new Event('resize'));
+    expect(panel.style.top).toBe('');
+    undo();
+    top.innerHeight = 350;
+    top.dispatchEvent(new Event('resize'));
+    expect(panel.style.top).toBe('');
+  });
+
+  it('keeps a drag of the dialog when the window resizes', () => {
+    const { win, top, panel } = dialog(350, 180);
+    createHost(win).fitFrame();
+    expect(panel.getBoundingClientRect().top).toBe(70);
+    // Dragged 100 px lower, then the window resizes without changing.
+    panel.drag = 100;
+    top.dispatchEvent(new Event('resize'));
+    expect(panel.getBoundingClientRect().top).toBe(170);
+    // A taller window: up by the window's change only.
+    top.innerHeight = 400;
+    top.dispatchEvent(new Event('resize'));
+    expect(panel.getBoundingClientRect().top).toBe(180);
+  });
+
+  it('is undone when the frame goes away', () => {
+    // Canvas closes the dialog by removing the frame: this document is
+    // unloaded, React is never unmounted.
+    const { win, top, frame, box, panel } = dialog(350, 180);
+    createHost(win).fitFrame();
+    win.dispatchEvent(new Event('pagehide'));
+    expect([frame.style.height, box.style.maxHeight, panel.style.top]).toEqual(
+      ['calc(100vh - 300px)', '', ''],
+    );
+    top.dispatchEvent(new Event('resize'));
+    expect(frame.style.height).toBe('calc(100vh - 300px)');
+
+    // Without a pagehide, the first resize after the frame is gone undoes it.
+    const other = dialog(350, 180);
+    createHost(other.win).fitFrame();
+    other.frame.isConnected = false;
+    other.top.dispatchEvent(new Event('resize'));
+    expect(other.panel.style.top).toBe('');
+    other.frame.isConnected = true;
+    other.top.dispatchEvent(new Event('resize'));
+    expect(other.frame.style.height).toBe('calc(100vh - 300px)');
+  });
+
+  it("stays within the dialog, and never below Canvas's own height", () => {
+    // The dialog's own maximum, 85% of 1400 from 180, ends first.
+    const { win, top, frame } = dialog(1400);
+    createHost(win).fitFrame();
+    expect(frame.style.height).toBe(`${180 + 1190 - 16 - 225}px`);
+    // The heading lower than Canvas expects: Canvas's size stays.
+    frame.getBoundingClientRect = () => ({ top: 400, height: 600 });
+    top.innerHeight = 900;
+    top.dispatchEvent(new Event('resize'));
+    expect(frame.style.height).toBe('calc(100vh - 300px)');
+  });
+
+  it('does nothing when the editor cannot be read', () => {
+    const outside = Object.assign(new EventTarget(), {
+      parent: null,
+      frameElement: null,
+    }) as unknown as Window;
+    expect(() => createHost(outside).fitFrame()()).not.toThrow();
+    const { win, frame } = dialog(350);
+    frame.closest = () => null;
+    createHost(win).fitFrame();
+    expect(frame.style.height).toBe('calc(100vh - 300px)');
   });
 });

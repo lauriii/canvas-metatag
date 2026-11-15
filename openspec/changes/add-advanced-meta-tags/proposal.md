@@ -67,7 +67,8 @@ Kept closed, on purpose:
 - Import of Metatag data. Metatag's tags are read live and stored nowhere.
 - Per-node overrides, robots.txt and llms.txt management, search-console
   integrations (the dialog never checks whether a code verified the site),
-  `og:locale`, translation of site and template text.
+  translation of site and template text. (`og:locale` is emitted by
+  `strengthen-zero-config-defaults`, which reopens that non-goal.)
 
 ## Out of scope
 
@@ -77,8 +78,10 @@ Kept closed, on purpose:
   can add those as other tags.
 - One tag per item of a multi-value field (link-values-to-fields keeps "the
   first item").
-- HTTP headers of any kind, favicons, manifests, theme colours with a media
-  query, scripts, styles, and any raw head markup.
+- HTTP headers of any kind, manifests, theme colours with a media query,
+  scripts, styles, and any raw head markup. Favicons: the owned front page's
+  icon links come from `strengthen-zero-config-defaults`; elsewhere they stay
+  out.
 - Page facts as values of other tags at page and site scope.
 - A permission of its own for other tags.
 
@@ -100,6 +103,11 @@ Kept closed, on purpose:
   by then, they may land first; `link-values-to-fields` task 3.2 then keeps
   the new robots keys in the rewritten shared fixture. The archive order does
   not change.
+- **Builds on `strengthen-zero-config-defaults`** (archived before this
+  change): its block for "The head has fixed rows in a fixed order" carries
+  that change's `og:locale`, `og:locale:alternate`, `og:image:type` and icon
+  link rows, and Metatag's sharing tags are left out so that the module's
+  made images are the only shared image (task group 6b).
 - **Followed by `add-home-page-defaults`.** That change decides once, per
   language, which entity is the front page. Until it lands, the "Verification
   missing from the home page" check uses the front page setting as the state

@@ -17,11 +17,12 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
  * A chat provider with fixed answers for the SEO dialog's two tasks.
  *
  * A marker anywhere in the user message selects the answer, so one test run
- * can reach every path: the "Steer it" text in the browser, the page title in
+ * can reach every path: the "Refine" text in the browser, the page title in
  * kernel tests.
  *
  * - no marker: JSON for the requested schema;
- * - #garbage: prose;
+ * - #garbage: prose, also when the system prompt does not end with the
+ *   fence and the answer shape, as a model not told the shape might;
  * - #rate-limit, #quota: the provider's typed exceptions;
  * - #inject: what a hijacked model would try.
  */
@@ -30,6 +31,26 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
   label: new TranslatableMarkup('Canvas Metatag Echo'),
 )]
 final class EchoSeoProvider extends EchoProvider {
+
+  /**
+   * Two models, listed for every capability, structured response included.
+   *
+   * Unlike most test providers it honours the structured output schema, so
+   * a site can make it the default for structured chat. Both answer the
+   * same: two ids let a test tell the structured chat default from the chat
+   * default.
+   *
+   * @param string|null $operation_type
+   *   The operation type. Not used.
+   * @param array<mixed> $capabilities
+   *   The capabilities asked for. Not used.
+   *
+   * @return array<string, string>
+   *   Model id => label.
+   */
+  public function getConfiguredModels(?string $operation_type = NULL, array $capabilities = []): array {
+    return ['echo-json' => 'Echo JSON', 'echo-structured' => 'Echo structured'];
+  }
 
   /**
    * Answers one chat call.
@@ -54,7 +75,9 @@ final class EchoSeoProvider extends EchoProvider {
     if (str_contains($message, '#quota')) {
       throw new AiQuotaException('You exceeded your current quota');
     }
-    if (str_contains($message, '#garbage')) {
+    // The fixed text the assistant adds after every configured prompt.
+    $told = (bool) preg_match('~\n\nThe user message contains page text between <page_content> tags\. [^\n]+\nAnswer with JSON only, in this shape: \{[^\n]+\}\z~', (string) $input->getSystemPrompt());
+    if (str_contains($message, '#garbage') || !$told) {
       $answer = 'I cannot help with that.';
     }
     elseif ($text) {

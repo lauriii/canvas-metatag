@@ -1,8 +1,20 @@
 import { CodeIcon, ImageIcon } from '@radix-ui/react-icons';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import { useApp } from '../App';
-import { breadcrumb, previewText, socialImage } from '../model';
+import {
+  breadcrumb,
+  previewNote,
+  previewText,
+  smallCard,
+  socialImage,
+} from '../model';
 import { PICKED } from './MediaPicker';
 import { IconBtn, InfoTip, Sk, SparkleIcon } from './ui';
 
@@ -54,10 +66,48 @@ export function Stage(props: {
     observer.observe(element);
     return () => observer.disconnect();
   }, [setStageVisible]);
+  // A suffix shows whole or not at all, so that only the subject (the
+  // previewed node's name) can end in an ellipsis; the last one goes first.
+  // What a left-out suffix said is said elsewhere too: the About this
+  // preview tip, or Checks for Site's identity gap. Measured when the
+  // caption's text or width changes, not on every keystroke.
+  const cap = useRef<HTMLDivElement>(null);
+  const fitted = useRef<string | null>(null);
+  const fit = () => {
+    const parts = [
+      ...(cap.current?.querySelectorAll<HTMLElement>(
+        ':scope > em ~ span, :scope > span + span',
+      ) ?? []),
+    ];
+    parts.forEach((part) => part.removeAttribute('data-cut'));
+    const cut = () =>
+      parts.some(
+        (part) =>
+          !part.hasAttribute('data-cut') &&
+          part.scrollWidth > part.clientWidth,
+      );
+    for (let index = parts.length - 1; index >= 0 && cut(); index--) {
+      parts[index].setAttribute('data-cut', '');
+    }
+  };
+  useLayoutEffect(() => {
+    const text = cap.current?.textContent ?? '';
+    if (text !== fitted.current) {
+      fitted.current = text;
+      fit();
+    }
+  });
+  useLayoutEffect(() => {
+    const observer = new ResizeObserver(() => fit());
+    observer.observe(cap.current!);
+    return () => observer.disconnect();
+  }, []);
   return (
     <div className="seo-stage" ref={ref}>
       <div className="seo-stage-cap">
-        <div className="seo-stage-cap-l">{props.caption}</div>
+        <div className="seo-stage-cap-l" ref={cap}>
+          {props.caption}
+        </div>
         {props.buttons && (
           <div className="seo-stage-cap-btns">{props.buttons}</div>
         )}
@@ -164,6 +214,13 @@ export function SearchPreview() {
     1000,
   );
   const template = target.scope === 'template';
+  const note = previewNote({
+    template,
+    published: target.published,
+    node: server.preview?.published !== false,
+    label: target.label,
+    hidden: view.hidden,
+  });
   const on = (path: 'title' | 'description') =>
     focusField === path ||
     (trial !== null && trial[path] !== view.texts[path]) ||
@@ -180,16 +237,12 @@ export function SearchPreview() {
           <>
             {template ? (
               <>
-                Previewing <em>{server.preview?.label ?? ''}</em>
+                Previewing <em dir="auto">{server.preview?.label ?? ''}</em>
               </>
             ) : (
               <span>Search result</span>
             )}
-            {!target.published && (
-              <span>
-                · {template ? 'Template not in use yet' : 'Not published yet'}
-              </span>
-            )}
+            {note.suffix && <span>· {note.suffix}</span>}
             {view.hidden && <span>· Hidden from search</span>}
           </>
         )
@@ -197,14 +250,7 @@ export function SearchPreview() {
       buttons={
         <>
           <OutputButton />
-          <InfoTip
-            label="About this preview"
-            text={`An estimate. Search engines sometimes rewrite titles and descriptions.${
-              template
-                ? ` Switch the previewed ${target.label} with the preview picker in the top bar.`
-                : ''
-            }`}
-          />
+          <InfoTip label="About this preview" text={note.info} />
         </>
       }
     >
@@ -218,11 +264,15 @@ export function SearchPreview() {
         <div className="seo-result-site">
           <Favicon site={site} />
           <div>
-            <div className="seo-result-name">{site}</div>
-            <div className="seo-result-address">{crumbs}</div>
+            <div className="seo-result-name" dir="auto">
+              {site}
+            </div>
+            <div className="seo-result-address" dir="auto">
+              {crumbs}
+            </div>
           </div>
         </div>
-        <div className="seo-result-title">
+        <div className="seo-result-title" dir="auto">
           <span
             className="seo-part"
             data-on={on('title')}
@@ -231,7 +281,11 @@ export function SearchPreview() {
             {title}
           </span>
         </div>
-        <div className="seo-result-text" data-muted={muted || undefined}>
+        <div
+          className="seo-result-text"
+          dir="auto"
+          data-muted={muted || undefined}
+        >
           <span
             className="seo-part"
             data-on={on('description')}
@@ -293,10 +347,22 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
   const { state, trial, focusField, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
+  const target = server.target;
+  // At template scope, a node visitors cannot see yet.
+  const unpublished =
+    target?.scope === 'template' && server.preview?.published === false
+      ? previewNote({
+          template: true,
+          published: target.published,
+          node: false,
+          label: target.label,
+        }).unpublished
+      : '';
   const [broken, setBroken] = useState<string | null>(null);
   const texts = { ...view.texts, ...trial };
   const { image } = socialImage(state, view, PICKED);
-  const large = image !== null && image.width >= 600;
+  const small = smallCard(image);
+  const large = !small;
   // The image on screen changes only once the next one has loaded, and
   // a large card waits for the file itself rather than show its thumbnail.
   const [front, setFront] = useState<{ src: string; prev?: string } | null>(
@@ -339,12 +405,8 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
         ) : (
           <>
             <span>Link preview</span>
-            {!large && (
-              <span>
-                ·{' '}
-                {image ? 'Small card: image under 600 px wide' : 'Small card: no image'}
-              </span>
-            )}
+            {small && <span>· Small card</span>}
+            {unpublished && <span>· Not published yet</span>}
           </>
         )
       }
@@ -352,6 +414,14 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
         <>
           {props.suggest}
           <OutputButton />
+          {(small || unpublished) && (
+            <InfoTip
+              label="About this preview"
+              text={[small && `${small}.`, unpublished]
+                .filter(Boolean)
+                .join(' ')}
+            />
+          )}
         </>
       }
     >
@@ -388,8 +458,10 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
           )}
         </div>
         <div className="seo-social-text">
-          <span className="seo-social-host">{host}</span>
-          <span className="seo-social-title">
+          <span className="seo-social-host" dir="auto">
+            {host}
+          </span>
+          <span className="seo-social-title" dir="auto">
             <span
               className="seo-part"
               data-on={on('social.title', 'social_title')}
@@ -398,7 +470,7 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
               {texts.social_title}
             </span>
           </span>
-          <span className="seo-social-description">
+          <span className="seo-social-description" dir="auto">
             <span
               className="seo-part"
               data-on={on('social.description', 'social_description')}

@@ -1,0 +1,18 @@
+langcode: en
+status: true
+dependencies:
+  enforced:
+    module:
+      - canvas_metatag_ai
+id: canvas_metatag_schema
+label: 'SEO: structured data (only the prompt named "default" is used)'
+variables:
+  -
+    name: types
+    help_text: 'The structured data types to choose from, one per line, each with a hint.'
+    required: true
+  -
+    name: properties
+    help_text: 'The properties a suggestion may fill, one line per type.'
+    required: true
+tokens: {  }

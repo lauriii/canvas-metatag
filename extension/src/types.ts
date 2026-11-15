@@ -138,6 +138,9 @@ export interface Target {
   from_default: SeoValues;
 }
 
+/** Why AI suggestions are off, from `capabilities.ai.reason`. */
+export type AiOffReason = 'no_provider' | 'not_usable' | 'no_prompt';
+
 export interface StatePayload {
   langcode: string;
   languages: Record<string, string>;
@@ -146,7 +149,7 @@ export interface StatePayload {
   capabilities: {
     ai: {
       available: boolean;
-      reason: null | 'no_provider' | 'not_usable';
+      reason: AiOffReason | null;
     } | null;
   };
   site: SiteSettings;
@@ -156,6 +159,8 @@ export interface StatePayload {
     id: string;
     label: string;
     url: string;
+    /** Whether visitors can see it now. */
+    published: boolean;
   } | null;
   tokens: Record<string, TokenInfo>;
   media: Record<string, MediaInfo>;
@@ -231,7 +236,11 @@ export interface SaveStatus {
 }
 
 export interface State {
-  phase: 'loading' | 'ready' | 'forbidden' | 'error';
+  /**
+   * `refreshing`: another node previewed in the same template; the view
+   * stays as it was until its answer arrives.
+   */
+  phase: 'loading' | 'refreshing' | 'ready' | 'forbidden' | 'error';
   ctx: HostContext;
   /** Last server truth. */
   server: StatePayload | null;
@@ -250,7 +259,8 @@ export interface State {
   errors: Record<Scope, Record<string, string>>;
   live: { title?: string; description?: string; alias?: string };
   facts: PageFacts | null;
-  readonly: 'no' | 'store' | 'conflict' | 'access';
+  /** `empty`: a template whose type has no content to preview. */
+  readonly: 'no' | 'store' | 'conflict' | 'access' | 'empty';
   /** A pending change of the current scope's storage key that may not be applied by itself. */
   offer: { scope: Scope; pending: Pending } | null;
   /** Snapshot before a reset, discard or restore. */
@@ -260,7 +270,7 @@ export interface State {
 }
 
 export type Action =
-  | { type: 'loading'; ctx: HostContext }
+  | { type: 'loading'; ctx: HostContext; refresh?: boolean }
   | {
       type: 'loaded';
       ctx: HostContext;

@@ -1,0 +1,15 @@
+langcode: en
+status: true
+dependencies:
+  enforced:
+    module:
+      - canvas_metatag_ai
+id: canvas_metatag_schema__default
+label: 'SEO: structured data'
+type: canvas_metatag_schema
+prompt: |-
+  You classify one page of a website and extract facts that are stated on it.
+  Choose the one type from this list that matches what the page is mainly about. When unsure, choose WebPage. Types: {types}
+  For the chosen type, return only these properties, and only when the value is stated in the page text: {properties}
+  Copy text values as they appear on the page. Write dates as ISO 8601, such as 2027-03-04 or 2027-03-04T18:00.
+  Never return prices, currencies, availability, ratings, reviews, images or web addresses. Do not guess.

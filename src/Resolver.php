@@ -15,6 +15,7 @@ use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\Display\EntityFormDisplayInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\Core\Entity\EntityPublishedInterface;
@@ -59,6 +60,13 @@ final class Resolver {
     'modified' => 'datetime',
     'image' => 'image',
   ];
+
+  /**
+   * From this size an image makes a large card.
+   *
+   * The dialog's link preview uses the same rule (`smallCard()` in model.ts).
+   */
+  private const LARGE_CARD = ['width' => 600, 'height' => 157];
 
   /**
    * What the dialog calls them.
@@ -207,7 +215,8 @@ final class Resolver {
    * The token vocabulary of a bundle, for write-mode validation.
    *
    * A Canvas page has the tokens every entity has. Any other bundle adds one
-   * {field.NAME} per configurable field of a supported type.
+   * {field.NAME} per configurable field of a supported type, in the order of
+   * the bundle's form: fields not on the form follow, by name.
    *
    * @return array<string, string>
    *   Token name => type: text, number, datetime, url or image.
@@ -217,11 +226,24 @@ final class Resolver {
     if ($entityTypeId === 'canvas_page') {
       return $types;
     }
+    $display = $this->entityTypeManager->getStorage('entity_form_display')->load("$entityTypeId.$bundle.default");
+    $fields = [];
     foreach ($this->entityFieldManager->getFieldDefinitions($entityTypeId, $bundle) as $name => $definition) {
       $type = self::FIELD_TYPES[$definition->getType()] ?? NULL;
       if ($type !== NULL && !$definition->getFieldStorageDefinition()->isBaseField()) {
-        $types["field.$name"] = $this->referencesImageMedia($definition) ? 'image' : $type;
+        $weight = $display instanceof EntityFormDisplayInterface ? $display->getComponent($name)['weight'] ?? NULL : NULL;
+        $fields[$name] = [
+          $weight === NULL ? 1 : 0,
+          (int) $weight,
+          $name,
+          $this->referencesImageMedia($definition) ? 'image' : $type,
+        ];
       }
+    }
+    // On the form by weight, then the rest; a tie by name.
+    uasort($fields, static fn (array $a, array $b): int => array_slice($a, 0, 3) <=> array_slice($b, 0, 3));
+    foreach ($fields as $name => $field) {
+      $types["field.$name"] = $field[3];
     }
     return $types;
   }
@@ -266,8 +288,14 @@ final class Resolver {
       ->addCacheableDependency($this->configFactory->get('system.date'));
     if ($entityTypeId !== 'canvas_page') {
       // A field added to the type, or a media type that changes its source,
-      // changes the vocabulary.
-      $cacheability->addCacheTags(['entity_field_info', 'config:media_type_list']);
+      // changes the vocabulary; the form's order decides which field is first.
+      // Creating a form display invalidates only the list tag.
+      $display = $this->entityTypeManager->getStorage('entity_form_display')->load("$entityTypeId.$bundle.default");
+      $cacheability->addCacheTags([
+        'entity_field_info',
+        'config:media_type_list',
+        ...($display ? $display->getCacheTags() : $this->entityTypeManager->getDefinition('entity_form_display')->getListCacheTags()),
+      ]);
     }
     $tokens['title']['value'] = (string) $entity->label();
     $tokens['site']['value'] = $identity['name'] !== '' ? $identity['name'] : (string) $this->configFactory->get('system.site')->get('name');
@@ -295,7 +323,7 @@ final class Resolver {
       $value = $item === NULL ? NULL : $this->fieldValue($item, $token['type'], $langcode, $cacheability);
       if ($token['type'] === 'image') {
         $tokens[$name]['image'] = is_array($value) ? $value : NULL;
-        // {image} is the first image that resolves, in field-definition order.
+        // {image} is the first image that resolves, in the form's order.
         $tokens['image']['image'] ??= $tokens[$name]['image'];
         continue;
       }
@@ -305,7 +333,7 @@ final class Resolver {
       if (!$described && $items->getFieldDefinition()->getType() === 'text_with_summary') {
         $described = TRUE;
         $summary = self::text((string) $item?->get('summary')->getValue());
-        $tokens['description']['value'] = $summary !== '' ? $summary : Unicode::truncate($tokens[$name]['value'], 160, TRUE);
+        $tokens['description']['value'] = $summary !== '' ? $summary : rtrim(Values::whole($tokens[$name]['value'], Unicode::truncate($tokens[$name]['value'], 160, TRUE)));
       }
     }
     return $tokens;
@@ -507,7 +535,7 @@ final class Resolver {
       // consumers fall back to the Open Graph values.
       [
         'name' => 'twitter:card',
-        'content' => $image !== NULL && $image['width'] >= 300 && $image['height'] >= 157 ? 'summary_large_image' : 'summary',
+        'content' => $image !== NULL && $image['width'] >= self::LARGE_CARD['width'] && $image['height'] >= self::LARGE_CARD['height'] ? 'summary_large_image' : 'summary',
       ],
     ];
 
@@ -601,7 +629,7 @@ final class Resolver {
       // With the digits the field stores, whatever the database hands back.
       'decimal' => number_format((float) $value, (int) $definition->getSetting('scale'), '.', ''),
       'link' => $item instanceof LinkItemInterface ? $this->link($item, $cacheability) : '',
-      // Named by its alt text, as a media item is by its label; else the file name.
+      // Named by its alt text, as a media item by its label; else the file.
       'image' => $this->usable($item, $cacheability) ? $this->fileImage($item, Values::plain((string) $item->get('alt')->getValue(), 255) ?: NULL) : NULL,
       'entity_reference' => $type === 'image'
         ? $this->mediaImage($reference, $langcode, $cacheability)
@@ -753,13 +781,39 @@ final class Resolver {
   /**
    * Formatted text as plain text.
    *
-   * Tags stripped, entities decoded once, whitespace collapsed.
+   * The content of elements that never display (script, style, template,
+   * also nested templates) removed, then tags stripped, entities decoded
+   * once, whitespace collapsed. A heading, list item, definition, table row
+   * or caption ends a sentence, as does the text before a list or a heading:
+   * a full stop follows it unless it ends in a stop, an ellipsis, a question
+   * or exclamation mark, a colon, semicolon or comma, or their equivalents in
+   * other scripts (closing quotes and brackets after it included). Such an
+   * element with no text of its own still ends the text before it. An opening
+   * tag may hold ">" in a quoted attribute. Should a markup pattern fail, the
+   * text is kept as it was; text that is not valid UTF-8 gives an empty
+   * string.
    */
   private static function text(string $html): string {
+    if (!mb_check_encoding($html, 'UTF-8')) {
+      return '';
+    }
+    // The end of a sentence. Entities never decode to a control character,
+    // so only the text's own need removing.
+    $end = "\x01";
+    $html = str_replace($end, '', $html);
+    $attributes = '(?:"[^"]*+"|\'[^\']*+\'|[^\'">]++)*+';
+    $html = preg_replace('~<(script|style)\b' . $attributes . '>(?:[^<]++|<(?!/\1\s*>))*+(?:</\1\s*>|\z)~i', ' ', $html) ?? $html;
+    $html = preg_replace('~<template\b' . $attributes . '>(?:[^<]++|(?R)|<(?!/?template\b))*+(?:</template\s*>|\z)~i', ' ', $html) ?? $html;
+    $html = preg_replace('~</(?:h[1-6]|li|dd|tr|caption)\s*>|<(?:ul|ol|dl|h[1-6])(?=[\s\/>])~i', $end . '$0', $html) ?? $html;
     // A space keeps the words of neighboring blocks apart; inline markup
     // joins its words as written.
-    $html = (string) preg_replace('~<(?=/?(?:p|div|br|li|ul|ol|h[1-6]|td|th|tr|blockquote|pre|hr|dt|dd|section|article|figure|figcaption)\b)~i', ' <', $html);
+    $html = preg_replace('~<(?=/?(?:p|div|br|li|ul|ol|h[1-6]|td|th|tr|blockquote|pre|hr|dt|dd|section|article|figure|figcaption)[\s\/>])~i', ' <', $html) ?? $html;
     $text = Html::decodeEntities(strip_tags($html));
+    // Nested ends are one end; after a sentence or clause mark, or with
+    // nothing before it, an end adds nothing; else a full stop.
+    $ends = '[.!?…:;,。！？、，．：；｡؟۔।॥،؛][\p{Pe}\p{Pf}"\'»]*';
+    // Should this fail, no mark is left in the text.
+    $text = preg_replace(['/\s*\x01(?:\s*\x01)*/u', "/(^|$ends)\x01/u", '/\x01/'], [$end, '$1', '.'], $text) ?? str_replace($end, ' ', $text);
     return trim((string) preg_replace('/\s+/u', ' ', $text));
   }
 

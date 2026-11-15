@@ -59,6 +59,7 @@ const CLI = process.env.CANVAS_METATAG_E2E_CLI ?? '';
 const FLAGS: Record<string, string> = {
   headless: 'CANVAS_METATAG_E2E_HEADLESS=1',
   ai: 'CANVAS_METATAG_E2E_AI=1',
+  complex: 'CANVAS_METATAG_E2E_COMPLEX=1',
 };
 
 /**
@@ -198,9 +199,9 @@ export async function openPage(page: Page, id: number): Promise<void> {
     .toBe(String(id));
 }
 
-/** Opens the Article template editor, previewing one node. */
-export async function openTemplate(page: Page, previewId: number): Promise<void> {
-  await page.goto(`./canvas/template/node/article/full/${previewId}`);
+/** Opens the Full template editor of a node type, previewing one node. */
+export async function openTemplate(page: Page, previewId: number, bundle = 'article'): Promise<void> {
+  await page.goto(`./canvas/template/node/${bundle}/full/${previewId}`);
   await expect(page.getByTestId('canvas-publish-review')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('select-content-preview-item')).toBeVisible({ timeout: 60_000 });
 }

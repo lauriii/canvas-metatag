@@ -57,6 +57,16 @@ described by a sentence that says the source and the item's value.
 - **WHEN** "Every Article"'s description is linked to Summary and the previewed article's summary is "How teams turn output into stories."
 - **THEN** a button named "Description" MUST show "Summary" and that text, and its description MUST start with "Linked to Article › Summary. This article: How teams turn output into stories."
 
+#### Scenario: A linked date, at rest
+
+- **WHEN** "Every Event"'s Starts detail is linked to the Starts field and the previewed event starts on 20 June 2026 at 19:00
+- **THEN** the box MUST show "Starts" and that date and time formatted in the dialog's language, without focusing or opening anything, and the value MUST NOT move or fold away when focus leaves the box
+
+#### Scenario: A linked list field
+
+- **WHEN** a detail is linked to Event status and the previewed event's status is stored as `EventScheduled` with the label "On as planned"
+- **THEN** the box and its link menu entry MUST show "On as planned", not `EventScheduled`
+
 #### Scenario: Following the default
 
 - **WHEN** "Every Article" sets no description
@@ -104,6 +114,11 @@ current entry MUST be marked.
 - **WHEN** the title's link menu is opened on a type with an image field
 - **THEN** the image field MUST be listed disabled with the reason "An image, not text"
 
+#### Scenario: Choosing between two dates
+
+- **WHEN** an editor opens the link menu of "Every Event"'s Starts detail
+- **THEN** the Starts and Ends entries MUST each show the previewed event's date and time, so they can be told apart before one is picked
+
 #### Scenario: Nothing found
 
 - **WHEN** the filter matches nothing
@@ -121,6 +136,11 @@ linkable from there.
 
 - **WHEN** an editor opens the author name's link menu, moves to "Writer" and presses the right arrow
 - **THEN** the menu MUST show a heading "Writer", a "Back to Article" button and the writer's fields, and Enter on "Name" MUST link the detail to Writer › Name
+
+#### Scenario: Venue › Street
+
+- **WHEN** an editor opens the link menu of Street address on "Every Event", whose Venue references venues with a Street field
+- **THEN** the menu MUST offer a "Venue" level with Street and the previewed event's venue street as its value, and Enter on it MUST link Street address to Venue › Street
 
 #### Scenario: A deep match
 

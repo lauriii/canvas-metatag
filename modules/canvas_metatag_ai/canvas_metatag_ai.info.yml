@@ -5,4 +5,4 @@ package: Canvas
 core_version_requirement: ^11.3
 dependencies:
   - canvas_metatag:canvas_metatag
-  - ai:ai
+  - ai:ai (>=1.5.0)

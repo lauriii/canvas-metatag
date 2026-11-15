@@ -24,7 +24,7 @@ group 1.
 - [ ] 2.5 Dialog: the new Advanced rows and the AI use label, note and code line (`SearchTab.tsx`), the same rows in Site › Visibility (`SiteTab.tsx`), the summary parts, the date constant. Verify with vitest for the summary and the note's two texts (before and after the date) and Playwright `page.spec.ts` (set each row, publish, check the head) and `site.spec.ts` (site defaults, a page turning AI training back to Allowed).
 - [ ] 2.6 Checks: "AI use is read from 1 Feb 2027" as good to know. Verify with `checks.test.ts` (listed before the date with a non-default value, not listed after it, not counted).
 - [ ] 2.7 Docs: ARCHITECTURE.md §4 (robots keys), §6 (cascade), §8 (rows). Verify with the cspell CI job.
-- [ ] 2.8 Browser check on site-4: Advanced on a page and a content type, Site › Visibility, the Output rows, Checks; save screenshots next to the mockup frames F01 and F03.
+- [ ] 2.8 Browser check on site-4: Advanced on a page and a content type, Site › Visibility, the Output rows, Checks; save screenshots next to the mockup frames F01 and F03 (`mockups/`, indexed in reference.md).
 
 ## 3. Metatag tags as the outermost layer
 
@@ -39,7 +39,7 @@ group 1.
 
 - [ ] 4.1 `Values::cleanIdentity()`: `verification` as a list of up to ten `{name, code}`, names from the policy, the code pattern and sentences of site-seo's delta; config schema. Verify with `ValuesTest::testVerification` and `ApiTest::testSite` (422 paths `identity.verification.<n>.code`, a repeated name accepted), and `InstallTest` (an exported identity holds the codes).
 - [ ] 4.2 `Resolver`: one meta tag per code after the card hint on every owned route, never elsewhere. Verify with `CoupledHeadTest::testVerification` (two codes for one name; a Views front page untouched) and `HeadlessHeadTest::testVerification`.
-- [ ] 4.3 Dialog: Site › Services with the code list, Remove, the paste input, "Which tag is this code for?", the removal bar text and the read-only line; `paste.ts` with `DOMParser` (allowed in `check-patterns.mjs` for that file only). Verify with a new `paste.test.ts` (a whole tag, a bare code, a tag with extra attributes, hostile input) and Playwright `site.spec.ts` (paste, save, see the tag on a page; remove; read-only as an editor in `access.spec.ts`).
+- [ ] 4.3 Dialog: Site › Services with the code list, Remove, the paste input, "Which tag is this code for?", the removal bar text and the read-only line; `paste.ts` with `DOMParser` (allowed in `check-patterns.mjs` for that file and `custom/clean.ts` from `extend-structured-data-by-id` only). Verify with a new `paste.test.ts` (a whole tag, a bare code, a tag with extra attributes, hostile input) and Playwright `site.spec.ts` (paste, save, see the tag on a page; remove; read-only as an editor in `access.spec.ts`).
 - [ ] 4.4 Checks: "Verification codes are not on the home page" for administrators when the front page is not owned. Verify with `checks.test.ts` and `ApiTest` (the state says whether the front page is owned).
 - [ ] 4.5 Docs: README (Services, codes on owned pages only), ARCHITECTURE.md §3 and §4. Verify with the cspell CI job.
 - [ ] 4.6 Browser check on site-4: Services with two codes, the bar, the page's HTML; save screenshots next to F03.
@@ -61,16 +61,21 @@ group 1.
 - [ ] 6.4 State: `tagPolicy` for every scope. Verify with `ApiTest::testPageState`, `testTemplateState` and `testSite`.
 - [ ] 6.5 Dialog: the Other tags row (Advanced, Services), the sheet with this scope's rows, "From the site" and "From the Metatag module" with switches, the hook note and the empty state (`OtherTags.tsx`, `model.ts` row helpers). Verify with vitest for the row helpers and Playwright `tags.spec.ts` (a site row reaches a page; turned off on that page and published; read-only in a conflict).
 - [ ] 6.6 Dialog: the row editor (meta or link, name or property with the Open Graph switch, content or address, kind and feed format, the tag line, Done, Remove, an empty row vanishing), refusals with Show and Go to Site. Verify with Playwright `tags.spec.ts` (a template row linked to a field; `og:title` refused, Show lands on Social › Title).
-- [ ] 6.7 Dialog: the paste panel and its verdict list with "Add ‹n› tags · ‹m› skipped". Verify with `paste.test.ts` (the mixed snippet of seo-dialog's delta, nothing found, already here, over 20,000 characters, a link with `media`) and Playwright `tags.spec.ts` (paste on a page, add, see the row in Output).
+- [ ] 6.7 Dialog: the paste panel and its verdict list, built on `PasteReview.tsx` from `extend-structured-data-by-id` (one paste language across the dialog), with "Add ‹n› tags · ‹m› skipped". Verify with `paste.test.ts` (the mixed snippet of seo-dialog's delta, nothing found, already here, over 20,000 characters, a link with `media`) and Playwright `tags.spec.ts` (paste on a page, add, see the row in Output).
 - [ ] 6.8 The edit permission's description names other tags' links. Verify with `ApiTest::testPermissions` reading the description.
 - [ ] 6.9 Keyboard and assistive technology: tab order, Escape order (panel, then sheet), switch and row names, the review list as a list, axe on the sheet with a row open and with the paste list, 200 % zoom. Verify with Playwright `tags.spec.ts` keyboard-only and axe tests.
 - [ ] 6.10 Docs: README (Other tags, headless note on rendering `head.meta` and `head.link` on the server, the upstream ask for fixed-key frontends), ARCHITECTURE.md §3, §4, §6, §8, §15, §17, §19; `.cspell-project-words.txt`. Verify with the cspell and PHPCS CI jobs.
 - [ ] 6.11 Browser check on site-4: the sheet at page, type and site scope, a row open, the paste list, a refusal, Output; save screenshots next to F04 to F08 and F10.
 
+## 6b. Sharing keys (after `strengthen-zero-config-defaults`)
+
+- [ ] 6b.1 Leave out Metatag tags whose key is or starts with a sharing key the module owns (`og:image`, `og:title`, `og:description`, `og:locale`, `twitter:card`, `twitter:image`, `twitter:title`, `twitter:description`) and the `image_src` link; keep this change's fixed-row order with `og:locale`, `og:locale:alternate`, `og:image:type` and the front page icon links of `strengthen-zero-config-defaults`. Verify with `MetatagCoexistenceTest::testSharingKeys` (Metatag's `og:image:url`, `twitter:image` and `twitter:title` absent on an owned page, in coupled HTML and `head.meta`) and `CoupledHeadTest::testShareRows` still green.
+- [ ] 6b.2 The Checks row offering a Metatag default `og:image` as the site's image. Verify with `checks.test.ts` (media image: action selects "Use this image"; a plain address: action leads to Site › Sharing; editors see nothing).
+
 ## 7. Integration
 
 - [ ] 7.1 Run every PHPUnit suite and each Playwright project (`host-contract`, `coupled`, `headless`, `ai`) one at a time on site-4; all green. Verify by the run output.
-- [ ] 7.2 Compare the final screenshots with the mockup frames F01 to F10 and record any difference in design.md. Verify by review.
+- [ ] 7.2 Compare the final screenshots with the mockup frames F01 to F10 in `mockups/` and record any difference in design.md. Verify by review.
 
 ## Workflow follow-up
 

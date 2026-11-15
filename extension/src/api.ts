@@ -113,8 +113,13 @@ export function createApi(base: string, fetchFn: typeof fetch = fetch) {
       csrf().catch(() => {});
     },
 
-    /** GET /state. `langcode` is what the editor's own auto-save key says. */
-    getState(
+    /**
+     * GET /state. `langcode` is what the editor's own auto-save key says.
+     * Canvas serves a type's Full template route also when the type has no
+     * Full template: without a preview node, that is the state without a
+     * page or template (Site settings).
+     */
+    async getState(
       ctx: HostContext,
       langcode?: string | null,
     ): Promise<StatePayload> {
@@ -129,11 +134,23 @@ export function createApi(base: string, fetchFn: typeof fetch = fetch) {
             ? {
                 entity_type: 'content_template',
                 id: ctx.id,
-                preview: ctx.previewId,
+                ...(ctx.previewId ? { preview: ctx.previewId } : {}),
               }
             : {},
       ).toString();
-      return request(`state${query && `?${query}`}`);
+      try {
+        return await request<StatePayload>(`state${query && `?${query}`}`);
+      } catch (error) {
+        if (
+          ctx.kind === 'template' &&
+          !ctx.previewId &&
+          error instanceof ApiError &&
+          error.code === 'not_found'
+        ) {
+          return request<StatePayload>('state');
+        }
+        throw error;
+      }
     },
 
     /**

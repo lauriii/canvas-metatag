@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Drupal\canvas_metatag_ai\Controller;
 
+use Drupal\ai\Exception\AiAccessDeniedException;
+use Drupal\ai\Exception\AiBrokenOutputException;
+use Drupal\ai\Exception\AiMissingFeatureException;
 use Drupal\ai\Exception\AiOperationTypeMissingException;
 use Drupal\ai\Exception\AiQuotaException;
 use Drupal\ai\Exception\AiRateLimitException;
@@ -52,7 +55,8 @@ final class AiController implements ContainerInjectionInterface {
   private const array ERRORS = [
     'bad_request' => [400, 'The request is not valid.'],
     'ai_not_configured' => [422, "AI suggestions aren't set up on this site yet."],
-    'blocked' => [422, "This text can't be sent to the AI service."],
+    // What to do next depends on the request, so the dialog says it.
+    'blocked' => [422, "The site's AI rules stopped this request."],
     'rate_limited' => [429, 'The AI service is busy. Try again in a minute.'],
     'quota_exceeded' => [503, "The site's AI allowance is used up. Ask a site administrator."],
     'invalid_response' => [502, "The AI answer couldn't be used. Try again."],
@@ -98,22 +102,26 @@ final class AiController implements ContainerInjectionInterface {
     }
     catch (\Throwable $e) {
       $code = match (TRUE) {
-        $e instanceof AiException => $e->reason === 'not_configured' ? 'ai_not_configured' : 'invalid_response',
+        $e instanceof AiException => ['not_configured' => 'ai_not_configured', 'blocked' => 'blocked'][$e->reason] ?? 'invalid_response',
         $e instanceof AiSetupFailureException,
         $e instanceof AiOperationTypeMissingException,
+        $e instanceof AiAccessDeniedException,
+        $e instanceof AiMissingFeatureException,
         $e instanceof PluginExceptionInterface => 'ai_not_configured',
         $e instanceof AiUnsafePromptException => 'blocked',
+        $e instanceof AiBrokenOutputException => 'invalid_response',
         $e instanceof AiRateLimitException => 'rate_limited',
         $e instanceof AiQuotaException => 'quota_exceeded',
         default => 'provider_error',
       };
-      // The provider's message is for the site's log only. The prompt, the
-      // page text and the model's answer are never logged.
-      $this->logger->error('AI suggestion failed (@code). Task: @task. Exception: @class. Message: @message', [
+      // One record per failure, also for those before the provider call,
+      // which the AI module does not log. No message: a provider's message is
+      // logged by the AI module on its own channel, and may quote the prompt.
+      $this->logger->error('AI suggestion failed (@code). Task: @task. Prompt: @kind. Exception: @class.', [
         '@code' => $code,
         '@task' => $input['task'],
+        '@kind' => $input['task'] === 'schema' ? 'schema' : Assistant::textKind($input['fields']),
         '@class' => $e::class,
-        '@message' => $e->getMessage(),
       ]);
       return self::error($code);
     }
@@ -126,8 +134,8 @@ final class AiController implements ContainerInjectionInterface {
    *   The request, safe to hand to the assistant.
    *
    * @throws \InvalidArgumentException
-   *   When the body is too large, is not a JSON object, or names an unknown
-   *   task, field or language.
+   *   When the body is too large, is not a JSON object, names an unknown
+   *   task, field or language, or mixes social and search fields.
    */
   private function read(string $content): array {
     $body = strlen($content) > self::MAX_BODY ? NULL : json_decode($content, TRUE);
@@ -156,6 +164,11 @@ final class AiController implements ContainerInjectionInterface {
     $count = $body['count'] ?? NULL;
     $current = $body['current'] ?? [];
     if (!is_array($fields) || !$fields || array_filter($fields, static fn (mixed $field): bool => !in_array($field, self::FIELDS, TRUE)) || !is_int($count) || !is_array($current)) {
+      throw new \InvalidArgumentException();
+    }
+    // Search and social text have a prompt each, and neither has the rules
+    // for the other. The dialog never mixes them.
+    if (count(array_unique(array_map(Assistant::isSocial(...), $fields))) > 1) {
       throw new \InvalidArgumentException();
     }
     $fields = array_values(array_unique($fields));

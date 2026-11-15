@@ -6,7 +6,12 @@ import {
 import { useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import type { ShownImage } from '../model';
+import {
+  dimensions,
+  imageSize,
+  inSentence,
+  type ShownImage,
+} from '../model';
 import type { MediaItem } from '../types';
 import { Btn, Sk } from './ui';
 
@@ -43,16 +48,6 @@ export function ImageName(props: { name: string }) {
     <>{name}</>
   );
 }
-
-/** "1770 × 996 · 249 KB", the weight when the server knows it. */
-export const imageSize = (image: ShownImage) =>
-  `${image.width} × ${image.height}${
-    image.bytes
-      ? image.bytes >= 1e6
-        ? ` · ${(image.bytes / 1e6).toFixed(1)} MB`
-        : ` · ${Math.max(1, Math.round(image.bytes / 1e3))} KB`
-      : ''
-  }`;
 
 /** What the Choose image sheet needs from the row that opened it. */
 export interface ImageRequest {
@@ -207,6 +202,7 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
           ref={search}
           type="search"
           className="seo-input"
+          dir="auto"
           placeholder="Search images"
           aria-label="Search images"
           value={query}
@@ -232,9 +228,9 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
                 <b>{field.label} field</b>
                 {field.image && (
                   <small aria-hidden>
-                    This {target?.label.toLowerCase() ?? 'page'}:{' '}
-                    {field.image.name} · {field.image.width} ×{' '}
-                    {field.image.height}
+                    This {target ? inSentence(target.label) : 'page'}:{' '}
+                    {field.image.name} ·{' '}
+                    {dimensions(field.image.width, field.image.height)}
                   </small>
                 )}
               </span>
@@ -247,7 +243,7 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
       <div className="seo-tiles" aria-busy={phase === 'loading'}>
         {sorted.map((item) => {
           const small = item.width < request.minWidth;
-          const size = `${item.width} × ${item.height}`;
+          const size = dimensions(item.width, item.height);
           return (
             <button
               key={item.uuid}

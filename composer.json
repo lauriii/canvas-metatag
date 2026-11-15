@@ -11,5 +11,8 @@
         "drupal/custom_elements": "^3.4",
         "drupal/metatag": "^2.1",
         "drupal/simple_oauth": "^6.1"
+    },
+    "suggest": {
+        "drupal/ai": "Version 1.5 or later, for the canvas_metatag_ai submodule: AI suggestions in the SEO dialog."
     }
 }

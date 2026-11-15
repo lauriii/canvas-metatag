@@ -9,6 +9,7 @@ use Drupal\canvas\Controller\AutoSaveValidateTrait;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Resolver;
+use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Component\Uuid\Uuid;
@@ -18,6 +19,7 @@ use Drupal\Core\Config\Entity\ConfigEntityStorageInterface;
 use Drupal\Core\DependencyInjection\AutowireTrait;
 use Drupal\Core\DependencyInjection\ContainerInjectionInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityRepositoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
@@ -61,7 +63,7 @@ final class ApiController implements ContainerInjectionInterface {
    * Everything the dialog needs to open: settings, tokens and the output.
    *
    * The context is a page, a content template with the node it is previewed
-   * with, or nothing.
+   * with (or without one, when its type has no content yet), or nothing.
    */
   public function state(Request $request): JsonResponse {
     $query = $request->query->all();
@@ -69,16 +71,22 @@ final class ApiController implements ContainerInjectionInterface {
     $context = match (TRUE) {
       $param('entity_type') === 'canvas_page' && is_string($param('id')) && $param('preview') === NULL
         => $this->pageContext($param('id'), $param('langcode')),
-      $param('entity_type') === 'content_template' && is_string($param('id')) && is_string($param('preview')) && $param('langcode') === NULL
+      $param('entity_type') === 'content_template' && is_string($param('id')) && ($param('preview') === NULL || is_string($param('preview'))) && $param('langcode') === NULL
         => $this->templateContext($param('id'), $param('preview')),
       array_intersect_key($query, array_flip(['entity_type', 'id', 'preview', 'langcode'])) === []
-        => ['target' => NULL, 'can' => FALSE, 'entity' => $this->anyPage(), 'draft' => FALSE],
+        => [
+          'target' => NULL,
+          'can' => FALSE,
+          'entity' => $this->anyPage(),
+          'draft' => FALSE,
+          'vocabulary' => [Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID],
+        ],
       default => self::badRequest(),
     };
     if ($context instanceof JsonResponse) {
       return $context;
     }
-    ['target' => $target, 'entity' => $entity, 'draft' => $draft] = $context;
+    ['target' => $target, 'entity' => $entity, 'draft' => $draft, 'vocabulary' => [$entity_type_id, $bundle]] = $context;
 
     // The edit copy is what is stored, not what a configuration override
     // makes of it; the resolver keeps reading with overrides.
@@ -122,10 +130,13 @@ final class ApiController implements ContainerInjectionInterface {
         'id' => (string) $entity->id(),
         'label' => (string) $entity->label(),
         'url' => $this->resolver->url($entity, $cacheability),
+        // A page's draft carries the status it will get; what counts is
+        // whether visitors can see it now.
+        'published' => ($target['scope'] ?? NULL) === 'page'
+          ? $target['published']
+          : !$entity instanceof EntityPublishedInterface || $entity->isPublished(),
       ],
-      'tokens' => $entity !== NULL && $entity->getEntityTypeId() === 'node'
-        ? $this->resolver->tokens($entity, 'node', $entity->bundle(), $cacheability)
-        : $this->resolver->tokens($entity, Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID, $cacheability),
+      'tokens' => $this->resolver->tokens($entity, $entity_type_id, $bundle, $cacheability),
       'media' => (object) $media,
       'resolved' => $entity === NULL ? NULL : array_diff_key($this->resolver->resolve($entity, $draft), ['cacheability' => TRUE]),
     ]);
@@ -142,10 +153,15 @@ final class ApiController implements ContainerInjectionInterface {
     [$identity, $identity_errors] = Values::cleanIdentity($body['identity']);
     // The site pattern accepts the tokens every entity has.
     [$values, $errors] = Values::clean($body['values'], 'site', $this->resolver->tokenTypes(Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID));
+    $config = $this->configFactory->getEditable('canvas_metatag.site');
+    if ($errors) {
+      $stored = $config->get('values');
+      [$values, $errors] = self::carry($body['values'], $values, $errors, Values::clean(is_array($stored) ? $stored : [], 'site', NULL)[0], 'site');
+    }
     if ($errors + $identity_errors) {
       return self::error(422, 'invalid', 'Some values need attention.', $errors + $identity_errors);
     }
-    $this->configFactory->getEditable('canvas_metatag.site')->set('identity', $identity)->set('values', $values)->save();
+    $config->set('identity', $identity)->set('values', $values)->save();
     return new JsonResponse(['site' => ['identity' => $identity, 'values' => (object) $values]]);
   }
 
@@ -187,7 +203,8 @@ final class ApiController implements ContainerInjectionInterface {
       foreach ($storage->loadMultiple(array_slice($ids, 0, self::PAGE_SIZE)) as $media) {
         $image = $media->access('view') ? $this->resolver->describe($media) : NULL;
         if ($image !== NULL) {
-          $items[] = ['uuid' => $media->uuid()] + self::pick($image, ['name', 'thumb', 'width', 'height', 'bytes', 'alt']);
+          $items[] = ['uuid' => $media->uuid()]
+            + self::pick($image, ['name', 'thumb', 'width', 'height', 'bytes', 'alt']);
         }
       }
     }
@@ -217,7 +234,22 @@ final class ApiController implements ContainerInjectionInterface {
     // as the dialog shows it: from the default translation's draft.
     $preview = $this->autoSaveManager->getAutoSaveEntityForPreview($page)->entity;
     $type = $this->resolver->layers($preview instanceof Page ? $preview : $page, FALSE, new CacheableMetadata())['from_default']['schema']['type'] ?? 'WebPage';
-    return $this->putDraft($page, 'page', $this->resolver->tokenTypes('canvas_page', 'canvas_page'), $body, $type);
+    // While that type is only a draft, the details of the published type,
+    // which the dialog cannot show, are kept: taking the type change back
+    // must lose none of them. Only for a translation that inherits the type,
+    // before and after this write: one with a type of its own is not
+    // affected by the default's type change.
+    $published = $this->resolver->layers($page, FALSE, new CacheableMetadata())['from_default']['schema']['type'] ?? 'WebPage';
+    $keep = [];
+    if ($published !== $type && empty($body['values']['schema']['type'])) {
+      $current = $this->autoSaveManager->getAutoSaveEntity($page, TRUE)->entity;
+      $current = Values::decode(($current instanceof Page ? $current : $page)->get('canvas_metatag')->value);
+      if (!isset($current['schema']['type'])) {
+        $props = Values::clean($current, 'page', NULL, $published)[0]['schema']['props'] ?? [];
+        $keep = array_diff_key($props, array_column(SchemaGraph::types()[$type]['props'] ?? [], 'key', 'key'));
+      }
+    }
+    return $this->putDraft($page, 'page', $this->resolver->tokenTypes('canvas_page', 'canvas_page'), $body, $type, $keep);
   }
 
   /**
@@ -256,28 +288,20 @@ final class ApiController implements ContainerInjectionInterface {
    *   The request body, as draftBody() returned it.
    * @param string $type
    *   The structured-data type the values inherit.
+   * @param array<string, string> $keep
+   *   Structured-data details written besides the values and never echoed:
+   *   those of a page translation's published type (putPage()).
    */
-  private function putDraft(Page|ContentTemplate $entity, string $scope, array $tokens, array $body, string $type = 'WebPage'): JsonResponse {
+  private function putDraft(Page|ContentTemplate $entity, string $scope, array $tokens, array $body, string $type = 'WebPage', array $keep = []): JsonResponse {
     [$clean, $errors] = Values::clean($body['values'], $scope, $tokens, $type);
     if ($errors) {
-      // A value sent back exactly as the draft (or the stored entity) holds
-      // it is carried forward, also when its vocabulary has changed since:
-      // read mode keeps it, and every other field must stay savable.
       $current = $this->autoSaveManager->getAutoSaveEntity($entity, bypass_cache: TRUE)->entity ?? $entity;
       $current = Values::clean(match (TRUE) {
         $current instanceof Page => Values::decode($current->get('canvas_metatag')->value),
         $current instanceof ContentTemplate => (array) $current->getThirdPartySetting('canvas_metatag', 'values', []),
         default => [],
       }, $scope, NULL, $type)[0];
-      foreach (array_keys($errors) as $path) {
-        $parents = explode('.', (string) $path);
-        $kept = NestedArray::getValue($current, $parents, $exists);
-        if ($exists && $kept === NestedArray::getValue($body['values'], $parents)) {
-          NestedArray::setValue($clean, $parents, $kept);
-          unset($errors[$path]);
-        }
-      }
-      $clean = Values::clean($clean, $scope, NULL, $type)[0];
+      [$clean, $errors] = self::carry($body['values'], $clean, $errors, $current, $scope, $type);
     }
     if ($errors) {
       return self::error(422, 'invalid', 'Some values need attention.', $errors);
@@ -297,7 +321,11 @@ final class ApiController implements ContainerInjectionInterface {
     // Never mutate the static-cached stored entity.
     $target = $draft->entity ?? clone $entity;
     if ($target instanceof Page) {
-      $target->set('canvas_metatag', Values::encode($clean));
+      $written = $clean;
+      if ($keep) {
+        $written['schema']['props'] = ($clean['schema']['props'] ?? []) + $keep;
+      }
+      $target->set('canvas_metatag', Values::encode($written));
     }
     elseif ($target instanceof ContentTemplate) {
       $clean
@@ -306,6 +334,40 @@ final class ApiController implements ContainerInjectionInterface {
     }
     $this->autoSaveManager->saveEntity($target, $body['client_instance_id']);
     return new JsonResponse(['values' => (object) $clean]);
+  }
+
+  /**
+   * Carries forward each refused value that was sent back exactly as stored.
+   *
+   * Also when its vocabulary has changed since: read mode keeps it, and every
+   * other field must stay savable.
+   *
+   * @param array $sent
+   *   The values as sent.
+   * @param array $clean
+   *   What write mode kept of them.
+   * @param array<string, string> $errors
+   *   What write mode refused, by dotted path.
+   * @param array $current
+   *   The values as stored (or in the draft), cleaned in read mode.
+   * @param string $scope
+   *   Either 'page', 'template' or 'site'.
+   * @param string $type
+   *   The structured-data type the values inherit.
+   *
+   * @return array{0: array, 1: array<string, string>}
+   *   The clean values and the errors that remain.
+   */
+  private static function carry(array $sent, array $clean, array $errors, array $current, string $scope, string $type = 'WebPage'): array {
+    foreach (array_keys($errors) as $path) {
+      $parents = explode('.', (string) $path);
+      $kept = NestedArray::getValue($current, $parents, $exists);
+      if ($exists && $kept === NestedArray::getValue($sent, $parents)) {
+        NestedArray::setValue($clean, $parents, $kept);
+        unset($errors[$path]);
+      }
+    }
+    return [Values::clean($clean, $scope, NULL, $type)[0], $errors];
   }
 
   /**
@@ -375,7 +437,7 @@ final class ApiController implements ContainerInjectionInterface {
   /**
    * The state of a page: its translation, and its draft for who may edit it.
    *
-   * @return array{target: array, can: bool, entity: \Drupal\Core\Entity\ContentEntityInterface, draft: bool}|\Symfony\Component\HttpFoundation\JsonResponse
+   * @return array{target: array, can: bool, entity: \Drupal\Core\Entity\ContentEntityInterface, draft: bool, vocabulary: array{string, string}}|\Symfony\Component\HttpFoundation\JsonResponse
    *   The context, or the error.
    */
   private function pageContext(string $id, mixed $langcode): array|JsonResponse {
@@ -421,28 +483,35 @@ final class ApiController implements ContainerInjectionInterface {
       'can' => $update && $this->currentUser->hasPermission('edit canvas metatag'),
       'entity' => $entity,
       'draft' => FALSE,
+      'vocabulary' => [Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID],
     ];
   }
 
   /**
    * The state of a content type's template, previewed with one of its nodes.
    *
-   * @return array{target: array, can: bool, entity: \Drupal\Core\Entity\ContentEntityInterface, draft: bool}|\Symfony\Component\HttpFoundation\JsonResponse
+   * Without a node (a type with no content yet), the values and the type's
+   * vocabulary only: no preview, no output.
+   *
+   * @return array{target: array, can: bool, entity: ?\Drupal\Core\Entity\ContentEntityInterface, draft: bool, vocabulary: array{string, string}}|\Symfony\Component\HttpFoundation\JsonResponse
    *   The context, or the error.
    */
-  private function templateContext(string $id, string $preview): array|JsonResponse {
+  private function templateContext(string $id, ?string $preview): array|JsonResponse {
     $storage = $this->entityTypeManager->getStorage(ContentTemplate::ENTITY_TYPE_ID);
     assert($storage instanceof ConfigEntityStorageInterface);
     $template = $storage->loadOverrideFree($id);
     if (!$template instanceof ContentTemplate || $template->getTargetEntityTypeId() !== 'node' || $template->getMode() !== 'full') {
       return self::error(404, 'not_found', 'SEO settings exist only for the full content template of a content type.');
     }
-    $node = ctype_digit($preview) ? $this->entityTypeManager->getStorage('node')->load($preview) : NULL;
-    if (!$node instanceof ContentEntityInterface || $node->bundle() !== $template->getTargetBundle()) {
-      return self::error(404, 'not_found', 'The content to preview with does not exist.');
+    $node = NULL;
+    if ($preview !== NULL) {
+      $node = ctype_digit($preview) ? $this->entityTypeManager->getStorage('node')->load($preview) : NULL;
+      if (!$node instanceof ContentEntityInterface || $node->bundle() !== $template->getTargetBundle()) {
+        return self::error(404, 'not_found', 'The content to preview with does not exist.');
+      }
+      $node = $this->entityRepository->getTranslationFromContext($node);
     }
-    $node = $this->entityRepository->getTranslationFromContext($node);
-    if (!$template->access('view') || !$node->access('view')) {
+    if (!$template->access('view') || ($node !== NULL && !$node->access('view'))) {
       return self::forbidden();
     }
     $update = $template->access('update');
@@ -466,6 +535,7 @@ final class ApiController implements ContainerInjectionInterface {
       'can' => $update && $this->currentUser->hasPermission('edit canvas metatag'),
       'entity' => $node,
       'draft' => $update,
+      'vocabulary' => ['node', $template->getTargetBundle()],
     ];
   }
 

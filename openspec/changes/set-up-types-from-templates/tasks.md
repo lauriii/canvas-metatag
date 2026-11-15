@@ -14,7 +14,7 @@ Needs `rethink-structured-data`, `read-page-components` and
 
 ## 3. Reach
 
-- [ ] 3.1 Route `GET /canvas-metatag/api/reach` with seo-access rules; batched `resolve()` over published items with the template's draft values; per-item and whole-answer caches with their tags; sampling above 2,000. Verify with a new kernel `ReachTest` (exact counts with a node grant hiding two items and an invalid currency on three; cache hit and invalidation on a node save; sample flag at 2,001 items) and `ApiTest::testReachAccess` (403 without update access to the template).
+- [ ] 3.1 Route `GET /canvas-metatag/api/reach` with seo-access rules; batched `resolve()` over published items with the template's draft values; per-item and whole-answer caches with their tags; sampling above 2,000. Verify with a new kernel `ReachTest` (exact counts with a node grant hiding two items and an invalid currency on three; a hand-added employer rating whose score is linked counted on the items that have a score; cache hit and invalidation on a node save; sample flag at 2,001 items) and `ApiTest::testReachAccess` (403 without update access to the template).
 - [ ] 3.2 Budget. Verify with a kernel `ReachBudgetTest` at 10,000 nodes within the time agreed with the product owner.
 - [ ] 3.3 Reach lines, Also helps rows (gray), "Complete on ‹n› of ‹m›", per-item degradation, Preview one with Back; reach fetched on mount and on the template's own value changes only. Verify with `checks.test.ts` (per-item rule) and Playwright `template.spec.ts` ("Also helps · Author on 175"; Preview one caption; a Canvas round trip without a value change does not call the reach route).
 

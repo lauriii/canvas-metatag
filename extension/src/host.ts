@@ -4,8 +4,11 @@
 
 export type HostContext =
   | { kind: 'page'; id: string }
-  /** Only for a node template in the `full` view mode with a preview node in the route. */
-  | { kind: 'template'; id: string; bundle: string; previewId: string }
+  /**
+   * Only for a node template in the `full` view mode. `previewId` is null on
+   * the route of a type with no content to preview: nothing to write under.
+   */
+  | { kind: 'template'; id: string; bundle: string; previewId: string | null }
   /** `template` is true on any other template route. */
   | { kind: 'none'; template: boolean };
 
@@ -61,6 +64,13 @@ export interface Host {
   /** Opens http(s) URLs only, through an anchor in the editor document. */
   openExternal(url: string): void;
   reloadEditor(): void;
+  /**
+   * Grows the dialog's frame to the height the editor's window allows, never
+   * below Canvas's own, and follows the window. A dialog opened in a taller
+   * window moves up to where Canvas opens it in this one. Undone when the
+   * frame goes away; returns the undo.
+   */
+  fitFrame(): () => void;
 }
 
 // The part of the editor's store this file reads. Shapes verified in the
@@ -109,9 +119,18 @@ export function parseRoute(pathname: string): HostContext {
   if (!template) {
     return { kind: 'none', template: /^\/template(?:\/|$)/.test(pathname) };
   }
-  const [, entityType, bundle, viewMode, previewId] = template;
-  return entityType === 'node' && viewMode === 'full' && previewId
-    ? { kind: 'template', id: `node.${bundle}.full`, bundle, previewId }
+  const [whole, entityType, bundle, viewMode, previewId] = template;
+  // Without a preview id only as the whole route: "/full/component/…" is not
+  // a template with nothing to preview.
+  return entityType === 'node' &&
+    viewMode === 'full' &&
+    (previewId || pathname.replace(/\/$/, '') === whole)
+    ? {
+        kind: 'template',
+        id: `node.${bundle}.full`,
+        bundle,
+        previewId: previewId ?? null,
+      }
     : { kind: 'none', template: true };
 }
 
@@ -284,7 +303,8 @@ export function createHost(win: Window = window): Host {
     },
 
     editorToken(ctx) {
-      if (ctx.kind === 'none') {
+      // Canvas keeps no draft entry for a template without a preview node.
+      if (ctx.kind === 'none' || (ctx.kind === 'template' && !ctx.previewId)) {
         return null;
       }
       return read((state) => {
@@ -455,6 +475,86 @@ export function createHost(win: Window = window): Host {
         editor().location.reload();
       } catch {
         // Nothing to reload.
+      }
+    },
+
+    fitFrame() {
+      try {
+        // Canvas sizes the frame and its scroll container to the window less
+        // a fixed 300 px, which leaves almost nothing in a short window.
+        const top = win.parent;
+        const frame = win.frameElement as HTMLElement | null;
+        const panel = frame?.closest<HTMLElement>('[role="dialog"]');
+        let found = frame?.parentElement ?? null;
+        while (
+          found &&
+          found !== panel &&
+          !/auto|scroll/.test(top.getComputedStyle(found).overflowY)
+        ) {
+          found = found.parentElement;
+        }
+        if (!frame || !panel || !found || found === panel) {
+          return () => {};
+        }
+        const box = found;
+        const own = [frame.style.height, box.style.maxHeight, panel.style.top];
+        const reset = () => {
+          frame.style.height = own[0];
+          box.style.maxHeight = own[1];
+          panel.style.top = own[2];
+        };
+        // Where Canvas placed the dialog, measured at open: later
+        // measurements include the editor's drags.
+        let opened: number | undefined;
+        const fit = () => {
+          // Canvas closes the dialog by removing the frame, without
+          // unmounting this document.
+          if (!frame.isConnected) {
+            undo();
+            return;
+          }
+          try {
+            reset();
+            // Canvas opens the dialog a fifth of the window from the top.
+            // Opened in a taller window, it moves up to where it would open
+            // in this one. The offset follows the window, never a drag,
+            // which stays where the editor left it.
+            opened ??= panel.getBoundingClientRect().top;
+            const lift = opened - top.innerHeight * 0.2;
+            if (lift >= 1) {
+              const y = parseFloat(top.getComputedStyle(panel).top) || 0;
+              panel.style.top = `${y - Math.floor(lift)}px`;
+            }
+            const { top: at, height } = frame.getBoundingClientRect();
+            // The dialog ends 16 px above the window, within its own maximum
+            // height, with its own padding below the frame.
+            const style = top.getComputedStyle(panel);
+            const bottom =
+              Math.min(
+                top.innerHeight - 16,
+                panel.getBoundingClientRect().top +
+                  (parseFloat(style.maxHeight) || Infinity),
+              ) - (parseFloat(style.paddingBottom) || 0);
+            if (bottom - at > height) {
+              frame.style.height = `${Math.floor(bottom - at)}px`;
+              box.style.maxHeight = frame.style.height;
+            }
+          } catch {
+            // Canvas's own size stays.
+          }
+        };
+        const undo = () => {
+          top.removeEventListener('resize', fit);
+          win.removeEventListener('pagehide', undo);
+          reset();
+        };
+        fit();
+        top.addEventListener('resize', fit);
+        // Removing the frame unloads this document; React stays mounted.
+        win.addEventListener('pagehide', undo);
+        return undo;
+      } catch {
+        return () => {};
       }
     },
   };

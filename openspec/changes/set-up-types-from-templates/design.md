@@ -52,7 +52,10 @@ tags and `config:canvas_metatag.site`. Above 2,000 items it evaluates a
 seeded sample of 500 and marks the counts approximate. The dialog fetches it
 when the verdict section mounts and when the template's own values change,
 never on a Canvas round trip. The template's draft values are applied to
-every item, so reach previews the draft.
+every item, so reach previews the draft. Hand-added items and added details
+(`extend-structured-data-by-id`, which runs earlier and shows verdicts for
+the previewed item only) are part of each item's graph, so their features
+are counted too, with their whole-value field links filled per item.
 
 *Alternatives:* entity queries (rejected: they cannot express validity
 rules, multi-hop sources or node grants); counting inside `/state`
@@ -62,7 +65,10 @@ rules, multi-hop sources or node grants); counting inside `/state`
 
 Registry props marked `per_item` (name, headline, dates, price, image) given
 one typed value at type scope make every feature requiring them `needs`
-with the reason `per_item`, and the reach line shows no count.
+with the reason `per_item`, and the reach line shows no count. Its field
+line uses the words `extend-structured-data-by-id` already shows for typed
+values in hand-added items: "The same ‹label› on every ‹Type›. Link it to a
+field instead."
 
 ### 5. Authors
 

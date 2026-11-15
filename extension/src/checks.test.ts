@@ -130,8 +130,8 @@ function input(setup: Setup = {}): ChecksInput {
     ai: false,
     published: true,
     typeLabel: 'Article',
-    previewLabel: 'Pricing',
     defaultLanguage: 'English',
+    robotsSettled: true,
     // Every character is 7 px wide.
     measurer: (value) => Array.from(value).length * 7,
     ...setup.input,
@@ -268,9 +268,9 @@ describe('checks()', () => {
     ],
     [
       'image-small',
-      'improve',
+      'info',
       { resolved: { image: { ...IMAGE, width: 800, height: 420 } } },
-      ['Use a larger social image', 'The social image is 800 x 420. Use at least 1200 x 630 for a large card.'],
+      ['The social image could be sharper', 'The social image is 800\u00a0×\u00a0420. It works as a large card; 1200\u00a0×\u00a0630 looks sharper.'],
     ],
     [
       'image-ratio',
@@ -283,6 +283,12 @@ describe('checks()', () => {
       'info',
       { resolved: { image: { ...IMAGE, bytes: 6.5 * 1048576 } } },
       ['The social image is 6.5 MB', 'Some services skip images over 5 MB.'],
+    ],
+    [
+      'image-heavy',
+      'info',
+      { resolved: { image: { ...IMAGE, bytes: 10665459 } } },
+      ['The social image is 10.2 MB', 'Some services skip images over 5 MB.'],
     ],
     [
       'image-format',
@@ -478,7 +484,7 @@ describe('checks()', () => {
         'h1-missing',
       )!.detail,
     ).toBe(
-      'Set one heading in this template to Heading 1. This is done in the template, not here.',
+      "Set one heading in the template's layout to Heading 1. SEO settings cannot set it.",
     );
     // A code is rarely printed as written: no "does not appear" for it.
     const product = find(
@@ -787,8 +793,11 @@ describe('rules with conditions', () => {
       find({ ...hidden, input: { published: false } }, 'noindex'),
     ).toBeUndefined();
     expect(
-      find({ ...hidden, input: { scope: 'template' } }, 'noindex')!.detail,
-    ).toBe('Hidden from search engines. Set for every Article.');
+      find({ ...hidden, input: { scope: 'template' } }, 'noindex'),
+    ).toMatchObject({
+      message: 'Show this article in search',
+      detail: 'Hidden from search engines. Set for every Article.',
+    });
     const bySite = find({ site: { robots: { noindex: true } } }, 'noindex')!;
     expect(bySite.detail).toBe(
       'Hidden from search engines. Set for the whole site.',
@@ -818,6 +827,19 @@ describe('rules with conditions', () => {
         'Hidden from search engines. Set in site configuration outside SEO.',
       fix: undefined,
     });
+    // Right after "Show in search results" on Every Article, before the
+    // server has the change: its last answer still says noindex, and is not
+    // believed, so nothing says that hiding is set outside SEO.
+    expect(
+      find(
+        {
+          target: { robots: { noindex: false } },
+          robotsMeta: 'noindex',
+          input: { robotsSettled: false, scope: 'template' },
+        },
+        'noindex',
+      ),
+    ).toBeUndefined();
   });
 
   it('snippet-off also fires for a limit of 0, image-preview for an absent directive', () => {
@@ -830,13 +852,48 @@ describe('rules with conditions', () => {
     expect(find({ site: {} }, 'image-preview')).toBeDefined();
   });
 
-  it('image-small names the thumbnail under 600 x 315', () => {
+  it('image-small follows the link preview: a thumbnail under 600 px wide to improve, a large card good to know', () => {
+    const small = (width: number, height: number) =>
+      find({ resolved: { image: { ...IMAGE, width, height } } }, 'image-small');
+    expect(small(400, 400)).toMatchObject({
+      severity: 'improve',
+      detail:
+        'The social image is 400\u00a0×\u00a0400. Most link previews show it as a small thumbnail; an image at least 600 px wide makes a large card, and 1200\u00a0×\u00a0630 is best.',
+    });
+    expect(small(1200, 150)?.detail).toContain(
+      'an image at least 157 px tall makes a large card',
+    );
+    expect(small(800, 420)).toMatchObject({
+      severity: 'info',
+      message: 'The social image could be sharper',
+      detail:
+        'The social image is 800\u00a0×\u00a0420. It works as a large card; 1200\u00a0×\u00a0630 looks sharper.',
+    });
+    expect(small(1200, 630)).toBeUndefined();
+  });
+
+  it('a large card that is cropped too is one row, good to know', () => {
+    const issues = checks(
+      input({ resolved: { image: { ...IMAGE, width: 800, height: 1000 } } }),
+    );
+    expect(ids(issues).filter((id) => id.startsWith('image-'))).toEqual([
+      'image-small',
+    ]);
+    expect(issues.find((issue) => issue.id === 'image-small')).toMatchObject({
+      severity: 'info',
+      message: 'The social image could be sharper',
+      detail:
+        'The social image is 800\u00a0×\u00a01000. It works as a large card, cropped; 1200\u00a0×\u00a0630 fits best.',
+    });
     expect(
-      find(
-        { resolved: { image: { ...IMAGE, width: 400, height: 210 } } },
-        'image-small',
-      )!.detail,
-    ).toBe('The social image is 400 x 210. It will show as a small thumbnail.');
+      issues.find((issue) => issue.id === 'image-small')?.detail,
+    ).not.toContain('for a large card');
+    // A thumbnail is square, never cropped to 1.91:1: one row, its size.
+    expect(
+      ids(
+        checks(input({ resolved: { image: { ...IMAGE, width: 400, height: 400 } } })),
+      ).filter((id) => id.startsWith('image-')),
+    ).toEqual(['image-small']);
   });
 
   it('token-empty: one row per value, not for names outside the vocabulary', () => {
@@ -865,15 +922,129 @@ describe('rules with conditions', () => {
     ).toEqual([]);
   });
 
-  it('at template scope "this page" is the previewed page', () => {
-    const issue = find(
+  it('at template scope "this page" is "this event", never the preview\'s title', () => {
+    const template = { scope: 'template', typeLabel: 'Event' } as const;
+    const title = find(
       {
         tokens: { title: text('Page title', ''), site: text('Site name', '') },
-        input: { scope: 'template', previewLabel: 'Hello world' },
+        input: template,
       },
       'title-empty',
     )!;
-    expect(issue.detail).toBe('Hello world has no title for search results.');
+    expect(title.detail).toBe('This event has no title for search results.');
+    const empty = find(
+      {
+        target: { social: { description: '{description} More.' } },
+        tokens: { description: text('Description', '') },
+        input: template,
+      },
+      'token-empty:description',
+    )!;
+    // The template cannot fill it in: a fact, not a task.
+    expect(empty).toMatchObject({
+      severity: 'info',
+      message: 'Description is empty for this event',
+      detail:
+        'It is left out for this event, and filled in wherever another event has one.',
+    });
+    // The previewed node's title is in the values, never in a sentence.
+    const all = checks(
+      input({
+        target: { social: { description: '{description} More.' } },
+        tokens: {
+          title: text('Page title', 'Hello world'),
+          description: text('Description', ''),
+        },
+        input: template,
+      }),
+    );
+    expect(
+      all.find((issue) => issue.id === 'token-empty:description')?.detail,
+    ).toContain('this event');
+    for (const issue of all) {
+      expect(`${issue.message} ${issue.detail ?? ''}`).not.toContain(
+        'Hello world',
+      );
+    }
+    // A structured data property linked to a field this event has no value
+    // in: a fact too, said once, and not in the counted row.
+    const linked = checks(
+      input({
+        target: {
+          schema: {
+            type: 'Event',
+            props: { endDate: '{field.field_ends}', image: '{field.field_poster}' },
+          },
+        },
+        tokens: {
+          'field.field_ends': { label: 'Field: Ends', type: 'datetime', value: '' },
+          'field.field_poster': { label: 'Field: Poster', type: 'image', value: '', image: null },
+        },
+        resolved: {
+          schema: {
+            withheld: false,
+            missing_required: [],
+            missing_recommended: ['endDate', 'image', 'location_name'],
+          },
+        },
+        input: template,
+      }),
+    );
+    expect(linked.find((issue) => issue.id === 'schema-recommended')?.message).toBe(
+      'Event is missing: Venue.',
+    );
+    expect(linked.find((issue) => issue.id === 'schema-empty:endDate')).toMatchObject({
+      severity: 'info',
+      message: 'Ends is empty for this event',
+      detail:
+        'It is left out for this event, and filled in wherever another event has one.',
+      jump: { scope: 'target', tab: 'schema', field: 'schema.props.endDate' },
+    });
+    expect(ids(linked)).toContain('schema-empty:image');
+    // At page scope it stays a task.
+    expect(
+      find(
+        {
+          target: { schema: { type: 'Event', props: { endDate: '{field.field_ends}' } } },
+          tokens: { 'field.field_ends': { label: 'Field: Ends', type: 'datetime', value: '' } },
+          resolved: {
+            schema: { withheld: false, missing_required: [], missing_recommended: ['endDate'] },
+          },
+        },
+        'schema-recommended',
+      )?.message,
+    ).toBe('Event is missing: Ends.');
+    // A type named by an abbreviation keeps it.
+    expect(
+      find(
+        {
+          tokens: { title: text('Page title', ''), site: text('Site name', '') },
+          input: { scope: 'template', typeLabel: 'FAQ page' },
+        },
+        'title-empty',
+      )!.detail,
+    ).toBe('This FAQ page has no title for search results.');
+  });
+
+  it('names an image format as people know it', () => {
+    expect(
+      find(
+        { resolved: { image: { ...IMAGE, mime: 'image/x-ms-bmp' } } },
+        'image-format',
+      )?.detail,
+    ).toBe('BMP images do not show on many services.');
+  });
+
+  it('the words a long text may be cut after end without their own mark', () => {
+    const title = Array.from({ length: 14 }, () => 'words,').join(' ');
+    expect(find({ target: { title } }, 'title-long')?.detail).toBe(
+      'May be cut off after “…words, words, words”.',
+    );
+    // Also a mark of another script, as the server's plain text knows it.
+    const arabic = Array.from({ length: 14 }, () => 'words،').join(' ');
+    expect(find({ target: { title: arabic } }, 'title-long')?.detail).toBe(
+      'May be cut off after “…words، words، words”.',
+    );
   });
 
   it('long text cannot be judged without a measurer', () => {

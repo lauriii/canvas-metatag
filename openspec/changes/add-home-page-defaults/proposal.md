@@ -57,8 +57,17 @@ reviewed and rejected; design.md records why, decision by decision.
   that stay true for subdirectory installs and headless frontends. Site gains a
   read-only "Home page" row that says what the home page is and what this
   module can and cannot do there.
-- No new scope, no stored home-only setting, no home title pattern, no
-  description fallback. No **BREAKING** change for stored data.
+- **A vaguely named front page is titled and shared by the site** (product
+  decision 12, replacing this change's earlier "no home rules"): when the
+  owned front page's name is empty, the site name, an alternate name or a
+  vague word, its title is the Site name, followed by the site's slogan when
+  Drupal has one, and its `og:title` is the same; without an image of its own
+  it shares the site card of `strengthen-zero-config-defaults`. The slogan is
+  never its description; its fallback to the identity description comes with
+  `describe-the-publisher`, which adds that description after this change.
+  The "Say what the site offers" check keeps asking for a real name.
+- No new scope, no stored home-only setting, no title pattern to configure.
+  No **BREAKING** change for stored data.
 
 ## Capabilities
 
@@ -99,15 +108,19 @@ reviewed and rejected; design.md records why, decision by decision.
 - The full identity (address, contact, legal name, merchant policies) and site
   kinds as identity subtypes: owned by the structured-data work. design.md D9
   records the placement rule this change hands over.
-- A "Home page" scope, home-only stored settings, a home title pattern, a
-  slogan or site-wide description fallback (README non-goal kept), forcing
+- A "Home page" scope, home-only stored settings, a configurable home title
+  pattern, the slogan as a description, a site-wide description on any page
+  other than the front page (README non-goal kept), forcing
   `index` on the home page.
-- `og:locale` (README non-goal kept), hreflang code validity, favicon checks,
+- `og:locale` and the front page's icon links (both in
+  `strengthen-zero-config-defaults`), hreflang code validity, favicon checks,
   a check for robots.txt or response headers (not visible to the dialog).
 - Writing the front page setting from the dialog. The fix for an alias-form
   setting points to where a site administrator sets it.
 
-No README non-goal is reopened.
+No README non-goal is reopened. The front page's description fallback is the
+description of the site the front page stands for, used on that page only; it
+is not a site-wide default description (product decision 12).
 
 ## Depends on / overlaps with other changes
 
@@ -134,10 +147,16 @@ are written on their text.
   missing from the home page" check keeps its wording and reads the front page
   from `front-page` once this change lands. Its open question on emitting on
   an unowned front page is the same product question as below.
-- **Structured-data design (in progress, not yet a change).** It plans an
+- **Depends on `strengthen-zero-config-defaults`** (the site card, the image
+  chain's end, the Site name on cards), which archives before this change.
+- **Followed by `describe-the-publisher`** (formerly "structured-data design,
+  in progress"), which runs and archives after this change. It plans an
   identity alternate name among other identity fields; this change adds only
   that field, with the same meaning. It should read the front page from
-  `front-page` rather than derive it again.
+  `front-page` rather than derive it again. It adds the identity description
+  and, with it, the front page's fallback to that description and the site
+  card's line when there is no slogan (moved there from this change's group
+  6b).
 - `build-ai-on-drupal-ai`, `expose-seo-to-canvas-ai`: no overlap beyond the
   existing Suggest action, which the front page title check offers.
 

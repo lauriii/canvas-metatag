@@ -43,15 +43,21 @@ import {
   type View,
   applyChanges,
   canon,
+  catchingUp,
   draftPayload,
   footer,
+  freshStore,
+  holdsStore,
+  inSentence,
   initialState,
+  nowEditing,
   openPending,
   pendingFor,
   pendingKey,
   prune,
   readPending,
   reducer,
+  robotsUnsent,
   saveDraft,
   sitePaths,
   strips,
@@ -195,6 +201,8 @@ export default function App() {
   const [host] = useState(() => createHost());
   const [api] = useState(() => createApi(host.basePath()));
   const [measurer] = useState(createMeasurer);
+  // Short editor windows: the frame takes the height there is.
+  useEffect(() => host.fitFrame(), [host]);
   const [state, rawDispatch] = useReducer(reducer, undefined, () =>
     initialState(host.context()),
   );
@@ -249,12 +257,21 @@ export default function App() {
   const saving = useRef(false);
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const held = useRef<string | null>(null);
+  const holding = useRef(false);
+  /** A change kept for a draft the editor had not stored in time. */
+  const stalled = useRef(false);
+  /** The load whose change in session storage waits for a writable target. */
+  const unopened = useRef<string | null>(null);
 
   /** Why the target may not be written, as far as the editor and the server tell. */
   const access = useCallback(
     (ctx: HostContext, payload: StatePayload): State['readonly'] => {
       if (!payload.target || ctx.kind === 'none') {
         return 'no';
+      }
+      // Canvas keeps no draft for a template without a node to preview.
+      if (!payload.preview) {
+        return 'empty';
       }
       if (!payload.can.target) {
         return 'access';
@@ -318,17 +335,17 @@ export default function App() {
         if (loaded.current !== key) {
           return;
         }
-        const label = payload.target
-          ? payload.target.scope === 'page'
-            ? payload.target.label
-            : `Every ${payload.target.label}`
-          : null;
+        // Another preview of the same template: its pending entry is this
+        // session's own, and already in the view.
+        const refresh = now.current.phase === 'refreshing';
         dispatch({
           type: 'loaded',
           ctx,
           payload,
           readonly: access(ctx, payload),
-          flash: !first.current && label ? `Now editing ${label}` : undefined,
+          flash: first.current
+            ? undefined
+            : nowEditing(now.current.server?.target, payload.target),
         });
         dispatch({ type: 'live', live: host.inputs() ?? {} });
         dispatch({ type: 'facts', facts: host.readFacts() });
@@ -336,7 +353,10 @@ export default function App() {
           // A write sent while the iframe is being removed cannot wait for a token.
           api.prime();
         }
-        reopen('target', payload);
+        if (!refresh) {
+          reopen('target', payload);
+          unopened.current = now.current.readonly === 'no' ? null : key;
+        }
         if (first.current) {
           reopen('site', payload);
         }
@@ -400,8 +420,20 @@ export default function App() {
       flush();
       shown.current = key;
       loaded.current = null;
-      setSheet(null);
-      dispatch({ type: 'loading', ctx });
+      // Another node in the same template's preview: the same values, so the
+      // view and its sheet stay until the new answer.
+      const was = now.current;
+      const refresh =
+        (was.phase === 'ready' || was.phase === 'refreshing') &&
+        was.ctx.kind === 'template' &&
+        ctx.kind === 'template' &&
+        was.ctx.id === ctx.id &&
+        !!was.ctx.previewId &&
+        !!ctx.previewId;
+      if (!refresh) {
+        setSheet(null);
+      }
+      dispatch({ type: 'loading', ctx, refresh });
     }
     // An entity route without an owner yet is loading, never "no page".
     if (!host.loading()) {
@@ -426,7 +458,18 @@ export default function App() {
     const status = (save: State['save']['target']) =>
       dispatch({ type: 'save', scope: 'target', save });
     if (readonly !== 'no') {
-      status({ phase: 'idle' });
+      // While a load's draft is being stored the change waits, and goes out
+      // once it is (the timer below runs again). Stored later than that, it
+      // still goes out then; meanwhile the footer says it is not stored.
+      if (holding.current) {
+        return;
+      }
+      stalled.current = readonly === 'store' && unsent(now.current);
+      status(
+        stalled.current
+          ? { phase: 'error', message: MESSAGES.unstored }
+          : { phase: 'idle' },
+      );
       return;
     }
     const key = keyOf(ctx);
@@ -625,6 +668,70 @@ export default function App() {
     };
   }, [access, api, dispatch, follow, host]);
 
+  // The editor and the server name different languages: known at load, and
+  // not a draft on its way.
+  const mismatch =
+    state.ctx.kind === 'page' &&
+    !!state.server &&
+    (host.editorToken(state.ctx)?.langcode ?? state.server.langcode) !==
+      state.server.langcode;
+  // Until the editor has stored the draft of what it just loaded (another
+  // page, or another node in a template's preview), it reports no draft: the
+  // 'store' state. That is not shown for up to 2 s, so a preview switch
+  // neither warns, locks the fields, moves the view nor speaks; a change
+  // typed meanwhile waits for it. One reached later, on a save, shows at once.
+  const [fresh, setFresh] = useState(true);
+  useLayoutEffect(
+    () => setFresh((was) => freshStore(was, state.phase, state.readonly)),
+    [state.phase, state.readonly],
+  );
+  const arriving = holdsStore(state.phase, state.readonly, fresh, mismatch);
+  // The load whose store took too long; each load has its own context.
+  const [late, setLate] = useState<HostContext | null>(null);
+  useEffect(() => {
+    if (!arriving) {
+      return;
+    }
+    const ctx = state.ctx;
+    const timer = setTimeout(() => setLate(ctx), 2000);
+    return () => clearTimeout(timer);
+  }, [arriving, state.ctx]);
+  const hold = arriving && late !== state.ctx;
+  useLayoutEffect(() => {
+    holding.current = hold;
+  }, [hold]);
+  // A change left in session storage is looked at only while the target can
+  // be written: a load that came while the editor was storing its draft looks
+  // again once it has, unless something was typed meanwhile.
+  useEffect(() => {
+    const { ctx, phase, readonly, server } = now.current;
+    if (
+      unopened.current !== keyOf(ctx) ||
+      phase !== 'ready' ||
+      readonly !== 'no' ||
+      !server
+    ) {
+      return;
+    }
+    unopened.current = null;
+    if (!unsent(now.current)) {
+      reopen('target', server);
+    }
+  }, [reopen, state.phase, state.readonly]);
+  // While another preview of the same template loads, the view is the one
+  // it was.
+  const seen = useMemo<State>(
+    () =>
+      hold || state.phase === 'refreshing'
+        ? {
+            ...state,
+            phase: state.phase === 'refreshing' ? 'ready' : state.phase,
+            readonly: hold ? 'no' : state.readonly,
+          }
+        : state,
+    [hold, state],
+  );
+
   // An edit starts the timer. A difference alone never does.
   useEffect(() => {
     if (state.save.target.phase !== 'pending') {
@@ -632,7 +739,24 @@ export default function App() {
     }
     saveTimer.current = setTimeout(save, 400);
     return () => clearTimeout(saveTimer.current);
-  }, [save, state.edits.target, state.save.target.phase]);
+  }, [
+    save,
+    state.edits.target,
+    state.save.target.phase,
+    state.phase,
+    state.readonly,
+    hold,
+  ]);
+  // A change kept for a draft the editor stored late goes out once it is.
+  useEffect(() => {
+    if (state.readonly !== 'no' || !stalled.current) {
+      return;
+    }
+    stalled.current = false;
+    if (unsent(now.current)) {
+      dispatch({ type: 'save', scope: 'target', save: { phase: 'pending' } });
+    }
+  }, [dispatch, state.readonly]);
 
   // Losing focus, or the iframe, sends a waiting change at once.
   useEffect(() => {
@@ -695,9 +819,11 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.server, state.edits.target, state.live, state.sent],
   );
+  const robotsSettled = !robotsUnsent(state);
   const issues = useMemo(() => {
     const server = state.server;
-    if (!server?.target || !shownView) {
+    // Nothing to judge without a node to preview.
+    if (!server?.target || !server.preview || !shownView) {
       return [];
     }
     return checks({
@@ -715,17 +841,17 @@ export default function App() {
       ai: server.capabilities.ai?.available === true,
       published: server.target.published,
       typeLabel: server.target.label,
-      previewLabel: server.preview?.label ?? server.target.label,
       defaultLanguage:
         server.languages[server.target.default_langcode ?? ''] ??
         'default-language',
       measurer,
+      robotsSettled,
     });
-  }, [measurer, shownView, state.facts, state.server]);
+  }, [measurer, robotsSettled, shownView, state.facts, state.server]);
 
   const app = useMemo<AppContext>(
     () => ({
-      state,
+      state: seen,
       dispatch,
       host,
       api,
@@ -733,8 +859,8 @@ export default function App() {
       issues,
       measurer,
       locked: {
-        target: state.readonly !== 'no',
-        site: !state.server?.can.site,
+        target: seen.readonly !== 'no',
+        site: !seen.server?.can.site,
       },
       jump,
       goTo(to, how = {}) {
@@ -767,9 +893,10 @@ export default function App() {
       commitDescription(text) {
         held.current = null;
         const { ctx, readonly } = now.current;
+        // Canvas's own field takes it while a new page's draft is on its way.
         const taken =
           ctx.kind === 'page' &&
-          readonly === 'no' &&
+          (readonly === 'no' || (readonly === 'store' && holding.current)) &&
           (text === (host.inputs()?.description ?? '') ||
             host.setDescription(ctx.id, text));
         dispatch({
@@ -811,9 +938,9 @@ export default function App() {
       jump,
       measurer,
       sheet,
+      seen,
       shownView,
       stageVisible,
-      state,
       trial,
     ],
   );
@@ -923,23 +1050,15 @@ export default function App() {
             </Btn>
           </div>
         )}
-        {(state.phase === 'ready' || state.phase === 'loading') &&
+        {(state.phase === 'ready' ||
+          state.phase === 'refreshing' ||
+          state.phase === 'loading') &&
           state.server && (
             // One element in both phases: when the editor moves on, the
             // frame stays, and so do focus and the live region. Only the
             // body waits.
             <Ready
-              strips={
-                state.phase === 'ready'
-                  ? strips(
-                      state,
-                      shownView,
-                      state.ctx.kind === 'page' &&
-                        (host.editorToken(state.ctx)?.langcode ??
-                          state.server.langcode) !== state.server.langcode,
-                    )
-                  : []
-              }
+              strips={strips(seen, shownView, mismatch)}
               act={act}
               loading={
                 state.phase === 'loading' ? (
@@ -1055,9 +1174,15 @@ function useNotes(): string[] {
   const server = state.server!;
   return [
     state.scope === 'site' && !server.target
-      ? state.ctx.kind === 'none' && state.ctx.template
-        ? 'SEO for a content type is set in its Full content template, with a page to preview.'
-        : 'Open a page or a content template to edit its SEO.'
+      ? // The Full template route of a type that has none; another template.
+        state.ctx.kind === 'template'
+        ? 'This content type has no Full content template yet. Add one to set its SEO.'
+        : state.ctx.kind === 'none' && state.ctx.template
+          ? 'SEO for a content type is set in its Full content template.'
+          : 'Open a page or a content template to edit its SEO.'
+      : null,
+    state.scope === 'target' && state.readonly === 'empty' && server.target
+      ? `No ${inSentence(server.target.label)} yet. Add one to preview and edit these settings.`
       : null,
     state.scope === 'site' && !server.can.site
       ? 'Only people who administer SEO site settings can change these. You are viewing them.'
@@ -1088,11 +1213,13 @@ function Ready(props: {
   useLayoutEffect(() => {
     frame.current?.toggleAttribute('inert', sheet !== null);
   }, [sheet]);
-  // Every view opens at its preview. A jump scrolls after this, to its field.
+  // Every view opens at its preview, also for another page or previewed
+  // node. A jump scrolls after this, to its field.
   const body = useRef<HTMLDivElement>(null);
+  const where = keyOf(state.ctx);
   useLayoutEffect(() => {
     body.current?.scrollTo(0, 0);
-  }, [tab, state.scope]);
+  }, [tab, state.scope, where]);
   // The bar floats over the body's end: the body makes room for its real
   // height, and what was in view (the end, or the control just used) stays.
   const barRef = useRef<HTMLDivElement>(null);
@@ -1117,13 +1244,15 @@ function Ready(props: {
     // Before the first measure: the body's own end padding, 32.
     const grew = pad - (Number.isNaN(room.current) ? 32 : room.current);
     room.current = pad;
-    // At the end before the bar came or grew: still at the end. Else the
-    // control just used stays clear of it.
+    // Scrolled to the end before the bar came or grew: still at the end.
+    // (A view at its top stays there: another page has just opened.) Else
+    // the control just used stays clear of it, with its message.
     if (element && grew > 0) {
-      if (atEnd.current ?? endOf(scroller, grew)) {
+      const active = document.activeElement;
+      if (scroller.scrollTop > 0 && (atEnd.current ?? endOf(scroller, grew))) {
         scroller.scrollTop = scroller.scrollHeight;
-      } else if (scroller.contains(document.activeElement)) {
-        reveal(document.activeElement);
+      } else if (active && scroller.contains(active)) {
+        reveal(active.closest('.seo-field') ?? active);
       }
     }
     atEnd.current = endOf(scroller);
@@ -1258,6 +1387,33 @@ function Ready(props: {
   );
 }
 
+/**
+ * Output's "Updating…": a polite status region that is there, empty, from
+ * the start, and gets its words only after 400 ms, so that a quick save stays
+ * quiet and a slow one is announced.
+ */
+function Updating({ busy }: { busy: boolean }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    if (!busy) {
+      setShown(false);
+      return;
+    }
+    const timer = setTimeout(() => setShown(true), 400);
+    return () => clearTimeout(timer);
+  }, [busy]);
+  return (
+    <span role="status" className="seo-updating-live">
+      {busy && shown && (
+        <span className="seo-updating">
+          <span className="seo-spinner" aria-hidden />
+          Updating…
+        </span>
+      )}
+    </span>
+  );
+}
+
 function SheetHost(props: { sheet: SheetState; onClose(): void }) {
   const { sheet, onClose } = props;
   const { state, dispatch, closeSheet } = useApp();
@@ -1279,11 +1435,15 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
         title="Output"
         focusBack
         end={
-          <InfoTip
-            label="About addresses"
-            text={originNote(server)}
-            size={28}
-          />
+          <>
+            {/* The view behind the sheet, with the save status, is inert. */}
+            <Updating busy={catchingUp(state)} />
+            <InfoTip
+              label="About addresses"
+              text={originNote(server)}
+              size={28}
+            />
+          </>
         }
         onClose={onClose}
       >
@@ -1296,6 +1456,8 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
     return (
       <Sheet
         title="Custom JSON-LD"
+        // A read-only editor cannot take focus: Back does, so Esc works.
+        focusBack={state.readonly !== 'no'}
         end={
           set &&
           state.readonly === 'no' && (

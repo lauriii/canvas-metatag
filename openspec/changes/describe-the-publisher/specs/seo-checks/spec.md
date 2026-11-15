@@ -1,3 +1,37 @@
+## MODIFIED Requirements
+
+### Requirement: Description rules
+
+The checks MUST judge the resolved search description: whether it exists, fits,
+and says more than the title. On the front page, the missing-description row
+MUST ask for a description of the whole site, and a description that comes
+from the identity MUST be named as the site's description.
+
+#### Scenario: No description
+
+- **WHEN** the resolved description is empty
+- **THEN** "Add a description" MUST be listed to improve
+
+#### Scenario: A long description
+
+- **WHEN** the description may be cut off
+- **THEN** "Shorten the description" MUST be listed as good to know
+
+#### Scenario: Repeating the title
+
+- **WHEN** the description equals the title without the site name, ignoring case and punctuation
+- **THEN** "Make the description say more" MUST be listed to improve
+
+#### Scenario: The site's description on the home page
+
+- **WHEN** the front page has no description of its own and the identity has a description
+- **THEN** "Add a description" MUST NOT be listed, and the description field MUST say "From the site's description"
+
+#### Scenario: No description on the home page
+
+- **WHEN** the front page has no description and the identity has none
+- **THEN** "Add a description" MUST be listed to improve, with "Describe the whole site: what it offers and who it's for. Without one, search engines pick text from the page."
+
 ## ADDED Requirements
 
 ### Requirement: Typed profiles that differ from the footer are reported
