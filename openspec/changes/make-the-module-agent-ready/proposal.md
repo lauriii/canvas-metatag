@@ -10,7 +10,8 @@ module. The agent must discover what the module does, configure it as code,
 set and read SEO for pages and templates, add structured data, and verify the
 result without the editor UI, with feedback it can act on.
 
-A probe on the farm site ran seven such jobs as an agent with only a shell.
+A probe on the farm site ran seven such jobs as an agent with only a shell
+(the baseline is in reference.md).
 Two could only be done by reverse-engineering the dialog, and one not at all:
 
 - **Verifying is browser-only.** The checks run in the dialog's script and

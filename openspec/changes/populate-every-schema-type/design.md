@@ -18,7 +18,8 @@ Two reviews shaped this design: a structured-data expert's and a site
 builder's. The fixes they asked for are in the decisions below: enum
 emission, workplaces with addresses, reference matching, the job description
 filter, recipe steps, defaults, deduplication, the group box keys, linked
-pairs, and the speed of setting up a type.
+pairs, and the speed of setting up a type. reference.md holds the approved
+mockup frames (`mockups/`) and the list of kinds of place.
 
 ## Goals / Non-Goals
 

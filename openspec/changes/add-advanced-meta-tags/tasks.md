@@ -24,7 +24,7 @@ group 1.
 - [ ] 2.5 Dialog: the new Advanced rows and the AI use label, note and code line (`SearchTab.tsx`), the same rows in Site › Visibility (`SiteTab.tsx`), the summary parts, the date constant. Verify with vitest for the summary and the note's two texts (before and after the date) and Playwright `page.spec.ts` (set each row, publish, check the head) and `site.spec.ts` (site defaults, a page turning AI training back to Allowed).
 - [ ] 2.6 Checks: "AI use is read from 1 Feb 2027" as good to know. Verify with `checks.test.ts` (listed before the date with a non-default value, not listed after it, not counted).
 - [ ] 2.7 Docs: ARCHITECTURE.md §4 (robots keys), §6 (cascade), §8 (rows). Verify with the cspell CI job.
-- [ ] 2.8 Browser check on site-4: Advanced on a page and a content type, Site › Visibility, the Output rows, Checks; save screenshots next to the mockup frames F01 and F03.
+- [ ] 2.8 Browser check on site-4: Advanced on a page and a content type, Site › Visibility, the Output rows, Checks; save screenshots next to the mockup frames F01 and F03 (`mockups/`, indexed in reference.md).
 
 ## 3. Metatag tags as the outermost layer
 
@@ -75,7 +75,7 @@ group 1.
 ## 7. Integration
 
 - [ ] 7.1 Run every PHPUnit suite and each Playwright project (`host-contract`, `coupled`, `headless`, `ai`) one at a time on site-4; all green. Verify by the run output.
-- [ ] 7.2 Compare the final screenshots with the mockup frames F01 to F10 and record any difference in design.md. Verify by review.
+- [ ] 7.2 Compare the final screenshots with the mockup frames F01 to F10 in `mockups/` and record any difference in design.md. Verify by review.
 
 ## Workflow follow-up
 

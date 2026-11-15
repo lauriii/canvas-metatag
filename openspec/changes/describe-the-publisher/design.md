@@ -47,7 +47,8 @@ never reach it.
 New keys: `site_name` (website node name; default the identity name),
 `description`, `email`, `telephone`, `address {street, locality, region,
 postal_code, country}`, `opening_hours` (days and times, the site timezone),
-`subtype` (`Organization`, `LocalBusiness` and a short list of its kinds).
+`subtype` (`Organization`, `LocalBusiness` and a short list of its kinds,
+listed in reference.md).
 A local business emits its address and `openingHoursSpecification` on the
 identity node.
 

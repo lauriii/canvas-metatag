@@ -27,8 +27,8 @@ See proposal.md for why. The state this design starts from:
   `canvas_set_homepage`, and flips `configuration.homepagePath` in its editor
   store without a round trip.
 
-Sources used below (fetched 2026-11-13; verbatim quotes and URLs are kept with
-the research notes outside the repository): search engine documentation on
+Sources used below (fetched 2026-11-13; the rules and short verbatim quotes
+behind each decision are in reference.md): search engine documentation on
 site names, title links, snippets, the robots meta tag, site icons,
 localized versions, pagination, duplicate URLs, site verification, and the
 organization, local business, profile page, return policy and shipping policy

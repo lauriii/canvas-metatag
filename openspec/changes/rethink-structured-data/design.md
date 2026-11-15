@@ -72,7 +72,8 @@ dated); a client-side evaluator only (rejected: Checks, headless and the
 overview need the same answer, so the server owns it; a mirror comes later).
 
 Sources: every rule's source address is in its `doc` field and was checked
-on 2026-11-13. The claims this design relies on are the structured data
+on 2026-11-13; reference.md lists the first entries' paths, rules and guides,
+and the G-rules. The claims this design relies on are the structured data
 general guidelines (visible content, true representation, no guarantee), the
 merchant listing documentation (image required, price above zero, the
 merchant is the seller, only pages where a shopper can buy, the plain price

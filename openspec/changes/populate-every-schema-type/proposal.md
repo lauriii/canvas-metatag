@@ -82,7 +82,7 @@ populated without JSON.
 - **Decision 2:** neutral wording ("In search results"); source addresses
   only in `data/search-features.json`.
 - **Product owner, 2026-11-13: hand-added JSON-LD can be filled as a form or
-  as JSON** (PO-DECISIONS item 11, built in `extend-structured-data-by-id`).
+  as JSON** (decisions.md, item 11, built in `extend-structured-data-by-id`).
   Read with it: decision 3's "typed lines of repeating content are never
   allowed" governs the module's own facts. Hand-added JSON-LD could always
   repeat anything; extend's form only shows it. This change's controls take a

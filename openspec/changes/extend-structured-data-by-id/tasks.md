@@ -3,7 +3,10 @@
 Needs `rethink-structured-data`, `link-values-to-fields` and
 `populate-every-schema-type`. The module stays working at the end of every
 group. PHPUnit runs through the farm's `docker exec` line; Playwright runs
-one spec at a time. Nothing here calls an AI provider.
+one spec at a time. Nothing here calls an AI provider. Groups 7–9 build the
+sheet described in `reference/reference.md` (layout, states, copy, keyboard
+rules; its §12 lists what not to build) and sketched in
+`reference/mockup.html`; the specs win where they differ.
 
 ## 1. Storage and validation
 

@@ -19,7 +19,7 @@ Drush command discovery needs no spike: Drush's `WorkspacePublishCommand` (13.7)
 ## 2. Coded problems, dropped values, handles (server, no visible change)
 
 - [ ] 2.1 `Values::clean()` and `cleanIdentity()` return `Problem` objects (`code`, `path`, `allowed`, `min`, `max`, `max_length`) with the closed code list of design.md decision 6, `form` included; `ApiController` maps them to today's sentences and `error_paths`. Verify with `ValuesTest` (one row per code with its limits; `schema.type` "Prodcut" gives `choice` with every page type; a bare string gives `form`) and `ApiTest` (every refusal body byte-identical to before).
-- [ ] 2.2 `Resolver::resolve()` keeps read-mode problems in the report's `dropped` for every key. Verify with `ResolverTest::testDroppedEverywhere` (the probe's six invalid stored values each listed with their code; delivery's head unchanged) and `DeliveryPathTest` still green.
+- [ ] 2.2 `Resolver::resolve()` keeps read-mode problems in the report's `dropped` for every key. Verify with `ResolverTest::testDroppedEverywhere` (the probe's six invalid stored values in reference.md, each listed with their code; delivery's head unchanged) and `DeliveryPathTest` still green.
 - [ ] 2.3 `Sources::vocabulary()` gives each row a unique handle (`field`, `field:property`, `field.ref_field`), and the shorthand resolves exactly those. Verify with a kernel `SourcesHandleTest` (`field_summary` for text; `field_body:summary` differs from `field_body`; `field_writer.name` equals the link menu's source; `field_summary` refused for an image with the image handles listed; every row's handle round-trips).
 
 ## 3. Configuration as code
@@ -61,7 +61,7 @@ Drush command discovery needs no spike: Drush's `WorkspacePublishCommand` (13.7)
 ## 8. Acceptance: a fresh agent completes the probe's seven jobs
 
 - [ ] 8.1 On a throwaway farm site with Canvas, this module and a few pages, give a coding agent with no prior context only the module's directory and the seven jobs of the probe: (1) find out what the module does and how it is configured; (2) set the site identity and default image; (3) set the Article type's title ending, description from the summary field and a BlogPosting type; (4) set a page's title, description, social image and a Product with a price, and read its head; (5) find out whether the page passes the checks and fix what is to fix; (6) add hand-written structured data copied from a public example; (7) make the setup reproducible on another environment. Verify that every job completes with no browser, no cookie session, no `php:eval` and no reading of `src/` or `extension/`; that every refusal is recovered on the next command from its message and `next`; and that the second environment's `check --all` exits 0.
-- [ ] 8.2 Record the run in `acceptance.md`: per job the commands, refusals and recoveries, command count and time, against the probe's baseline (two jobs needing the dialog's internals, one impossible). Any job that misses the pass mark reopens the task that caused it.
+- [ ] 8.2 Record the run in `acceptance.md`: per job the commands, refusals and recoveries, command count and time, against the probe's baseline in reference.md (two jobs needing the dialog's internals, one impossible). Any job that misses the pass mark reopens the task that caused it.
 
 ## Workflow follow-up
 

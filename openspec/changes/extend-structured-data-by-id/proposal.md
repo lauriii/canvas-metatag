@@ -104,7 +104,7 @@ listed below.
 
 - **Product owner, 2026-11-13: hand-added JSON-LD can be filled as a form or
   as JSON.** The lead took the recommended option for each question it raised
-  (PO-DECISIONS item 11):
+  (decisions.md, item 11):
   1. **Reopened: "a visual builder for arbitrary schema.org types" (was out
      of scope here) and "no schema.org vocabulary at runtime" (was a
      non-goal here and in `rethink-structured-data`).** Yes, inside the two

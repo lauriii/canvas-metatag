@@ -26,7 +26,8 @@ The tag inventory behind this change judged 324 candidate tags (every tag the
 Metatag module and its submodules can output, the robots directives, and the
 newer tags it does not offer). About 25 jobs still matter; 15 rows deserve a
 typed control; 115 are fine as a generic row; 164 should be refused. The
-design follows that split.
+design follows that split. reference.md lists the keys behind each verdict,
+which is what `data/head-tag-policy.json` is built from.
 
 ## Goals / Non-Goals
 

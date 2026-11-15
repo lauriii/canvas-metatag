@@ -1,5 +1,11 @@
 # Design
 
+The sheet's full design (layout, levels, states, switching rules, every
+problem's copy, keyboard and screen-reader rules, what was cut) is in
+[`reference/reference.md`](reference/reference.md), with a self-contained
+sketch in `reference/mockup.html` and key states in `reference/img/`. The
+specs win over it, and this file wins over it.
+
 ## Context
 
 See proposal.md for why. Custom JSON-LD (`schema.custom`) is validated when

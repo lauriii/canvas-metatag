@@ -95,7 +95,7 @@ No README non-goal is reopened by this change.
 ## Decisions this relies on
 
 - **Product owner, 2026-11-13: hand-added JSON-LD can be filled as a form or
-  as JSON** (PO-DECISIONS item 11; built in `extend-structured-data-by-id`).
+  as JSON** (decisions.md, item 11; built in `extend-structured-data-by-id`).
   This change narrows its review rule for it: a review or aggregate rating is
   "of your own organization" only when its subject is the site's identity or
   an organization with the identity's address or profiles, so an employer

@@ -12,9 +12,11 @@ nothing was dropped) and exact line texts only where the breaks have margin,
 because font engines move glyph advances by fractions of a pixel. Each group
 leaves the module working; nothing visible changes before group 4.
 
+The visual bar is `reference/`: `reference/reference.md` gives the card rules and what each reference card demonstrates, `reference/cards/` the rendered cards, and `reference/prototype/card.php.txt` the prototype renderer to port (its differences from this change are listed in reference.md).
+
 ## 1. Fonts and text (no visible change)
 
-- [ ] 1.1 Add `fonts/` with the faces of design.md D14, one OFL licence file per family carrying that family's own notice, and `fonts/build.sh` (subset the Latin family to Latin, Greek and Cyrillic; instance the symbol font at weight 600 and subset it to basic-plane symbols). Verify with a unit `FontsTest`: each font file loads in GD, each family has its licence file, and the total size stays under 1.5 MB.
+- [ ] 1.1 Add `fonts/` with the faces of design.md D14 (sources and notices in `reference/reference.md`, "Fonts"), one OFL licence file per family carrying that family's own notice, and `fonts/build.sh` (subset the Latin family to Latin, Greek and Cyrillic; instance the symbol font at weight 600 and subset it to basic-plane symbols). Verify with a unit `FontsTest`: each font file loads in GD, each family has its licence file, and the total size stays under 1.5 MB.
 - [ ] 1.2 Generate a coverage range file per font at build time and `ShareText::covers()`; no TrueType parsing at runtime. Verify with `FontsTest::testCoverageIsCurrent` (regenerates and compares) and `ShareTextTest` (U+FEDF covered by the Arabic face; a Japanese character covered by none).
 - [ ] 1.3 `ShareText::clean()`: controls, zero-width characters and direction marks removed, emoji outside the basic plane removed with dangling separators, basic-plane symbols kept, input cut to 300 characters, `&` escaped for GD. Verify with `ShareTextTest` (the "Launch week" and "Hello مرحبا שלום" titles; a probe that "&#169;" draws six glyphs).
 - [ ] 1.4 Arabic presentation forms and per-line right-to-left ordering. Verify with `ShareTextTest` (fixed words to their isolated, initial, medial, final and lam-alef forms; mixed Latin, Arabic, Hebrew, digits and brackets to their visual word order).
@@ -27,6 +29,7 @@ leaves the module working; nothing visible changes before group 4.
 - [ ] 2.3 `ShareCard::page()` and `::site()` with the small line, returning no image when the title or, for the site card, both mark and name can't be drawn. Verify with `ShareCardTest` (a 1200 × 630 PNG; the title box of a two-line title inside the centre 630 × 630; a Japanese title gives none; a Japanese site name without a logo gives no site card; the site card line left out when equal to the description).
 - [ ] 2.4 The small line from the kind registry with dates from `IntlDateFormatter` (long date, no time) and a fallback format. Verify with `ShareLabelTest` (Event "EVENT · JUNE 19, 2027"; Finnish month names; Basic page none; Person with and without a mapped job title; no price, pay or duration for any kind).
 - [ ] 2.5 `ShareImage`: EXIF orientation, skip rules, cover and frame with the enlargement limits, transparent sources, chosen images, encoding q82/q72/q60 under 300 KB. Verify with `ShareImageTest` (an orientation-6 fixture comes out upright; a cut-out whose transparent pixels are black sits on white; 1600 × 1200 is cropped; 1200 × 1200 is framed; 640 × 320 framed at most 1.25×; a chosen 400 × 400 framed at 1×; a chosen 150 × 150 refused; a noisy 2400 × 1600 at most 300 KB; a 9000 × 9000 image skipped).
+- [ ] 2.6 Built cards match `reference/` (compare by viewing): render every case in the `reference/reference.md` card table with `ShareCard`, `ShareImage` and the icon renderer from the same inputs, and open each beside its file in `reference/cards/`. Verify by viewing: same layout, line breaks, colours, marks and photo treatment (sub-pixel glyph differences allowed; the site card line is the slogan in this change), and list any deliberate difference in the merge request.
 
 ## 3. Serving (no visible change: nothing links to it yet)
 
@@ -78,7 +81,7 @@ leaves the module working; nothing visible changes before group 4.
 ## 10. Docs and fixtures
 
 - [ ] 10.1 README: the reopened non-goals ("image upload or image styles" narrowed to made share images, `og:locale`), how share images are made and served, disk use (about 40 KB per fetched page and language), requirements (GD with FreeType, local public files). ARCHITECTURE.md: the share route, `CardInput`, storage, the placeholder row. Verify with the cspell CI job.
-- [ ] 10.2 Commit four reference cards (an event, an Arabic page, a fresh site without a logo, a light brand colour; together under 200 KB) to `tests/fixtures/share-cards/` with a `layout.json` of their line texts, sizes and measured contrast. They are reviewed by eye; `ShareLayoutTest` compares only `layout.json`. Verify with `ShareLayoutTest::testReferenceLayouts`.
+- [ ] 10.2 Commit four cards rendered by the module for the inputs of `reference/cards/` `c04` (an event), `c12` (an Arabic page), `c17` (a fresh site without a logo) and `c21` (a light brand colour), together under 200 KB, to `tests/fixtures/share-cards/` with a `layout.json` of their line texts, sizes and measured contrast. They are reviewed by eye; `ShareLayoutTest` compares only `layout.json`. Verify with `ShareLayoutTest::testReferenceLayouts`.
 - [ ] 10.3 Confirm that nothing in the change names a commercial vendor or product, and run `openspec validate strengthen-zero-config-defaults --strict`.
 
 ## 11. Manual QA on the farm site
@@ -86,7 +89,7 @@ leaves the module working; nothing visible changes before group 4.
 - [ ] 11.1 Run the whole PHPUnit suite, vitest and the Playwright suites touched above, one browser suite at a time. Verify all pass and the extension build is current.
 - [ ] 11.2 Real head output, by anonymous `curl`: a Canvas page without an image (card rows, `og:locale`, `summary_large_image`), a page with a 4:3 photo (cropped JPEG under 300 KB), the job posting (card, not the logo), the front page (icon links), a page named "Untitled page" with a heading; fetch each image address and check its headers and pixel size. Record the output in the merge request.
 - [ ] 11.3 In the real editor: open Social on a page without an image, type a new title and watch the card change; choose an image and Remove it; open the Event template; open Site → Sharing, switch the sample, change the colour to orange and back, choose "No image" and "Use this image". Save screenshots of each, including the dialog at 200% zoom.
-- [ ] 11.4 Share three published farm pages in a link preview debugger or a chat app reachable from the farm site, and confirm a large 1200 × 630 image with the site name and the page title. Where no external tool can reach the farm site, say so in the merge request and attach the fetched images instead.
+- [ ] 11.4 Share three published farm pages in a link preview debugger or a chat app reachable from the farm site, and confirm a large 1200 × 630 image with the site name and the page title that looks like its `reference/cards/` counterpart. Where no external tool can reach the farm site, say so in the merge request and attach the fetched images instead.
 - [ ] 11.5 Unpublish a page whose card was fetched and confirm the card address answers 404 and the stored file is gone.
 
 ## Workflow follow-up

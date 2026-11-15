@@ -2,9 +2,16 @@
 
 ## Context
 
-See proposal.md for why. Facts this design rests on, measured on the farm
-site (PHP 8.4, GD 2.3.3 with FreeType, Drupal 11.4) with a prototype renderer
-over the farm site's own pages and the complex fixture content:
+See proposal.md for why. The visual bar lives in `reference/`:
+`reference/reference.md` (the card rules, measured values and what each
+reference card demonstrates), `reference/cards/` (the rendered cards, with
+`overview.jpg` showing every case) and `reference/prototype/card.php.txt` (the
+renderer that drew them). This design and the specs decide behaviour;
+`reference/` decides looks.
+
+Facts this design rests on, measured on the farm site (PHP 8.4, GD 2.3.3 with
+FreeType, Drupal 11.4) with that prototype renderer over the farm site's own
+pages and the complex fixture content:
 
 - A fresh install's owned pages carry no `og:image`; only a chosen image or a
   site default image gives one, at its upload size and shape.
@@ -113,7 +120,11 @@ computed from draft values. The dialog debounces it by 400 ms.
 
 ### D6. The card
 
-On a 1200 × 630 canvas:
+The full rules, with every size and the measured contrast of each reference
+card, are in `reference/reference.md`; the cards in `reference/cards/` show
+what a built card must look like (`c04-event-86.png` is the canonical page
+card, `c01-front-site-card.png` the site card). In short, on a 1200 × 630
+canvas:
 
 - **Field:** the site colour (the stored colour, else picked from the logo,
   else neutral `#22252C`→`#0E0F13`): a diagonal gradient from L+0.03 to
@@ -265,12 +276,14 @@ changes.
 
 Bundled under `fonts/` with one OFL 1.1 licence file per family, only the
 faces in use: Inter 4.1 (display SemiBold for titles and the monogram;
-SemiBold, Medium and Regular), subset to Latin, Greek and Cyrillic; Noto Sans
-Arabic SemiBold (the full build with presentation forms); Noto Sans Hebrew
-SemiBold; Noto Emoji instanced at weight 600 and subset to basic-plane
-symbols. The families declare no reserved font name, so subsets keep their
-names. Drupal.org's licensing guidance allows non-code assets whose licence
-permits distribution. A `fonts/build.sh` records the subsetting, and a unit
+SemiBold and Regular; Medium drew only the host line, which is gone), subset
+to Latin, Greek and Cyrillic; Noto Sans Arabic SemiBold (the full build with
+presentation forms); Noto Sans Hebrew SemiBold; Noto Emoji instanced at
+weight 600 and subset to basic-plane symbols. The families declare no
+reserved font name, so subsets keep their names. Where each file comes from,
+its notice and the role and scale it is drawn at are listed in
+`reference/reference.md` ("Fonts"). Drupal.org's licensing guidance allows
+non-code assets whose licence permits distribution. A `fonts/build.sh` records the subsetting, and a unit
 test regenerates the coverage files and compares them.
 
 ### D15. Cacheability
@@ -284,7 +297,8 @@ over values already resolved: no file access and no GD.
 ## Risks / Trade-offs
 
 - [The card is the product's face] → restraint: one family, one colour,
-  three text tiers; 36 cases rendered and reviewed; the colour can be changed
+  three text tiers; 36 cases rendered and reviewed
+  (`reference/cards/overview.jpg`); the colour can be changed
   in one row; "Use this image" and "No image" are one click.
 - [Search guidance discourages text images and generic images] → the card is
   last in the chain, never in structured data, `noindex`; Checks push a real

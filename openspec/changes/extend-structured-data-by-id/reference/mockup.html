@@ -1,0 +1,761 @@
+<!doctype html>
+<!-- cspell:disable -- a design sketch: inline CSS tokens and sample data. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Own JSON-LD editor</title>
+<style>
+:root{
+  --font:system-ui,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --gray-1:#fcfcfd;--gray-2:#f9f9fb;--gray-3:#f0f0f3;--gray-4:#e8e8ec;--gray-5:#e0e1e6;--gray-6:#d9d9e0;--gray-7:#cdced6;--gray-8:#b9bbc6;--gray-9:#8b8d98;--gray-10:#80838d;--gray-11:#60646c;--gray-12:#1c2024;
+  --gray-a2:#00005506;--gray-a3:#0000330f;--gray-a4:#00002d17;--gray-a5:#0009321f;--gray-a6:#00002f26;--gray-a7:#00062e32;--gray-a8:#00083046;
+  --blue-2:#f4faff;--blue-3:#e6f4fe;--blue-9:#0090ff;--blue-10:#0588f0;--blue-11:#0d74ce;--blue-12:#113264;--blue-a3:#008ff519;--blue-a4:#009eff2a;--blue-a5:#0093ff3d;
+  --amber-2:#fefbe9;--amber-9:#ffc53d;--amber-11:#ab6400;--amber-a3:#ffba1826;--amber-a4:#ffd60a3c;
+  --red-2:#fffcfc;--red-3:#feebec;--red-9:#e5484d;--red-11:#ce2c31;--red-a3:#f3000d14;
+  --green-9:#30a46c;--green-11:#218358;--green-a3:#00a43319;
+  --seo-ring:0 0 0 1px var(--blue-10),inset 0 0 0 1px var(--blue-10),0 0 0 4px var(--blue-a3);
+  --seo-shadow-pop:0 0 0 1px var(--gray-a4),0 10px 28px -8px rgba(0,0,45,.16),0 2px 6px -2px rgba(0,0,45,.08);
+  --seo-shadow-bar:0 0 0 1px var(--gray-a4),0 6px 16px -6px rgba(0,0,45,.18);
+  --seo-selected:var(--blue-a3);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#e9eaee;font-family:var(--font);color:var(--gray-12);font-size:14px;line-height:20px;-webkit-font-smoothing:antialiased;padding:40px 40px 80px}
+button{font:inherit;color:inherit;background:none;border:0;cursor:default}
+svg.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+svg.s14{width:14px;height:14px}svg.s12{width:12px;height:12px}
+.board-h{max-width:1100px;margin-bottom:36px}
+.board-h h1{font-size:22px;line-height:28px;font-weight:600}
+.board-h p{font-size:14px;line-height:22px;color:var(--gray-11);margin-top:8px}
+.board-h code{font-family:var(--mono);font-size:13px}
+.frames{display:flex;flex-wrap:wrap;gap:56px 40px;align-items:flex-start}
+.fr{width:500px}
+.cap{min-height:118px;margin-bottom:12px}
+.cap .id{display:inline-block;font:600 13px/20px var(--mono);color:var(--gray-11);margin-right:6px}
+.cap h2{display:inline;font-size:16px;line-height:24px;font-weight:600}
+.cap p{font-size:13px;line-height:19px;color:var(--gray-11);margin-top:6px}
+.dlg{background:#fff;border-radius:12px;box-shadow:0 0 0 1px var(--gray-a4),0 16px 40px -16px rgba(0,0,45,.28);padding:0 16px 16px}
+.dlg-bar{height:40px;display:flex;align-items:center;justify-content:space-between;font-weight:600;font-size:14px}
+.ifr{position:relative;width:468px;height:760px;overflow:hidden;background:#fff}
+.sheet{position:absolute;inset:0;display:flex;flex-direction:column;background:#fff}
+.sh-h{height:44px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 6px;position:relative;z-index:2;background:#fff}
+.sh-h.scrolled{box-shadow:0 1px 0 var(--gray-a4)}
+.sh-h h2{font-size:14px;line-height:20px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ib{width:28px;height:28px;display:inline-grid;place-items:center;border-radius:6px;color:var(--gray-11);flex:none}
+.ib.sm{width:24px;height:24px}
+.ib.hov{background:var(--gray-a3);color:var(--gray-12)}
+.tabs{display:flex;gap:2px;padding:2px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--gray-a4)}
+.tab{height:24px;padding:0 10px;font-size:13px;line-height:24px;font-weight:500;color:var(--gray-11);border-radius:6px}
+.tab.on{background:var(--gray-a3);color:var(--gray-12)}
+.tab.ring{box-shadow:var(--seo-ring)}
+.sh-b{flex:1;overflow:hidden;padding:8px 16px 32px;position:relative}
+.sh-b.scrolled-in{padding-top:0}
+.intro{font-size:13px;line-height:18px;color:var(--gray-11)}
+.foot{font-size:12px;line-height:16px;color:var(--gray-11);margin-top:16px}
+.back{display:inline-flex;align-items:center;gap:2px;height:28px;padding:0 8px 0 2px;margin-left:-4px;font-size:13px;line-height:20px;font-weight:500;color:var(--gray-11);border-radius:6px}
+.crumbs{display:flex;align-items:center;justify-content:space-between}
+.crumbs .meta{font-size:12px;line-height:16px;color:var(--gray-11)}
+.ihead{display:flex;gap:4px;align-items:flex-start;margin-top:10px}
+.ihead .t{flex:1;min-width:0}
+.ihead h3{font-size:14px;line-height:20px;font-weight:600}
+.mono{font-family:var(--mono);font-size:12px;line-height:16px;color:var(--gray-11)}
+.def{font-size:12px;line-height:16px;color:var(--gray-11);margin-top:2px}
+.ihead .acts{display:flex;margin-right:-6px;margin-top:-4px}
+.stage{background:var(--gray-2);box-shadow:inset 0 0 0 1px var(--gray-a3);border-radius:12px;padding:8px 14px 8px 16px;margin-top:14px}
+.stage .c{font-size:12px;line-height:16px;color:var(--gray-11);margin-bottom:2px;display:flex;justify-content:space-between;align-items:center}
+.vl{display:flex;align-items:center;gap:8px;min-height:28px;font-size:13px;line-height:20px}
+.vl .v{margin-left:auto;color:var(--gray-12);white-space:nowrap}
+.vl .v.need{color:var(--amber-11)}.vl .v.off{color:var(--gray-11)}
+.vl svg.ok{color:var(--green-11)}.vl svg.need{color:var(--amber-11)}.vl svg.off{color:var(--gray-9)}
+.vl .sub{display:block;font-size:12px;line-height:16px;color:var(--gray-11)}
+.vl.two{align-items:flex-start;padding:4px 0}.vl.two>svg{margin-top:2px}
+.fx{height:24px;display:inline-flex;align-items:center;gap:4px;padding:0 8px;margin:0 -6px 0 2px;font-size:12px;line-height:16px;font-weight:500;color:var(--blue-11);border-radius:6px}
+.band{font-size:12px;line-height:16px;color:var(--gray-11);margin:22px 0 10px;display:flex;align-items:center;gap:8px}
+.band::after{content:"";flex:1;height:1px;background:var(--gray-a3)}
+.f+.f{margin-top:16px}
+.lr{display:flex;align-items:center;gap:4px;min-height:20px;margin-bottom:6px;font-size:13px;line-height:20px;font-weight:500}
+.lr .as{margin-left:auto;font-weight:400;font-size:12px;line-height:16px;color:var(--gray-11);display:flex;align-items:center;gap:4px}
+.lr code,.kl{font-family:var(--mono);font-size:12px;font-weight:500}
+.lb{width:20px;height:20px;display:inline-grid;place-items:center;border-radius:4px;color:var(--gray-10)}
+.lb.on{color:var(--blue-11)}
+.in{min-height:32px;padding:6px 12px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--gray-a6);font-size:14px;line-height:20px;background:#fff;display:flex;align-items:center;gap:8px;min-width:0}
+.in .tx{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.in .ph,.ph{color:var(--gray-11)}
+.in.focus{box-shadow:var(--seo-ring)}
+.in.ro{background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a4);color:var(--gray-11)}
+.in.err{box-shadow:inset 0 0 0 1px var(--red-9)}
+.in .suf{color:var(--gray-11);font-size:13px;white-space:nowrap}
+.in.search{padding-left:10px}
+.in.search svg{color:var(--gray-10)}
+.caret{display:inline-block;width:1px;height:18px;background:var(--gray-12);vertical-align:-4px;margin-left:1px}
+.g{margin-top:6px;font-size:12px;line-height:16px;display:flex;gap:6px;color:var(--gray-11);align-items:flex-start}
+.g svg{margin-top:0}
+.g.amber{color:var(--amber-11)}.g.red{color:var(--red-11)}
+.g .gb{height:20px;margin-top:-2px;padding:0 6px;border-radius:5px;font-weight:500;color:var(--blue-11);white-space:nowrap}
+.ibox{min-height:44px;padding:6px 6px 6px 12px;border-radius:6px;box-shadow:inset 0 0 0 1px var(--gray-a6);display:flex;align-items:center;gap:10px;background:#fff}
+.ibox .t{flex:1;min-width:0}
+.ibox .t b{display:block;font-weight:400;font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ibox .t span{display:block;font-size:12px;line-height:16px;color:var(--gray-11);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ibox>svg{color:var(--gray-10)}
+.lnk{min-height:32px;padding:5px 6px 5px 10px;border-radius:6px;background:var(--blue-2);box-shadow:inset 0 0 0 1px var(--blue-a5);display:flex;align-items:center;gap:8px;min-width:0}
+.lnk .src{font-size:13px;line-height:20px;font-weight:500;color:var(--blue-11);white-space:nowrap;display:flex;align-items:center;gap:5px}
+.lnk .val{flex:1;min-width:0;font-size:14px;line-height:20px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lnk .x{color:var(--gray-10)}
+.lnk.def{background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a4)}
+.lnk.def .src{color:var(--gray-11)}
+.grp{margin-top:6px;padding-left:12px;box-shadow:inset 2px 0 0 var(--gray-a4)}
+.grp .f+.f{margin-top:12px}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+fieldset.oneof{border:0;min-width:0}
+fieldset.oneof legend{font-size:13px;line-height:20px;font-weight:500;margin-bottom:6px;padding:0}
+.pair{display:grid;grid-template-columns:1fr auto 1fr;gap:8px;align-items:center}
+.pair .or{font-size:12px;color:var(--gray-11)}
+.pair .in .lab{font-size:12px;color:var(--gray-11);white-space:nowrap}
+.helps{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:20px;font-size:12px;line-height:16px;color:var(--gray-11)}
+.cb{height:24px;padding:0 8px 0 6px;border-radius:6px;background:var(--gray-a3);font-size:12px;line-height:24px;font-weight:500;color:var(--gray-12);display:inline-flex;gap:4px;align-items:center}
+.cb svg{color:var(--gray-11)}
+.addd{margin-top:12px}
+.addd .note{font-size:12px;line-height:16px;color:var(--gray-11);margin-top:6px}
+.list{margin-top:24px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--gray-a4);background:#fff}
+.row{min-height:44px;padding:8px 12px 8px 16px;display:flex;align-items:center;gap:12px}
+.row+.row{box-shadow:inset 0 1px 0 var(--gray-a3)}
+.row .l{flex:1;min-width:0;font-size:13px;line-height:20px;font-weight:500}
+.row .l .s{display:block;font-weight:400;font-size:12px;line-height:16px;color:var(--gray-11);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .l .s.red{color:var(--red-11)}
+.row .r{display:flex;align-items:center;gap:6px;font-size:13px;line-height:20px;color:var(--gray-11);white-space:nowrap}
+.row .r svg.ok{color:var(--green-11)}
+.row.add .l{color:var(--blue-11);display:flex;gap:8px;align-items:center}
+.sw{width:32px;height:20px;border-radius:999px;background:var(--gray-a5);position:relative;flex:none}
+.sw::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(0,0,40,.25)}
+.sw.on{background:var(--blue-9)}.sw.on::after{left:14px}
+.notice{border-radius:10px;padding:10px 12px;display:flex;gap:10px;background:var(--gray-a2);box-shadow:inset 0 0 0 1px var(--gray-a3);font-size:13px;line-height:18px}
+.notice>svg{color:var(--gray-11);margin-top:1px}
+.notice.amber{background:var(--amber-2);box-shadow:inset 0 0 0 1px var(--amber-a4)}
+.notice.amber>svg{color:var(--amber-11)}
+.notice .acts{display:flex;gap:8px;margin-top:8px}
+.btn{height:28px;padding:0 10px;border-radius:6px;font-size:13px;line-height:28px;font-weight:500;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn.soft{background:var(--gray-a3)}
+.btn.ghost{color:var(--gray-11)}
+.btn.blue{color:var(--blue-11)}
+.btn.solid{background:var(--blue-11);color:#fff}
+.btn.outline{box-shadow:inset 0 0 0 1px var(--gray-a6);background:#fff}
+.btn.h32{height:32px;line-height:32px;padding:0 12px}
+.btn.dis{opacity:.5}
+.tbar{display:flex;align-items:center;justify-content:space-between;margin:14px 0 6px}
+.tbar .meta{font-size:12px;line-height:16px;color:var(--gray-11)}
+.tbar .r{display:flex;gap:2px;margin-right:-8px}
+.code{position:relative;display:grid;grid-template-columns:34px 1fr;background:#fff;border-radius:10px;box-shadow:inset 0 0 0 1px var(--gray-a6);font-family:var(--mono);font-size:12px;line-height:18px;overflow:hidden}
+.code.focus{box-shadow:var(--seo-ring)}
+.code.err{box-shadow:inset 0 0 0 1px var(--red-9),0 0 0 3px var(--red-a3)}
+.code .gut{background:var(--gray-2);color:var(--gray-10);text-align:right;padding:8px 8px 8px 0;box-shadow:inset -1px 0 0 var(--gray-a3);white-space:pre;position:relative;z-index:1}
+.code .src{padding:8px 10px;white-space:pre;overflow:hidden;color:var(--gray-12);position:relative;z-index:1}
+.code .hl{position:absolute;left:0;right:0;height:18px;background:var(--red-a3);z-index:0}
+.code .hl.blue{background:var(--blue-a3)}
+.code .gm{color:var(--red-11);font-weight:600}
+.code .k{color:var(--gray-12)}.code .p{color:var(--gray-10)}
+.code .w{text-decoration:underline wavy var(--amber-9);text-underline-offset:3px}
+.code .e{text-decoration:underline wavy var(--red-9);text-underline-offset:3px}
+.status{display:flex;gap:6px;align-items:center;font-size:12px;line-height:16px;color:var(--gray-11);margin-top:8px}
+.status svg.ok{color:var(--green-11)}
+.prob{display:flex;gap:8px;align-items:flex-start;font-size:13px;line-height:18px;padding:10px 0}
+.prob+.prob{box-shadow:inset 0 1px 0 var(--gray-a3)}
+.prob>svg{margin-top:1px}
+.prob.red{color:var(--red-11)}.prob.amber{color:var(--amber-11)}
+.prob .b{color:var(--gray-12)}
+.prob .sub{display:block;color:var(--gray-11);font-size:12px;line-height:16px;margin-top:2px}
+.prob .acts{display:flex;gap:8px;margin-top:8px}
+.rl{margin-top:8px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--gray-a4);padding:4px;background:#fff}
+.rl.pop{position:absolute;box-shadow:var(--seo-shadow-pop);z-index:5}
+.gl{font-size:12px;line-height:16px;font-weight:500;color:var(--gray-11);padding:8px 10px 4px}
+.res{padding:6px 10px;border-radius:6px}
+.res.act{background:var(--seo-selected)}
+.res .l1{display:flex;gap:6px;align-items:center;font-size:13px;line-height:20px;font-weight:500}
+.res .l1 .rt{margin-left:auto;font-weight:400;font-size:12px;color:var(--gray-11)}
+.res .l2{font-size:12px;line-height:16px;color:var(--gray-11);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.res .l2 .mono{font-size:11.5px}
+.res.dis{opacity:.55}
+.tag{display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:4px;font-size:11px;line-height:18px;font-weight:500;background:var(--gray-a3);color:var(--gray-11)}
+.tag.blue{background:var(--blue-a3);color:var(--blue-11)}
+.tag.green{background:var(--green-a3);color:var(--green-11)}
+.hint{display:flex;justify-content:space-between;font-size:12px;line-height:16px;color:var(--gray-11);padding:8px 10px 6px;margin-top:4px;box-shadow:inset 0 1px 0 var(--gray-a3)}
+.kbd{display:inline-block;min-width:16px;padding:0 4px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--gray-a5);font-size:11px;line-height:16px;text-align:center}
+.or-sep{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--gray-11);margin:18px 0 14px}
+.or-sep::before,.or-sep::after{content:"";flex:1;height:1px;background:var(--gray-a4)}
+.img-row{display:flex;align-items:center;gap:12px}
+.thumb{width:40px;height:40px;border-radius:8px;box-shadow:inset 0 0 0 1px var(--gray-a4);display:grid;place-items:center;font:700 13px/1 var(--font);color:#fff;background:linear-gradient(135deg,#3e63dd,#0d74ce);flex:none}
+.img-row .t{flex:1;min-width:0}
+.img-row .t b{display:block;font-weight:400;font-size:14px;line-height:20px}
+.img-row .t span{display:block;font-size:12px;line-height:16px;color:var(--gray-11)}
+.vals .in+.in{margin-top:6px}
+.vals .in .x{color:var(--gray-10);margin-right:-4px}
+.bar{position:absolute;left:8px;right:8px;bottom:8px;min-height:44px;border-radius:12px;background:#fff;box-shadow:var(--seo-shadow-bar);display:flex;align-items:center;gap:8px;padding:0 6px 0 14px;font-size:13px;line-height:18px;z-index:6}
+.bar .tx{flex:1}
+.dot{width:8px;height:8px;border-radius:50%;flex:none}
+.dot.red{background:var(--red-9)}.dot.blue{background:var(--blue-9)}.dot.amber{background:var(--amber-9)}
+.chk{width:16px;height:16px;border-radius:4px;box-shadow:inset 0 0 0 1px var(--gray-a7);flex:none;display:grid;place-items:center;background:#fff}
+.chk.on{background:var(--blue-9);box-shadow:none;color:#fff}
+.chk.on svg{width:12px;height:12px;stroke-width:2}
+.crow{display:flex;gap:12px;align-items:flex-start;padding:10px 12px 10px 14px}
+.crow+.crow{box-shadow:inset 0 1px 0 var(--gray-a3)}
+.crow .chk{margin-top:2px}
+.crow .t{flex:1;min-width:0}
+.crow .t b{display:block;font-size:13px;line-height:20px;font-weight:500}
+.crow .t span{display:block;font-size:12px;line-height:16px;color:var(--gray-11)}
+.crow .t span.ok{color:var(--green-11)}
+.crow .t span.am{color:var(--amber-11)}
+.skel{background:var(--gray-a3);border-radius:4px;height:10px}
+.mini{padding:14px 16px 18px}
+.mini+.mini{box-shadow:inset 0 1px 0 var(--gray-a4)}
+.mini .mt{font:600 11px/16px var(--mono);color:var(--gray-10);letter-spacing:.02em;margin-bottom:8px}
+.rb{font-size:15px;line-height:24px}
+.rb .p{text-decoration:underline dotted;text-decoration-color:var(--gray-8);text-decoration-thickness:1.5px;text-underline-offset:4px}
+.rb .p.hand{color:var(--gray-11)}
+.rb .p.on{background:var(--seo-selected);box-shadow:0 0 0 2px var(--seo-selected);border-radius:3px;text-decoration-color:transparent}
+.hdr{height:44px;display:flex;align-items:center;gap:8px;padding:0 16px}
+.hdr .scope{font-size:14px;font-weight:600;display:flex;align-items:center;gap:4px}
+.hdr .tl{margin-left:auto;display:flex;gap:2px}
+.hdr .tl span{height:28px;padding:0 8px;font-size:13px;line-height:28px;font-weight:500;color:var(--gray-11);border-radius:6px}
+.hdr .tl span.on{background:var(--gray-a3);color:var(--gray-12)}
+.hdr .ck{font-size:13px;font-weight:500;color:var(--gray-11);display:flex;gap:6px;align-items:center;padding:0 8px}
+.tip{position:absolute;background:var(--gray-12);color:#fff;font-size:12px;line-height:16px;padding:6px 8px;border-radius:6px;z-index:7;max-width:260px}
+.legend{font-size:12px;line-height:16px;color:var(--gray-11)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+.cursor-note{font-size:11px;line-height:14px;color:var(--blue-11);font-family:var(--mono)}
+.cline{display:flex;gap:6px;align-items:center;font-size:12px;line-height:16px;color:var(--gray-11);margin-top:6px;white-space:nowrap;min-height:24px}
+.cline .mono{color:var(--gray-12)}
+.cline .ef{margin-left:auto;color:var(--blue-11);font-weight:500;display:inline-flex;gap:4px;align-items:center}
+.tdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--red-9);margin-left:4px;vertical-align:2px}
+.code .ga{color:var(--amber-11);font-weight:600}
+.code .s{color:var(--blue-11)}
+.code .hl.amber{background:var(--amber-a3)}
+.slist{margin-top:16px;border-radius:12px;box-shadow:inset 0 0 0 1px var(--gray-a4);background:#fff}
+.srow{padding:10px 6px 8px 16px;display:flex;gap:6px;align-items:flex-start}
+.srow+.srow{box-shadow:inset 0 1px 0 var(--gray-a3)}
+.srow .t{flex:1;min-width:0}
+.srow .sn{font-size:14px;line-height:20px;color:var(--gray-12)}
+.srow .tln{font-size:12px;line-height:16px;color:var(--gray-11);margin-top:2px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.srow .vl{min-height:26px;margin-top:2px}
+.srow.sel{background:var(--seo-selected);border-radius:12px 12px 0 0}
+.tag.red{background:var(--red-a3);color:var(--red-11)}
+.tag.amber{background:var(--amber-a3);color:var(--amber-11)}
+.btnrow{display:flex;gap:8px;align-items:center;margin-top:14px}
+.step{display:flex;align-items:center;gap:2px;font-size:12px;line-height:16px;color:var(--gray-11)}
+.step b{font-weight:500;color:var(--gray-12);margin-right:4px}
+.menu{position:absolute;left:16px;right:16px;background:#fff;border-radius:12px;box-shadow:var(--seo-shadow-pop);padding:4px;z-index:5}
+.menu .res .l1 svg{color:var(--blue-11)}
+.res .l2.wrap{white-space:normal}
+.res .l2.am{color:var(--amber-11)}
+.mini.tight{padding:12px 16px 14px}
+.prob .path{font-family:var(--mono);font-size:12px;color:var(--gray-12)}
+.prob .btn{color:var(--gray-12)}
+.prob .btn.ghost{color:var(--gray-11)}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-cl" viewBox="0 0 16 16"><path d="M10 3.5 5.5 8l4.5 4.5"/></symbol>
+    <symbol id="i-cr" viewBox="0 0 16 16"><path d="M6 3.5 10.5 8 6 12.5"/></symbol>
+    <symbol id="i-cd" viewBox="0 0 16 16"><path d="M4 6l4 4 4-4"/></symbol>
+    <symbol id="i-dots" viewBox="0 0 16 16"><circle cx="3.5" cy="8" r=".9" fill="currentColor"/><circle cx="8" cy="8" r=".9" fill="currentColor"/><circle cx="12.5" cy="8" r=".9" fill="currentColor"/></symbol>
+    <symbol id="i-info" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 7.2v3.6M8 5.1v.1"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.3"/><path d="M10.2 10.2 13.5 13.5"/></symbol>
+    <symbol id="i-link" viewBox="0 0 16 16"><path d="M6.8 9.2 9.2 6.8M7.4 4.6l.9-.9a2.6 2.6 0 0 1 3.7 3.7l-.9.9M8.6 11.4l-.9.9a2.6 2.6 0 0 1-3.7-3.7l.9-.9"/></symbol>
+    <symbol id="i-x" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3.5v9M3.5 8h9"/></symbol>
+    <symbol id="i-ok" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M5.4 8.2 7.2 10l3.4-3.6"/></symbol>
+    <symbol id="i-half" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="i-ring" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" stroke-dasharray="2.2 2"/></symbol>
+    <symbol id="i-minus" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M5.2 8h5.6"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 16 16"><path d="M8 2.6 14 13H2z"/><path d="M8 6.6v3M8 11.3v.1"/></symbol>
+    <symbol id="i-err" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M6 6l4 4M10 6l-4 4"/></symbol>
+    <symbol id="i-img" viewBox="0 0 16 16"><rect x="2.5" y="3" width="11" height="10" rx="1.5"/><path d="M2.8 11.2 6 8l2.4 2.4 1.6-1.6 3.2 3.2"/><circle cx="10.4" cy="5.9" r=".9"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V4a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 16 16"><path d="M9 3h4v4M13 3 7.5 8.5M11.5 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V5.5a1 1 0 0 1 1-1h2.5"/></symbol>
+    <symbol id="i-lock" viewBox="0 0 16 16"><rect x="3.5" y="7" width="9" height="6.5" rx="1.5"/><path d="M5.5 7V5.2a2.5 2.5 0 0 1 5 0V7"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.4 6.6 11.5 12.5 5"/></symbol>
+    <symbol id="i-code" viewBox="0 0 16 16"><path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5"/></symbol>
+    <symbol id="i-fmt" viewBox="0 0 16 16"><path d="M3 4h10M5.5 7h7.5M5.5 10h7.5M3 13h10"/></symbol>
+    <symbol id="i-cal" viewBox="0 0 16 16"><rect x="2.5" y="3.5" width="11" height="10" rx="1.5"/><path d="M2.5 6.5h11M5.5 2v3M10.5 2v3"/></symbol>
+    <symbol id="i-wand" viewBox="0 0 16 16"><path d="M3 13l7-7M9 3.5v1.6M12.5 7h-1.6M11.5 4.5l-1 1M6.3 3.6l.6.6M12.4 9.7l-.6-.6"/></symbol>
+  </defs>
+</svg>
+
+<header class="board-h">
+  <h1>Hand-added JSON-LD · fill it as a form or as JSON</h1>
+  <p>Picture for <code>extend-structured-data-by-id</code>: the "Add your own JSON-LD" sheet opens as a form by default, with a JSON tab over the same stored text. Each frame is the 468 px iframe inside the Canvas dialog. <b>This is a sketch, not the spec.</b> Where it differs from <code>reference.md</code> or the change's specs, they win. Pixel details (spacing, exact icons) are indicative; the copy, bands, order and states are the point.</p>
+  <p>Site: <b>Fairwork</b>, an employer review site. Page: <b>Acme Logistics: employee reviews</b> (a plain web page). Template frames: <b>Every Book review</b>. Rules: only needs are empty; switching tabs never changes a byte; nothing the form doesn't understand is dropped; every problem has a line, a path and words.</p>
+</header>
+
+<div class="frames">
+
+<section class="fr" id="F0">
+  <div class="cap"><span class="id">F0</span><h2>Entry: the read-back and Code</h2>
+  <p>Nothing new on the main view. A hand-added item reads back as the "Added by hand" part with its own verdict (rethink). Pressing it opens the sheet at that item (F3); Code › Output › "Add your own JSON-LD" opens the item list (F6).</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr">
+    <div class="hdr"><span class="scope">This page<svg class="i s12"><use href="#i-cd"/></svg></span>
+      <div class="tl"><span>Search</span><span>Social</span><span class="on">Schema</span></div>
+      <span class="ck"><svg class="i" style="color:var(--green-11)"><use href="#i-ok"/></svg>Checks</span></div>
+    <div class="sh-b" style="padding-top:8px">
+      <div class="stage" style="margin-top:0;padding:12px 16px 14px">
+        <div class="c" style="margin-bottom:10px"><span>Understood as</span><span class="btn ghost" style="height:24px;line-height:24px;padding:0 6px;margin-right:-6px;font-size:12px"><svg class="i s14"><use href="#i-code"/></svg>Code</span></div>
+        <p class="rb"><span class="p">Acme Logistics: employee reviews</span>, a web page by <span class="p">Fairwork</span>. Added by hand: <span class="p hand on">an employer rating of Acme Logistics</span>.</p>
+        <div style="margin-top:12px;padding-top:8px;box-shadow:inset 0 1px 0 var(--gray-a4)">
+          <div class="c">In search results</div>
+          <div class="vl"><svg class="i ok"><use href="#i-ok"/></svg><span>Employer rating</span><span class="v">Can show</span></div>
+        </div>
+        <div class="status" style="margin-top:8px"><svg class="i s14 ok"><use href="#i-ok"/></svg>The facts match the page.</div>
+      </div>
+      <div class="tip" style="left:200px;top:150px">Added by hand · Edit in Add your own JSON-LD</div>
+      <div class="f" style="margin-top:24px"><div class="lr">What this page is</div>
+        <div class="ibox" style="min-height:32px;padding:6px 6px 6px 12px"><div class="t"><b>A web page</b></div><svg class="i"><use href="#i-cr"/></svg></div></div>
+      <div class="list">
+        <div class="row"><span class="l">More details<span class="s">Kind of page, language and 2 more</span></span><svg class="i" style="color:var(--gray-10)"><use href="#i-cd"/></svg></div>
+      </div>
+      <p class="foot" style="margin-top:24px">Pressing the highlighted part opens the sheet on that item (F3). Its accessible name: "Added by hand, an employer rating of Acme Logistics, edit it".</p>
+    </div>
+  </div></div>
+</section>
+
+<!-- ═════════ F1 ═════════ -->
+<section class="fr" id="F1">
+  <div class="cap"><span class="id">F1</span><h2>Empty sheet: one question, one paste row</h2>
+    <p>Form is the default tab. Focus is in "What is it?", which lists the types the rules file documents, those with a live search feature first, each with the module's own one-line <code>about</code>. "Paste JSON-LD" (or a paste outside a text input) cleans up the paste and stays in Form. The tab is remembered per viewer.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs" role="tablist" aria-label="Edit as"><span class="tab on">Form</span><span class="tab">JSON</span></div></div>
+    <div class="sh-b">
+      <p class="intro">Describe something this page shows that its structured data doesn't cover yet. It's added as its own item.</p>
+      <div class="f" style="margin-top:16px"><div class="lr">What is it?</div>
+        <div class="in focus search"><svg class="i"><use href="#i-search"/></svg><span class="tx"><span class="caret"></span><span class="ph"> Search types, like rating or event</span></span></div>
+        <div class="rl" role="listbox">
+          <div class="gl">Has a search feature</div>
+          <div class="res act"><div class="l1">Employer rating<span class="tag">Search feature</span></div><div class="l2"><span class="mono">EmployerAggregateRating</span> · A company's rating by the people who work there</div></div>
+          <div class="res"><div class="l1">Review<span class="tag">Search feature</span></div><div class="l2"><span class="mono">Review</span> · One person's review of a book, film, product or place</div></div>
+          <div class="res"><div class="l1">Q&amp;A<span class="tag">Search feature</span></div><div class="l2"><span class="mono">QAPage</span> · A question with answers that people posted</div></div>
+          <div class="res"><div class="l1">Discussion forum<span class="tag">Search feature</span></div><div class="l2"><span class="mono">DiscussionForumPosting</span> · A post and the replies to it in a forum</div></div>
+          <div class="res"><div class="l1">Software app<span class="tag">Search feature</span></div><div class="l2"><span class="mono">SoftwareApplication</span> · An app people can install or use online</div></div>
+          <div class="hint"><span>939 types</span><span><span class="kbd">↑</span> <span class="kbd">↓</span> move · <span class="kbd">↵</span> choose</span></div>
+        </div>
+      </div>
+      <div class="list" style="margin-top:16px">
+        <div class="row"><svg class="i" style="color:var(--gray-11)"><use href="#i-code"/></svg><span class="l">Paste JSON-LD<span class="s">Script tags, several items and @graph are fine.</span></span><svg class="i" style="color:var(--gray-10)"><use href="#i-cr"/></svg></div>
+      </div>
+      <p class="foot">Up to 10 items, 32 KB in all.</p>
+    </div>
+  </div></div></div>
+</section>
+
+<section class="fr" id="F2">
+  <div class="cap"><span class="id">F2</span><h2>Choosing a type: search the vocabulary</h2>
+  <p>Word starts in the plain label and the schema.org name first, then definitions under their own heading. Types with a live search feature first, then match quality. Documented types show the module's own line; other types show schema.org's definition from the site's download. The schema.org name is mono, never the label. A page kind is steered, not listed (F14 c).</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab on">Form</span><span class="tab">JSON</span></div></div>
+    <div class="sh-b">
+      <p class="intro">Describe something this page shows that its structured data doesn't cover yet. It's added as its own item.</p>
+      <div class="f" style="margin-top:16px"><div class="lr">What is it?</div>
+        <div class="in focus search"><svg class="i"><use href="#i-search"/></svg><span class="tx">rating<span class="caret"></span></span><span class="ib sm" style="margin-right:-6px"><svg class="i s14"><use href="#i-x"/></svg></span></div>
+        <div class="rl">
+          <div class="gl">Names</div>
+          <div class="res act"><div class="l1">Employer rating<span class="tag" style="margin-left:4px">Search feature</span></div><div class="l2"><span class="mono">EmployerAggregateRating</span> · A company's rating by the people who work there.</div></div>
+          <div class="res"><div class="l1">Aggregate rating<span class="tag" style="margin-left:4px">Search feature</span></div><div class="l2"><span class="mono">AggregateRating</span> · The average of many ratings or reviews of one thing.</div></div>
+          <div class="res"><div class="l1">Rating</div><div class="l2"><span class="mono">Rating</span> · A score on a scale, like 1 to 5 stars.</div></div>
+          <div class="res"><div class="l1">Endorsement rating</div><div class="l2"><span class="mono">EndorsementRating</span> · How strongly someone endorses something.</div></div>
+          <div class="gl">Definitions that mention “rating”</div>
+          <div class="res"><div class="l1">Review<span class="tag" style="margin-left:4px">Search feature</span></div><div class="l2"><span class="mono">Review</span> · One person's review of a book, film, product or place.</div></div>
+          <div class="res"><div class="l1">Employer review</div><div class="l2"><span class="mono">EmployerReview</span> · A review of a company as a place to work.</div></div>
+          <div class="hint"><span>6 of 939 types</span><span><span class="kbd">↵</span> choose · <span class="kbd">esc</span> clear</span></div>
+        </div>
+      </div>
+      <p class="foot">Screen readers hear “Employer rating, has a search feature, 1 of 6”. The list is a combobox popup; arrows move, Enter chooses, focus stays in the box.</p>
+    </div>
+  </div></div></div>
+</section>
+
+<section class="fr" id="F3">
+  <div class="cap"><span class="id">F3</span><h2>Type chosen: only what the feature needs</h2>
+  <p>Three needs from the rules file (4 of the type's 22 details). "Rating count or review count" is one fieldset with one sentence, not two asterisks. Recommended details wait as Add buttons; the rest is one search away. The form minted <code>#employer-rating</code>. A complete nested item rests as one line (F4, F5). The header Back goes up one level ("Back to all items"); there is no second back row.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab on">Form</span><span class="tab">JSON</span></div></div>
+    <div class="sh-b">
+            <div class="ihead"><div class="t"><h3>Employer rating</h3><div class="mono">EmployerAggregateRating · #employer-rating</div><div class="def">A company's rating by the people who work there.</div></div>
+        <div class="acts"><span class="ib"><svg class="i"><use href="#i-info"/></svg></span><span class="ib"><svg class="i"><use href="#i-dots"/></svg></span></div></div>
+      <div class="stage">
+        <div class="c">In search results</div>
+        <div class="vl"><svg class="i need"><use href="#i-half"/></svg><span>Employer rating</span><span class="v need">Needs a rating or review count</span></div>
+      </div>
+      <div class="band">Needed for Employer rating</div>
+      <div class="f"><div class="lr">Item reviewed<span class="as">Organization</span></div>
+        <div class="ibox"><div class="t"><b>Acme Logistics</b><span>Described here · name, website and 2 more</span></div><svg class="i"><use href="#i-cd"/></svg></div></div>
+      <div class="f"><div class="lr">Rating value</div>
+        <div class="in"><span class="tx">4.2</span><span class="suf">out of 5</span></div></div>
+      <div class="f"><fieldset class="oneof"><legend>Rating count or review count</legend>
+        <div class="pair"><div class="in focus"><span class="lab">Ratings</span><span class="tx"><span class="caret"></span></span></div><span class="or">or</span><div class="in"><span class="lab">Reviews</span><span class="tx"></span></div></div>
+        <div class="g amber"><svg class="i s14"><use href="#i-half"/></svg>Fill one, so the rating can show.</div></fieldset></div>
+      <div class="helps">Also helps <span class="cb"><svg class="i s14"><use href="#i-plus"/></svg>Best rating</span><span class="cb"><svg class="i s14"><use href="#i-plus"/></svg>Worst rating</span></div>
+      <div class="addd"><div class="in search"><svg class="i"><use href="#i-search"/></svg><span class="tx ph">Add a detail</span></div><div class="note">16 more details of an employer rating</div></div>
+      <div class="list"><div class="row"><span class="l">This is what the page is mainly about<span class="s">Shown on a plain web page only</span></span><span class="sw"></span></div></div>
+    </div>
+  </div></div></div>
+</section>
+
+<!-- ═════════ F4 ═════════ -->
+<section class="fr" id="F4">
+  <div class="cap"><span class="id">F4</span><h2>A detail that is an item: point before you copy</h2>
+    <p>Item reviewed is a menu button. What already exists on the page comes first, filtered by what the detail expects; a choice a rule would flag says why inside the menu (only your own organization's ratings can't show). Cross-page references are not offered. "Describe it here" expands the item inline (F5). "Just a name" writes plain text and says what it costs.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h scrolled"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab on">Form</span><span class="tab">JSON</span></div></div>
+    <div class="sh-b" style="padding-top:0">
+      <div class="stage" style="margin-top:8px">
+        <div class="c">In search results</div>
+        <div class="vl"><svg class="i need"><use href="#i-half"/></svg><span>Employer rating</span><span class="v need">Needs what is rated</span></div>
+      </div>
+      <div class="band">Needed for Employer rating</div>
+      <div class="f"><div class="lr">Item reviewed<span class="as">Organization</span></div>
+        <div class="in focus"><span class="tx ph">Choose what is rated</span><svg class="i" style="color:var(--gray-10)"><use href="#i-cd"/></svg></div></div>
+      <div class="menu" style="top:196px" role="menu" aria-label="Item reviewed">
+        <div class="gl">On this page</div>
+        <div class="res"><div class="l1">Fairwork<span class="rt">This site · Organization</span></div><div class="l2 am">Ratings of your own organization can't show.</div></div>
+                <div class="res act"><div class="l1"><svg class="i s14"><use href="#i-plus"/></svg>Describe it here</div><div class="l2">A new organization, filled in below</div></div>
+        <div class="res"><div class="l1">Just a name</div><div class="l2">Employer rating can't show with only a name.</div></div>
+        <div class="hint"><span>Employer rating needs an organization</span><span><span class="kbd">↵</span> choose</span></div>
+      </div>
+      <div style="height:228px"></div>
+      <div class="f"><div class="lr">Rating value</div>
+        <div class="in"><span class="tx">4.2</span><span class="suf">out of 5</span></div></div>
+      <div class="f"><fieldset class="oneof"><legend>Rating count or review count</legend>
+        <div class="pair"><div class="in"><span class="lab">Ratings</span><span class="tx">318</span></div><span class="or">or</span><div class="in"><span class="lab">Reviews</span><span class="tx"></span></div></div></fieldset></div>
+    </div>
+  </div></div></div>
+</section>
+
+<section class="fr" id="F5">
+  <div class="cap"><span class="id">F5</span><h2>Described here, inline on a rail</h2>
+  <p>"Describe it here" expands the organization under its label on a 2 px rail, so the rating stays in view around it. It has the item's anatomy in miniature: type, its need, its values, Add a detail to it. It is stored inside the rating, does not count toward the 10 items, and gets an <code>@id</code> only when a second item points at it. Done, it rests as one line. A third level is a summary line with "Edit in JSON".</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h scrolled"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab on">Form</span><span class="tab">JSON</span></div></div>
+    <div class="sh-b" style="padding-top:0">
+      <div class="band" style="margin-top:6px">Needed for Employer rating</div>
+      <div class="f"><div class="lr">Item reviewed<span class="as">Organization<span class="ib sm" title="Hide details of Item reviewed" style="margin-right:-4px"><svg class="i s14" style="transform:rotate(180deg)"><use href="#i-cd"/></svg></span></span></div>
+        <div class="in"><svg class="i s14" style="color:var(--gray-10)"><use href="#i-plus"/></svg><span class="tx">Describe it here</span><svg class="i" style="color:var(--gray-10)"><use href="#i-cd"/></svg></div>
+                <div class="grp" role="group" aria-label="Item reviewed" style="margin-top:12px">
+          <div class="mono" style="display:flex;justify-content:space-between;align-items:center;height:20px">Organization<span class="ib sm" style="margin-right:-4px"><svg class="i s14"><use href="#i-dots"/></svg></span></div>
+          <div class="f" style="margin-top:8px"><div class="lr">Name<span class="as">Needed</span></div><div class="in"><span class="tx">Acme Logistics</span></div></div>
+          <div class="f"><div class="lr">Website</div><div class="in"><span class="tx">https://acme-logistics.example</span></div></div>
+          <div class="f"><div class="lr">Logo</div>
+            <div class="img-row"><span class="thumb">AL</span><span class="t"><b>acme-logo.png</b><span>512 × 512 · from the media library</span></span><span class="btn soft">Change</span></div></div>
+          <div class="f"><div class="lr">Profiles<span class="as">2 values</span></div>
+            <div class="vals">
+              <div class="in"><span class="tx">https://social.example/acme-logistics</span><span class="ib sm x"><svg class="i s14"><use href="#i-x"/></svg></span></div>
+              <div class="in focus"><span class="tx">https://registry.example/companies/41822<span class="caret"></span></span><span class="ib sm x"><svg class="i s14"><use href="#i-x"/></svg></span></div>
+            </div>
+            <div style="margin-top:4px"><span class="btn ghost" style="margin-left:-10px;height:24px;line-height:24px;font-size:12px"><svg class="i s14"><use href="#i-plus"/></svg>Add another profile</span></div></div>
+          <div class="f" style="margin-top:12px"><div class="in search" style="min-height:28px;padding-top:4px;padding-bottom:4px"><svg class="i s14"><use href="#i-search"/></svg><span class="tx ph" style="font-size:13px">Add a detail to Acme Logistics</span></div></div>
+        </div></div>
+      <div class="f" style="margin-top:20px"><div class="lr">Rating value<span class="as">Needed</span></div>
+        <div class="in"><span class="tx">4.2</span><span class="suf">out of 5</span></div></div>
+      <div class="f" style="margin-top:20px"><fieldset class="oneof"><legend>Rating count or review count</legend>
+        <div class="pair"><div class="in"><span class="lab">Ratings</span><span class="tx">318</span></div><span class="or">or</span><div class="in"><span class="lab">Reviews</span><span class="tx"></span></div></div></fieldset></div>
+    </div>
+  </div></div></div>
+</section>
+
+<!-- ═════════ F6 ═════════ -->
+<section class="fr" id="F6">
+  <div class="cap"><span class="id">F6</span><h2>All items: each reads back as a sentence</h2>
+    <p>The top level once there are two or more items. Each row is the stage's grammar in miniature: a sentence built from the item's own JSON (the rules file's <code>say</code>, else a generic one), its type and <code>@id</code>, its verdict. A left-out item (<code>schema.skip</code>) stays listed with its reason. Removing offers Undo. Here the organization came from a pasted <code>@graph</code> with <code>@id</code> links, which stays as pasted.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab on">Form</span><span class="tab">JSON</span></div><span class="ib"><svg class="i"><use href="#i-dots"/></svg></span></div>
+    <div class="sh-b">
+      <p class="intro">Added to this page's structured data as separate items.</p>
+      <div class="slist">
+        <div class="srow"><div class="t"><div class="sn">Acme Logistics as an employer: 4.2 out of 5 from 318 ratings.</div>
+          <div class="tln">Employer rating · <span class="mono">#employer-rating</span></div>
+          <div class="vl"><svg class="i ok s14"><use href="#i-ok"/></svg><span style="font-size:13px">Employer rating</span><span class="v" style="font-size:13px">Can show</span></div></div>
+          <span class="ib sm"><svg class="i s14"><use href="#i-dots"/></svg></span></div>
+        <div class="srow"><div class="t"><div class="sn">Acme Logistics, an organization.</div>
+          <div class="tln">Organization · <span class="mono">#acme-logistics</span></div>
+          <div class="vl"><svg class="i off s14"><use href="#i-ring"/></svg><span style="font-size:13px;color:var(--gray-11)">Part of the employer rating</span></div></div>
+          <span class="ib sm"><svg class="i s14"><use href="#i-dots"/></svg></span></div>
+        <div class="srow"><div class="t"><div class="sn" style="color:var(--gray-11)">A question with 3 answers: “Is the pay fair at Acme?”</div>
+          <div class="tln">Q&amp;A · <span class="mono">#pay-question</span><span class="tag">Left out</span></div>
+          <div class="g red" style="margin-top:4px"><svg class="i s14"><use href="#i-err"/></svg><span>Couldn't find “Is the pay fair at Acme?” on this page.</span></div>
+          <div style="display:flex;gap:8px;margin-top:6px"><span class="btn soft" style="height:24px;line-height:24px;font-size:12px">It's on the page, check again</span></div></div>
+          <span class="ib sm"><svg class="i s14"><use href="#i-dots"/></svg></span></div>
+      </div>
+      <div class="btnrow"><span class="btn soft"><svg class="i s14"><use href="#i-plus"/></svg>Add an item</span><span class="btn ghost"><svg class="i s14"><use href="#i-code"/></svg>Paste JSON-LD</span></div>
+      <p class="foot">Each row is a button: "Acme Logistics as an employer… Employer rating, can show. Open it." ⋯ holds Show in JSON, Show in Output, Change type, Leave out of the page, This is what the page is mainly about, Remove item.</p>
+      <div class="bar"><span class="dot blue"></span><span class="tx">Removed the item “Overall rating”.</span><span class="btn blue">Undo</span></div>
+    </div>
+  </div></div></div>
+</section>
+
+<!-- ═════════ F7 ═════════ -->
+<section class="fr" id="F7">
+  <div class="cap"><span class="id">F7</span><h2>JSON after a paste, with the caret line</h2>
+    <p>The paste had a script tag, <code>@context</code> and <code>@graph</code>; the clean-up says so in one line with Undo clean-up, which restores the exact paste. What's in the box is what is stored, byte for byte. The caret line under it brings the form's knowledge to the code: path, plain label, what is expected, Edit in form (the one command that moves focus).</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab">Form</span><span class="tab on">JSON</span></div><span class="ib"><svg class="i"><use href="#i-dots"/></svg></span></div>
+    <div class="sh-b">
+      <div class="notice"><svg class="i"><use href="#i-check"/></svg><div>Cleaned up the paste: took it out of its script tag, split the graph into 2 items and removed the context line.<div class="acts"><span class="btn outline">Undo clean-up</span></div></div></div>
+      <div class="tbar"><span class="meta">2 items</span><span class="r"><span class="btn ghost"><svg class="i s14"><use href="#i-fmt"/></svg>Format</span><span class="btn ghost"><svg class="i s14"><use href="#i-copy"/></svg>Copy</span></span></div>
+<div class="code focus"><div class="hl blue" style="top:98px;opacity:.6"></div><div class="gut">1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19</div><div class="src"><span class="p">[</span>
+  <span class="p">{</span>
+    "@type": <span class="s">"EmployerAggregateRating"</span>,
+    "@id": <span class="s">"#employer-rating"</span>,
+    "itemReviewed": { "@id": <span class="s">"#acme-logistics"</span> },
+    "ratingValue": 4.<span class="caret"></span>2,
+    "ratingCount": 318,
+    "bestRating": 5
+  <span class="p">},</span>
+  <span class="p">{</span>
+    "@type": <span class="s">"Organization"</span>,
+    "@id": <span class="s">"#acme-logistics"</span>,
+    "name": <span class="s">"Acme Logistics"</span>,
+    "url": <span class="s">"https://acme-logistics.example"</span>,
+    "sameAs": [
+      <span class="s">"https://social.example/acme-logistics"</span>
+    ]
+  <span class="p">}</span>
+<span class="p">]</span></div></div>
+      <div class="cline"><span class="mono">Line 6 · ratingValue</span><span>· Rating value: a number, like 4.2</span><span class="ef">Edit in form</span></div>
+      <div class="status" style="margin-top:2px"><svg class="i s14 ok"><use href="#i-ok"/></svg>Valid · 2 items · 0.5 KB · Saves when you leave the box (Ctrl+Enter)</div>
+      <div class="stage" style="margin-top:12px">
+        <div class="c">In search results</div>
+        <div class="vl"><svg class="i ok"><use href="#i-ok"/></svg><span>Employer rating</span><span class="v">Can show</span></div>
+        <div class="vl"><svg class="i off"><use href="#i-ring"/></svg><span>Acme Logistics</span><span class="v off">Part of the employer rating</span></div>
+      </div>
+    </div>
+  </div></div></div>
+</section>
+
+<section class="fr" id="F8">
+  <div class="cap"><span class="id">F8</span><h2>A paste that needs a decision</h2>
+  <p>Shown only when the paste holds something the page already makes, a copy of the site's organization, more than 10 items, or more than 32 KB. A clean paste goes straight in (F7). Unticked rows say why; links to the pasted organization are re-pointed at the reserved <code>#identity</code>. The pasted text isn't kept.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab">Form</span><span class="tab on">JSON</span></div></div>
+    <div class="sh-b">
+            <div class="ihead"><div class="t"><h3>Add from your paste</h3><div class="def" style="font-size:13px;line-height:18px;margin-top:4px">Found 4 items in 3 script tags. The page you copied also has microdata, which wasn't imported.</div></div></div>
+      <div class="list" style="margin-top:14px">
+        <div class="crow"><span class="chk on"><svg class="i"><use href="#i-check"/></svg></span><span class="t"><b>Employer rating</b><span>Acme Logistics · 4.2 from 318 ratings</span><span class="ok">Will be added · can show in search results</span></span></div>
+        <div class="crow"><span class="chk"></span><span class="t"><b>Organization</b><span>Fairwork</span><span class="am">This is your site's organization. Links to it will point to yours.</span></span></div>
+        <div class="crow"><span class="chk"></span><span class="t"><b>Website</b><span>Fairwork</span><span>Already made by this page.</span></span></div>
+        <div class="crow"><span class="chk"></span><span class="t"><b>Breadcrumbs</b><span>Home › Companies › Acme Logistics</span><span>Already made from the page's breadcrumb.</span></span></div>
+      </div>
+      <div class="g" style="margin-top:12px"><svg class="i s14"><use href="#i-info"/></svg><span>The rating's “author” pointed at the pasted Fairwork. It now points at your site's organization, <span class="mono">#identity</span>.</span></div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px"><span class="btn soft h32">Cancel</span><span class="btn solid h32">Add 1 item</span></div>
+    </div>
+  </div></div></div>
+</section>
+
+<!-- ═════════ F9 ═════════ -->
+<section class="fr" id="F9">
+  <div class="cap"><span class="id">F9</span><h2>Problems: a line, a path, plain words, a fix</h2>
+    <p>Checked 150 ms after typing stops. Each problem names the line where the fix goes, the path, and the one fix as a button. Red blocks saving and puts a dot on the Form tab; amber is advice. Red is exactly what the server refuses; a schemeless address and an unknown name are amber and never block. Invalid text is held, not sent: the bar says so, and the page keeps the last valid text.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab">Form<span class="tdot" aria-hidden="true"></span></span><span class="tab on">JSON</span></div><span class="ib"><svg class="i"><use href="#i-dots"/></svg></span></div>
+    <div class="sh-b">
+      <div class="tbar" style="margin-top:4px"><span class="meta">1 item · 3 problems</span><span class="r"><span class="btn ghost"><svg class="i s14"><use href="#i-fmt"/></svg>Format</span><span class="btn ghost"><svg class="i s14"><use href="#i-copy"/></svg>Copy</span></span></div>
+<div class="code err"><div class="hl" style="top:152px"></div><div class="gut">1
+2
+3
+4
+5
+6
+<span class="ga">● 7</span>
+8
+<span class="gm">● 9</span>
+10
+<span class="ga">● 11</span>
+12</div><div class="src">{
+  "@type": <span class="s">"EmployerAggregateRating"</span>,
+  "@id": <span class="s">"#employer-rating"</span>,
+  "itemReviewed": {
+    "@type": <span class="s">"Organization"</span>,
+    "name": <span class="s">"Acme Logistics"</span>,
+    "sameAs": <span class="s w">"acme-logistics.example"</span>
+  },
+  "ratingValue": 4.2<span class="e">&#8203; </span>
+  "bestRating": 5,
+  <span class="w">"ratingcount"</span>: 318<span class="caret"></span>
+}</div></div>
+      <div class="cline"><span class="mono">Line 11 · ratingcount</span><span>· isn't a detail of an employer rating</span><span class="ef">Edit in form</span></div>
+      <div style="margin-top:4px">
+        <div class="prob red"><svg class="i"><use href="#i-err"/></svg><div><span class="path">Line 9 · ratingValue</span><span class="b">: a comma is missing after 4.2.</span><div class="acts"><span class="btn soft">Add the comma</span></div></div></div>
+        <div class="prob amber"><svg class="i"><use href="#i-warn"/></svg><div><span class="path">Line 7 · itemReviewed › sameAs</span><span class="b">: use the full address.</span><div class="acts"><span class="btn soft">Use https://acme-logistics.example</span><span class="btn ghost">Go to line 7</span></div></div></div>
+        <div class="prob amber"><svg class="i"><use href="#i-warn"/></svg><div><span class="path">Line 11 · ratingcount</span><span class="b">: isn't a detail of an employer rating. Did you mean ratingCount?</span><div class="acts"><span class="btn soft">Use ratingCount</span></div></div></div>
+      </div>
+      <div class="bar"><span class="dot red"></span><span class="tx">Not saved: line 9 has a problem.</span><span class="btn blue">Show</span></div>
+    </div>
+  </div></div></div>
+</section>
+
+<!-- ═════════ F10 ═════════ -->
+<section class="fr" id="F10">
+  <div class="cap"><span class="id">F10</span><h2>Invalid JSON: the Form tab explains</h2>
+    <p>The Form tab always switches. With unreadable text it shows one notice with the one fix and "Go to line", never a half-form. There is no automatic repair preview: each problem carries its own fix, and a pasted script tag, <code>@context</code> or <code>@graph</code> left in carries "Clean up".</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr">
+    <div class="mini tight">
+      <div class="mt">FORM, WHILE THE JSON HAS A PROBLEM</div>
+      <div class="sh-h" style="padding:0;height:36px"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+        <div class="tabs"><span class="tab on ring">Form<span class="tdot"></span></span><span class="tab">JSON</span></div></div>
+      <div class="notice amber" style="margin-top:8px"><svg class="i"><use href="#i-warn"/></svg><div>The form can't read this JSON: line 9 has a problem. Nothing is lost.<div class="acts"><span class="btn outline">Add the comma</span><span class="btn ghost">Go to line 9</span></div></div></div>
+      <p class="foot" style="margin-top:8px">Announced: "Form. The form can't read this JSON: line 9 has a problem." Focus stays on the tab; Add the comma is the next Tab stop.</p>
+    </div>
+  </div></div>
+</section>
+
+<section class="fr" id="F11">
+  <div class="cap"><span class="id">F11</span><h2>Template scope: values linked to fields</h2>
+  <p>"Every Book review". The stepper pages through real book reviews; verdicts are the previewed item's (counts across items belong to a later change). Each value is typed or linked with link-values' own controls (link button, linked box with source and previewed value, × to unlink). In the text a link is a whole-value brace name, so no second store is needed. A value typed once gets the per-item warning.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab on">Form</span><span class="tab">JSON</span></div></div>
+    <div class="sh-b">
+      <div class="crumbs"><span></span><span class="step"><span>Previewing</span>&nbsp;<b>The Quiet Orchard</b><span class="ib sm"><svg class="i s14"><use href="#i-cl"/></svg></span>3 of 212<span class="ib sm"><svg class="i s14"><use href="#i-cr"/></svg></span></span></div>
+      <div class="ihead" style="margin-top:6px"><div class="t"><h3>Review</h3><div class="mono">Review · #review · on every Book review</div></div>
+        <div class="acts"><span class="ib"><svg class="i"><use href="#i-info"/></svg></span><span class="ib"><svg class="i"><use href="#i-dots"/></svg></span></div></div>
+      <div class="stage">
+        <div class="c">In search results</div>
+        <div class="vl two"><svg class="i ok"><use href="#i-ok"/></svg><span style="flex:1">Review snippet</span><span class="v">For The Quiet Orchard: Can show</span></div>
+      </div>
+      <div class="band">Needed for Review snippet</div>
+      <div class="f"><div class="lr">Author<span class="lb on"><svg class="i s14"><use href="#i-link"/></svg></span></div>
+        <div class="lnk def"><span class="src"><svg class="i s14"><use href="#i-link"/></svg>Author</span><span class="val">Ada Writer</span><span class="ib sm x"><svg class="i s14"><use href="#i-x"/></svg></span></div></div>
+      <div class="f"><div class="lr">Item reviewed</div>
+        <div class="ibox"><div class="t"><b>The Quiet Orchard</b><span>Book · name linked to Book title</span></div><svg class="i"><use href="#i-cr"/></svg></div></div>
+      <div class="f"><div class="lr">Rating</div>
+        <div class="grp">
+          <div class="f"><div class="lr" style="font-weight:400">Rating value<span class="lb on"><svg class="i s14"><use href="#i-link"/></svg></span></div>
+            <div class="lnk"><span class="src"><svg class="i s14"><use href="#i-link"/></svg>Score</span><span class="val">4.5</span><span class="ib sm x"><svg class="i s14"><use href="#i-x"/></svg></span></div></div>
+          <div class="two-col" style="margin-top:12px">
+            <div><div class="lr" style="font-weight:400">Best rating<span class="lb"><svg class="i s14"><use href="#i-link"/></svg></span></div><div class="in"><span class="tx">5</span></div></div>
+            <div><div class="lr" style="font-weight:400">Worst rating<span class="lb"><svg class="i s14"><use href="#i-link"/></svg></span></div><div class="in"><span class="tx">1</span></div></div>
+          </div>
+        </div></div>
+      <div class="band">Also set</div>
+      <div class="f"><div class="lr">Image<span class="lb"><svg class="i s14"><use href="#i-link"/></svg></span></div>
+        <div class="img-row"><span class="thumb" style="background:linear-gradient(135deg,#30a46c,#218358)">OV</span><span class="t"><b>review-banner.jpg</b><span>1200 × 630 · from the media library</span></span><span class="btn soft">Change</span></div>
+        <div class="g amber"><svg class="i s14"><use href="#i-warn"/></svg><span>The same image on every Book review. Link it to a field instead.</span><span class="gb">Link it</span></div></div>
+    </div>
+  </div></div></div>
+</section>
+
+<section class="fr" id="F13">
+  <div class="cap"><span class="id">F13</span><h2>Every kind of value, by what the detail expects</h2>
+  <p>A type with no search feature: no needs, so only set values show. The control comes from the detail's expected types and the value's actual shape (the shape wins, nothing is coerced). Asides here show the schema.org name and stored form; in use they appear on hover or focus. Yes/No has "Not set", which is not No.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr"><div class="sheet">
+    <div class="sh-h"><span class="ib"><svg class="i"><use href="#i-cl"/></svg></span><h2>Add your own JSON-LD</h2>
+      <div class="tabs"><span class="tab on">Form</span><span class="tab">JSON</span></div></div>
+    <div class="sh-b">
+            <div class="ihead"><div class="t"><h3>Book</h3><div class="mono">Book · #pay-talks-guide</div></div>
+        <div class="acts"><span class="ib"><svg class="i"><use href="#i-info"/></svg></span><span class="ib"><svg class="i"><use href="#i-dots"/></svg></span></div></div>
+      <div class="vl two" style="margin-top:6px"><svg class="i off"><use href="#i-ring"/></svg><span>No search feature<span class="sub">Search engines and other tools can still read it.</span></span></div>
+      <div class="f" style="margin-top:14px"><div class="lr">Name<span class="as"><code>name</code> · text</span></div><div class="in"><span class="tx">The Fairwork guide to pay talks</span></div></div>
+      <div class="f"><div class="lr">Author<span class="as"><code>author</code> · points to #identity</span></div>
+        <div class="in"><svg class="i s14" style="color:var(--gray-10)"><use href="#i-link"/></svg><span class="tx">Fairwork (this site)</span><svg class="i" style="color:var(--gray-10)"><use href="#i-cd"/></svg></div></div>
+      <div class="f"><div class="two-col">
+        <div><div class="lr">Date published<span class="as"><code>2026-03-02</code></span></div><div class="in"><span class="tx">2 Mar 2026</span><svg class="i s14" style="color:var(--gray-10)"><use href="#i-cal"/></svg></div></div>
+        <div><div class="lr">Number of pages<span class="as">whole number</span></div><div class="in"><span class="tx" style="font-variant-numeric:tabular-nums">64</span></div></div></div></div>
+      <div class="f"><div class="lr">Date modified<span class="as">date, time and zone</span></div>
+        <div style="display:grid;grid-template-columns:1.2fr .8fr 1.4fr;gap:6px"><div class="in"><span class="tx">10 Nov 2026</span></div><div class="in"><span class="tx">09:30</span></div><div class="in"><span class="tx">Helsinki +02:00</span><svg class="i s14" style="color:var(--gray-10)"><use href="#i-cd"/></svg></div></div>
+        <div class="g"><svg class="i s14"><use href="#i-info"/></svg>Stored as <code class="kl" style="font-weight:400">2026-11-10T09:30+02:00</code> (Helsinki, winter time). The zone starts as the site's.</div></div>
+      <div class="f"><div class="two-col">
+        <div><div class="lr">Book format<span class="as">one of 5</span></div><div class="in"><span class="tx">E-book</span><svg class="i s14" style="color:var(--gray-10)"><use href="#i-cd"/></svg></div></div>
+        <div><div class="lr">Is accessible for free</div><div class="in"><span class="tx">Yes</span><svg class="i s14" style="color:var(--gray-10)"><use href="#i-cd"/></svg></div></div></div>
+        <div class="g">Stored as <code class="kl" style="font-weight:400">https://schema.org/EBook</code> and <code class="kl" style="font-weight:400">true</code>.</div></div>
+      <div class="f"><div class="lr">URL<span class="as"><code>url</code> · address</span></div>
+        <div class="in"><span class="tx">/guides/pay-talks</span></div>
+        <div class="g amber"><svg class="i s14"><use href="#i-warn"/></svg><span>Use the full address.</span><span class="gb">Use https://fairwork.example/guides/pay-talks</span></div></div>
+      <div class="f"><div class="lr">Image<span class="as">from the media library</span></div>
+        <div class="img-row"><span class="thumb" style="background:linear-gradient(135deg,#12a594,#0d74ce)">PT</span><span class="t"><b>pay-talks-cover.jpg</b><span>1200 × 1600 · 214 KB</span></span><span class="btn soft">Change</span></div></div>
+    </div>
+  </div></div></div>
+</section>
+
+<!-- ═════════ F14 ═════════ -->
+<section class="fr" id="F14">
+  <div class="cap"><span class="id">F14</span><h2>Small states</h2>
+    <p>(a) The vocabulary loads in the background; documented types search at once. (b) Without the downloaded list the form still edits any item by shape. (c) Duplicate guard: a kind the page already is routes to Add details. (d) Changing the type keeps every value. (e) Read-only stays selectable and copyable.</p></div>
+  <div class="dlg"><div class="dlg-bar">SEO<svg class="i"><use href="#i-x"/></svg></div>
+  <div class="ifr" style="height:auto">
+    <div class="mini tight">
+      <div class="mt">a · LOADING THE LIST</div>
+      <div class="in focus search"><svg class="i"><use href="#i-search"/></svg><span class="tx">rating<span class="caret"></span></span></div>
+      <div class="rl">
+        <div class="res act"><div class="l1">Employer rating<span class="tag">Search feature</span></div><div class="l2"><span class="mono">EmployerAggregateRating</span> · A company's rating by the people who work there</div></div>
+        <div style="padding:8px 10px"><div class="skel" style="width:55%"></div><div class="skel" style="width:80%;margin-top:8px"></div></div>
+        <div class="hint"><span>Loading schema.org types…</span></div>
+      </div>
+    </div>
+    <div class="mini tight">
+      <div class="mt">b · FULL LIST NOT ON THIS SITE</div>
+      <div class="notice"><svg class="i"><use href="#i-info"/></svg><div>Only types with a search feature are listed. Type an exact schema.org name to use another; the form still edits it. A site administrator can add the full list.</div></div>
+      <p class="foot" style="margin-top:6px">There is no download button in the sheet: the site fetches the list with a drush command. The dialog never calls schema.org.</p>
+    </div>
+    <div class="mini tight">
+      <div class="mt">c · THE PAGE ALREADY IS THIS KIND</div>
+      <div class="in search"><svg class="i"><use href="#i-search"/></svg><span class="tx">product</span></div>
+      <div class="rl"><div class="res act"><div class="l1">Product<span class="tag blue">Page kind</span></div><div class="l2 wrap">This page already describes Oak desk lamp. Add what's missing to it instead.</div>
+        <div style="display:flex;gap:8px;margin-top:8px"><span class="btn soft">Add details to Oak desk lamp</span><span class="btn ghost">Add a separate item anyway</span></div></div></div>
+    </div>
+    <div class="mini tight">
+      <div class="mt">d · CHANGING THE TYPE KEEPS EVERY VALUE</div>
+      <div class="notice"><svg class="i"><use href="#i-info"/></svg><div>2 details aren't expected on a rating. They're kept, and search features may ignore them.<div class="acts"><span class="btn outline">Remove them</span><span class="btn ghost">Keep them</span></div></div></div>
+    </div>
+    <div class="mini tight">
+      <div class="mt">e · READ-ONLY (SOMEONE ELSE IS EDITING)</div>
+      <div class="g" style="margin:0 0 8px"><svg class="i s14"><use href="#i-lock"/></svg>Read-only. You can view and copy this JSON-LD.</div>
+<div class="code"><div class="gut">1
+2
+3</div><div class="src">{
+  "@type": <span class="s">"EmployerAggregateRating"</span>,
+  "@id": <span class="s">"#employer-rating"</span>, …</div></div>
+      <div class="tbar" style="margin:6px 0 0"><span class="meta">12 lines</span><span class="r"><span class="btn ghost"><svg class="i s14"><use href="#i-copy"/></svg>Copy</span></span></div>
+    </div>
+  </div></div>
+</section>
+
+</div>
+</body>
+</html>
