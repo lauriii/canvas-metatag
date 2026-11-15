@@ -188,3 +188,12 @@ The SEO dialog's visual rules (tokens, components, review checklist) are in
     - Browser, language and screen-reader coverage is its own change,
       test-in-every-engine-and-language, queued right after.
     - Canvas proposals stay drafts in the change; nothing is posted upstream.
+16. complete-the-headless-frontend (feedback from a real headless frontend)
+    - The computed values in the link menu are grouped as "Automatic".
+    - A status report row for the public address ships here, before
+      serve-each-frontend-its-own-addresses.
+    - Page addresses on a non-public host are left out on a production-like
+      site; plain http on a public host is only reported.
+    - The README names no JSON-LD library; the module's graph is complete.
+    - The frontend recipe is proved by a contract test plus a manual check.
+    - Runs first after the JSON-LD form pause.
