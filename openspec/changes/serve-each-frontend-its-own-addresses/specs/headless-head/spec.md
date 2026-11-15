@@ -55,3 +55,20 @@ settings too.
 
 **Migration**: See public-addresses, "Addresses are part of the cacheability"
 and "One frontend's head never serves another".
+
+### Requirement: Page addresses on a host no visitor reaches are left out
+
+**Reason**: complete-the-headless-frontend left these addresses out early, for
+the single public base. The rule now applies to every frontend's addresses.
+
+**Migration**: See public-addresses, "An address that can't be known is left
+out". The same hosts are left out, with the same development-host rule.
+
+### Requirement: The status report flags a public base no visitor can use
+
+**Reason**: complete-the-headless-frontend added this row early, for the
+single public base. The full guardrail replaces it.
+
+**Migration**: See public-addresses, "The status report refuses addresses no
+visitor can use" and "The status report warns about risky addresses". The row
+keeps its title, "SEO public addresses", and its helpers.

@@ -239,8 +239,9 @@ never fetches an address. A logo over 4096 px a side is skipped.
   sentences that fit in 160 characters (`IntlBreakIterator` sentence instance
   in the page's language); when the first sentence is longer, at a word within
   159 characters with "…".
-- **Long text:** a node with no formatted text with a summary takes its first
-  formatted or long text field in form order.
+- **Long text:** a node with no summary and no text field named for a
+  description (complete-the-headless-frontend) takes its first formatted or
+  long text field in form order.
 - **A Canvas page's own text:** up to three candidates: text props of at
   least 50 characters, after the first heading, from instances the page
   places in its own content (not page regions, not a template), not starting

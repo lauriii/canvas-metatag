@@ -29,7 +29,7 @@ go on the merge request.
 
 - [ ] 4.1 Add `expectAccessible(page, view)` to `fixture.ts` and replace the axe copies in `access.spec.ts` and `template-complex.spec.ts`. Prove it with one `AxeBuilder` use left in `tests/e2e/`, and both suites green.
 - [ ] 4.2 Scan every view (seo-dialog "An automated scan"): in `access.spec.ts` each tab of each scope, each sheet, the scope menu, read-only Site, each notice and a field error; the suggestions tray in `ai.spec.ts`; the Arabic page in M3. Prove it with the smoke set green in all three engines, and a negative control recorded in the merge request: a temporarily unnamed button fails the scan, naming its view.
-- [ ] 4.3 Add one `toMatchAriaSnapshot()` per page-scope and site-scope view, stored once under `tests/e2e/__aria__/`, dynamic text as regular expressions, Chromium only with the reason in each skip. Prove it with a second run of `--update-snapshots=changed` that changes nothing, and the snapshots reviewed in the merge request.
+- [ ] 4.3 Add one `toMatchAriaSnapshot()` per page-scope and site-scope view, and one of an open template link menu with its named groups (complete-the-headless-frontend), stored once under `tests/e2e/__aria__/`, dynamic text as regular expressions, Chromium only with the reason in each skip. Prove it with a second run of `--update-snapshots=changed` that changes nothing, and the snapshots reviewed in the merge request.
 - [ ] 4.4 Add the forced-colours and reduced-motion test to `access.spec.ts` (seo-dialog "Forced colours" and "Reduced motion"). Prove it green in Chromium, with a negative control recorded: without the forced-colours rules, it fails.
 
 ## 5. Triage

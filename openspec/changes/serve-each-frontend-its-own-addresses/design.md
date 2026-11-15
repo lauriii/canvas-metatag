@@ -487,6 +487,9 @@ drops the row:
 - a language found by domain with no frontend address;
 - content API output with no frontend and no setting;
 - commands on `http://default`;
+- a page address on a non-public host while Drupal's own host is
+  production-like (complete-the-headless-frontend left these out first, for
+  the single public base);
 - an image that a sized template can't describe, or that would be on a
   non-public Drupal host (D8);
 - a draft card on the content API, which would otherwise name the editor's
@@ -526,16 +529,23 @@ development copy: its own host is a loopback address, `localhost`, under
 (a short list kept in code). Anything else, including a private IP, an
 internal name, plain http behind a TLS-terminating proxy, and Drush on
 `http://default`, is production-like. A private CMS is exactly where a
-localhost canonical would otherwise go unnoticed.
+localhost canonical would otherwise go unnoticed. The helpers are
+`Values::isDevelopmentHost()` and `Values::isPublicHost()`, added by
+complete-the-headless-frontend.
 
 **Status report** ("SEO public addresses"):
 
 - **Errors**, warnings on a development host: a public or language address,
   or the setting, that is plain http or on a non-public host; invalid address
   settings or an invalid setting; a language Drupal finds by domain that a
-  frontend has no address for.
+  frontend has no address for. On a development host, an address on a
+  development host too is the normal local setup and gets no row. A plain http
+  error names the fix: the frontend's public address for this environment, or
+  Drupal's reverse proxy settings.
 - **Warnings:**
   - `canvas_headless` with no frontend and no setting;
+  - Drupal's own pages on a plain http request's address, on a
+    production-like host (naming Drupal's reverse proxy settings);
   - an entry that applies to no frontend;
   - a public address on one of Drupal's hosts;
   - a staging-looking first label (`staging`, `stage`, `dev`, `test`, `qa`,

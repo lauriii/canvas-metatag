@@ -210,9 +210,10 @@ identity and the home address matches the front page's canonical link.
 When an address can't be built for the frontend, the rows that need it MUST be
 left out, never put on another host. This covers a language Drupal finds by its
 domain that the frontend has no address for, content API output with no
-frontend and no public address setting, and an image the image address can't
-describe. A page without its own address MUST carry no canonical, `og:url` or
-JSON-LD script.
+frontend and no public address setting, a page address on a non-public host
+while Drupal's own host is production-like, and an image the image address
+can't describe. A page without its own address MUST carry no canonical,
+`og:url` or JSON-LD script.
 
 #### Scenario: A language found by its domain
 
@@ -222,6 +223,11 @@ JSON-LD script.
 #### Scenario: A headless site without a frontend
 
 - **WHEN** a frontend fetches `/about` through the content API at `http://cms.internal:8080`, no frontend is configured and no public address is set
+- **THEN** the head MUST carry no canonical, `og:url`, hreflang or JSON-LD script
+
+#### Scenario: A development frontend in production
+
+- **WHEN** a page is fetched at `https://cms.example.com` and the frontend's public address is `http://localhost:3000`
 - **THEN** the head MUST carry no canonical, `og:url`, hreflang or JSON-LD script
 
 #### Scenario: An image address that needs a size
@@ -459,12 +465,12 @@ setting applied, or `unnamed` when nothing was named and none could.
 ### Requirement: The status report refuses addresses no visitor can use
 
 The status report MUST show an error for a public or language address, or the
-public base setting, that is plain http or on a non-public host (as in "Images
-on a host no crawler reaches are left out"), for invalid address settings, and
-for a language Drupal finds by domain that a frontend has no address for. These
-MUST be warnings only where Drupal's own host is a development host: loopback,
-`localhost`, under `localhost`, `test` or `invalid`, or a known local
-development suffix.
+public base setting, that is plain http or on a non-public host (as defined for
+images); for invalid address settings; and for a language Drupal finds by
+domain that a frontend has no address for. Where Drupal's own host is a
+development host (loopback, `localhost`, under `localhost`, `test` or
+`invalid`, or a known local suffix), these MUST be warnings, or absent for an
+address on such a host.
 
 #### Scenario: A development frontend in production
 
@@ -484,16 +490,22 @@ development suffix.
 #### Scenario: A development site
 
 - **WHEN** the same configuration is viewed at `https://cms.example.test`
-- **THEN** it MUST show a warning, not an error
+- **THEN** it MUST show nothing for `http://localhost:3000`, and a warning, not an error, for a frontend at `http://www.example.com`
 
 ### Requirement: The status report warns about risky addresses
 
 The status report MUST warn when `canvas_headless` has no frontend and no
-public address is set; when an entry applies to no frontend; when a public
-address is on one of Drupal's hosts; when a public address's first label is
-`staging`, `stage`, `dev`, `test`, `qa`, `uat` or `preview`; when an image
-address uses `{source}` or names one of Drupal's hosts; and when a language's
-alternate on another frontend is not built the same way by that frontend.
+public address is set; when Drupal's own pages take a plain http request's
+address on a production-like host; when an entry applies to no frontend; when a
+public address is on one of Drupal's hosts or its first label is `staging`,
+`stage`, `dev`, `test`, `qa`, `uat` or `preview`; when an image address uses
+`{source}` or names one of Drupal's hosts; and when another frontend does not
+build a language's alternate back.
+
+#### Scenario: Plain http behind a proxy
+
+- **WHEN** no frontend is configured and the status report is viewed at `http://www.example.com`
+- **THEN** it MUST warn, naming Drupal's reverse proxy settings
 
 #### Scenario: Settings for a frontend that is gone
 

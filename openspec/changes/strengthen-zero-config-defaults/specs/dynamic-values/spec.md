@@ -2,7 +2,7 @@
 
 ### Requirement: A page's and a node's own description and image
 
-The Description fact MUST be, for a Canvas page, its description field, else the page's own text; for a node, the summary of its first formatted text with a summary, else its first formatted or long text in form order. Derived text MUST be plain and cut to the whole sentences that fit in 160 characters, else at a word within 159 with "…". The Image fact MUST be a Canvas page's image media, or a node's first image field that resolves, in form order.
+The Description fact MUST be a Canvas page's description field, else its own text; for a node, the summary of its first formatted text with one, else its first text field named for a description (value-links), else its first formatted or long text. Derived text MUST be plain and cut to the whole sentences that fit in 160 characters, else at a word within 159 with "…". The Image fact MUST be a Canvas page's image media, or a node's first image field that resolves. "First" MUST follow form order.
 
 #### Scenario: A node's description
 
@@ -23,6 +23,16 @@ The Description fact MUST be, for a Canvas page, its description field, else the
 
 - **WHEN** a content type has no formatted text with a summary and a node's first long text field holds "Open Monday to Friday. Closed on public holidays."
 - **THEN** its Description fact MUST be that text
+
+#### Scenario: A Summary field
+
+- **WHEN** a Post type has a Body without a summary and a plain long text field `field_post_summary` labelled "Summary", and a post's Summary is "Ten lessons from a year of shipping."
+- **THEN** its Description fact MUST be "Ten lessons from a year of shipping." and name Summary as its source
+
+#### Scenario: A word inside a label
+
+- **WHEN** a Product type has a plain text field labelled "Lead time" and no other text field
+- **THEN** its Description fact MUST NOT be read from "Lead time"
 
 #### Scenario: A node's image
 
