@@ -162,3 +162,17 @@ The SEO dialog's visual rules (tokens, components, review checklist) are in
     - Preview-only checks (headings, alt text, measured lengths) are listed as
       "not checked" from the shell; revisit after the acceptance run.
     - One change, landing last in the queue (after describe-the-publisher).
+14. serve-each-frontend-its-own-addresses (headless frontends on other domains)
+    - Every address is built for the frontend rendering the page, never the
+      first configured one; a frontend names itself in the content API path.
+    - Preview deployments with unknown addresses match configured patterns,
+      get `noindex`, and are never stored in shared caches.
+    - Images can go through the frontend's own image pipeline, so the Drupal
+      host need never appear in public output.
+    - No new image member in the content API; the image template covers it.
+    - No settings UI; configuration and settings.php, shown in the status
+      report.
+    - Drupal's own copy keeps a canonical to the first frontend, no `noindex`.
+    - A preview pattern match is enough; no preview token required.
+    - With several frontends, an unnamed request gets no addresses.
+    - Lands last, after make-the-module-agent-ready.
