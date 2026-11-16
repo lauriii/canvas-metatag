@@ -126,7 +126,7 @@ final class Resolver {
    *   default one: the three language-neutral settings of the default one.
    */
   public function layers(ContentEntityInterface $entity, bool $draft, CacheableMetadata $cacheability): array {
-    $layers = $this->site($cacheability) + ['target' => [], 'from_default' => []];
+    $layers = array_diff_key($this->site($cacheability), ['currency' => TRUE]) + ['target' => [], 'from_default' => []];
 
     if ($entity->getEntityTypeId() === 'canvas_page') {
       $read = static fn (ContentEntityInterface $page, string $type = 'WebPage'): array => Values::clean(Values::decode($page->get('canvas_metatag')->value), 'page', NULL, $type)[0];
@@ -404,9 +404,11 @@ final class Resolver {
    * @param bool $draft
    *   Read the content template's Canvas draft for the type layer.
    *
-   * @return array{head: array{title: string, meta: list<array<string, string>>, link: list<array<string, string>>, script: list<array{type: string, textContent: array}>}, image: ?array, schema: array{withheld: bool, missing_required: list<string>, missing_recommended: list<string>}, cacheability: \Drupal\Core\Cache\CacheableMetadata}
-   *   The head in emission order, the effective social image, the report of
-   *   the structured data and everything the result depends on.
+   * @return array{head: array{title: string, meta: list<array<string, string>>, link: list<array<string, string>>, script: list<array{type: string, textContent: array}>}, image: ?array, schema: array, cacheability: \Drupal\Core\Cache\CacheableMetadata}
+   *   The head in emission order, the effective social image, what building
+   *   the structured data reported (SchemaGraph::build(), without the graph)
+   *   and everything the result depends on. Nothing only the dialog shows is
+   *   computed here: see report().
    */
   public function resolve(ContentEntityInterface $entity, bool $draft = FALSE): array {
     // Kept for the rest of the request: the coupled adapter asks twice.
@@ -491,6 +493,7 @@ final class Resolver {
       'published' => $facts['published']['value'],
       'modified' => $facts['modified']['value'],
       'timezone' => $this->timezone(),
+      'currency' => $this->site($cacheability)['currency'],
       'identity' => ['kind' => $identity['kind'], 'name' => $site_name, 'same_as' => $identity['same_as']],
       'logo' => $identity['logo'] === '' ? NULL : $this->image($identity['logo'], $cacheability),
       'image' => $image,
@@ -498,6 +501,12 @@ final class Resolver {
       + array_map(static fn (array $fact): string => $fact['value'], array_diff_key($facts, ['image' => TRUE])),
     ], $effective['schema'] ?? [], $value);
     $og_type = SchemaGraph::types()[$effective['schema']['type'] ?? 'WebPage']['og_type'] ?? 'website';
+    // Where the front page's identity and website nodes are judged, and the
+    // addresses report() judges them with.
+    // The front page in the entity's language, with its prefix.
+    $report['front'] = $own === $this->publicUrl(Url::fromRoute('<front>', [], ['language' => $entity->language()]), $cacheability);
+    $report['home'] = $origin['url'] . '/';
+    $report['url'] = $own;
     $article = $og_type === 'article';
 
     $meta = [
@@ -554,10 +563,39 @@ final class Resolver {
   }
 
   /**
-   * The site layer and the identity, read with configuration overrides.
+   * What only the dialog shows: the head, with verdicts and graph rules.
    *
-   * @return array{site: array, identity: array}
-   *   Both cleaned in read mode.
+   * Never called while a visitor's head is built (DeliveryPathTest): the
+   * search features and the rules run for the dialog's state alone.
+   *
+   * @return array
+   *   resolve()'s result, its `schema` with `features`
+   *   (SchemaGraph::features()) and `rules` (SchemaGraph::rules()).
+   */
+  public function report(ContentEntityInterface $entity, bool $draft = FALSE): array {
+    $result = $this->resolve($entity, $draft);
+    $graph = $result['head']['script'][0]['textContent'];
+    $schema = $result['schema'];
+    $home = $schema['home'];
+    $result['schema']['features'] = SchemaGraph::features($graph, [
+      'home' => $home,
+      'url' => $schema['url'],
+      'front' => $schema['front'],
+      'type' => $schema['type'],
+      'gates' => $schema['gates'],
+      // A withheld main node is judged as it would ship, so the dialog says
+      // what it needs.
+      'extra' => isset($schema['withheld']['node']) ? [$schema['withheld']['node']] : [],
+    ]);
+    $result['schema']['rules'] = SchemaGraph::rules($graph, ['home' => $home], $schema['nodes']);
+    return $result;
+  }
+
+  /**
+   * The site layer, the identity and the currency, read with overrides.
+   *
+   * @return array{site: array, identity: array, currency: string}
+   *   Cleaned in read mode.
    */
   private function site(CacheableMetadata $cacheability): array {
     $config = $this->configFactory->get('canvas_metatag.site');
@@ -567,6 +605,7 @@ final class Resolver {
     return [
       'site' => Values::clean(is_array($values) ? $values : [], 'site', NULL)[0],
       'identity' => Values::cleanIdentity(is_array($identity) ? $identity : [])[0],
+      'currency' => Values::currency($config->get('currency'))[0],
     ];
   }
 

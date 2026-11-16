@@ -45,6 +45,7 @@ final class Values {
     'date' => 'date',
     'number' => 'number',
     'enum' => 'text',
+    'currency' => 'text',
     'image' => 'image',
   ];
 
@@ -78,6 +79,7 @@ final class Values {
     'date' => 'Choose a date.',
     'number' => 'Enter a number, like 49 or 49.90.',
     'enum' => 'Choose one of the listed options.',
+    'currency' => 'Choose a currency code from the list, such as EUR.',
   ];
 
   /**
@@ -116,7 +118,7 @@ final class Values {
         'canonical' => self::canonical($item, $errors),
         'social' => self::social($item, $value, $errors),
         'robots' => self::robots($item, $errors),
-        'schema' => self::schema($item, $value, $inheritedType, $errors),
+        'schema' => self::schema($item, $value, $inheritedType, $accepts === NULL, $errors),
       };
     }
     return [self::canon($clean), $errors];
@@ -645,7 +647,7 @@ final class Values {
   /**
    * Cleans the `schema` map against the type registry.
    */
-  private static function schema(mixed $value, callable $clean_value, string $inheritedType, array &$errors): array {
+  private static function schema(mixed $value, callable $clean_value, string $inheritedType, bool $read, array &$errors): array {
     if (!is_array($value)) {
       $errors['schema'] = self::INVALID;
       return [];
@@ -656,6 +658,12 @@ final class Values {
     if (isset($value['type']) && $value['type'] !== '') {
       if (is_string($value['type']) && isset($types[$value['type']])) {
         $clean['type'] = $type = $value['type'];
+      }
+      elseif ($read && is_string($value['type']) && preg_match('/^[A-Za-z][A-Za-z0-9]{0,63}$/D', $value['type'])) {
+        // A type this release no longer has stays stored, so that the dialog
+        // can say so; output is a plain web page and its details go.
+        $clean['type'] = $value['type'];
+        $type = 'WebPage';
       }
       else {
         $errors['schema.type'] = 'Choose one of the listed page types.';
@@ -674,12 +682,13 @@ final class Values {
         }
         $kind = $props[$key]['kind'];
         $item = $clean_value($item, $path, self::KINDS[$kind], 2000);
-        // Typed text is checked now; a linked value when it is read.
-        if (isset($item['text']) && !SchemaGraph::validLiteral($type, (string) $key, $item['text'])) {
-          $errors[$path] = self::LITERAL[$kind] ?? match ($props[$key]['pattern'] ?? '') {
-            '^[A-Z]{3}$' => 'Enter a three-letter currency code, like EUR.',
-            default => 'This value has characters that are not allowed here.',
-          };
+        // Typed text is checked now; a linked value when it is read. A
+        // three-letter currency stored before the code list ("RMB") is kept
+        // when read, so that the graph reports it as dropped instead of
+        // losing it without a word.
+        $code = $read && $kind === 'currency' && preg_match('/^[A-Z]{3}$/D', $item['text'] ?? '');
+        if (isset($item['text']) && !$code && !SchemaGraph::validLiteral($type, (string) $key, $item['text'])) {
+          $errors[$path] = self::LITERAL[$kind] ?? 'This value has characters that are not allowed here.';
           continue;
         }
         $clean['props'][$key] = $item;
@@ -688,10 +697,46 @@ final class Values {
     if (isset($value['custom'])) {
       $clean['custom'] = self::custom($value['custom'], $errors);
     }
-    foreach (array_diff(array_keys($value), ['type', 'props', 'custom']) as $key) {
+    if (isset($value['skip'])) {
+      $clean['skip'] = self::skip($value['skip'], $clean['custom'] ?? NULL, $errors);
+    }
+    foreach (array_diff(array_keys($value), ['type', 'props', 'custom', 'skip']) as $key) {
       $errors["schema.$key"] = self::NOT_HERE;
     }
     return $clean;
+  }
+
+  /**
+   * The hand-added items left out: @ids as written, of items that exist.
+   *
+   * An id whose item is gone is dropped, also when it is written: the list
+   * follows the custom JSON-LD.
+   */
+  private static function skip(mixed $value, ?string $custom, array &$errors): array {
+    if (!is_array($value) || !array_is_list($value) || array_filter($value, static fn (mixed $id): bool => !is_string($id))) {
+      $errors['schema.skip'] = self::INVALID;
+      return [];
+    }
+    $items = json_decode($custom ?? '', TRUE);
+    $items = is_array($items) ? (array_is_list($items) ? $items : [$items]) : [];
+    $ids = array_filter(array_map(static fn (mixed $item): mixed => is_array($item) ? $item['@id'] ?? NULL : NULL, $items), is_string(...));
+    return array_values(array_unique(array_intersect($value, $ids)));
+  }
+
+  /**
+   * The site currency: an ISO 4217 code, or '' for none.
+   *
+   * @return array{0: string, 1: ?string}
+   *   The clean code ('' when refused), and the message when refused.
+   */
+  public static function currency(mixed $value): array {
+    if ($value === '' || $value === NULL) {
+      return ['', NULL];
+    }
+    if (is_string($value) && isset(SchemaGraph::currencies()[$value])) {
+      return [$value, NULL];
+    }
+    return ['', self::LITERAL['currency']];
   }
 
   /**

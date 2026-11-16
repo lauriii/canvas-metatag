@@ -456,6 +456,8 @@ export function Sheet(props: {
   end?: ReactNode;
   /** Back takes focus on open (else the sheet's own content does). */
   focusBack?: boolean;
+  /** Under the scroller, never over it: a confirm that stays in sight. */
+  foot?: ReactNode;
   onClose(): void;
   children: ReactNode;
 }) {
@@ -498,6 +500,7 @@ export function Sheet(props: {
       >
         {props.children}
       </div>
+      {props.foot && <div className="seo-sheet-foot">{props.foot}</div>}
     </section>
   );
 }

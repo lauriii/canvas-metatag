@@ -181,10 +181,11 @@ steer a new request with a hint, and MAY ask again.
 ### Requirement: Structured data proposals
 
 A schema request MUST return one type from the module's registry, values only
-for that type's text and date properties that the registry does not reserve for
-people, and the keys whose value could not be verified. A text value MUST count
-as verified only when the page text contains it, ignoring case and white
-space. A date MUST never count as verified.
+for that type's text properties that the registry does not reserve for
+people, and the keys whose value could not be verified. Prices, currencies,
+identifiers, dates, authors and ratings MUST be reserved for people. A text
+value MUST count as verified only when the page text contains it, ignoring
+case and white space.
 
 #### Scenario: A type outside the registry
 
@@ -193,7 +194,7 @@ space. A date MUST never count as verified.
 
 #### Scenario: Reserved and non-text properties
 
-- **WHEN** the model returns a price, a currency, an availability, an SKU, an image, an event status or an `@id`
+- **WHEN** the model returns a price, a currency, an availability, an SKU, an image, an event status, a start date, an author or an `@id`
 - **THEN** none of them MUST be in the proposal
 
 #### Scenario: A value not on the page
@@ -213,25 +214,32 @@ space. A date MUST never count as verified.
 
 #### Scenario: A value that does not fit its property
 
-- **WHEN** a proposed value is not a valid literal for its property, such as an end date of "next Friday"
+- **WHEN** a proposed value is not a valid literal for its property
 - **THEN** it MUST be left out of the proposal
 
 ### Requirement: Structured data proposals are reviewed in the dialog
 
-The dialog MUST show the proposed type and its details, verified details
-ticked, unverified ones unticked and marked. "Use selected" MUST apply only the
-type and the ticked details. When the new type would drop details of the
-current one, the dialog MUST say how many and ask before applying.
+The dialog MUST show the proposed kind and its verified details, ticked.
+Unverified details MUST NOT be offered; the dialog MUST only count them. A
+reserved fact the kind needs MUST be shown as "Add it yourself". "Use
+selected" MUST apply only the kind and the ticked details. When the new kind
+would drop details of the current one, the dialog MUST say which and ask
+before applying.
 
 #### Scenario: Unverified details
 
-- **WHEN** a proposal lists a key as unverified
-- **THEN** the dialog MUST show it unticked, with a note that it was not found on the page, or that dates cannot be checked
+- **WHEN** a proposal lists one key as unverified
+- **THEN** the dialog MUST NOT show its value and MUST say "1 more guess wasn't found on the page"
+
+#### Scenario: A start date
+
+- **WHEN** the proposal is an event
+- **THEN** the dialog MUST show "Starts · Add it yourself" with "AI doesn't fill in dates, prices or authors."
 
 #### Scenario: A type change that drops details
 
-- **WHEN** the editor uses a proposal of another type and the current type has details the new one lacks
-- **THEN** the dialog MUST say how many details would be removed, and apply only when the editor confirms
+- **WHEN** the editor uses a proposal of another kind and the current kind has details the new one lacks
+- **THEN** the dialog MUST name the details that would be removed, and apply only when the editor confirms
 
 ### Requirement: Requests are checked
 

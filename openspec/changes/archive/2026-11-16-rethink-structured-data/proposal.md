@@ -99,8 +99,22 @@ No README non-goal is reopened by this change.
   This change narrows its review rule for it: a review or aggregate rating is
   "of your own organization" only when its subject is the site's identity or
   an organization with the identity's address or profiles, so an employer
-  rating of another company is not flagged. The G1 line points at the
+  rating of another company is not flagged. An organization is matched by
+  address whatever its type (review round 3): a restaurant or a hotel is one,
+  a page or a product is not. The G1 line points at the
   identity by its full address, which today's validator accepts.
+- **Product owner decision 2 (2026-11-13): no search engine is named in UI
+  copy**; "documentation links in the rules file may keep their URLs only in
+  a data file, never in UI copy". The two decisions for the product owner
+  above are taken as recommended: the copy stays neutral ("In search
+  results", "Rules checked ‹date›"), and each rule's source address lives
+  only in `data/search-features.json`, where the proof's "Documentation"
+  button opens it. No other file names a vendor.
+- **Product owner decision 6: "Plans for a service" is the honest kind for
+  memberships and subscriptions**, never steered to shopping listings: built
+  here as decision 2 above recommends.
+- **Product owner decision 9: AI never calls a paid provider.** The AI tests
+  of this change use the echo provider only.
 
 ## Depends on / followed by
 

@@ -85,7 +85,14 @@ final class ComplexContentTest extends CanvasKernelTestBase {
     self::assertSame([], $unknown);
 
     $templates = ContentTemplate::loadMultiple();
-    foreach (['event.full', 'product.full', 'product.teaser', 'job_posting.full', 'person.full', 'announcement.full'] as $id) {
+    foreach ([
+      'event.full',
+      'product.full',
+      'product.teaser',
+      'job_posting.full',
+      'person.full',
+      'announcement.full',
+    ] as $id) {
       self::assertTrue($templates["node.$id"]->status(), $id);
     }
     // Never published.
@@ -136,11 +143,10 @@ final class ComplexContentTest extends CanvasKernelTestBase {
     // read through the venue, so the event ships; a hidden first performer or
     // venue gives nothing.
     $lamp = $resolver->resolve($node('product_lamp'));
-    self::assertFalse($lamp['schema']['withheld']);
-    self::assertSame([], $lamp['schema']['missing_required']);
+    self::assertNull($lamp['schema']['withheld']);
     $event = $resolver->resolve($node('event_full'));
-    self::assertFalse($event['schema']['withheld']);
-    self::assertSame([], $event['schema']['missing_required']);
+    self::assertNull($event['schema']['withheld']);
+
     self::assertSame('Midsummer Night Concert | Events', $event['head']['title']);
     self::assertSame('Lakeside Concert Hall', $this->linked($node('event_full'), 'field_venue␞␟entity␜␜entity:node␝title␞␟value'));
     self::assertSame('EventScheduled', $this->linked($node('event_full'), 'field_event_status␞␟value'));
@@ -199,7 +205,15 @@ final class ComplexContentTest extends CanvasKernelTestBase {
    */
   private function counts(): array {
     $counts = [];
-    foreach (['node', 'media', 'file', 'taxonomy_term', 'user', 'content_template', 'field_config'] as $entity_type_id) {
+    foreach ([
+      'node',
+      'media',
+      'file',
+      'taxonomy_term',
+      'user',
+      'content_template',
+      'field_config',
+    ] as $entity_type_id) {
       $counts[$entity_type_id] = (int) $this->container->get('entity_type.manager')->getStorage($entity_type_id)->getQuery()->accessCheck(FALSE)->count()->execute();
     }
     return $counts;

@@ -154,8 +154,9 @@ test('type-level values are linked to fields, follow the previewed article and p
 
   // Structured data: every Article is an Article, by its byline.
   await tab(frame, UI.tab.schema).click();
-  await frame.getByRole('combobox', { name: 'Type', exact: true }).click();
-  await frame.getByRole('option', { name: /^Article/ }).click();
+  await button(frame, UI.schema.kind).click();
+  await frame.getByRole('radio', { name: UI.schema.article }).check();
+  await button(frame, 'Change to an article').click();
   const more = button(frame, 'More details');
   if ((await more.getAttribute('aria-expanded')) !== 'true') {
     await more.click();

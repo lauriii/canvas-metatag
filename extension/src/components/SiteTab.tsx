@@ -1,15 +1,15 @@
-import { SegmentedControl } from '@radix-ui/themes';
+import { SegmentedControl, Select } from '@radix-ui/themes';
 import { Fragment } from 'react';
 
 import { useApp } from '../App';
 import { identityGaps } from '../checks';
-import { aiOffText, siteTexts } from '../model';
+import { aiOffText, currencyChoices, placesText, siteTexts } from '../model';
 import { Field, useHeld } from './Field';
 import { ImageRow, PICKED, Thumb } from './MediaPicker';
 import { Stage } from './Previews';
 import { Visibility } from './SearchTab';
 import { TitleField } from './Value';
-import { InfoTip } from './ui';
+import { InfoTip, reveal } from './ui';
 
 const SEPARATORS = ['|', '·', '–', '—'];
 /** What a screen reader says for each: punctuation is often skipped. */
@@ -60,6 +60,7 @@ export function SiteView() {
   const image = (uuid: string) => PICKED[uuid] ?? server.media[uuid] ?? null;
   const gaps = identityGaps(state.edits.site, view?.facts.site?.value ?? '');
   const ai = server.capabilities.ai;
+  const currencies = currencyChoices(server.ui, [state.edits.site.currency, server.site.currency]);
   const name = identity.name.trim() || view?.facts.site?.value || '';
   const profiles = useHeld(
     identity.same_as.join('\n'),
@@ -243,6 +244,47 @@ export function SiteView() {
             onPick={(picked) => 'media' in picked && edit('identity.default_image', picked.media)}
             onClear={() => edit('identity.default_image', '')}
           />
+        )}
+      </Field>
+
+      <h3 className="seo-group-title">Prices</h3>
+      <Field
+        scope="site"
+        path="currency"
+        label="Currency"
+        fallback="Not set"
+        note={
+          state.effect?.count
+            ? `Goes live on ${placesText(state.effect)}. ${state.effect.count === 1 ? 'Its merchant listing' : 'Their merchant listings'} may change.`
+            : "Used for every price that doesn't name its own."
+        }
+      >
+        {(field) => (
+          <Select.Root
+            value={state.edits.site.currency || 'none'}
+            disabled={field.disabled}
+            onValueChange={(value) => {
+              edit('currency', value === 'none' ? '' : value);
+              // The bar comes with the change: the field stays in sight above it.
+              requestAnimationFrame(() => reveal(document.getElementById(field.id)?.closest<HTMLElement>('.seo-field') ?? null));
+            }}
+          >
+            <Select.Trigger id={field.id} className="seo-select-box" aria-describedby={field.describedBy} />
+            <Select.Content position="popper" className="seo-select-content seo-select-fit">
+              <Select.Item value="none">Not set</Select.Item>
+              {currencies.common.map(([code, name]) => (
+                <Select.Item key={code} value={code}>
+                  {name}
+                </Select.Item>
+              ))}
+              <Select.Separator />
+              {currencies.rest.map(([code, name]) => (
+                <Select.Item key={code} value={code}>
+                  {name}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
         )}
       </Field>
 

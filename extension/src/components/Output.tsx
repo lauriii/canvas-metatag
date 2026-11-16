@@ -2,9 +2,13 @@ import { CheckIcon, CopyIcon } from '@radix-ui/react-icons';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import { catchingUp } from '../model';
-import type { Head, StatePayload } from '../types';
+import { retiredText } from '../checks';
+import { andList, catchingUp, unsent } from '../model';
+import type { GraphNode, Head, StatePayload } from '../types';
 import { Btn, reveal } from './ui';
+
+/** The structured data test: it reads a published address, or pasted code. */
+const TEST = 'https://validator.schema.org/';
 
 /** Text to the clipboard; the frame may not hold the clipboard permission. */
 async function copy(text: string): Promise<boolean> {
@@ -129,9 +133,103 @@ export function originNote(server: StatePayload): string {
       : `Addresses use ${server.origin.url.replace(/^https?:\/\//, '')}, the address you are signed in at.`;
 }
 
+/** Why a node is not in the graph, in words. */
+function leftOut(server: StatePayload, node: GraphNode): string | null {
+  const schema = server.resolved!.schema;
+  switch (node.left_out) {
+    case 'withheld': {
+      const props = server.registry[schema.type]?.props ?? [];
+      const names = (keys: string[]) =>
+        andList(keys.map((key) => props.find((prop) => prop.key === key)?.label ?? key));
+      // Missing, or set and not valid: Checks says why.
+      return schema.withheld?.missing.length
+        ? `Left out: it needs ${names(schema.withheld.missing).toLowerCase()}`
+        : `Left out: ${names(schema.withheld?.dropped ?? [])} ${(schema.withheld?.dropped.length ?? 0) > 1 ? 'are' : 'is'} not valid`;
+    }
+    case 'skip':
+      return "Left out until it's on the page";
+    case 'reserved':
+      return 'Left out: it uses an id of the site’s own';
+    case 'duplicate':
+      return 'Left out: another item has the same id';
+    default: {
+      const retired = schema.features.find((verdict) => verdict.verdict === 'retired' && verdict.node === node.id);
+      return retired ? retiredText(server.search_features.features[retired.feature!]?.since, server.ui) : null;
+    }
+  }
+}
+
+const ORIGIN: Record<GraphNode['origin'], string> = {
+  main: 'Main',
+  site: 'Site',
+  page: 'This page',
+  hand: 'Added by hand',
+};
+
+/** The graph as an outline: the main node first, each with where it comes from. */
+function Outline() {
+  const { state } = useApp();
+  const server = state.server!;
+  const schema = server.resolved!.schema;
+  const list = (server.resolved!.head.script.find((script) => script.type === 'application/ld+json')?.textContent as { '@graph'?: Record<string, unknown>[] } | undefined)?.['@graph'] ?? [];
+  const rank = (node: GraphNode) => (node.origin === 'main' ? 0 : node.left_out ? 2 : 1);
+  const nodes = [...schema.nodes].sort((a, b) => rank(a) - rank(b));
+  return (
+    <ul className="seo-outline" aria-labelledby="seo-out-schema">
+      {nodes.map((node, index) => {
+        const data = node.at === undefined ? undefined : list[node.at];
+        const name = typeof data?.name === 'string' ? data.name : typeof data?.headline === 'string' ? data.headline : '';
+        const reason = leftOut(server, node);
+        return (
+          <li key={index} className="seo-outline-row" data-left-out={node.left_out ? '' : undefined}>
+            <span className="seo-outline-type">
+              {node.type}
+              {name && <span className="seo-outline-name" dir="auto"> · {name}</span>}
+            </span>
+            <span className="seo-chip">{ORIGIN[node.origin]}</span>
+            {node.id && <code className="seo-outline-id">{node.id}</code>}
+            {reason && <span className="seo-outline-reason">{reason}</span>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/** Hands the page to a structured data test: by address, or as copied code. */
+function TestButton(props: { graph: string }) {
+  const { state, host } = useApp();
+  const server = state.server!;
+  const [said, setSaid] = useState('');
+  const live = !!server.target?.published && !server.target.has_draft && !unsent(state) && !!server.preview?.published;
+  return (
+    <>
+      <Btn
+        variant="ghost"
+        onClick={async () => {
+          if (live) {
+            host.openExternal(`${TEST}#url=${encodeURIComponent(server.preview!.url)}`);
+            return;
+          }
+          // A draft is not at its address yet: the code is.
+          const copied = await copy(props.graph);
+          setSaid(copied ? 'Copied. Paste the code into the test.' : 'Copy the structured data, then paste it into the test.');
+          host.openExternal(TEST);
+        }}
+      >
+        Test this page
+      </Btn>
+      <span className="seo-meta" role="status">
+        {said}
+      </span>
+    </>
+  );
+}
+
 /** The exact tags for the page: what the server resolved, drafts included. */
 export function OutputSheet(props: { section?: 'schema' }) {
-  const { state } = useApp();
+  const { state, openSheet } = useApp();
+  const [json, setJson] = useState(false);
   const server = state.server!;
   const head = server.resolved?.head;
   const list = head ? rows(head) : [];
@@ -178,9 +276,22 @@ export function OutputSheet(props: { section?: 'schema' }) {
           {graph && (
             <div ref={schema}>
               <div className="seo-out-head">
-                <h3>Structured data</h3>
+                <h3 id="seo-out-schema">Structured data</h3>
                 <CopyButton text={graph} label="Copy structured data" />
               </div>
+              <Outline />
+              <div className="seo-out-actions">
+                <Btn variant="ghost" aria-expanded={json} onClick={() => setJson(!json)}>
+                  {json ? 'Hide JSON-LD' : 'Show JSON-LD'}
+                </Btn>
+                <TestButton graph={graph} />
+                {state.readonly === 'no' && (
+                  <Btn variant="ghost" onClick={() => openSheet({ kind: 'custom' })}>
+                    Add your own JSON-LD
+                  </Btn>
+                )}
+              </div>
+              {json && (
               <pre
                 className="seo-code"
                 tabIndex={0}
@@ -201,6 +312,7 @@ export function OutputSheet(props: { section?: 'schema' }) {
                   );
                 })}
               </pre>
+              )}
             </div>
           )}
         </>

@@ -28,6 +28,8 @@ export interface PageFacts {
   imagesWithoutAlt: string[];
   /** Visible text, capped at 20000 characters. */
   text: string;
+  /** The file names of the images it shows, at most 50. */
+  images?: string[];
 }
 
 export interface HostChange {
@@ -415,6 +417,11 @@ export function createHost(win: Window = window): Host {
             0,
             20000,
           ),
+          // The file each image shows, whatever size the theme asked for.
+          images: Array.from(doc.querySelectorAll('img'))
+            .slice(0, 50)
+            .map((image) => image.currentSrc || image.getAttribute('src') || '')
+            .filter(Boolean),
         };
       } catch {
         return null;

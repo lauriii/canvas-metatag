@@ -18,6 +18,7 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
+import { stageMatch } from '../checks';
 import { AI_SENDS, type Meter, source as sourceOf } from '../model';
 import type { Issue, Scope } from '../types';
 import { Btn, SparkleIcon, reveal } from './ui';
@@ -305,6 +306,12 @@ function useIssue(scope: Scope, path: string): Issue | undefined {
           issue.jump?.scope === 'target' &&
           issue.jump.field === path &&
           !issue.id.startsWith('schema-required:') &&
+          // Hand-added items are said item by item, under the JSON-LD.
+          !issue.id.startsWith('hand-') &&
+          // What a feature needs is the field's own guidance: "Needed for …".
+          !issue.id.startsWith('feature-needs:') &&
+          // The name field says it with its way to the title.
+          issue.id !== 'schema-name-title' &&
           // A link says what it gives under its own field.
           !issue.id.startsWith('link-'),
       )
@@ -361,7 +368,7 @@ export function IssueFix(props: {
             type: 'apply',
             scope: 'target',
             values: fix.apply(state.edits.target),
-            undo: fixedText(fix.label),
+            undo: fix.undo?.(state.edits.target) ?? fixedText(fix.label),
           })
         }
       >
@@ -392,7 +399,7 @@ export function Field(
     /** aria-required on the control; no visible mark. */
     required?: boolean;
     /** A required value is missing: "Needed for Product". */
-    missing?: string;
+    missing?: ReactNode;
     /** The label is for assistive technology only. */
     labelHidden?: boolean;
     /** The label names a group of controls, not one control. */
@@ -420,8 +427,11 @@ export function Field(
   },
 ) {
   const field = useField(props);
-  const { stageVisible, state } = useApp();
-  const issue = useIssue(props.scope, props.path);
+  const { stageVisible, state, issues } = useApp();
+  const found = useIssue(props.scope, props.path);
+  // What the Schema stage already says about the page is said here again
+  // only once the field is in use: one line at rest, not two.
+  const issue = found && !field.focused && found === stageMatch(issues) ? undefined : found;
   const { meter } = props;
   const guideId = `${field.id}-guide`;
 

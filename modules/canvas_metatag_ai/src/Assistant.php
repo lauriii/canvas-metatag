@@ -224,7 +224,7 @@ final class Assistant {
    *   The page as the dialog sees it. Untrusted. `ending` when known.
    *
    * @return array{type: string, props: array<string, string>, unverified: list<string>}
-   *   A registry type, clean values for its text and date properties, and the
+   *   A registry type, clean values for its text properties, and the
    *   keys whose value was not found in the page text.
    *
    * @throws \Drupal\canvas_metatag_ai\AiException
@@ -232,20 +232,22 @@ final class Assistant {
    *   Whatever the provider throws.
    */
   public function suggestSchema(string $langcode, array $page): array {
-    // What a model may propose: text and date properties, minus the ones the
-    // registry reserves for people (prices, availability, status).
+    // What a model may propose: text properties, minus the ones the registry
+    // reserves for people (prices, codes, authors). Dates are never asked
+    // for: a date rewritten into another notation cannot be verified.
     $allowed = [];
     $hints = $keys = '';
     foreach (SchemaGraph::types() as $id => $type) {
       $allowed[$id] = [];
       $labels = [];
       foreach ($type['props'] ?? [] as $prop) {
-        if (in_array($prop['kind'], ['text', 'date'], TRUE) && ($prop['ai'] ?? TRUE) !== FALSE) {
+        if ($prop['kind'] === 'text' && ($prop['ai'] ?? TRUE) !== FALSE) {
           $allowed[$id][$prop['key']] = $prop['kind'];
           $labels[] = "{$prop['key']} ({$prop['label']})";
         }
       }
-      $hints .= "\n- $id: {$type['hint']}";
+      // What it is, in the words of the kind or the variant.
+      $hints .= "\n- $id: " . ($type['kind']['label'] ?? "{$type['label']}, a kind of " . mb_strtolower(SchemaGraph::types()[$type['variant_of']]['label'])) . (isset($type['kind']['not_for']) ? ". {$type['kind']['not_for']}" : '');
       $keys .= "\n- $id: " . ($labels ? implode(', ', $labels) : 'none');
     }
 
@@ -282,8 +284,7 @@ final class Assistant {
       throw new AiException('invalid_response');
     }
     // The server decides what is verified, not the model: a text value is
-    // verified when the page text contains it. A date never is, because it
-    // was rewritten into another notation.
+    // verified when the page text contains it.
     $haystack = self::comparable($page['text'] ?? '');
     $props = $unverified = [];
     foreach (self::rows($data['properties'] ?? NULL, 'key') as [$key, $value]) {
@@ -292,7 +293,7 @@ final class Assistant {
         continue;
       }
       $props[$key] = $value;
-      if ($allowed[$type][$key] === 'date' || !str_contains($haystack, self::comparable($value))) {
+      if (!str_contains($haystack, self::comparable($value))) {
         $unverified[] = $key;
       }
     }

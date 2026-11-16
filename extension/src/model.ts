@@ -1,9 +1,10 @@
 // Pure logic: no DOM, no network, no host. Everything here runs in vitest's
 // node environment. cascade(), plain() and texts() mirror the PHP class
 // Values and are pinned to it by tests/fixtures/text-cases.json.
-import rawRegistry from '../../data/schema-types.json';
+import currencyCodes from '../../data/currencies.json';
 import { ApiError } from './api';
 import type { EditorToken, HostContext } from './host';
+import { dateWords } from './readback';
 import {
   type Lookup,
   type ShownImage,
@@ -20,8 +21,11 @@ import type {
   Measurer,
   Pending,
   Registry,
+  Resolved,
+  SchemaProp,
   Scope,
   SchemaType,
+  SearchFeatures,
   SeoValues,
   SiteSettings,
   Source,
@@ -30,6 +34,7 @@ import type {
   Tab,
   Texts,
   Value,
+  Verdict,
 } from './types';
 
 export type { ShownImage } from './values';
@@ -45,15 +50,221 @@ const isValue = (value: Obj) => {
   return keys.length === 1 && ['text', 'fact', 'media', 'source'].includes(keys[0]);
 };
 
-const RAW = rawRegistry as unknown as Record<string, SchemaType>;
+// The type registry and the search features come with the state, in the
+// dialog's language (ApiController::state()).
 
-/** The JSON-LD type registry with `extends` resolved (one level). */
-export const REGISTRY: Registry = Object.fromEntries(
-  Object.entries(RAW).map(([id, type]) => [
+/** A registry type, or the web page for one the registry does not have. */
+export const typeOf = (registry: Registry, id: string | undefined): SchemaType =>
+  (id !== undefined && registry[id]) || registry.WebPage;
+
+/** The type whose kind a type is: itself, or the one it is a variant of. */
+export const kindOfType = (registry: Registry, id: string | undefined): string => {
+  const type = id !== undefined && registry[id] ? id : 'WebPage';
+  return registry[type].variant_of ?? type;
+};
+
+/** "Euro · EUR", in the dialog's language: a symbol can stand for several. */
+export function currencyName(code: string, locale: string): string {
+  try {
+    const name = new Intl.DisplayNames([locale], { type: 'currency' }).of(code) ?? code;
+    return name === code ? code : `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${code}`;
+  } catch {
+    return code;
+  }
+}
+
+const currencyLists = new Map<string, (readonly [string, string])[]>();
+
+/** Every currency a price may be in, by its name in the dialog's language. */
+export function currencyOptions(locale: string): (readonly [string, string])[] {
+  let list = currencyLists.get(locale);
+  if (!list) {
+    list = (currencyCodes as string[])
+      .map((code) => [code, currencyName(code, locale)] as const)
+      .sort((a, b) => a[1].localeCompare(b[1], locale));
+    currencyLists.set(locale, list);
+  }
+  return list;
+}
+
+/**
+ * The currencies to choose from: those in use here, then the most common,
+ * then every other by name.
+ */
+export function currencyChoices(locale: string, inUse: (string | undefined)[]) {
+  const all = currencyOptions(locale);
+  const first = [...new Set([...inUse, 'EUR', 'USD', 'GBP'])];
+  const common = first.flatMap((code) => all.filter(([one]) => one === code));
+  return { common, rest: all.filter((one) => !common.includes(one)) };
+}
+
+/** The kinds, in their order. */
+export const kinds = (registry: Registry): string[] =>
+  Object.keys(registry)
+    .filter((id) => registry[id].kind)
+    .sort((a, b) => registry[a].kind!.order - registry[b].kind!.order);
+
+/** "Merchant listing", or the feature id when the rules have none. */
+export const featureLabel = (rules: SearchFeatures, feature: string | null) =>
+  feature === null ? '' : (rules.features[feature]?.label ?? feature);
+
+/**
+ * The stage's feature lines: the server's verdicts in their order, then,
+ * when the main node has no feature of its own, "No search feature" last.
+ * A verdict on the page node (a profile's) is the main node's. At most four.
+ */
+export function stageVerdicts(report: Resolved['schema'] | undefined, main: string, page: string): Verdict[] {
+  const features = report?.features ?? [];
+  const none =
+    !!report?.nodes.some((node) => node.origin === 'main') &&
+    !features.some((one) => one.node === main || one.node === page) &&
+    features[0]?.verdict !== 'none';
+  return [...features, ...(none ? [{ feature: null, node: main, verdict: 'none' as const }] : [])].slice(0, 4);
+}
+
+/** "In stock" for the option "InStock": its words, capitalized. */
+export const optionText = (prop: SchemaProp, option: string) => {
+  const words = prop.option_labels?.[option] ?? option;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+/** The details a change of kind removes, said with their values. */
+export function removed(server: StatePayload, values: SeoValues, to: string, locale: string): string[] {
+  const registry = server.registry;
+  const from = typeOf(registry, values.schema?.type ?? String(inherited(server, 'target', 'schema.type')));
+  const next = typeOf(registry, to).props ?? [];
+  const props = values.schema?.props ?? {};
+  // In the order the form shows them: the facts shown first, then the rest.
+  const order = [...(from.main ?? []), ...(from.props ?? []).map((prop) => prop.key)];
+  const at = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
+  const gone = Object.keys(props)
+    .filter((key) => !next.some((prop) => prop.key === key))
+    .sort((a, b) => at(a) - at(b));
+  return gone
+    .filter((key) => !(key === 'offers_priceCurrency' && gone.includes('offers_price')))
+    .map((key) => {
+      const prop = from.props?.find((one) => one.key === key);
+      const value = props[key];
+      // A question is named by what it asks; a detail by its name.
+      const label = NOUNS[key] ?? `the ${(prop?.label ?? key).toLowerCase()}`;
+      if (!value || !('text' in value)) {
+        return label;
+      }
+      const currency = props.offers_priceCurrency;
+      const shown =
+        // A draft that is not a number yet is said as typed.
+        key === 'offers_price' && currency && 'text' in currency && value.text.trim() !== '' && Number.isFinite(Number(value.text))
+          ? new Intl.NumberFormat(locale, { style: 'currency', currency: currency.text, minimumFractionDigits: 0 }).format(Number(value.text))
+          : prop?.kind === 'enum'
+            ? (prop.option_labels?.[value.text] ?? value.text)
+            : prop?.kind === 'date'
+              ? (dateWords(value.text, locale) ?? value.text)
+              : value.text;
+      return `${label} (${shown})`;
+    });
+}
+
+/**
+ * "a, b and c". The copy is English, so the list is too, in the dialog's
+ * date style: no comma before "and".
+ */
+export const andList = (items: string[]) => new Intl.ListFormat('en-GB', { type: 'conjunction' }).format(items);
+
+/** The kinds sheet's confirm: what a change of kind removes (removed()). */
+export const changeKindText = (name: string, lost: string[]) =>
+  lost.length
+    ? `Changing to ${name} removes ${andList(lost)} you set. Undo brings ${lost.length === 1 ? 'it' : 'them'} back.`
+    : `Change this page to ${name}.`;
+
+/** The AI tray's confirm, for a proposed kind that removes details. */
+export const proposalLossText = (lost: string[]) => `Using this removes ${andList(lost)} you set.`;
+
+/** Details whose label is not a noun, as a sentence names them. */
+const NOUNS: Record<string, string> = {
+  billing: 'the billing',
+  startDate: 'the start',
+  endDate: 'the end',
+  datePublished: 'the publication date',
+  dateModified: 'the update date',
+  sold_here: 'the answer to “Bought on this page”',
+};
+
+/** The values with another kind: the details the new one has are kept. */
+export function withKind(server: StatePayload, values: SeoValues, to: string): SeoValues {
+  const next = typeOf(server.registry, to).props ?? [];
+  const schema = values.schema ?? {};
+  return {
+    ...values,
+    schema: {
+      ...schema,
+      type: to,
+      props: Object.fromEntries(Object.entries(schema.props ?? {}).filter(([key]) => next.some((prop) => prop.key === key))),
+    },
+  };
+}
+
+/**
+ * Leaves out a hand-added item until it is on the page.
+ *
+ * The report's entry names the item: by its `@id` (`base` is the page's own
+ * address, which a "#local" id is relative to), or, without one, by its
+ * place and type. NULL when the JSON-LD no longer holds it, as after an
+ * unsent edit. An item without an `@id` is given one first (`#‹type›`,
+ * unique on the page), so that it can be listed: `given` names it.
+ */
+export function leaveOut(
+  values: SeoValues,
+  entry: { item?: number; id: string | null; type: string },
+  base: string,
+): { values: SeoValues; id: string; given: boolean } | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(values.schema?.custom ?? '');
+  } catch {
+    return null;
+  }
+  const list = Array.isArray(data) ? [...data] : [data];
+  const written = (one: unknown) =>
+    isObj(one) && typeof one['@id'] === 'string' ? (one['@id'].startsWith('#') ? base + one['@id'] : one['@id']) : null;
+  const item =
+    entry.id !== null
+      ? list.findIndex((one) => written(one) === entry.id)
+      : isObj(list[entry.item ?? -1]) && written(list[entry.item!]) === null && (list[entry.item!] as Record<string, unknown>)['@type'] === entry.type
+        ? entry.item!
+        : -1;
+  const node = list[item];
+  if (!isObj(node)) {
+    return null;
+  }
+  let id = typeof node['@id'] === 'string' ? node['@id'] : '';
+  const given = id === '';
+  if (given) {
+    const base = `#${String(node['@type'] ?? 'item').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const taken = new Set(list.map((one) => (isObj(one) ? one['@id'] : null)));
+    // Never one of the site's own ids, never one another item has.
+    const reserved = ['#identity', '#logo', '#website', '#webpage', '#primaryimage', '#primary'];
+    id = base;
+    for (let n = 2; taken.has(id) || reserved.includes(id); n++) {
+      id = `${base}-${n}`;
+    }
+    list[item] = { '@id': id, ...node };
+  }
+  const schema = values.schema ?? {};
+  return {
+    values: {
+      ...values,
+      schema: {
+        ...schema,
+        custom: given
+          ? JSON.stringify(Array.isArray(data) ? list : list[0])
+          : schema.custom,
+        skip: [...new Set([...(schema.skip ?? []), id])],
+      },
+    },
     id,
-    { ...(type.extends ? RAW[type.extends] : {}), ...type },
-  ]),
-);
+    given,
+  };
+}
 
 // Paths and canonical form.
 
@@ -515,7 +726,8 @@ export const initialState = (ctx: HostContext): State => ({
   scope: 'target',
   tab: 'search',
   tabs: { target: 'search', site: 'identity' },
-  edits: { target: {}, site: { identity: EMPTY_IDENTITY, values: {} } },
+  edits: { target: {}, site: { identity: EMPTY_IDENTITY, values: {}, currency: '' } },
+  effect: null,
   sent: null,
   siteDirty: false,
   save: { target: { phase: 'idle' }, site: { phase: 'idle' } },
@@ -602,6 +814,7 @@ function tidy<S extends Scope>(
   return {
     identity: { ...EMPTY_IDENTITY, ...site.identity },
     values: settle(server, scope, site.values ?? {}),
+    currency: site.currency ?? '',
   } as Edits[S];
 }
 
@@ -793,16 +1006,21 @@ export function reducer(state: State, action: Action): State {
             ...state,
             edits: { ...state.edits, site: state.server.site },
             siteDirty: false,
+            effect: null,
             errors: { ...state.errors, site: {} },
             save: { ...state.save, site: { phase: 'idle' } },
             undo: { text: 'Discarded', edits: state.edits },
           }
         : state;
 
+    case 'effect':
+      return { ...state, effect: action.effect };
+
     case 'siteSaved':
       return {
         ...state,
         server: action.payload,
+        effect: null,
         // Saving never edits the fields; only edits made meanwhile are unsaved.
         siteDirty: canon(state.edits.site) !== action.sent,
         errors: { ...state.errors, site: {} },
@@ -1230,7 +1448,7 @@ const LABELS: [RegExp, string][] = [
   [/^social\.image$/, 'Image'],
   [/^(values\.)?robots\./, 'Search visibility'],
   [/^schema\.type$/, 'Page type'],
-  [/^schema\.custom$/, 'Custom JSON-LD'],
+  [/^schema\.custom$/, 'Your own JSON-LD'],
   [/^schema\./, 'Structured data'],
   [/^identity\.kind$/, 'This site represents'],
   [/^identity\.name$/, 'Name'],
@@ -1253,7 +1471,7 @@ export const fieldNames = (paths: string[]): string[] => [
 export const sitePaths = (fields: Record<string, string>) =>
   Object.fromEntries(
     Object.entries(fields).map(([path, message]) => [
-      path.startsWith('identity.') ? path : `values.${path}`,
+      path.startsWith('identity.') || path === 'currency' ? path : `values.${path}`,
       message,
     ]),
   );
@@ -1394,7 +1612,18 @@ export interface Footer {
   dot: 'gray' | 'blue' | 'spinner' | 'ok' | 'error' | 'info' | 'warn';
   text: string;
   actions: FooterAction[];
+  /** A button's own label, in place of its usual one. */
+  labels?: Partial<Record<FooterAction, string>>;
 }
+
+/** "Oak desk lamp, Membership and 2 more" */
+export const placesText = (effect: { count: number; places: string[] }) => {
+  const named = effect.places.slice(0, 25);
+  const more = effect.count - named.length;
+  return more > 0
+    ? `${named.join(', ')} and ${more} more`
+    : named.join(', ').replace(/, ([^,]*)$/, ' and $1');
+};
 
 const attention = (count: number) =>
   `${count} ${count === 1 ? 'field needs' : 'fields need'} attention`;
@@ -1426,6 +1655,17 @@ export function footer(state: State): Footer {
     }
     if (save.phase === 'error') {
       return { dot: 'error', text: save.message ?? '', actions: ['retry'] };
+    }
+    if (state.siteDirty && state.effect && state.effect.count > 0) {
+      // Where the save changes structured data, said before it does; the
+      // Currency field names the places.
+      const where = state.effect.count === 1 ? state.effect.places[0] : `${state.effect.count} places`;
+      return {
+        dot: 'blue',
+        text: `Also changes ${where}.`,
+        actions: dirty,
+        labels: { save: `Save and update ${where}` },
+      };
     }
     if (state.siteDirty) {
       return state.edits.site.values.robots?.noindex === true &&
@@ -1714,20 +1954,7 @@ export function breadcrumb(url: string): string {
 }
 
 /** An ISO date or date-time in words, as written: the time is the site's own. */
-export function dateText(value: string): string {
-  const match = value.match(/^(\d{4})-(\d\d)-(\d\d)(?:T(\d\d):(\d\d))?/);
-  if (!match) {
-    return value;
-  }
-  const [, year, month, day, hour, minute] = match;
-  const date = new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(+year, +month - 1, +day)));
-  return hour ? `${date}, ${hour}:${minute}` : date;
-}
+export const dateText = (value: string): string => dateWords(value, 'en') ?? value;
 
 /** "a" or "an" for a type's label. */
 export const article = (label: string) =>

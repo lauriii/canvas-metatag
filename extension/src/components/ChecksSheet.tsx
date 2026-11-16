@@ -1,8 +1,8 @@
 import { InfoCircledIcon } from '@radix-ui/react-icons';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import { AI_SENDS, REGISTRY } from '../model';
+import { AI_SENDS, typeOf } from '../model';
 import type { Issue, Jump } from '../types';
 import { fixedText } from './Field';
 import { Btn, SparkleIcon } from './ui';
@@ -23,7 +23,8 @@ const FIELDS: [RegExp, string][] = [
   [/^(values\.)?robots\./, 'visibility'],
   [/^values\./, 'site default'],
   [/^identity\./, 'site identity'],
-  [/^schema\.type$/, 'type'],
+  [/^schema\.type$/, 'kind of page'],
+  [/^schema\.custom$/, 'JSON-LD added by hand'],
 ];
 
 export const CHECKS_NOTE =
@@ -43,15 +44,34 @@ export function summary(issues: Issue[]): string {
   );
 }
 
+/**
+ * Reads the page again for one issue, and says in the bar what it found:
+ * the row only goes when the text is there.
+ */
+export function useRecheck(): (id: string) => void {
+  const { dispatch, host, issues } = useApp();
+  const [pending, setPending] = useState<string | null>(null);
+  useEffect(() => {
+    if (pending !== null) {
+      dispatch({ type: 'flash', flash: issues.some((one) => one.id === pending) ? 'Still not on the page' : 'Found on the page' });
+      setPending(null);
+    }
+  }, [pending, issues, dispatch]);
+  return (id) => {
+    setPending(id);
+    dispatch({ type: 'facts', facts: host.readFacts() });
+  };
+}
+
 /** Facts about this dialog's settings and the page preview. Verb first, fixable in place. */
 export function ChecksSheet() {
-  const { state, dispatch, issues, goTo, locked, ...app } = useApp();
+  const { state, dispatch, issues, goTo, locked, openSheet, ...app } = useApp();
+  const recheck = useRecheck();
   const server = state.server!;
   const target = server.target!;
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => heading.current?.focus(), []);
-  const type =
-    REGISTRY[app.view?.effective.schema?.type ?? 'WebPage'] ?? REGISTRY.WebPage;
+  const type = typeOf(server.registry, app.view?.effective.schema?.type);
 
   const where = (jump: Jump) => {
     const key = jump.field.match(/^schema\.props\.(.+)$/)?.[1];
@@ -74,20 +94,18 @@ export function ChecksSheet() {
             variant="soft"
             onClick={(event) => {
               // The fixed row goes with its button: focus moves on to the
-              // next row's first button, else to the summary.
+              // next row of its group, on its sentence, never onto the same
+              // action there; else to the summary.
               const row = event.currentTarget.closest('li');
               const rows = Array.from(
-                row?.closest('.seo-body')?.querySelectorAll('li') ?? [],
+                row?.parentElement?.querySelectorAll(':scope > li') ?? [],
               );
-              const next = rows
-                .slice(rows.indexOf(row!) + 1)
-                .map((one) => one.querySelector('button'))
-                .find(Boolean);
+              const next = rows[rows.indexOf(row!) + 1]?.querySelector<HTMLElement>('.seo-check-title');
               dispatch({
                 type: 'apply',
                 scope: 'target',
                 values: fix.apply(state.edits.target),
-                undo: fixedText(fix.label),
+                undo: fix.undo?.(state.edits.target) ?? fixedText(fix.label),
               });
               requestAnimationFrame(() =>
                 (next?.isConnected ? next : heading.current)?.focus(),
@@ -106,6 +124,33 @@ export function ChecksSheet() {
           >
             <SparkleIcon />
             Suggest
+          </Btn>
+        )}
+        {fix && 'image' in fix && !locked.target && (
+          <Btn
+            variant="soft"
+            aria-describedby={titleId}
+            onClick={() =>
+              openSheet({
+                kind: 'image',
+                request: {
+                  minWidth: 600,
+                  chosen: undefined,
+                  onPick: (value) => dispatch({ type: 'edit', scope: 'target', path: fix.image, value }),
+                },
+              })
+            }
+          >
+            {fix.label}
+          </Btn>
+        )}
+        {issue.recheck && (
+          <Btn
+            variant="ghost"
+            aria-describedby={titleId}
+            onClick={() => recheck(issue.id)}
+          >
+            {issue.recheck}
           </Btn>
         )}
         {fix && 'link' in fix && jump && (
@@ -183,6 +228,7 @@ export function ChecksSheet() {
                       <p
                         className="seo-check-title"
                         id={`seo-check-${group.severity}-${index}`}
+                        tabIndex={-1}
                       >
                         {issue.message}
                       </p>

@@ -31,6 +31,7 @@ export const PROP_KINDS: Record<SchemaProp['kind'], Kind> = {
   date: 'date',
   number: 'number',
   enum: 'text',
+  currency: 'text',
   image: 'image',
 };
 

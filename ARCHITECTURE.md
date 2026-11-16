@@ -146,9 +146,14 @@ not change when nothing changed.
   and no credentials; never a fragment.
 - `robots`: booleans `noindex`, `nofollow`, `nosnippet`; integer `max_snippet`
   (-1 to 1000); `max_image_preview` one of none, standard, large.
-- `schema.type` is a key of `data/schema-types.json`; `schema.props` are that
-  type's property keys; `schema.custom` is custom JSON-LD text, re-encoded on
-  write (section 7).
+- `schema.type` is a key of `data/schema-types.json` (read mode keeps a type
+  the registry no longer has, so the dialog can say so; output is a web
+  page); `schema.props` are that type's property keys; `schema.custom` is
+  custom JSON-LD text, re-encoded on write (section 7); `schema.skip` lists
+  the `@id`s, as written, of hand-added items left out until they are on
+  the page (cleaned against the custom JSON-LD on every read and write).
+- `canvas_metatag.site:currency` is an ISO 4217 code (`data/currencies.json`)
+  or empty: the currency of every price that names none.
 
 `Values::clean($input, $scope, $accepts, $inheritedType)` is the one
 validator. `$accepts($source, $kind)` says whether a field link is offered
@@ -170,13 +175,22 @@ validator. `$accepts($source, $kind)` says whether a field link is offered
 - Control, C1 and bidi override characters are stripped; typed text is never
   trimmed, scanned or rewritten otherwise. Braces in typed text are text.
 
-The registry `data/schema-types.json` describes ten types (`WebPage`,
+The registry `data/schema-types.json` describes eleven types (`WebPage`,
 `AboutPage`, `ContactPage`, `CollectionPage`, `Article`, `BlogPosting`,
-`NewsArticle`, `Event`, `Product`, `ProfilePage`). An entry has a label, a
-`page_type`, optionally a `primary_type`, `og_type`, `refs` to our own nodes,
-`nested` types, and `props` with `key`, `kind` (text, url, date, number, enum,
-image), `default` (a value, usually `{"fact": ...}`), `level` (required or
-recommended), `options` and `pattern`. One level of `extends`.
+`NewsArticle`, `Event`, `Product`, `Service`, `ProfilePage`). Six are kinds
+the editor chooses ("What this page is": `kind` with its label, its name in
+a sentence, what it can earn, what it is not for, an icon and an order); the
+rest are variants of one (`variant_of`, chosen under `variants`: "Kind of
+article"). An entry has a label, a `page_type`, optionally a `primary_type`,
+`og_type`, `refs` to our own nodes (a ref may be conditional: `if` a gate
+detail has a value, `unless` a detail is set), `nested` types, `main` (the
+details shown before More details), `slots` and `say` (the read-back's
+sentences, section 7), and `props` with `key`, `kind` (text, url, date,
+number, enum, currency, image), `default` (a value, usually
+`{"fact": ...}`), `level` (required: the main node is withheld without it),
+`options`, `option_labels`, `pattern` and `emit: false` (a gate: stored,
+never in the graph, such as "Bought on this page"). One level of `extends`;
+a variant never inherits its base's kind.
 `SchemaGraph::validLiteral()` is the only check of a literal against its
 property; the cleaner, the graph builder and the AI submodule all call it.
 
@@ -343,9 +357,57 @@ does not move when its canonical does.
 
 These ids never change after release: other pages and search engines refer to
 them. The page node points at the primary node through `mainEntity` only when
-it ships. When a required property is missing the primary node is withheld and
-the report says which (`schema.withheld`, `missing_required`,
-`missing_recommended`); the Checks tab reads that report.
+it ships. When a required property is missing the primary node is withheld.
+Building reports, with the graph: `withheld` (`missing`, `dropped`: required
+values that gave nothing or did not fit, and the node as it would have been),
+`dropped` (every value that did not fit its kind, with what it gave),
+`sources` (each value's branch: `set`, `default`, `site`), `gates`,
+`unknown_type`, and `nodes` (every node with its origin `site`, `page`,
+`main` or `hand`, its place in `@graph`, or why it was left out:
+`withheld`, `skip`, `reserved`, `duplicate`). Nothing is silent.
+
+Commerce: a price billed every month or year (`billing`, a gate) is also
+emitted as `offers.priceSpecification` (a `UnitPriceSpecification` with the
+`billingDuration` and the unit code `MON` or `ANN`); a product's offer has
+the identity as `seller` only when "Bought on this page" (`sold_here`) is
+yes; a price's currency defaults to the site currency (never an offer with
+no price). An image a main node takes
+by default is the one chosen to share the page, else the page's own, never
+the site default.
+
+### Search features and the report (dialog only)
+
+`data/search-features.json` lists each search feature the module knows
+(live or retired, the types it applies to, `required`, `complete`,
+`recommended` and rule paths, `not_for` misfits, `where` it shows, at most
+two `confirm` guidelines, documented `names`, the source address) and the
+date it was `reviewed`. `SchemaGraph::features($graph, $ctx)` evaluates it on
+the built graph, following `{"@id"}` references inside it (the withheld main
+node is judged as it would ship): one verdict per feature and node, `ready`,
+`complete`, `needs` (with what is missing and what sets it), `unanswered`,
+`not_fit` (with a reason), `not_here`, `retired`, or `none`.
+`SchemaGraph::rules()` checks the hand-added items over the merged graph: a
+second identity, a reference to an item of this site that is not there, a
+review or rating of the site's own organization (not an employer rating, not
+another company), an address that is not a full one.
+
+Delivery and report are two functions: `Resolver::resolve()` builds the head
+for every consumer; `Resolver::report()` calls it and adds `features` and
+`rules`. Only `ApiController::state()` calls `report()`, so a visitor's
+request never computes them (`DeliveryPathTest`). The dialog reads the
+graph back (`extension/src/readback.ts`: the first `say` variant whose slots
+all resolve, values formatted with `Intl` in the dialog's language, a fact
+list when a sentence has no translation) and compares it with the page
+(`checks.ts`: text, prices next to a currency with their period, dates four
+ways, images by file, ratings; never codes).
+
+Registry and rules strings are translated on the server:
+`scripts/registry-strings.php` writes `src/RegistryStrings.php`, one literal
+`TranslatableMarkup` per string (context `canvas_metatag:schema`), and a CI
+job fails when it is stale. `/state` carries `registry` and
+`search_features` in the dialog's language; a type's `say` is `null` when one
+of its sentences has no translation in locale storage. A CI job warns when
+the rules were reviewed more than 120 days ago.
 
 Property keys with underscores are paths (`location_address_streetAddress` is
 `location > address > streetAddress`), typed by `nested`. Enums become
@@ -854,7 +916,8 @@ each row names the test that fails when it changes.
 
 | Suite | Proves | Run |
 |---|---|---|
-| `tests/src/Unit/ValuesTest`, `SchemaGraphTest` | validation (refused and accepted cases), encoding, cascade, text outputs, separators; registry, ids, withheld nodes, custom JSON-LD, encoder safety; the shared fixtures `tests/fixtures/text-cases.json` and `graphs/*.json` | PHPUnit |
+| `tests/src/Unit/ValuesTest`, `SchemaGraphTest` | validation (refused and accepted cases), encoding, cascade, text outputs, separators; registry, kinds, ids, withheld nodes, commerce (billing, the seller, the site currency), left-out items, custom JSON-LD, encoder safety; the shared fixtures `tests/fixtures/text-cases.json` and `graphs/*.json` | PHPUnit |
+| `SchemaGraphReportTest`, `SearchFeaturesTest`, `SearchFeaturesFileTest`, `RegistryConsistencyTest`, `DeliveryPathTest` | the report (unknown type, dropped values, nodes and origins), the rules of hand-added items; one passing and one failing graph per search feature; the rules file's sources and dates; that the registry and the rules agree; that only the dialog's state reaches the verdicts | PHPUnit (unit) |
 | `ResolverTest` | ownership, layers, facts and access, the form's order, linked values (empty, hidden, deleted field, formatted text), the head, cacheability and drafts, the public base | PHPUnit (kernel) |
 | `SourcesTest` (group `canvas_metatag_canvas_contract`) | the Canvas contract of `src/Sources.php`: vocabulary, exclusions, labels, the image rewrite, a round trip and value per field type, every status and the account rule, `accepts()` | PHPUnit (kernel); also against Canvas 1.x-dev in CI |
 | `BoundaryTest` | only `src/Sources.php` uses Canvas's prop source code | PHPUnit (unit) |
@@ -863,14 +926,15 @@ each row names the test that fails when it changes.
 | `CoupledHeadTest` | the HTML head an anonymous visitor gets, with both page caches; non-owned routes untouched; a failing build serves core's head | PHPUnit (kernel) |
 | `HeadlessHeadTest` | the content API head, preview drafts, routes left alone, the runtime requirement | PHPUnit (kernel) |
 | `MetatagCoexistenceTest` | Metatag silent where the head is ours, widgets hidden | PHPUnit (kernel) |
-| `ApiTest` | route requirements, state (facts, separator, sources, broken links; incl. a template without a node to preview), site (stored links ignored), media, writes follow shown values, refused links | PHPUnit (kernel) |
+| `ApiTest` | route requirements, state (facts, separator, sources, broken links, the report's verdicts and rules; incl. a template without a node to preview), site (stored links ignored, the currency, what a save changes elsewhere), the registry in the dialog's language, media, writes follow shown values, refused links | PHPUnit (kernel) |
 | `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node (headings, list items and table rows as sentences), heads and structured data (a square logo's small card), hidden references published and deleted (coupled and headless), drafts, headless | PHPUnit (kernel) |
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
 | `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
-| `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks, API client, host adapter parsing | `npm run verify` |
+| `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks (verdict rows, parity with the page, hand-added items), the read-back, kinds, API client, host adapter parsing | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
-| Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates linked to fields, title endings, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
+| Playwright `coupled` (`page`, `template`, `site`, `access`, `schema`) |
+ the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates linked to fields, title endings, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
 | Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider, an edited prompt, and a site guardrail that blocks | |
 | Playwright `complex` | template scope on the complex fixture: type fields and their values, levels and hidden references, link menus in windows 350 and 420 px tall, by keyboard and to assistive technology, previews that follow the editor (at the view's top, without a message or a status change), Checks against a long title, an unpublished preview node and its information button (click, hover then click, click elsewhere), a square small card for a square logo, a header whose Checks text gives way to a long type name, a type without content, text direction | |
 

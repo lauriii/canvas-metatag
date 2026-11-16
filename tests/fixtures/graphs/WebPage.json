@@ -25,12 +25,41 @@
     "facts": {
         "title": "About Ada"
     },
-    "links": {},
+    "links": [],
     "images": [],
     "report": {
-        "withheld": false,
-        "missing_required": [],
-        "missing_recommended": []
+        "withheld": null,
+        "dropped": [],
+        "sources": [],
+        "gates": [],
+        "type": "AboutPage",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Person",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#logo",
+                "type": "ImageObject",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/fi/tietoa#webpage",
+                "type": "AboutPage",
+                "origin": "page",
+                "at": 3
+            }
+        ]
     },
     "graph": {
         "@context": "https://schema.org",

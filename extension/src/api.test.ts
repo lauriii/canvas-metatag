@@ -157,6 +157,7 @@ describe('requests', () => {
         same_as: [],
       },
       values: { title_end: { text: 'Example Co' } },
+      currency: 'EUR',
     };
     await api.putSite(site);
     expect(JSON.parse(fake.calls[1].init.body as string)).toEqual(site);

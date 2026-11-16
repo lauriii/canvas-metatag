@@ -1,67 +1,204 @@
 {
-  "WebPage": { "label": "Web page", "group": "Web page", "hint": "The default. Right for most pages.", "page_type": "WebPage" },
-  "AboutPage": { "label": "About page", "group": "Web page", "hint": "About the organization or person behind the site.", "page_type": "AboutPage" },
-  "ContactPage": { "label": "Contact page", "group": "Web page", "hint": "How to get in touch.", "page_type": "ContactPage" },
-  "CollectionPage": { "label": "Collection page", "group": "Web page", "hint": "A list of other pages, such as a blog index.", "page_type": "CollectionPage" },
+  "WebPage": {
+    "label": "Web page", "page_type": "WebPage",
+    "kind": { "label": "A web page", "name": "a web page", "earn": "No search feature of its own. Right for most pages.", "icon": "file", "order": 6 },
+    "main": [],
+    "variants": "Kind of page",
+    "slots": { "name": { "path": "name", "fact": "title" }, "site": { "path": "isPartOf.name", "site": "identity.name", "label": "Site name" } },
+    "say": [["{name}, a web page of {site}."]]
+  },
+  "AboutPage": {
+    "label": "About page", "page_type": "AboutPage", "variant_of": "WebPage",
+    "slots": { "name": { "path": "name", "fact": "title" }, "site": { "path": "isPartOf.name", "site": "identity.name", "label": "Site name" } },
+    "say": [["{name}, the page about {site}."]]
+  },
+  "ContactPage": {
+    "label": "Contact page", "page_type": "ContactPage", "variant_of": "WebPage",
+    "slots": { "name": { "path": "name", "fact": "title" }, "site": { "path": "isPartOf.name", "site": "identity.name", "label": "Site name" } },
+    "say": [["{name}, the contact page of {site}."]]
+  },
+  "CollectionPage": {
+    "label": "Collection page", "page_type": "CollectionPage", "variant_of": "WebPage",
+    "slots": { "name": { "path": "name", "fact": "title" }, "site": { "path": "isPartOf.name", "site": "identity.name", "label": "Site name" } },
+    "say": [["{name}, a page that lists other pages of {site}."]]
+  },
   "Article": {
-    "label": "Article", "group": "Article", "hint": "Editorial content with an author and a date.",
+    "label": "Article",
     "primary_type": "Article", "og_type": "article",
+    "kind": { "label": "An article", "name": "an article", "earn": "Can show its title, image and date in results.", "icon": "reader", "order": 3 },
+    "main": ["image", "datePublished"],
+    "variants": "Kind of article",
     "refs": { "publisher": "identity" },
     "nested": { "author": "Person" },
     "props": [
-      { "key": "headline", "label": "Headline", "kind": "text", "default": { "fact": "title" }, "level": "recommended" },
+      { "key": "headline", "label": "Headline", "kind": "text", "default": { "fact": "title" } },
       { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
-      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" }, "level": "recommended" },
-      { "key": "datePublished", "label": "Published", "kind": "date", "default": { "fact": "published" }, "level": "recommended" },
-      { "key": "dateModified", "label": "Updated", "kind": "date", "default": { "fact": "modified" }, "level": "recommended" },
-      { "key": "author_name", "label": "Author name", "kind": "text", "default": { "fact": "author" }, "level": "recommended" },
+      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
+      { "key": "datePublished", "label": "Published", "kind": "date", "default": { "fact": "published" } },
+      { "key": "dateModified", "label": "Updated", "kind": "date", "default": { "fact": "modified" } },
+      { "key": "author_name", "label": "Author name", "kind": "text", "default": { "fact": "author" }, "ai": false },
       { "key": "author_url", "label": "Author page", "kind": "url" }
-    ]
+    ],
+    "slots": {
+      "headline": { "path": "headline", "prop": "headline" },
+      "author": { "path": "author.name", "prop": "author_name" },
+      "published": { "path": "datePublished", "prop": "datePublished" }
+    },
+    "say": [[
+      "{headline}, an article by {author}, published {published}.",
+      "{headline}, an article by {author}.",
+      "{headline}, an article published {published}.",
+      "{headline}, an article."
+    ]]
   },
-  "BlogPosting": { "extends": "Article", "label": "Blog post", "hint": "A post in a blog.", "primary_type": "BlogPosting" },
-  "NewsArticle": { "extends": "Article", "label": "News article", "hint": "Reporting on a current event.", "primary_type": "NewsArticle" },
+  "BlogPosting": {
+    "extends": "Article", "variant_of": "Article", "label": "Blog post", "primary_type": "BlogPosting",
+    "say": [[
+      "{headline}, a blog post by {author}, published {published}.",
+      "{headline}, a blog post by {author}.",
+      "{headline}, a blog post published {published}.",
+      "{headline}, a blog post."
+    ]]
+  },
+  "NewsArticle": {
+    "extends": "Article", "variant_of": "Article", "label": "News article", "primary_type": "NewsArticle",
+    "say": [[
+      "{headline}, a news article by {author}, published {published}.",
+      "{headline}, a news article by {author}.",
+      "{headline}, a news article published {published}.",
+      "{headline}, a news article."
+    ]]
+  },
   "Event": {
-    "label": "Event", "group": "Event", "hint": "Something that happens at a time and a place.",
+    "label": "Event",
     "primary_type": "Event",
-    "nested": { "location": "Place", "location_address": "PostalAddress" },
+    "kind": { "label": "An event people attend in person", "name": "an event", "earn": "Can show in event listings with its date and place.", "not_for": "Not for events that happen only online.", "icon": "calendar", "order": 4 },
+    "main": ["startDate", "location_address_streetAddress", "location_address_addressLocality", "location_address_addressCountry"],
+    "refs": { "organizer": { "to": "identity", "unless": "organizer_name" } },
+    "nested": { "location": "Place", "location_address": "PostalAddress", "organizer": "Organization" },
     "props": [
       { "key": "name", "label": "Event name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
       { "key": "startDate", "label": "Starts", "kind": "date", "level": "required" },
-      { "key": "endDate", "label": "Ends", "kind": "date", "level": "recommended" },
-      { "key": "location_name", "label": "Venue", "kind": "text", "level": "recommended" },
+      { "key": "endDate", "label": "Ends", "kind": "date" },
+      { "key": "location_name", "label": "Venue", "kind": "text" },
       { "key": "location_address_streetAddress", "label": "Street address", "kind": "text", "level": "required" },
       { "key": "location_address_addressLocality", "label": "City", "kind": "text" },
       { "key": "location_address_postalCode", "label": "Postal code", "kind": "text" },
       { "key": "location_address_addressCountry", "label": "Country", "kind": "text" },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" }, "level": "recommended" },
-      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" }, "level": "recommended" },
-      { "key": "eventStatus", "label": "Status", "kind": "enum", "options": ["EventScheduled", "EventCancelled", "EventPostponed", "EventRescheduled"], "ai": false }
-    ]
+      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
+      { "key": "eventStatus", "label": "Status", "kind": "enum", "options": ["EventScheduled", "EventCancelled", "EventPostponed", "EventRescheduled"], "option_labels": { "EventScheduled": "scheduled", "EventCancelled": "cancelled", "EventPostponed": "postponed", "EventRescheduled": "rescheduled" }, "ai": false },
+      { "key": "organizer_name", "label": "Organizer", "kind": "text" }
+    ],
+    "slots": {
+      "name": { "path": "name", "prop": "name" },
+      "venue": { "path": "location.name", "prop": "location_name" },
+      "city": { "path": "location.address.addressLocality", "prop": "location_address_addressLocality" },
+      "start": { "path": "startDate", "prop": "startDate" }
+    },
+    "say": [[
+      "{name}, an event at {venue}, {city}, starting {start}.",
+      "{name}, an event in {city}, starting {start}.",
+      "{name}, an event at {venue}, starting {start}.",
+      "{name}, an event starting {start}."
+    ]]
   },
   "Product": {
-    "label": "Product", "group": "Product", "hint": "One product with a price.",
+    "label": "Product",
     "primary_type": "Product",
+    "kind": { "label": "A product people buy", "name": "a product", "earn": "Can show a product result and a merchant listing.", "not_for": "Not for services, memberships or subscriptions.", "icon": "cube", "order": 1 },
+    "main": ["offers_price", "offers_priceCurrency", "sold_here", "image"],
+    "refs": { "offers_seller": { "to": "identity", "if": { "sold_here": "yes" } } },
     "nested": { "offers": "Offer", "brand": "Brand" },
     "props": [
       { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" }, "level": "recommended" },
-      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" }, "level": "recommended" },
+      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
       { "key": "offers_price", "label": "Price", "kind": "number", "level": "required", "ai": false },
-      { "key": "offers_priceCurrency", "label": "Currency", "kind": "text", "pattern": "^[A-Z]{3}$", "level": "required", "ai": false },
-      { "key": "offers_availability", "label": "Availability", "kind": "enum", "options": ["InStock", "OutOfStock", "PreOrder", "BackOrder", "SoldOut", "Discontinued"], "level": "recommended", "ai": false },
+      { "key": "offers_priceCurrency", "label": "Currency", "kind": "currency", "ai": false },
+      { "key": "billing", "label": "Billed", "kind": "enum", "options": ["once", "P1M", "P1Y"], "option_labels": { "once": "once", "P1M": "every month", "P1Y": "every year" }, "emit": false, "ai": false },
+      { "key": "sold_here", "label": "Bought on this page", "kind": "enum", "options": ["yes", "no"], "option_labels": { "yes": "yes, from us", "no": "no" }, "emit": false, "ai": false },
+      { "key": "offers_availability", "label": "Availability", "kind": "enum", "options": ["InStock", "OutOfStock", "PreOrder", "BackOrder", "SoldOut", "Discontinued"], "option_labels": { "InStock": "in stock", "OutOfStock": "out of stock", "PreOrder": "available to pre-order", "BackOrder": "on back order", "SoldOut": "sold out", "Discontinued": "discontinued" }, "ai": false },
       { "key": "brand_name", "label": "Brand", "kind": "text" },
       { "key": "sku", "label": "SKU", "kind": "text", "pattern": "^\\S+$", "ai": false }
-    ]
+    ],
+    "slots": {
+      "name": { "path": "name", "prop": "name" },
+      "seller": { "path": "offers.seller.name", "prop": "sold_here", "site": "identity.name", "label": "Seller" },
+      "price": { "path": "offers.price", "prop": "offers_price", "currency": "offers.priceCurrency", "unless": "offers.priceSpecification.billingDuration" },
+      "price_month": { "path": "offers.price", "prop": "offers_price", "currency": "offers.priceCurrency", "if": { "offers.priceSpecification.billingDuration": "P1M" } },
+      "price_year": { "path": "offers.price", "prop": "offers_price", "currency": "offers.priceCurrency", "if": { "offers.priceSpecification.billingDuration": "P1Y" } },
+      "availability": { "path": "offers.availability", "prop": "offers_availability" }
+    },
+    "say": [[
+      "{name}, a product sold by {seller} for {price}, {availability}.",
+      "{name}, a product sold by {seller} for {price}.",
+      "{name}, a product sold by {seller} for {price_month} a month, {availability}.",
+      "{name}, a product sold by {seller} for {price_month} a month.",
+      "{name}, a product sold by {seller} for {price_year} a year, {availability}.",
+      "{name}, a product sold by {seller} for {price_year} a year.",
+      "{name}, a product sold by {seller}, {availability}.",
+      "{name}, a product sold by {seller}.",
+      "{name}, a product for {price}, {availability}.",
+      "{name}, a product for {price}.",
+      "{name}, a product for {price_month} a month, {availability}.",
+      "{name}, a product for {price_month} a month.",
+      "{name}, a product for {price_year} a year, {availability}.",
+      "{name}, a product for {price_year} a year.",
+      "{name}, a product, {availability}.",
+      "{name}, a product."
+    ]]
   },
-  "ProfilePage": {
-    "label": "Profile", "group": "Profile", "hint": "A page about one person.",
-    "page_type": "ProfilePage", "primary_type": "Person", "og_type": "profile",
+  "Service": {
+    "label": "Service",
+    "primary_type": "Service",
+    "kind": { "label": "Plans for a service", "name": "plans for a service", "earn": "No search feature of its own. For memberships, subscriptions and services, with their prices.", "icon": "layers", "order": 2 },
+    "main": ["offers_price", "offers_priceCurrency", "billing"],
+    "refs": { "provider": "identity" },
+    "nested": { "offers": "Offer" },
     "props": [
       { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
-      { "key": "description", "label": "About", "kind": "text", "default": { "fact": "description" }, "level": "recommended" },
-      { "key": "image", "label": "Photo", "kind": "image", "default": { "fact": "image" }, "level": "recommended" },
+      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "offers_price", "label": "Price", "kind": "number", "ai": false },
+      { "key": "offers_priceCurrency", "label": "Currency", "kind": "currency", "ai": false },
+      { "key": "billing", "label": "Billed", "kind": "enum", "options": ["once", "P1M", "P1Y"], "option_labels": { "once": "once", "P1M": "every month", "P1Y": "every year" }, "emit": false, "ai": false }
+    ],
+    "slots": {
+      "name": { "path": "name", "prop": "name" },
+      "provider": { "path": "provider.name", "site": "identity.name", "label": "Provider" },
+      "price": { "path": "offers.price", "prop": "offers_price", "currency": "offers.priceCurrency", "unless": "offers.priceSpecification.billingDuration" },
+      "price_month": { "path": "offers.price", "prop": "offers_price", "currency": "offers.priceCurrency", "if": { "offers.priceSpecification.billingDuration": "P1M" } },
+      "price_year": { "path": "offers.price", "prop": "offers_price", "currency": "offers.priceCurrency", "if": { "offers.priceSpecification.billingDuration": "P1Y" } }
+    },
+    "say": [[
+      "{name}, a service from {provider} for {price}.",
+      "{name}, a service from {provider} for {price_month} a month.",
+      "{name}, a service from {provider} for {price_year} a year.",
+      "{name}, a service from {provider}."
+    ]]
+  },
+  "ProfilePage": {
+    "label": "Profile",
+    "page_type": "ProfilePage", "primary_type": "Person", "og_type": "profile",
+    "kind": { "label": "A person's profile", "name": "a profile", "earn": "Can show the person's name and photo with results from the page.", "icon": "person", "order": 5 },
+    "main": ["image", "jobTitle"],
+
+    "nested": { "worksFor": "Organization" },
+    "props": [
+      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "description", "label": "About", "kind": "text", "default": { "fact": "description" } },
+      { "key": "image", "label": "Photo", "kind": "image", "default": { "fact": "image" } },
       { "key": "jobTitle", "label": "Role", "kind": "text" },
+      { "key": "worksFor_name", "label": "Works for", "kind": "text" },
       { "key": "sameAs", "label": "Profile elsewhere", "kind": "url" }
-    ]
+    ],
+    "slots": {
+      "name": { "path": "name", "prop": "name" },
+      "role": { "path": "jobTitle", "prop": "jobTitle" }
+    },
+    "say": [[
+      "{name}, {role}, on a profile page.",
+      "{name}, on a profile page."
+    ]]
   }
 }

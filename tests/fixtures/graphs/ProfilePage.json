@@ -36,13 +36,51 @@
         "title": "Ada Writer",
         "description": "Ada writes about pages."
     },
-    "links": {},
+    "links": [],
     "images": [],
     "report": {
-        "withheld": false,
-        "missing_required": [],
-        "missing_recommended": [
-            "image"
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "description": "default",
+            "jobTitle": "set",
+            "sameAs": "set"
+        },
+        "gates": [],
+        "type": "ProfilePage",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#logo",
+                "type": "ImageObject",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/team/ada#webpage",
+                "type": "ProfilePage",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/team/ada#primary",
+                "type": "Person",
+                "origin": "main",
+                "at": 4
+            }
         ]
     },
     "graph": {

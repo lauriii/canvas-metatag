@@ -50,6 +50,8 @@ export interface SeoValues {
     type?: string;
     props?: Record<string, Value>;
     custom?: string;
+    /** Hand-added items left out, by their `@id` as written. */
+    skip?: string[];
   };
 }
 
@@ -75,35 +77,156 @@ export interface Identity {
 export interface SiteSettings {
   identity: Identity;
   values: SeoValues;
+  /** An ISO 4217 code: the currency of every price that names none. '' = none. */
+  currency: string;
 }
 
-// The JSON-LD type registry (data/schema-types.json).
+// The JSON-LD type registry (data/schema-types.json), in the dialog's language.
 
 export interface SchemaProp {
   key: string;
   label: string;
-  kind: 'text' | 'url' | 'date' | 'number' | 'enum' | 'image';
+  kind: 'text' | 'url' | 'date' | 'number' | 'enum' | 'currency' | 'image';
   default?: Value;
-  level?: 'required' | 'recommended';
+  /** The main node is left out without it. */
+  level?: 'required';
   options?: string[];
+  /** Each option in words, in a sentence: "in stock". */
+  option_labels?: Record<string, string>;
   pattern?: string;
   ai?: boolean;
+  /** Stored, never in the graph: it decides what is. */
+  emit?: false;
+}
+
+/** One fact of a read-back sentence: a path in the built graph. */
+export interface Slot {
+  path: string;
+  /** The detail that sets it. */
+  prop?: string;
+  /** The fact it shows. */
+  fact?: Fact;
+  /** The site setting that sets it. */
+  site?: string;
+  label?: string;
+  /** The path of a price's currency. */
+  currency?: string;
+  /** Resolves only when these paths give these values. */
+  if?: Record<string, string>;
+  /** Resolves only when this path gives nothing. */
+  unless?: string;
 }
 
 export interface SchemaType {
   label: string;
-  group: string;
-  hint: string;
-  extends?: string;
+  /** A kind the editor chooses in "What this page is". */
+  kind?: {
+    label: string;
+    /** In a sentence: "a product". */
+    name: string;
+    earn: string;
+    not_for?: string;
+    icon: string;
+    order: number;
+  };
+  /** The detail its variants are chosen with: "Kind of article". */
+  variants?: string;
+  variant_of?: string;
   page_type?: string;
   primary_type?: string;
   og_type?: string;
-  refs?: Record<string, string>;
-  nested?: Record<string, string>;
   props?: SchemaProp[];
+  /** The details shown before More details. */
+  main?: string[];
+  /** References to the site's nodes: fixed, or with the detail that replaces them. */
+  refs?: Record<string, string | { to: string; unless?: string; if?: Record<string, string> }>;
+  slots?: Record<string, Slot>;
+  /** Sentences, each a list of variants; null when one has no translation. */
+  say?: string[][] | null;
 }
 
 export type Registry = Record<string, SchemaType>;
+
+/** A fact a feature asks for: its path, and what sets it. */
+export interface FeatureFact {
+  path: string;
+  prop?: string;
+  site?: string;
+  /** The index of the rule it fails. */
+  rule?: number;
+}
+
+export type VerdictName =
+  | 'needs'
+  | 'unanswered'
+  | 'ready'
+  | 'complete'
+  | 'not_fit'
+  | 'not_here'
+  | 'retired'
+  | 'none';
+
+export interface Verdict {
+  feature: string | null;
+  /** The `@id` of the node it is about. */
+  node: string | null;
+  verdict: VerdictName;
+  missing?: FeatureFact[];
+  helps?: FeatureFact[];
+  /** Why it does not fit: a `not_for` id. */
+  reason?: string;
+}
+
+/** data/search-features.json, in the dialog's language. */
+export interface SearchFeatures {
+  reviewed: string;
+  props: Record<string, string>;
+  site: Record<string, string>;
+  facts: Record<string, { label: string; need: string }>;
+  features: Record<
+    string,
+    {
+      label: string;
+      /** "merchant listings": what a fact is needed for. */
+      for?: string;
+      where: string;
+      status: 'shown' | 'retired';
+      since?: string;
+      changelog?: string;
+      doc?: string;
+      on: string[];
+      /** Judged only on this site node ("identity"), on the home page. */
+      node?: string;
+      /** A list is one of; "a|b" either. */
+      required?: (string | string[])[];
+      complete?: string[];
+      recommended?: string[];
+      rules?: { path: string; need?: string }[];
+      not_for?: { id: string; reason: string; why: string; suggest?: string; seller?: string }[];
+      confirm?: string[];
+    }
+  >;
+}
+
+/** One node of the graph, emitted or left out. */
+export interface GraphNode {
+  id: string | null;
+  type: string;
+  origin: 'site' | 'page' | 'main' | 'hand';
+  /** A hand-added item's index in the custom JSON-LD. */
+  item?: number;
+  /** Its index in `@graph`, when emitted. */
+  at?: number;
+  left_out?: 'withheld' | 'skip' | 'reserved' | 'duplicate';
+}
+
+/** A rule a hand-added item breaks. */
+export interface GraphRule {
+  rule: 'second_identity' | 'dangling' | 'own_reviews' | 'relative';
+  item: number;
+  node: string | null;
+  value?: string;
+}
 
 // GET /state.
 
@@ -179,9 +302,22 @@ export interface Resolved {
   head: Head;
   image: ImageInfo | null;
   schema: {
-    withheld: boolean;
-    missing_required: string[];
-    missing_recommended: string[];
+    /** Why the main node was left out, and the node it would have been. */
+    withheld: { missing: string[]; dropped: string[]; node: Record<string, unknown> } | null;
+    /** Values that do not fit their kind, with what they gave. */
+    dropped: { key: string; value: string; kind: string }[];
+    /** Where each value of the main node came from. */
+    sources: Record<string, 'set' | 'default' | 'site'> | [];
+    /** The values of the details that decide, never emitted. */
+    gates: Record<string, string> | [];
+    /** The registry type the graph was built as. */
+    type: string;
+    /** A stored type the registry does not have. */
+    unknown_type: string | null;
+    nodes: GraphNode[];
+    front: boolean;
+    features: Verdict[];
+    rules: GraphRule[];
   };
 }
 
@@ -204,6 +340,8 @@ export interface Target {
 export type AiOffReason = 'no_provider' | 'not_usable' | 'no_prompt';
 
 export interface StatePayload {
+  /** The dialog's own language. */
+  ui: string;
   langcode: string;
   languages: Record<string, string>;
   origin: { url: string; source: 'settings' | 'frontend' | 'request' };
@@ -215,6 +353,8 @@ export interface StatePayload {
     } | null;
   };
   site: SiteSettings;
+  registry: Registry;
+  search_features: SearchFeatures;
   target: Target | null;
   preview: {
     entity_type: string;
@@ -233,6 +373,13 @@ export interface StatePayload {
   broken: Record<string, BrokenLink>;
   media: Record<string, MediaInfo>;
   resolved: Resolved | null;
+}
+
+/** The published places a site save changes the structured data of. */
+export interface SiteEffect {
+  count: number;
+  /** The first 25, by name. */
+  places: string[];
 }
 
 export interface MediaItem extends MediaInfo {
@@ -323,6 +470,8 @@ export interface State {
   /** canon() of the last confirmed draft payload. */
   sent: string | null;
   siteDirty: boolean;
+  /** Where the unsaved site settings change structured data, once asked. */
+  effect: SiteEffect | null;
   save: Record<Scope, SaveStatus>;
   /** Dotted path => the server's sentence, per scope. */
   errors: Record<Scope, Record<string, string>>;
@@ -374,6 +523,7 @@ export type Action =
   | { type: 'live'; live: State['live'] }
   | { type: 'facts'; facts: PageFacts | null }
   | { type: 'readonly'; readonly: State['readonly'] }
+  | { type: 'effect'; effect: SiteEffect | null }
   | { type: 'offer'; offer: State['offer'] }
   | { type: 'flash'; flash: string | null };
 
@@ -393,10 +543,15 @@ export interface Issue {
   detail?: string;
   jump?: Jump;
   fix?:
-    | { label: string; apply(values: SeoValues): SeoValues }
+    /** `undo`: what the bar says once it is applied, when not "Fixed". */
+    | { label: string; apply(values: SeoValues): SeoValues; undo?(values: SeoValues): string }
     | { label: string; suggest: string }
     /** Leads to the field and opens its link menu. */
-    | { label: string; link: true };
+    | { label: string; link: true }
+    /** Opens the image chooser for the image at this path. */
+    | { label: string; image: string };
+  /** The page may show it after all: reads the preview again. */
+  recheck?: string;
 }
 
 export type Source = 'target' | 'default' | 'site' | 'fallback';

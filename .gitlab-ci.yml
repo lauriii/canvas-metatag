@@ -39,7 +39,7 @@ variables:
   # jobs below run their own npm ci.
   _COMPOSER_YARN_INSTALL: '0'
 
-# The three custom jobs run for merge requests and on the default branch, on
+# The custom jobs run for merge requests and on the default branch, on
 # the template's PHP image, which also has Node.
 .custom-job:
   rules:
@@ -83,6 +83,43 @@ build-assets:
         echo "The committed extension build is out of date. Run 'npm run build' in extension/ and commit the result.";
         exit 1;
       }
+
+################
+# Registry strings (custom job): fails if src/RegistryStrings.php is stale.
+#
+# Every string the dialog shows from data/schema-types.json and
+# data/search-features.json is a literal in src/RegistryStrings.php, so that
+# it is extracted for translation. Regenerate it and fail on a difference.
+################
+registry-strings:
+  extends: .custom-job
+  stage: validate
+  needs: []
+  script:
+    - cd $CI_PROJECT_DIR && php scripts/registry-strings.php
+    - git config --global --add safe.directory $CI_PROJECT_DIR
+    - |
+      git diff --exit-code -- src/RegistryStrings.php || {
+        echo "src/RegistryStrings.php is out of date. Run 'php scripts/registry-strings.php' and commit the result.";
+        exit 1;
+      }
+
+################
+# Search features review (custom job): a warning, never a failure.
+#
+# The verdicts follow the search features' documentation, which changes.
+# After 120 days without a review of data/search-features.json this job
+# fails as allowed to, which shows as a warning: re-read each feature's
+# documentation, update the file and its `reviewed` date.
+################
+search-features-review:
+  extends: .custom-job
+  stage: validate
+  needs: []
+  allow_failure: true
+  script:
+    - cd $CI_PROJECT_DIR
+    - php -r '$reviewed = json_decode(file_get_contents("data/search-features.json"), TRUE)["reviewed"]; $days = intdiv(time() - strtotime($reviewed), 86400); echo "Rules reviewed on $reviewed, $days days ago.\n"; exit($days > 120 ? 1 : 0);'
 
 ################
 # The Canvas contract against Canvas's development branch (custom job).

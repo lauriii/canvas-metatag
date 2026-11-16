@@ -56,10 +56,47 @@
     },
     "images": [],
     "report": {
-        "withheld": false,
-        "missing_required": [],
-        "missing_recommended": [
-            "image"
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "startDate": "set",
+            "endDate": "set",
+            "location_name": "set",
+            "location_address_streetAddress": "set",
+            "location_address_addressLocality": "set",
+            "location_address_addressCountry": "set",
+            "description": "default",
+            "eventStatus": "set"
+        },
+        "gates": [],
+        "type": "Event",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/events/launch#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/events/launch#primary",
+                "type": "Event",
+                "origin": "main",
+                "at": 3
+            }
         ]
     },
     "graph": {
@@ -117,7 +154,10 @@
                     }
                 },
                 "description": "Doors open at six.",
-                "eventStatus": "https://schema.org/EventScheduled"
+                "eventStatus": "https://schema.org/EventScheduled",
+                "organizer": {
+                    "@id": "https://www.example.com/#identity"
+                }
             }
         ]
     }

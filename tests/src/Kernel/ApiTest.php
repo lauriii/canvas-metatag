@@ -8,6 +8,7 @@ use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Controller\ApiController;
+use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\Access\CsrfRequestHeaderAccessCheck;
 use Drupal\Core\Entity\EntityInterface;
@@ -28,7 +29,8 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
-// cspell:ignore Tarifs tarifs
+// cspell:ignore Tarifs tarifs sivu sivuston Tuote jonka ihmiset ostavat
+// cspell:ignore Kauppalistaus
 /**
  * Tests the state, site and media routes and the access to all five.
  *
@@ -229,12 +231,15 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertStringContainsString('"from_default":{}', (string) $response->getContent());
     $state = self::decodeResponse($response);
     self::assertSame([
+      'ui',
       'langcode',
       'languages',
       'origin',
       'can',
       'capabilities',
       'site',
+      'registry',
+      'search_features',
       'target',
       'preview',
       'facts',
@@ -246,8 +251,9 @@ final class ApiTest extends CanvasKernelTestBase {
     ], array_keys($state));
     $draft = $auto_save->getAutoSaveEntityForPreview(Page::load($page->id()))->entity;
     self::assertInstanceOf(Page::class, $draft);
-    $resolved = $this->resolver()->resolve($draft);
+    $resolved = $this->resolver()->report($draft);
     $expected = [
+      'ui' => 'en',
       'langcode' => 'en',
       'languages' => ['en' => 'English', 'fr' => 'French'],
       'origin' => ['url' => 'http://localhost', 'source' => 'request'],
@@ -263,6 +269,7 @@ final class ApiTest extends CanvasKernelTestBase {
           'same_as' => [],
         ],
         'values' => ['robots' => ['max_image_preview' => 'large']],
+        'currency' => '',
       ],
       'target' => [
         'scope' => 'page',
@@ -330,7 +337,27 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame('Pricing plans | Example', $state['resolved']['head']['title']);
     self::assertSame('noindex, max-image-preview:large', self::meta($state['resolved']['head'])['robots']);
     self::assertSame($this->imageOf($picked) + ['source' => 'override'], $state['resolved']['image']);
-    self::assertSame(['withheld' => FALSE, 'missing_required' => [], 'missing_recommended' => []], $state['resolved']['schema']);
+    // What only the dialog shows: a plain page has no search feature, and
+    // no hand-added item to check.
+    self::assertNull($state['resolved']['schema']['withheld']);
+    self::assertSame([[
+      'feature' => NULL,
+      'node' => NULL,
+      'verdict' => 'none',
+    ],
+    ], $state['resolved']['schema']['features']);
+    self::assertSame([], $state['resolved']['schema']['rules']);
+    self::assertSame([
+      'Organization',
+      'ImageObject',
+      'WebSite',
+      'WebPage',
+      'ImageObject',
+    ], array_column($state['resolved']['schema']['nodes'], 'type'));
+    // The registry and the rules, in the dialog's language.
+    self::assertSame('A product people buy', $state['registry']['Product']['kind']['label']);
+    self::assertSame('Merchant listing', $state['search_features']['features']['merchant-listing']['label']);
+    self::assertSame(SchemaGraph::searchFeatures()['reviewed'], $state['search_features']['reviewed']);
     self::assertSame('https://schema.org', $state['resolved']['head']['script'][0]['textContent']['@context']);
 
     // Someone who may view the page but not update it never receives a
@@ -422,7 +449,10 @@ final class ApiTest extends CanvasKernelTestBase {
     ]);
     $this->createField('field_no_view_access', 'string', 'Notes');
     $hero = $this->createImage('Article hero');
-    $stored = ['social' => ['image' => $this->linkTo('Hero image › Image', 'image')], 'title_end' => ['text' => 'Blog']];
+    $stored = [
+      'social' => ['image' => $this->linkTo('Hero image › Image', 'image')],
+      'title_end' => ['text' => 'Blog'],
+    ];
     $this->createTemplate(TRUE, $stored);
     $node = Node::create([
       'type' => 'article',
@@ -453,12 +483,15 @@ final class ApiTest extends CanvasKernelTestBase {
 
     $state = self::decodeResponse($this->request(Request::create(self::STATE . $query)));
     self::assertSame([
+      'ui',
       'langcode',
       'languages',
       'origin',
       'can',
       'capabilities',
       'site',
+      'registry',
+      'search_features',
       'target',
       'preview',
       'facts',
@@ -492,7 +525,16 @@ final class ApiTest extends CanvasKernelTestBase {
     ], $state['preview']);
     // The facts every entity has; the type's fields with the previewed
     // node's values.
-    self::assertSame(['title', 'description', 'site', 'url', 'author', 'published', 'modified', 'image'], array_keys($state['facts']));
+    self::assertSame([
+      'title',
+      'description',
+      'site',
+      'url',
+      'author',
+      'published',
+      'modified',
+      'image',
+    ], array_keys($state['facts']));
     self::assertSame($this->imageOf($hero), $state['facts']['image']['image']);
     $rows = array_column($state['sources'], NULL, 'label');
     self::assertSame(
@@ -517,14 +559,28 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame('Grace Hopper | Example', $state['resolved']['head']['title']);
     self::assertSame('article', self::meta($state['resolved']['head'])['og:type']);
     self::assertSame($this->imageOf($hero) + ['source' => 'entity'], $state['resolved']['image']);
-    self::assertSame(['withheld' => FALSE, 'missing_required' => [], 'missing_recommended' => []], $state['resolved']['schema']);
+    // The report: the blog post ships, judged as an article.
+    $schema = $state['resolved']['schema'];
+    self::assertSame([
+      NULL,
+      [],
+      'BlogPosting',
+      NULL,
+    ], [$schema['withheld'], $schema['dropped'], $schema['type'], $schema['unknown_type']]);
+    self::assertSame(['article'], array_column($schema['features'], 'feature'));
+    self::assertSame('main', array_column($schema['nodes'], 'origin', 'type')['BlogPosting']);
+    self::assertSame([], $schema['rules']);
 
     // Someone who may use Canvas but not update the template gets what is
     // stored.
     $this->setUpCurrentUser(permissions: [...self::VISITOR, Page::EDIT_PERMISSION, 'edit canvas metatag']);
     $response = $this->request(Request::create(self::STATE . $query));
-    self::assertStringNotContainsString('BlogPosting', (string) $response->getContent());
     $viewer = self::decodeResponse($response);
+    // The draft's type is nowhere but in the registry and the rules.
+    self::assertStringNotContainsString('BlogPosting', (string) json_encode(array_diff_key($viewer, [
+      'registry' => TRUE,
+      'search_features' => TRUE,
+    ])));
     self::assertSame(['target' => FALSE, 'site' => FALSE], $viewer['can']);
     self::assertSame(['has_draft' => FALSE, 'values' => $stored], array_intersect_key($viewer['target'], [
       'has_draft' => 1,
@@ -583,7 +639,12 @@ final class ApiTest extends CanvasKernelTestBase {
     \assert($template instanceof ContentTemplate);
     $gone = ['source' => ['expression' => 'ℹ︎␜entity:node:article␝field_gone␞␟value', 'sourceType' => 'entity-field']];
     $this->container->get(AutoSaveManager::class)->saveEntity((clone $template)->setThirdPartySetting('canvas_metatag', 'values', ['description' => $gone]), self::CLIENT);
-    self::assertSame(['description' => ['field' => 'field_gone', 'reason' => 'missing']], self::decodeResponse($this->request(Request::create(self::STATE . $query)))['broken']);
+    self::assertSame([
+      'description' => [
+        'field' => 'field_gone',
+        'reason' => 'missing',
+      ],
+    ], self::decodeResponse($this->request(Request::create(self::STATE . $query)))['broken']);
 
     $errors = [
       $query . '&langcode=en' => [400, 'bad_request'],
@@ -656,7 +717,10 @@ final class ApiTest extends CanvasKernelTestBase {
     }
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag']);
     $response = $this->request(Request::create(self::STATE . $query));
-    self::assertSame([403, 'forbidden'], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
+    self::assertSame([
+      403,
+      'forbidden',
+    ], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
   }
 
   /**
@@ -669,12 +733,15 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertStringContainsString('"media":{}', (string) $response->getContent());
     $state = self::decodeResponse($response);
     self::assertSame([
+      'ui',
       'langcode',
       'languages',
       'origin',
       'can',
       'capabilities',
       'site',
+      'registry',
+      'search_features',
       'target',
       'preview',
       'facts',
@@ -691,7 +758,16 @@ final class ApiTest extends CanvasKernelTestBase {
       $state['resolved'],
     ]);
     self::assertSame(['target' => FALSE, 'site' => TRUE], $state['can']);
-    self::assertSame(['title', 'description', 'site', 'url', 'author', 'published', 'modified', 'image'], array_keys($state['facts']));
+    self::assertSame([
+      'title',
+      'description',
+      'site',
+      'url',
+      'author',
+      'published',
+      'modified',
+      'image',
+    ], array_keys($state['facts']));
     self::assertSame(['', 'Example'], array_values(array_unique(array_column($state['facts'], 'value'))));
     self::assertSame(['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => NULL], $state['facts']['image']);
     self::assertSame(['|', [], []], [$state['separator'], $state['sources'], $state['broken']]);
@@ -792,12 +868,35 @@ final class ApiTest extends CanvasKernelTestBase {
       'identity' => array_reverse($identity, TRUE),
     ]);
     self::assertSame(200, $response->getStatusCode());
-    self::assertSame((string) json_encode(['site' => ['identity' => $identity, 'values' => $values]]), $response->getContent());
+    self::assertSame((string) json_encode([
+      'site' => [
+        'identity' => $identity,
+        'values' => $values,
+        'currency' => '',
+      ],
+    ]), $response->getContent());
     $raw = $this->config('canvas_metatag.site')->getRawData();
     self::assertSame($identity, $raw['identity']);
     self::assertEquals($values, $raw['values']);
     $state = self::decodeResponse($this->request(Request::create(self::STATE)));
-    self::assertSame(['identity' => $identity, 'values' => $values], $state['site']);
+    self::assertSame(['identity' => $identity, 'values' => $values, 'currency' => ''], $state['site']);
+
+    // The site currency: a code, never a symbol; kept when a save leaves it
+    // out.
+    $response = $this->putSite(['identity' => $identity, 'values' => $values, 'currency' => '€']);
+    self::assertSame(422, $response->getStatusCode());
+    self::assertSame(['currency' => 'Choose a currency code from the list, such as EUR.'], self::decodeResponse($response)['error']['fields']);
+    self::assertSame(200, $this->putSite([
+      'identity' => $identity,
+      'values' => $values,
+      'currency' => 'EUR',
+    ])->getStatusCode());
+    self::assertSame('EUR', $this->config('canvas_metatag.site')->get('currency'));
+    self::assertSame('EUR', self::decodeResponse($this->putSite([
+      'identity' => $identity,
+      'values' => $values,
+    ]))['site']['currency']);
+    self::assertSame('EUR', self::decodeResponse($this->request(Request::create(self::STATE)))['site']['currency']);
     self::assertSame([$logo->uuid()], array_keys($state['media']));
     unset($GLOBALS['config']['canvas_metatag.site']);
     $this->container->get('config.factory')->clearStaticCache();
@@ -811,7 +910,9 @@ final class ApiTest extends CanvasKernelTestBase {
 
     // A body that cannot be used, including one that is too large.
     $bad = [
+      'dry run not a flag' => '{"identity":{},"values":{},"dry_run":"yes"}',
       'not json' => '{"identity":',
+
       'not an object' => '"text"',
       'no identity' => '{"values":{}}',
       'no values' => '{"identity":{}}',
@@ -825,7 +926,12 @@ final class ApiTest extends CanvasKernelTestBase {
     foreach ($bad as $label => $content) {
       $response = $this->request(Request::create(self::SITE, 'PUT', content: $content));
       self::assertSame(400, $response->getStatusCode(), $label);
-      self::assertSame(['error' => ['code' => 'bad_request', 'message' => 'The request could not be read.']], self::decodeResponse($response), $label);
+      self::assertSame([
+        'error' => [
+          'code' => 'bad_request',
+          'message' => 'The request could not be read.',
+        ],
+      ], self::decodeResponse($response), $label);
     }
     self::assertSame('|', $this->config('canvas_metatag.site')->get('identity.separator'));
 
@@ -840,7 +946,12 @@ final class ApiTest extends CanvasKernelTestBase {
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag']);
     self::assertSame(['ai' => NULL], self::decodeResponse($this->request(Request::create(self::STATE)))['capabilities']);
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag', 'use canvas metatag ai']);
-    self::assertSame(['ai' => ['available' => FALSE, 'reason' => 'no_provider']], self::decodeResponse($this->request(Request::create(self::STATE)))['capabilities']);
+    self::assertSame([
+      'ai' => [
+        'available' => FALSE,
+        'reason' => 'no_provider',
+      ],
+    ], self::decodeResponse($this->request(Request::create(self::STATE)))['capabilities']);
   }
 
   /**
@@ -879,7 +990,11 @@ final class ApiTest extends CanvasKernelTestBase {
     $this->createImage('Unpublished', values: ['status' => FALSE, 'created' => $created + 100]);
     // A file that is not public is never emitted, so it is not offered.
     $this->createImage('Not public', values: ['created' => $created], scheme: 'temporary');
-    $special = $this->createImage('Pricing hero', ['alt' => 'Pricing table', 'width' => 640, 'height' => 480], ['created' => $created + 50]);
+    $special = $this->createImage('Pricing hero', [
+      'alt' => 'Pricing table',
+      'width' => 640,
+      'height' => 480,
+    ], ['created' => $created + 50]);
 
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag']);
     $first = self::decodeResponse($this->request(Request::create(self::MEDIA)));
@@ -887,7 +1002,11 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertTrue($first['more']);
     self::assertCount(24, $first['items']);
     // Newest first; no document, nothing unpublished.
-    self::assertSame(['Pricing hero', 'Image 26', 'Image 25'], array_slice(array_column($first['items'], 'name'), 0, 3));
+    self::assertSame([
+      'Pricing hero',
+      'Image 26',
+      'Image 25',
+    ], array_slice(array_column($first['items'], 'name'), 0, 3));
     self::assertSame([
       'uuid' => $special->uuid(),
       'name' => 'Pricing hero',
@@ -903,24 +1022,39 @@ final class ApiTest extends CanvasKernelTestBase {
     $second = self::decodeResponse($this->request(Request::create(self::MEDIA . '?page=1')));
     self::assertSame(['Image 3', 'Image 2', 'Image 1'], array_column($second['items'], 'name'));
     self::assertFalse($second['more']);
-    self::assertSame(['items' => [], 'more' => FALSE], self::decodeResponse($this->request(Request::create(self::MEDIA . '?page=2'))));
+    self::assertSame([
+      'items' => [],
+      'more' => FALSE,
+    ], self::decodeResponse($this->request(Request::create(self::MEDIA . '?page=2'))));
     // Filtered by name.
     $found = self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=' . urlencode(' hero '))));
     self::assertSame(['Pricing hero'], array_column($found['items'], 'name'));
     self::assertFalse($found['more']);
     self::assertCount(11, self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=Image+1')))['items']);
-    self::assertSame(['items' => [], 'more' => FALSE], self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=Unpublished'))));
-    self::assertSame(['items' => [], 'more' => FALSE], self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=public'))));
+    self::assertSame([
+      'items' => [],
+      'more' => FALSE,
+    ], self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=Unpublished'))));
+    self::assertSame([
+      'items' => [],
+      'more' => FALSE,
+    ], self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=public'))));
 
     // Someone who may see unpublished media is not offered it either: an
     // unpublished image is never emitted, so picking it would do nothing.
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag', 'administer media']);
     $listed = self::decodeResponse($this->request(Request::create(self::MEDIA)));
     self::assertSame('Pricing hero', $listed['items'][0]['name']);
-    self::assertSame(['items' => [], 'more' => FALSE], self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=Unpublished'))));
+    self::assertSame([
+      'items' => [],
+      'more' => FALSE,
+    ], self::decodeResponse($this->request(Request::create(self::MEDIA . '?q=Unpublished'))));
     // And someone who may not view media gets nothing.
     $this->setUpCurrentUser(permissions: ['access content', 'edit canvas metatag']);
-    self::assertSame(['items' => [], 'more' => FALSE], self::decodeResponse($this->request(Request::create(self::MEDIA))));
+    self::assertSame([
+      'items' => [],
+      'more' => FALSE,
+    ], self::decodeResponse($this->request(Request::create(self::MEDIA))));
   }
 
   /**
@@ -954,7 +1088,7 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
     $state = self::decodeResponse($this->request(Request::create(self::STATE . '?entity_type=canvas_page&id=' . $page->id() . '&langcode=fr')));
     self::assertSame($values, $state['target']['values']);
-    self::assertFalse($state['resolved']['schema']['withheld']);
+    self::assertNull($state['resolved']['schema']['withheld']);
     $graph = self::graph($state['resolved']['head']);
     self::assertSame(['Product', 'Bureau'], [$graph['primary']['@type'], $graph['primary']['name']]);
     // The default version names no type of its own here: WebPage.
@@ -962,7 +1096,11 @@ final class ApiTest extends CanvasKernelTestBase {
     \assert($english instanceof Page);
     $response = $this->putDraft($path, $english, $values, ['langcode' => 'en']);
     self::assertSame(422, $response->getStatusCode());
-    self::assertSame(['schema.props.name', 'schema.props.offers_price', 'schema.props.offers_priceCurrency'], array_keys(self::decodeResponse($response)['error']['fields']));
+    self::assertSame([
+      'schema.props.name',
+      'schema.props.offers_price',
+      'schema.props.offers_priceCurrency',
+    ], array_keys(self::decodeResponse($response)['error']['fields']));
 
     // A page links no field, in any write.
     $response = $this->putDraft($path, $english, [
@@ -989,7 +1127,12 @@ final class ApiTest extends CanvasKernelTestBase {
     $path = '/canvas-metatag/api/draft/content_template/' . $template->id();
     $response = $this->putDraft($path, $template, ['description' => $gone, 'title' => ['text' => 'New']]);
     self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
-    self::assertSame(['values' => ['description' => $gone, 'title' => ['text' => 'New']]], json_decode((string) $response->getContent(), TRUE));
+    self::assertSame([
+      'values' => [
+        'description' => $gone,
+        'title' => ['text' => 'New'],
+      ],
+    ], json_decode((string) $response->getContent(), TRUE));
     $refused = [
       // An expression the menu does not offer.
       [
@@ -1044,6 +1187,129 @@ final class ApiTest extends CanvasKernelTestBase {
     catch (NotFoundHttpException) {
       return 404;
     }
+  }
+
+  /**
+   * A site save first says where it changes structured data.
+   */
+  public function testSiteSaveEffect(): void {
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, 'administer canvas metatag']);
+    $priced = ['schema' => ['type' => 'Product', 'props' => ['offers_price' => ['text' => '89']]]];
+    $this->createPage([
+      'title' => 'Oak desk lamp',
+      'canvas_metatag' => Values::encode($priced),
+      'path' => ['alias' => '/lamp'],
+    ]);
+    $this->createPage([
+      'title' => 'Membership',
+      'canvas_metatag' => Values::encode(array_replace_recursive($priced, ['schema' => ['type' => 'Service']])),
+      'path' => ['alias' => '/membership'],
+    ]);
+    // A currency of its own, a draft and a page without a price: unchanged.
+    $this->createPage([
+      'title' => 'Euro lamp',
+      'canvas_metatag' => Values::encode(array_replace_recursive($priced, ['schema' => ['props' => ['offers_priceCurrency' => ['text' => 'USD']]]])),
+      'path' => ['alias' => '/usd'],
+    ]);
+    $this->createPage([
+      'title' => 'Draft lamp',
+      'status' => FALSE,
+      'canvas_metatag' => Values::encode($priced),
+      'path' => ['alias' => '/draft'],
+    ]);
+    $this->createPage(['title' => 'About', 'path' => ['alias' => '/about']]);
+    // A content type whose every item states a price, named in plain text.
+    NodeType::create(['type' => 'product', 'name' => "Editor's pick & Q&A"])->save();
+    ContentTemplate::create([
+      'id' => 'node.product.full',
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'product',
+      'content_entity_type_view_mode' => 'full',
+      'component_tree' => [],
+      'status' => TRUE,
+    ])->setThirdPartySetting('canvas_metatag', 'values', $priced)->save();
+
+    // A currency linked to a field follows the site's where the field is
+    // empty; a typed one never does.
+    $link = ['source' => ['expression' => 'ℹ︎␜entity:node:plan␝field_currency␞␟value', 'sourceType' => 'entity-field']];
+    foreach (['plan' => $link, 'gift' => ['text' => 'USD']] as $bundle => $currency) {
+      NodeType::create(['type' => $bundle, 'name' => ucfirst($bundle)])->save();
+      ContentTemplate::create([
+        'id' => "node.$bundle.full",
+        'content_entity_type_id' => 'node',
+        'content_entity_type_bundle' => $bundle,
+        'content_entity_type_view_mode' => 'full',
+        'component_tree' => [],
+        'status' => TRUE,
+      ])->setThirdPartySetting('canvas_metatag', 'values', array_replace_recursive($priced, ['schema' => ['props' => ['offers_priceCurrency' => $currency]]]))->save();
+    }
+
+    $site = ['identity' => [], 'values' => []];
+    $effect = fn (array $body): mixed => self::decodeResponse($this->putSite($body + $site + ['dry_run' => TRUE]))['effect'];
+    $first = $effect(['currency' => 'EUR']);
+    self::assertSame(4, $first['count']);
+    self::assertEqualsCanonicalizing(['Oak desk lamp', 'Membership', "Every Editor's pick & Q&A", 'Every Plan'], $first['places']);
+    // Nothing is saved by a dry run.
+    self::assertNull($this->config('canvas_metatag.site')->get('currency'));
+    // A save that keeps the currency changes nothing elsewhere.
+    self::assertNull($effect([]));
+    $this->putSite($site + ['currency' => 'EUR']);
+    self::assertNull($effect(['currency' => 'EUR']));
+    self::assertSame(4, $effect(['currency' => ''])['count']);
+
+    // Past 25 places, the rest are counted, not named.
+    foreach (range(1, 24) as $n) {
+      $this->createPage([
+        'title' => "Lamp $n",
+        'canvas_metatag' => Values::encode($priced),
+        'path' => ['alias' => "/lamp-$n"],
+      ]);
+    }
+    $many = $effect(['currency' => 'USD']);
+    self::assertSame(28, $many['count']);
+    self::assertCount(25, $many['places']);
+  }
+
+  /**
+   * The registry in the dialog's language; a sentence only when translated.
+   */
+  public function testTranslatedRegistry(): void {
+    $this->enableModules(['locale']);
+    $this->installSchema('locale', ['locales_source', 'locales_target', 'locales_location', 'locale_file']);
+    ConfigurableLanguage::createFromLangcode('fi')->save();
+    $this->container->get('kernel')->rebuildContainer();
+    $storage = $this->container->get('locale.storage');
+    $translate = static function (string $source, string $translation) use ($storage): void {
+      $string = $storage->createString(['source' => $source, 'context' => 'canvas_metatag:schema'])->save();
+      $storage->createTranslation([
+        'lid' => $string->getId(),
+        'language' => 'fi',
+        'translation' => $translation,
+      ])->save();
+    };
+    $translate('A product people buy', 'Tuote, jonka ihmiset ostavat');
+    $translate('Merchant listing', 'Kauppalistaus');
+    $translate('{name}, a web page of {site}.', '{name}, sivuston {site} sivu.');
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag']);
+
+    $finnish = self::decodeResponse($this->request(Request::create('/fi' . self::STATE)));
+    self::assertSame('fi', $finnish['ui']);
+    self::assertSame('Tuote, jonka ihmiset ostavat', $finnish['registry']['Product']['kind']['label']);
+    self::assertSame('Kauppalistaus', $finnish['search_features']['features']['merchant-listing']['label']);
+    // Untranslated strings stay English; ids, keys and paths are never
+    // translated.
+    self::assertSame('Plans for a service', $finnish['registry']['Service']['kind']['label']);
+    self::assertSame('Service', $finnish['search_features']['features']['merchant-listing']['not_for'][0]['suggest']);
+    self::assertSame('Product', $finnish['registry']['Product']['primary_type']);
+    // A type whose sentences are all translated keeps them; one with an
+    // untranslated sentence gives none, so the dialog lists the facts.
+    self::assertSame([['{name}, sivuston {site} sivu.']], $finnish['registry']['WebPage']['say']);
+    self::assertNull($finnish['registry']['Product']['say']);
+
+    $english = self::decodeResponse($this->request(Request::create(self::STATE)));
+    self::assertSame('en', $english['ui']);
+    self::assertSame('{name}, a web page of {site}.', $english['registry']['WebPage']['say'][0][0]);
+    self::assertCount(16, $english['registry']['Product']['say'][0]);
   }
 
   /**

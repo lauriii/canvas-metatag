@@ -372,10 +372,8 @@ test('the dialog follows the previewed event, also through hidden references and
   await expect(street.locator('.seo-linked-value')).toHaveText('Hidden from visitors for this event');
   await expect(street.locator('.seo-guide')).toHaveText('So the detail is left out.');
   await page.screenshot({ path: test.info().outputPath('hidden-venue-schema.png'), fullPage: true });
-  // The type's line says why the details are left out, not "Add".
-  await expect(frame.locator('.seo-field[data-path="schema.type"] .seo-guide')).toHaveText(
-    'Street address is hidden from visitors for this event, so Event details are left out.',
-  );
+  // The read-back says what ships: a web page, not "Add".
+  await expect(frame.getByRole('region', { name: UI.schema.stage })).toContainText('a web page of');
   await tab(frame, UI.tab.search).click();
   // Checks say what visitors miss: the venue's name and street are hidden.
   await button(frame, UI.tab.checks).click();
@@ -1063,14 +1061,10 @@ test('a type with no content shows its values read-only, until there is one to p
   const frame = await openSeo(page);
   await expect(button(frame, 'Every Announcement')).toBeVisible();
   await expect(frame.getByText(UI.template.nothingToPreview)).toBeVisible();
-  // The stored ending, and nothing to edit.
-  const titleEnding = button(frame, UI.field.titleEnding);
-  await expect(titleEnding).toHaveAccessibleName(`Title ending: ${announcement.ending}`);
-  // Its menu shows what a value could link to, and links nothing.
-  const readOnly = await linkMenu(frame);
-  await expect(readOnly.getByRole('option', { name: /^Text, / })).toHaveAttribute('aria-disabled', 'true');
-  await page.keyboard.press('Escape');
-  await expect(readOnly).toBeHidden();
+  // The stored ending, as text: no menu, no link, nothing offered to edit.
+  await expect(frame.locator('.seo-ending').first()).toContainText(announcement.ending);
+  await expect(button(frame, UI.field.titleEnding)).toHaveCount(0);
+  await expect(button(frame, UI.action.changeLink(UI.field.description))).toHaveCount(0);
   await expect(frame.getByTestId(TEST_ID.search)).toHaveCount(0);
   await expect(button(frame, UI.tab.checks)).toHaveCount(0);
   await expect(button(frame, UI.action.output)).toHaveCount(0);
@@ -1078,29 +1072,30 @@ test('a type with no content shows its values read-only, until there is one to p
   await expect(frame.getByText(UI.site.otherTemplate)).toHaveCount(0);
   // A value that follows its default says which, and that there is no
   // announcement to fill it from.
-  await expect(box(frame, UI.field.description)).toHaveAccessibleDescription(
+  const atRest = (label: string) => frame.getByRole('group', { name: label, exact: true });
+  await expect(atRest(UI.field.description)).toHaveAccessibleDescription(
     /^Follows the default: each announcement's description\. No announcement to preview\./,
   );
-  await expect(box(frame, UI.field.description)).toContainText('Default');
+  await expect(atRest(UI.field.description)).toContainText('Default');
   // Settings are values at rest: no switch or menu that does not open.
   await expect(frame.getByRole('switch')).toHaveCount(0);
   await expect(frame.locator('.seo-row[data-path="robots.noindex"]')).toContainText('On');
   await button(frame, 'Advanced').click();
-  // No select (a value's box is a combobox of its own).
-  await expect(frame.getByRole('combobox').and(frame.locator(':not(.seo-linked-box)'))).toHaveCount(0);
+  // No select, and no box that opens a menu.
+  await expect(frame.getByRole('combobox')).toHaveCount(0);
   await expect(frame.locator('.seo-row[data-path="robots.nosnippet"]')).toContainText('Allowed');
   // The social texts follow their defaults, with nothing to fill them from.
   await tab(frame, UI.tab.social).click();
-  await expect(box(frame, UI.field.socialTitle)).toHaveAccessibleDescription(/^Follows the default: each announcement's title\. No announcement to preview\./);
-  await expect(box(frame, UI.field.socialDescription)).toHaveAccessibleDescription(/^Follows the default: the description\. No announcement to preview\./);
-  await expect(box(frame, UI.field.socialDescription)).toContainText('No announcement to preview');
-  // No type, and nothing to choose: "None", without the invitation.
+  await expect(atRest(UI.field.socialTitle)).toHaveAccessibleDescription(/^Follows the default: each announcement's title\. No announcement to preview\./);
+  await expect(atRest(UI.field.socialDescription)).toHaveAccessibleDescription(/^Follows the default: the description\. No announcement to preview\./);
+  await expect(atRest(UI.field.socialDescription)).toContainText('No announcement to preview');
+  // No kind of its own: what is output, a web page, with no sheet to open.
   await tab(frame, UI.tab.schema).click();
-  await expect(frame.getByRole('combobox', { name: 'Type', exact: true })).toHaveText('None');
-  await expect(frame.getByText(/^Helps search engines/)).toHaveCount(0);
-  // Custom JSON-LD is off and opens no empty editor.
-  await expect(frame.getByText('Custom JSON-LD')).toBeVisible();
-  await expect(button(frame, 'Custom JSON-LD')).toHaveCount(0);
+  await expect(frame.locator('.seo-field[data-path="schema.type"]')).toContainText('A web page');
+  await expect(button(frame, UI.schema.kind)).toHaveCount(0);
+  // Your own JSON-LD is not offered, and opens no empty editor.
+  await expect(button(frame, UI.schema.ownJsonLd)).toHaveCount(0);
+
   await tab(frame, UI.tab.search).click();
   // The scope menu names the state as the notice does.
   await button(frame, 'Every Announcement').click();

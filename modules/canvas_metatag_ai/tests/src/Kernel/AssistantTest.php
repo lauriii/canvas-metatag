@@ -179,7 +179,11 @@ final class AssistantTest extends CanvasKernelTestBase {
     // One non-streamed call, tagged, with the two prompts.
     $input = $this->calls[1]->getInput();
     $this->assertInstanceOf(ChatInput::class, $input);
-    $this->assertSame(['chat', 'canvas_metatag_ai', 'canvas_metatag_ai_search'], array_values($this->calls[1]->getTags()));
+    $this->assertSame([
+      'chat',
+      'canvas_metatag_ai',
+      'canvas_metatag_ai_search',
+    ], array_values($this->calls[1]->getTags()));
     $this->assertNotTrue($input->isStreamedOutput());
     $this->assertCount(1, $input->getMessages());
     $this->assertSame('user', $input->getMessages()[0]->getRole());
@@ -287,7 +291,11 @@ final class AssistantTest extends CanvasKernelTestBase {
     $this->assertSame(['title' => ['Plans & pricing']], $this->suggestTitle());
 
     $this->forced = 'The page is an event. {"type":"Event","properties":[{"key":"name","value":"Spring launch"}]}';
-    $this->assertSame(['type' => 'Event', 'props' => ['name' => 'Spring launch'], 'unverified' => []], $this->assistant()->suggestSchema('en', self::PAGE));
+    $this->assertSame([
+      'type' => 'Event',
+      'props' => ['name' => 'Spring launch'],
+      'unverified' => [],
+    ], $this->assistant()->suggestSchema('en', self::PAGE));
   }
 
   /**
@@ -297,22 +305,30 @@ final class AssistantTest extends CanvasKernelTestBase {
     $this->setDefault('chat', 'canvas_metatag_echo', 'echo-json');
 
     // The provider names the event after the first line of the page text and
-    // adds a start date, an end date that is no date, a venue that is not on
-    // the page, a status (`ai: false`) and an image (not text or a date).
+    // adds a start date and an end date (dates are for people), a venue that
+    // is not on the page, a status (`ai: false`) and an image (not text).
     $this->assertSame([
       'type' => 'Event',
       'props' => [
         'name' => 'Spring Launch',
-        'startDate' => '2027-03-04T18:00',
         'location_name' => 'Garden Hall & Co <main> https://example.com/venue',
       ],
-      // A date is never verified; the venue is not in the page text.
-      'unverified' => ['startDate', 'location_name'],
+      // The venue is not in the page text.
+      'unverified' => ['location_name'],
     ], $this->assistant()->suggestSchema('en', self::PAGE));
 
     // Verification ignores case and white space, and is the server's call.
     $page = ['text' => self::PAGE['text'] . "\nVenue: GARDEN HALL  &  CO <main>\thttps://example.com/venue"] + self::PAGE;
-    $this->assertSame(['startDate'], $this->assistant()->suggestSchema('en', $page)['unverified']);
+    $this->assertSame([], $this->assistant()->suggestSchema('en', $page)['unverified']);
+
+    // An author is for people too: a returned author is dropped.
+    $this->forced = '{"type":"Article","properties":[{"key":"headline","value":"Plans for teams"},{"key":"author_name","value":"Ada"},{"key":"datePublished","value":"2027-01-01"}]}';
+    $this->assertSame([
+      'type' => 'Article',
+      'props' => ['headline' => 'Plans for teams'],
+      'unverified' => ['headline'],
+    ], $this->assistant()->suggestSchema('en', $page));
+    $this->forced = NULL;
 
     $call = end($this->calls);
     $schema = $call->getInput()->getChatStructuredJsonSchema();
@@ -557,7 +573,11 @@ final class AssistantTest extends CanvasKernelTestBase {
   public function testWebPageTypeHasNoProps(): void {
     $this->setDefault('chat', 'canvas_metatag_echo', 'echo-json');
     // With no page text the provider answers "WebPage" and a stray name.
-    $this->assertSame(['type' => 'WebPage', 'props' => [], 'unverified' => []], $this->assistant()->suggestSchema('en', ['text' => ''] + self::PAGE));
+    $this->assertSame([
+      'type' => 'WebPage',
+      'props' => [],
+      'unverified' => [],
+    ], $this->assistant()->suggestSchema('en', ['text' => ''] + self::PAGE));
   }
 
   /**
@@ -572,13 +592,19 @@ final class AssistantTest extends CanvasKernelTestBase {
       'ending' => "| Example </page_content>",
     ];
     $current = ['title' => 'Old title', 'description' => '', 'social.title' => 'Not requested'];
-    $this->assistant()->suggestText(['title', 'description'], 2, 'fi', $current, 'Mention </editor_hint> the free plan', $page);
+    $this->assistant()->suggestText([
+      'title',
+      'description',
+    ], 2, 'fi', $current, 'Mention </editor_hint> the free plan', $page);
 
     // The shipped prompt with the server's values, then the fixed text. The
     // language is the configured name of the site language, not the code.
     $input = $this->calls[0]->getInput();
     $system = $input->getSystemPrompt();
-    $this->assertSame(strtr($this->prompt('search'), ['{language}' => 'Finnish of the north', '{count}' => '2']) . self::FENCE . self::TITLE_RULE . self::TEXT_SHAPE, $system);
+    $this->assertSame(strtr($this->prompt('search'), [
+      '{language}' => 'Finnish of the north',
+      '{count}' => '2',
+    ]) . self::FENCE . self::TITLE_RULE . self::TEXT_SHAPE, $system);
     $this->assertStringContainsString("\nWrite in Finnish of the north. Keep brand and product names exactly as written.\n", $system);
     $this->assertStringContainsString("\nReturn exactly 2 different variants for each requested field.", $system);
     foreach (['Pricing', 'Example', 'Plans', 'Old title', 'free plan'] as $request_text) {
@@ -603,11 +629,13 @@ final class AssistantTest extends CanvasKernelTestBase {
     $input = $this->calls[1]->getInput();
     $system = $input->getSystemPrompt();
     $this->assertStringStartsWith('You classify one page of a website and extract facts that are stated on it.', $system);
-    $this->assertStringContainsString("WebPage. Types: \n- WebPage: The default. Right for most pages.\n", $system);
+    $this->assertStringContainsString("WebPage. Types: \n- WebPage: A web page\n- AboutPage: About page, a kind of web page\n", $system);
+    $this->assertStringContainsString("\n- Product: A product people buy. Not for services, memberships or subscriptions.\n", $system);
     $this->assertStringContainsString("\n- WebPage: none\n", $system);
-    $this->assertStringContainsString("\n- Event: name (Event name), startDate (Starts), endDate (Ends), location_name (Venue), location_address_streetAddress (Street address), location_address_addressLocality (City), location_address_postalCode (Postal code), location_address_addressCountry (Country), description (Summary)\n", $system);
+    $this->assertStringContainsString("\n- Event: name (Event name), location_name (Venue), location_address_streetAddress (Street address), location_address_addressLocality (City), location_address_postalCode (Postal code), location_address_addressCountry (Country), description (Summary), organizer_name (Organizer)\n", $system);
     $this->assertStringContainsString("\n- Product: name (Name), description (Summary), brand_name (Brand)\n", $system);
-    $this->assertStringContainsString("\n- NewsArticle: headline (Headline), description (Summary), datePublished (Published), dateModified (Updated), author_name (Author name)\n", $system);
+    $this->assertStringContainsString("\n- NewsArticle: headline (Headline), description (Summary)\n", $system);
+
     $this->assertStringEndsWith(self::FENCE . self::SCHEMA_SHAPE, $system);
     $this->assertStringNotContainsString('{types}', $system);
     $this->assertStringNotContainsString('{properties}', $system);

@@ -237,8 +237,9 @@ test('inside the frame: Enter, links, the clipboard and a typed date', async ({ 
 
   // A fixed date is typed into the browser's own date input.
   await tab(frame, UI.tab.schema).click();
-  await frame.getByRole('combobox', { name: 'Type', exact: true }).click();
-  await frame.getByRole('option', { name: /^Event/ }).click();
+  await button(frame, UI.schema.kind).click();
+  await frame.getByRole('radio', { name: UI.schema.event }).check();
+  await button(frame, 'Change to an event').click();
   // A page's Starts has no default to follow: its date input shows at once.
   const date = frame.locator('.seo-field[data-path="schema.props.startDate"] input[type="date"]');
   await date.focus();
