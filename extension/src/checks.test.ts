@@ -1,7 +1,10 @@
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
-import { type ChecksInput, checks, countIssues, identityGaps } from './checks';
-import { REGISTRY, cascade, merge, source, texts as textsOf } from './model';
+import { type ChecksInput, checks, countIssues, identityGaps, rankImages } from './checks';
+import { EMPTY_SCHEMA, REGISTRY, RULES } from './data.test-helper';
+import { cascade, merge, source, texts as textsOf } from './model';
 import type {
   BrokenLink,
   Fact,
@@ -57,6 +60,8 @@ const field = (name: string, label: string, over: Partial<SourceRow> = {}): Sour
   ...over,
 });
 
+const PAGE = 'https://www.example.com/pricing';
+
 const SITE = {
   identity: {
     kind: 'organization' as const,
@@ -69,6 +74,7 @@ const SITE = {
   values: {
     robots: { max_image_preview: 'large' as const },
   },
+  currency: '',
 };
 
 interface Setup {
@@ -79,6 +85,7 @@ interface Setup {
   facts?: Partial<Record<Fact, string>>;
   sources?: SourceRow[];
   broken?: Record<string, BrokenLink>;
+  media?: Lookup['media'];
   resolved?: Partial<Resolved> | null;
   robotsMeta?: string;
   canonical?: string;
@@ -101,7 +108,7 @@ function input(setup: Setup = {}): ChecksInput {
     ),
     sources: setup.sources ?? [],
     broken: setup.broken ?? {},
-    media: {},
+    media: setup.media ?? {},
     resolvable: true,
   };
   const layers = {
@@ -137,15 +144,15 @@ function input(setup: Setup = {}): ChecksInput {
               script: [],
             },
             image: IMAGE,
-            schema: {
-              withheld: false,
-              missing_required: [],
-              missing_recommended: [],
-            },
+            schema: EMPTY_SCHEMA,
             ...setup.resolved,
           },
     site: SITE,
     registry: REGISTRY,
+    rules: RULES,
+    home: 'https://www.example.com/',
+    url: 'https://www.example.com/pricing',
+    ui: 'en',
     facts: {
       h1: ['Pricing'],
       imagesWithoutAlt: [],
@@ -365,30 +372,28 @@ describe('checks()', () => {
       'fix',
       {
         target: { schema: { type: 'Event' } },
-        resolved: {
-          schema: {
-            withheld: true,
-            missing_required: ['startDate'],
-            missing_recommended: [],
-          },
-        },
+        resolved: { schema: { ...EMPTY_SCHEMA, type: 'Event', withheld: { missing: ['startDate'], dropped: [], node: {} } } },
       },
-      ['Add Starts', 'Event details are left out until it is filled in.'],
+      ['Add a start date', 'The event is left out until it is filled in.'],
     ],
     [
-      'schema-recommended',
-      'improve',
+      'feature-helps:event',
+      'info',
       {
         target: { schema: { type: 'Event' } },
-        resolved: {
-          schema: {
-            withheld: false,
-            missing_required: [],
-            missing_recommended: ['endDate', 'location_name'],
-          },
-        },
+        resolved: { schema: { ...EMPTY_SCHEMA, type: 'Event', features: [{ feature: 'event', node: `${PAGE}#primary`, verdict: 'ready', helps: [{ path: 'location.name', prop: 'location_name' }, { path: 'endDate', prop: 'endDate' }] }] } },
       },
-      'Event is missing: Ends, Venue.',
+      // In the form's order, whatever the rules file's.
+      ['Also helps the event result: Ends, Venue.', 'Adding them gives the event result more to show.'],
+    ],
+    [
+      'feature-needs:image',
+      'improve',
+      {
+        target: { schema: { type: 'Product' } },
+        resolved: { schema: { ...EMPTY_SCHEMA, type: 'Product', features: [{ feature: 'merchant-listing', node: `${PAGE}#primary`, verdict: 'needs', missing: [{ path: 'image', prop: 'image' }] }] } },
+      },
+      'Add an image for merchant listings',
     ],
     [
       'schema-dates:endDate',
@@ -404,7 +409,7 @@ describe('checks()', () => {
           },
         },
       },
-      '"Ends" is before "Starts".',
+      ['Move “Ends” after “Starts”', '“Ends” is before “Starts”.'],
     ],
     [
       'schema-dates:dateModified',
@@ -413,7 +418,7 @@ describe('checks()', () => {
         target: { schema: { type: 'Article' } },
         facts: { modified: '2026-03-01T09:00:00+02:00' },
       },
-      '"Updated" is before "Published".',
+      ['Move “Updated” after “Published”', '“Updated” is before “Published”.'],
     ],
     [
       'schema-not-on-page:location_name',
@@ -423,7 +428,8 @@ describe('checks()', () => {
           schema: { type: 'Event', props: { location_name: t('The New Mill') } },
         },
       },
-      ['Check Venue', 'It does not appear on the page. Structured data should match what visitors see.'],
+      ["Couldn't find “The New Mill” on this page", 'Structured data should describe what visitors see.'],
+
     ],
     [
       'identity-incomplete',
@@ -485,7 +491,8 @@ describe('checks()', () => {
         'h1-missing',
         'img-alt',
         'schema-required',
-        'schema-recommended',
+        'feature-helps',
+        'feature-needs',
         'schema-dates',
         'schema-not-on-page',
         'identity-incomplete',
@@ -689,10 +696,11 @@ describe('fixes', () => {
     expect(
       find({ ...missing, input: { ai: true } }, 'description-missing')!.fix,
     ).toEqual({ label: 'Suggest', suggest: 'description' });
+    // At template scope it is said for the item, with nothing to suggest.
     expect(
       find(
         { ...missing, input: { ai: true, scope: 'template' } },
-        'description-missing',
+        'value-empty:description',
       )!.fix,
     ).toBeUndefined();
     expect(
@@ -810,13 +818,14 @@ describe('rules that need the page preview', () => {
         'schema-not-on-page:location_name',
       ),
     ).toBeUndefined();
-    // Linked to a fact, a value is the page's own: never compared.
+    // Linked to a fact, a value is compared too, named by its value, and
+    // its source said.
     expect(
       find(
         event({ location_name: { fact: 'author' } }),
         'schema-not-on-page:location_name',
       ),
-    ).toBeUndefined();
+    ).toMatchObject({ message: 'Couldn’t find “Ada” on this page'.replace('’', "'"), detail: 'It comes from author. Structured data should describe what visitors see.' });
     // Braces are typed text, compared as written.
     expect(
       find(
@@ -824,14 +833,296 @@ describe('rules that need the page preview', () => {
         'schema-not-on-page:location_name',
       ),
     ).toBeDefined();
-    // Dates and other kinds are never compared with the text.
+    // A code, an identifier or an option is never compared with the text.
     expect(
-      ids(checks(input(event({ startDate: '2027-03-04' })))).filter((id) =>
+      ids(checks(input({ target: { schema: { type: 'Product', props: { sku: t('LAMP-1'), offers_priceCurrency: t('EUR'), offers_availability: t('InStock') } } } }))).filter((id) =>
         id.startsWith('schema-not-on-page'),
       ),
     ).toEqual([]);
   });
+
+  it('finds dates four ways, and images by their file', () => {
+    const on = (text: string, images: string[] = []): Setup['input'] => ({ facts: { h1: ['Pricing'], imagesWithoutAlt: [], text, images } });
+    const starts = { target: { schema: { type: 'Event', props: { startDate: t('2027-03-04') } } } };
+    for (const text of ['March 4, 2027', 'Mar 4, 2027', '3/4/27', 'On 2027-03-04 at six']) {
+      expect(find({ ...starts, input: on(`Doors open ${text}.`) }, 'schema-not-on-page:startDate'), text).toBeUndefined();
+    }
+    expect(find({ ...starts, input: on('Doors open soon.') }, 'schema-not-on-page:startDate')?.message).toBe("Couldn't find the date 4 March 2027 on this page");
+    // An image by its file, whatever size the page shows it at.
+    const image = { target: { schema: { type: 'Product', props: { image: { media: 'lamp' } } } } };
+    const media = { lamp: { name: 'Oak lamp', thumb: '/files/styles/medium/public/oak-lamp.png.webp?itok=a', width: 1200, height: 1200 } };
+    expect(find({ ...image, media, input: on('', ['/files/styles/large/public/oak-lamp.png.avif?itok=b']) }, 'schema-not-on-page:image')).toBeUndefined();
+    expect(find({ ...image, media, input: on('', ['/files/other.png']) }, 'schema-not-on-page:image')?.message).toBe("Couldn't find the image “Oak lamp” on this page");
+  });
+
+  it('finds a price only next to a currency, with its period', () => {
+    const graph = (offers: Record<string, unknown>) => ({
+      head: { title: '', meta: [], link: [], script: [{ type: 'application/ld+json', textContent: { '@graph': [{ '@id': `${PAGE}#primary`, '@type': 'Product', name: 'Studio', offers: { '@type': 'Offer', ...offers } }] } }] },
+      image: null,
+      schema: { ...EMPTY_SCHEMA, type: 'Product' },
+    });
+    const price = (text: string, offers: Record<string, unknown> = { price: '2500', priceCurrency: 'EUR' }) =>
+      find({ target: { schema: { type: 'Product', props: { offers_price: t('2500') } } }, resolved: graph(offers), input: { facts: { h1: [], imagesWithoutAlt: [], text } } }, 'schema-not-on-page:offers_price');
+    expect(price('Studio: €2,500, paid once.')).toBeUndefined();
+    expect(price('Studio 2.500 EUR')).toBeUndefined();
+    // A number that is not next to a currency is not a price.
+    expect(price('Trusted by 2,500 customers.')?.message).toBe("Couldn't find €2,500 on this page");
+    // Shown per month, stored as a one-time price.
+    expect(price('Studio €2,500 / month')).toMatchObject({
+      message: "Couldn't find €2,500 as a one-time price on this page: it says €2,500 a month.",
+      // Billed is where that is said.
+      detail: 'If it is paid every month or year, say so in Billed.',
+      jump: { field: 'schema.props.billing' },
+    });
+    // Billed every month: found.
+    expect(price('Studio €2,500 / month', { price: '2500', priceCurrency: 'EUR', priceSpecification: { billingDuration: 'P1M' } })).toBeUndefined();
+    // The same amount in another currency: said, and Currency is where it is fixed.
+    expect(price('Studio $2,500')).toMatchObject({
+      message: "Couldn't find €2,500 on this page: it says $2,500.",
+      jump: { field: 'schema.props.offers_priceCurrency' },
+    });
+    // A draft that is not a number is not compared: no "NaN".
+    expect(find({ target: { schema: { type: 'Product', props: { offers_price: t('Euro89') } } }, resolved: graph({ price: '89', priceCurrency: 'EUR' }), input: { facts: { h1: [], imagesWithoutAlt: [], text: 'Nothing' } } }, 'schema-not-on-page:offers_price')).toBeUndefined();
+  });
+
+  it('lists the page\'s own images first, then those picked in this session', () => {
+    const item = (uuid: string, file: string) => ({ uuid, thumb: `/files/styles/thumbnail/public/${file}.webp?itok=x` });
+    const items = [item('a', 'logo.png'), item('b', 'picked.png'), item('c', 'hero.jpg'), item('d', 'other.png')];
+    const ranked = rankImages(items, ['/files/styles/large/public/hero.jpg?itok=y'], ['b']);
+    expect(ranked.map((one) => one.uuid)).toEqual(['c', 'b', 'a', 'd']);
+    // Nothing on the page, nothing picked: the library's order.
+    expect(rankImages(items, [], []).map((one) => one.uuid)).toEqual(['a', 'b', 'c', 'd']);
+  });
+
+  it('a feature that needs an image offers the chooser and shows the field', () => {
+    const image = find(
+      { target: { schema: { type: 'Product' } }, resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, type: 'Product', features: [{ feature: 'merchant-listing', node: `${PAGE}#primary`, verdict: 'needs', missing: [{ path: 'image', prop: 'image' }] }] } } },
+      'feature-needs:image',
+    );
+    expect(image).toMatchObject({ fix: { label: 'Choose an image' }, jump: { field: 'schema.props.image' } });
+  });
+
+  it('checks hand-added items: text nobody can see, reviews of yourself, ratings', () => {
+    const hand = (items: Record<string, unknown>[], rules: Resolved['schema']['rules'] = [], text = 'Pricing Simple plans for teams.') =>
+      checks(input({
+        target: { schema: { custom: JSON.stringify(items) } },
+        resolved: {
+          head: { title: '', meta: [], link: [], script: [{ type: 'application/ld+json', textContent: { '@graph': [{}, {}, {}, ...items] } }] },
+          image: null,
+          schema: { ...EMPTY_SCHEMA, nodes: items.map((item, at) => ({ id: typeof item['@id'] === 'string' ? PAGE + item['@id'] : null, type: String(item['@type']), origin: 'hand' as const, item: at, at: at + 3 })), rules },
+        },
+        input: { facts: { h1: [], imagesWithoutAlt: [], text } },
+      }));
+    const faq = { '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'Is the shade dimmable?', acceptedAnswer: { '@type': 'Answer', text: 'Yes.' } }] };
+    const hidden = hand([faq]).find((issue) => issue.id === 'hand-hidden:0');
+    expect(hidden).toMatchObject({ severity: 'fix', message: 'Couldn’t find the question “Is the shade dimmable?” on this page'.replace('’', "'"), recheck: 'Check again' });
+    // Leaving it out lists it, and keeps the JSON-LD; an item without an
+    // @id is given one first.
+    const fix = hidden!.fix as { apply(values: SeoValues): SeoValues; undo(values: SeoValues): string };
+    const left = fix.apply({ schema: { custom: JSON.stringify([faq]) } });
+    expect(left.schema?.skip).toEqual(['#faqpage']);
+    expect(JSON.parse(left.schema!.custom!)[0]).toEqual({ '@id': '#faqpage', ...faq });
+    // The bar says so, wherever the fix is pressed.
+    expect(fix.undo({ schema: { custom: JSON.stringify([faq]) } })).toBe('Gave the item the id #faqpage so it can be left out.');
+    const named = hand([{ '@id': '#faq', ...faq }]).find((issue) => issue.id === 'hand-hidden:0')!.fix as typeof fix;
+    expect(named.undo({ schema: { custom: JSON.stringify([{ '@id': '#faq', ...faq }]) } })).toBe('Left out until it is on the page');
+    // An unsent edit moved it: the item the report named is still the one
+    // left out, by its id.
+    expect(named.apply({ schema: { custom: JSON.stringify([{ '@type': 'Thing' }, { '@id': '#faq', ...faq }]) } }).schema?.skip).toEqual(['#faq']);
+    // The JSON-LD no longer holds it: no fix that would do nothing.
+    const gone = checks(input({
+      target: { schema: { custom: JSON.stringify([{ '@type': 'Thing' }]) } },
+      resolved: {
+        head: { title: '', meta: [], link: [], script: [{ type: 'application/ld+json', textContent: { '@graph': [{}, {}, {}, faq] } }] },
+        image: null,
+        schema: { ...EMPTY_SCHEMA, nodes: [{ id: null, type: 'FAQPage', origin: 'hand' as const, item: 0, at: 3 }] },
+      },
+      input: { facts: { h1: [], imagesWithoutAlt: [], text: 'Pricing' } },
+    })).find((issue) => issue.id === 'hand-hidden:0');
+    expect(gone).toBeDefined();
+    expect(gone!.fix).toBeUndefined();
+    // On the page: nothing to fix.
+    expect(ids(hand([faq], [], 'Is the shade dimmable? Yes.'))).not.toContain('hand-hidden:0');
+
+    // Reviews of your own organization are to fix; the rules come from the server.
+    const own = hand([{ '@type': 'Review', name: 'Pricing' }], [{ rule: 'own_reviews', item: 0, node: null }]);
+    expect(own.find((issue) => issue.id === 'hand-reviews:0')).toMatchObject({ severity: 'fix', message: 'No review stars for reviews of your own organization.' });
+    // Two of them are told apart: a review by its author, else by its name.
+    const two = hand([{ '@type': 'Review', author: { '@type': 'Person', name: 'Ann' } }, { '@type': 'Review', name: 'Pricing' }], [{ rule: 'own_reviews', item: 0, node: null }, { rule: 'own_reviews', item: 1, node: null }]);
+    expect(two.filter((issue) => issue.id.startsWith('hand-reviews:')).map((issue) => issue.detail?.split(':')[0])).toEqual(['The review by Ann', 'Pricing']);
+    // A second identity points at the identity by its full address.
+    const copy = hand([{ '@type': 'Organization', name: 'Pricing' }], [{ rule: 'second_identity', item: 0, node: null }]);
+    expect(copy.find((issue) => issue.id === 'hand-identity:0')?.detail).toBe('This is your site\'s organization. Point to it with “@id”: “https://www.example.com/#identity” instead.');
+    // A reference to an item of the site that is not here, and an address
+    // that is not a full one.
+    const dangling = hand([{ '@type': 'Thing', name: 'Pricing' }], [{ rule: 'dangling', item: 0, node: null, value: 'https://www.example.com/#logo' }]);
+    expect(dangling.find((issue) => issue.id.startsWith('hand-dangling:0'))).toMatchObject({ severity: 'improve', message: "Points to https://www.example.com/#logo, which isn't on this page" });
+    const relative = hand([{ '@type': 'Thing', name: 'Pricing' }], [{ rule: 'relative', item: 0, node: null, value: '/about' }]);
+    expect(relative.find((issue) => issue.id.startsWith('hand-relative:0'))).toMatchObject({ severity: 'improve', message: 'Use a full address for “/about”' });
+    // A rating the page never shows.
+    const rating = hand([{ '@type': 'AggregateRating', name: 'Pricing', ratingValue: '4.8', reviewCount: '12' }], [], 'Pricing Rated 4,8 by 12 people.');
+    expect(ids(rating).filter((id) => id.startsWith('hand-rating'))).toEqual([]);
+    expect(hand([{ '@type': 'AggregateRating', name: 'Pricing', ratingValue: '4.8' }]).find((issue) => issue.id.startsWith('hand-rating'))?.message).toBe("Couldn't find the rating 4.8 on this page");
+    // A value that is not a plain number is looked for as written, never run
+    // as a pattern.
+    for (const value of ['(4.5', '*4', '[5', '4.5.1']) {
+      const odd = hand([{ '@type': 'AggregateRating', name: 'Pricing', ratingValue: value }]);
+      expect(odd.find((issue) => issue.id.startsWith('hand-rating'))?.message).toBe(`Couldn't find the rating ${value} on this page`);
+    }
+    expect(ids(hand([{ '@type': 'AggregateRating', name: 'Pricing', ratingValue: '(4.5' }], [], 'Pricing Rated (4,5) by many.')).filter((id) => id.startsWith('hand-rating'))).toEqual([]);
+  });
+
+  it('names what a site setting needs, by its own feature, for those who may set it', () => {
+    const logo = (can = true) =>
+      checks(input({
+        resolved: {
+          head: { title: '', meta: [], link: [], script: [] },
+          image: null,
+          schema: { ...EMPTY_SCHEMA, features: [{ feature: 'organization-logo', node: 'https://www.example.com/#identity', verdict: 'needs', missing: [{ path: 'logo.width', site: 'identity.logo', rule: 0 }] }] },
+        },
+        input: { can: { target: true, site: can } },
+      })).find((issue) => issue.id.startsWith('feature-needs:'));
+    expect(logo()).toMatchObject({ severity: 'improve', message: 'Add a logo at least 112 pixels wide for the logo in results', jump: { scope: 'site', field: 'identity.logo' } });
+    // Without the right to change the site, nothing to count.
+    expect(logo(false)).toBeUndefined();
+  });
+
+  it('says an unknown stored kind, a product named after its page, and no search feature', () => {
+    const schema = (over: Partial<Resolved['schema']>, values: SeoValues, more: Partial<ChecksInput> = {}, graph: Record<string, unknown>[] = []) =>
+      checks(input({
+        target: values,
+        resolved: { head: { title: '', meta: [], link: [], script: [{ type: 'application/ld+json', textContent: { '@graph': graph } }] }, image: null, schema: { ...EMPTY_SCHEMA, ...over } },
+        input: more,
+      }));
+    const unknown = schema({ unknown_type: 'Recipe' }, { schema: { type: 'Recipe' } }).find((issue) => issue.id === 'schema-unknown');
+    expect(unknown).toMatchObject({ severity: 'improve', message: 'Choose what this page is', jump: { field: 'schema.type' } });
+    expect(unknown?.detail).toContain('“Recipe”');
+
+    // A product named after its page title: on a page, to improve.
+    const product = (name: string, more: Partial<ChecksInput> = {}) =>
+      schema({ type: 'Product' }, { schema: { type: 'Product' } }, more, [{ '@type': 'Product', '@id': `${PAGE}#primary`, name }]).find((issue) => issue.id === 'schema-name-title');
+    expect(product('Pricing')).toMatchObject({ severity: 'improve', message: 'Give the product its own name', jump: { field: 'schema.props.name' } });
+    expect(product('Studio membership')).toBeUndefined();
+    // On a template the name follows each item's own title, which is right.
+    expect(product('Pricing', { scope: 'template', typeLabel: 'Product' })).toBeUndefined();
+
+    // No search feature for a kind that has one: good to know, not counted.
+    const none = schema({ type: 'Service', features: [{ feature: null, node: null, verdict: 'none' }] }, { schema: { type: 'Service' } }).filter((issue) => issue.id === 'feature-none');
+    expect(none).toMatchObject([{ severity: 'info', message: 'No search feature for plans for a service' }]);
+    expect(countIssues(none)).toBe(0);
+    // A web page says nothing about it.
+    expect(ids(schema({ features: [{ feature: null, node: null, verdict: 'none' }] }, {}))).not.toContain('feature-none');
+  });
+
+  it('every kind of row checks.ts makes is tested here', () => {
+    const source = readFileSync(new URL('./checks.ts', import.meta.url), 'utf8');
+    const tests = readFileSync(new URL('./checks.test.ts', import.meta.url), 'utf8');
+    const made = [...new Set([...source.matchAll(/\bid: [`'"]([a-z0-9-]+)/g)].map((m) => m[1]))];
+    expect(made.length).toBeGreaterThan(30);
+    expect(made.filter((id) => !new RegExp(`['\`]${id}[:'\`]`).test(tests))).toEqual([]);
+  });
+
+  it('never promises a result in structured data words', () => {
+    const banned = /will show|eligible|AI-ready|get cited|\bscores?\b/i;
+    const checksSource = readFileSync(new URL('./checks.ts', import.meta.url), 'utf8');
+    const structuredRows = checksSource.slice(checksSource.indexOf('// Structured data:'));
+    const stage = readFileSync(new URL('./components/SchemaTab.tsx', import.meta.url), 'utf8');
+    const rules = readFileSync(new URL('../../data/search-features.json', import.meta.url), 'utf8');
+    for (const [name, text] of Object.entries({ structuredRows, stage, rules })) {
+      expect([name, text.match(banned)?.[0] ?? null]).toEqual([name, null]);
+    }
+  });
+
+  it('words the verdicts: doesn’t fit, only if bought here, retired, never counted', () => {
+    const verdicts = (features: Resolved['schema']['features']) =>
+      checks(input({ target: { schema: { type: 'Product' } }, resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, type: 'Product', features } } }));
+    const node = `${PAGE}#primary`;
+    const all = verdicts([
+      { feature: 'merchant-listing', node, verdict: 'not_fit', reason: 'recurring' },
+      { feature: 'faq', node: `${PAGE}#faq`, verdict: 'retired' },
+    ]);
+    expect(all.find((issue) => issue.id === 'feature-not-fit:merchant-listing')).toMatchObject({ severity: 'info', message: "Merchant listing doesn't fit: a recurring price" });
+    expect(all.find((issue) => issue.id.startsWith('feature-retired:faq'))).toMatchObject({ severity: 'info', message: 'FAQ: Not shown since 7 May 2026' });
+    expect(countIssues(all.filter((issue) => issue.id.startsWith('feature-')))).toBe(0);
+    expect(verdicts([{ feature: 'merchant-listing', node, verdict: 'unanswered' }]).find((issue) => issue.id.startsWith('feature-unanswered'))).toMatchObject({ severity: 'info', jump: { field: 'schema.props.sold_here' } });
+    // Each heading of a structured data rule starts with a verb.
+    const headings = [
+      ...verdicts([{ feature: 'merchant-listing', node, verdict: 'needs', missing: [{ path: 'image', prop: 'image' }, { path: 'offers.priceCurrency', prop: 'offers_priceCurrency' }] }]),
+      ...checks(input({ target: { schema: { type: 'Product' } }, resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, type: 'Product', withheld: { missing: ['offers_price'], dropped: [], node: {} } } } })),
+    ].filter((issue) => /^(schema-required|feature-needs|schema-dropped|schema-name-title|schema-unknown|schema-dates)/.test(issue.id));
+    expect(headings.map((issue) => issue.message)).toEqual(['Add an image for merchant listings', 'Add a currency for merchant listings', 'Add a price']);
+    for (const issue of headings) {
+      expect(issue.message).toMatch(/^(Add|Use|Fix|Give|Choose|Move) /);
+    }
+  });
+
+  it('says a value that does not fit under its own field, never "Add"', () => {
+    const currency = field('field_currency', 'Currency', { status: 'ok', value: 'Euro (€)' });
+    const all = checks(input({
+      target: { schema: { type: 'Product', props: { offers_priceCurrency: { source: currency.source } } } },
+      sources: [currency],
+      resolved: {
+        head: { title: '', meta: [], link: [], script: [] },
+        image: null,
+        schema: {
+          ...EMPTY_SCHEMA,
+          type: 'Product',
+          dropped: [{ key: 'offers_priceCurrency', value: 'Euro (€)', kind: 'currency' }],
+          features: [{ feature: 'merchant-listing', node: `${PAGE}#primary`, verdict: 'needs', missing: [{ path: 'offers.priceCurrency', prop: 'offers_priceCurrency' }] }],
+        },
+      },
+      input: { scope: 'template', typeLabel: 'Product' },
+    }));
+    expect(all.find((issue) => issue.id === 'schema-dropped:offers_priceCurrency')).toMatchObject({
+      severity: 'improve',
+      message: 'Use a currency code from the list, such as EUR: the Currency field gives “Euro (€)”.',
+      jump: { field: 'schema.props.offers_priceCurrency' },
+    });
+    expect(all.map((issue) => issue.message).join('\n')).not.toContain('Add a currency');
+  });
+
+  it('says a description linked to a field the previewed item has empty as a fact', () => {
+    const sku = field('field_sku', 'SKU', { status: 'empty', value: '' });
+    const all = checks(input({
+      target: { description: { source: sku.source } },
+      sources: [sku],
+      facts: { description: '' },
+      input: { scope: 'template', typeLabel: 'Product' },
+    }));
+    expect(all.find((issue) => issue.id === 'value-empty:description')).toMatchObject({
+      severity: 'info',
+      message: 'SKU is empty for this product',
+      jump: { field: 'description' },
+    });
+    expect(all.map((issue) => issue.id)).not.toContain('description-missing');
+    // Its default, the same way.
+    expect(checks(input({ facts: { description: '' }, input: { scope: 'template', typeLabel: 'Product' } })).find((issue) => issue.id === 'value-empty:description')?.message).toBe('The description is empty for this product');
+    // On a page the empty description is the page's own problem.
+    expect(checks(input({ target: { description: { source: sku.source } }, sources: [sku], facts: { description: '' } })).map((issue) => issue.id)).toContain('description-missing');
+  });
+
+  it('lists a detail linked to a field the previewed item has empty once', () => {
+    const ends = field('field_ends', 'Ends', { kinds: ['date'], status: 'empty', value: '' });
+    const all = checks(input({
+      target: { schema: { type: 'Event', props: { endDate: { source: ends.source } } } },
+      sources: [ends],
+      resolved: {
+        head: { title: '', meta: [], link: [], script: [] },
+        image: null,
+        schema: {
+          ...EMPTY_SCHEMA,
+          type: 'Event',
+          features: [{ feature: 'event', node: `${PAGE}#primary`, verdict: 'ready', helps: [{ path: 'endDate', prop: 'endDate' }] }],
+        },
+      },
+      input: { scope: 'template', typeLabel: 'Event' },
+    }));
+    expect(all.filter((issue) => issue.id.includes('endDate'))).toEqual([
+      expect.objectContaining({ id: 'schema-empty:endDate', severity: 'info', message: 'Ends is empty for this event' }),
+    ]);
+  });
 });
+
 
 describe('rules with conditions', () => {
   it('title-generic is silent outside English', () => {
@@ -1032,7 +1323,7 @@ describe('rules with conditions', () => {
         },
         sources: rows,
         resolved: {
-          schema: { withheld: true, missing_required: ['location_address_streetAddress'], missing_recommended: [] },
+          schema: { ...EMPTY_SCHEMA, type: 'Event', withheld: { missing: ['location_address_streetAddress'], dropped: [], node: {} } },
         },
         input: { scope: 'template', typeLabel: 'Event' },
       }),
@@ -1056,12 +1347,12 @@ describe('rules with conditions', () => {
         {
           target: { schema: { type: 'Event', props: { startDate: { source: ends.source } } } },
           sources: [ends],
-          resolved: { schema: { withheld: true, missing_required: ['startDate'], missing_recommended: [] } },
+          resolved: { schema: { ...EMPTY_SCHEMA, type: 'Event', withheld: { missing: ['startDate'], dropped: [], node: {} } } },
           input: { scope: 'template', typeLabel: 'Event' },
         },
         'schema-required:startDate',
       ),
-    ).toMatchObject({ message: 'Starts is empty for this event', detail: 'Event details are left out for this event.' });
+    ).toMatchObject({ message: 'Starts is empty for this event', detail: 'The event is left out for this event.' });
   });
 
   it('says why a link is broken by its reason, naming the machine name', () => {
@@ -1155,16 +1446,16 @@ describe('rules with conditions', () => {
         ],
         resolved: {
           schema: {
-            withheld: false,
-            missing_required: [],
-            missing_recommended: ['endDate', 'image', 'location_name'],
+            ...EMPTY_SCHEMA,
+            type: 'Event',
+            features: [{ feature: 'event', node: `${PAGE}#primary`, verdict: 'ready', helps: [{ path: 'endDate', prop: 'endDate' }, { path: 'image', prop: 'image' }, { path: 'location.name', prop: 'location_name' }] }],
           },
         },
         input: template,
       }),
     );
-    expect(linked.find((issue) => issue.id === 'schema-recommended')?.message).toBe(
-      'Event is missing: Venue.',
+    expect(linked.find((issue) => issue.id === 'feature-helps:event')?.message).toBe(
+      'Also helps the event result: Venue.',
     );
     expect(linked.find((issue) => issue.id === 'schema-empty:endDate')).toMatchObject({
       severity: 'info',
@@ -1181,12 +1472,12 @@ describe('rules with conditions', () => {
           target: { schema: { type: 'Event', props: { endDate: { source: field('field_ends', 'Ends').source } } } },
           sources: [field('field_ends', 'Ends', { kinds: ['date'], status: 'empty', value: '' })],
           resolved: {
-            schema: { withheld: false, missing_required: [], missing_recommended: ['endDate'] },
+            schema: { ...EMPTY_SCHEMA, type: 'Event', features: [{ feature: 'event', node: `${PAGE}#primary`, verdict: 'ready', helps: [{ path: 'endDate', prop: 'endDate' }] }] },
           },
         },
-        'schema-recommended',
+        'feature-helps:event',
       )?.message,
-    ).toBe('Event is missing: Ends.');
+    ).toBe('Also helps the event result: Ends.');
     // A type named by an abbreviation keeps it.
     expect(
       find(

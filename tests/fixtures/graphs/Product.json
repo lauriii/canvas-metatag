@@ -73,9 +73,53 @@
         }
     },
     "report": {
-        "withheld": false,
-        "missing_required": [],
-        "missing_recommended": []
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "set",
+            "description": "default",
+            "image": "set",
+            "offers_price": "set",
+            "offers_priceCurrency": "set",
+            "offers_availability": "set",
+            "brand_name": "set",
+            "sku": "set"
+        },
+        "gates": [],
+        "type": "Product",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/shop/desk#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/shop/desk#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/shop/desk#primary",
+                "type": "Product",
+                "origin": "main",
+                "at": 4
+            }
+        ]
     },
     "graph": {
         "@context": "https://schema.org",

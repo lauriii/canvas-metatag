@@ -114,6 +114,13 @@ canvas_metatag.values:
           type: string
           label: 'Custom JSON-LD'
           requiredKey: false
+        skip:
+          type: sequence
+          label: 'Hand-added items left out, by @id'
+          requiredKey: false
+          sequence:
+            type: string
+            label: '@id as written'
 
 canvas_metatag.site:
   type: config_object
@@ -149,6 +156,10 @@ canvas_metatag.site:
     values:
       type: canvas_metatag.values
       label: 'Site defaults'
+    currency:
+      type: string
+      label: 'Currency of prices (an ISO 4217 code; empty: none)'
+      requiredKey: false
 
 canvas.content_template.*.*.*.third_party.canvas_metatag:
   type: mapping

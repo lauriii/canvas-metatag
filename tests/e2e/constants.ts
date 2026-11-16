@@ -30,6 +30,8 @@ export const PAGES = {
   checks: { id: 4, title: 'Checks', path: './checks' },
   // Its published SEO title's main part is "Published title".
   stored: { id: 5, title: 'Stored', path: './stored', seoTitle: 'Published title' },
+  /** Described as a Recipe, which the registry does not have. */
+  oldRecipe: { id: 6, title: 'Rye bread', path: './rye-bread' },
 } as const;
 
 /** Image media, by name. The file is the lower-cased, hyphenated name. */
@@ -258,6 +260,24 @@ export const UI = {
     sends: "Sends this page's text to the AI service.",
     // Typed into Refine, it trips the site guardrail the AI setup adds.
     policyMarker: '#policy',
-    notFound: 'Not found on the page. Check before using.',
+    guesses: /^\d+ more guess(es)? (wasn't|weren't) found on the page\.$/,
+    // The start date is the person's to set.
+    yourself: 'Starts · Add it yourself',
+    reserved: "AI doesn't fill in dates, prices or authors.",
+  },
+  schema: {
+    stage: 'Understood as',
+    kind: 'What this page is',
+    kinds: 'What is this page?',
+    product: 'A product people buy',
+    service: 'Plans for a service',
+    article: 'An article',
+    event: 'An event people attend in person',
+    webPage: 'A web page',
+    toService: 'Change to plans for a service',
+    ownJsonLd: 'Add your own JSON-LD',
+    moved: 'Custom JSON-LD moved to Code › Add your own JSON-LD',
+    code: 'Code',
+    proofFoot: 'Meeting these makes a result possible. Search engines decide whether to show it.',
   },
 } as const;

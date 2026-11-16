@@ -1,0 +1,487 @@
+{
+  "reviewed": "2026-11-13",
+  "props": {
+    "offers.priceSpecification.price": "offers_price",
+    "offers.priceSpecification.priceCurrency": "offers_priceCurrency",
+    "offers.priceSpecification.billingDuration": "billing",
+    "offers.seller": "sold_here",
+    "mainEntity.name": "name",
+    "mainEntity.alternateName": "name",
+    "author.sameAs": "author_url"
+  },
+  "site": {
+    "name": "identity.name",
+    "url": "home",
+    "logo": "identity.logo",
+    "logo.width": "identity.logo",
+    "logo.height": "identity.logo"
+  },
+  "facts": {
+    "name": {
+      "label": "Name",
+      "need": "a name"
+    },
+    "image": {
+      "label": "Image",
+      "need": "an image"
+    },
+    "offers.price": {
+      "label": "Price",
+      "need": "a price"
+    },
+    "offers.priceCurrency": {
+      "label": "Currency",
+      "need": "a currency"
+    },
+    "offers.availability": {
+      "label": "Availability",
+      "need": "an availability"
+    },
+    "offers.seller": {
+      "label": "Seller",
+      "need": "a seller"
+    },
+    "offers.@type": {
+      "label": "Offer",
+      "need": "a single offer"
+    },
+    "review": {
+      "label": "Review",
+      "need": "a review"
+    },
+    "aggregateRating": {
+      "label": "Rating",
+      "need": "a rating"
+    },
+    "brand.name": {
+      "label": "Brand",
+      "need": "a brand"
+    },
+    "description": {
+      "label": "Summary",
+      "need": "a summary"
+    },
+    "sku": {
+      "label": "SKU",
+      "need": "an SKU"
+    },
+    "headline": {
+      "label": "Headline",
+      "need": "a headline"
+    },
+    "datePublished": {
+      "label": "Published",
+      "need": "a published date"
+    },
+    "dateModified": {
+      "label": "Updated",
+      "need": "an updated date"
+    },
+    "author.name": {
+      "label": "Author",
+      "need": "an author"
+    },
+    "author.url": {
+      "label": "Author page",
+      "need": "an author page"
+    },
+    "startDate": {
+      "label": "Starts",
+      "need": "a start date"
+    },
+    "endDate": {
+      "label": "Ends",
+      "need": "an end date"
+    },
+    "location.name": {
+      "label": "Venue",
+      "need": "a venue"
+    },
+    "location.address.streetAddress": {
+      "label": "Street address",
+      "need": "a street address"
+    },
+    "location.address.addressLocality": {
+      "label": "City",
+      "need": "a city"
+    },
+    "location.address.addressCountry": {
+      "label": "Country",
+      "need": "a country"
+    },
+    "eventStatus": {
+      "label": "Status",
+      "need": "a status"
+    },
+    "organizer.name": {
+      "label": "Organizer",
+      "need": "an organizer"
+    },
+    "mainEntity.name": {
+      "label": "Name",
+      "need": "a name"
+    },
+    "logo": {
+      "label": "Logo",
+      "need": "a logo"
+    },
+    "logo.width": {
+      "label": "Logo",
+      "need": "a logo at least 112 pixels wide"
+    },
+    "logo.height": {
+      "label": "Logo",
+      "need": "a logo at least 112 pixels tall"
+    },
+    "url": {
+      "label": "Home address",
+      "need": "a home address"
+    }
+  },
+  "features": {
+    "product-snippet": {
+      "label": "Product result",
+      "for": "product results",
+      "where": "A product result can show the price, stock or rating under the link.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/product-snippet",
+      "on": [
+        "Product"
+      ],
+      "required": [
+        "name",
+        [
+          "offers.price|offers.priceSpecification.price",
+          "review",
+          "aggregateRating"
+        ]
+      ],
+      "recommended": [
+        "offers.priceCurrency",
+        "offers.availability",
+        "brand.name"
+      ],
+      "not_for": [
+        {
+          "id": "several_offers",
+          "several": "offers",
+          "reason": "several plans on one product",
+          "why": "A product result is for one product at one price. Several plans are a service with plans, or a group of products."
+        }
+      ],
+      "confirm": [
+        "The page is about this one product, not a list or a comparison."
+      ],
+      "names": [
+        "name",
+        "offers",
+        "price",
+        "priceSpecification",
+        "priceCurrency",
+        "availability",
+        "review",
+        "aggregateRating",
+        "brand"
+      ]
+    },
+    "merchant-listing": {
+      "label": "Merchant listing",
+      "for": "merchant listings",
+      "where": "Your product in shopping results, with its price and stock.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/merchant-listing",
+      "on": [
+        "Product"
+      ],
+      "required": [
+        "name",
+        "image",
+        "offers.price|offers.priceSpecification.price",
+        "offers.priceCurrency|offers.priceSpecification.priceCurrency"
+      ],
+      "recommended": [
+        "description",
+        "brand.name",
+        "sku",
+        "offers.availability"
+      ],
+      "rules": [
+        {
+          "path": "offers.price",
+          "gt": 0,
+          "need": "a price above zero"
+        },
+        {
+          "path": "offers.@type",
+          "is": "Offer"
+        }
+      ],
+      "not_for": [
+        {
+          "id": "recurring",
+          "exists": "offers.priceSpecification.billingDuration",
+          "reason": "a recurring price",
+          "why": "Shopping listings are for things people buy and own. Memberships and subscriptions are services: describe them as plans for a service.",
+          "suggest": "Service"
+        },
+        {
+          "id": "several_offers",
+          "several": "offers",
+          "reason": "several plans on one product",
+          "why": "Shopping listings are for one product at one price. Several plans are a service with plans.",
+          "suggest": "Service"
+        },
+        {
+          "id": "not_sold_here",
+          "seller": "offers.seller",
+          "reason": "not bought on this page",
+          "why": "Shopping listings are for pages where people buy the product from you. A review or a comparison can still show a product result."
+        }
+      ],
+      "confirm": [
+        "The price on the page is the price people pay."
+      ],
+      "names": [
+        "name",
+        "image",
+        "offers",
+        "price",
+        "priceSpecification",
+        "priceCurrency",
+        "billingDuration",
+        "seller",
+        "availability",
+        "description",
+        "brand",
+        "sku"
+      ]
+    },
+    "article": {
+      "label": "Article title, image and date",
+      "for": "article results",
+      "where": "Article results can show the title, a larger image and the date.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/article",
+      "on": [
+        "Article",
+        "BlogPosting",
+        "NewsArticle"
+      ],
+      "required": [],
+      "complete": [
+        "headline",
+        "image",
+        "datePublished"
+      ],
+      "recommended": [
+        "dateModified",
+        "author.name",
+        "author.url|author.sameAs"
+      ],
+      "confirm": [
+        "The dates match the ones the page shows.",
+        "Each author is named on their own."
+      ],
+      "names": [
+        "headline",
+        "image",
+        "datePublished",
+        "dateModified",
+        "author",
+        "name",
+        "url",
+        "sameAs"
+      ]
+    },
+    "event": {
+      "label": "Event result",
+      "for": "event listings",
+      "where": "Your event in event listings, with its date and place.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/event",
+      "on": [
+        "Event"
+      ],
+      "required": [
+        "name",
+        "startDate",
+        "location.address.streetAddress",
+        "location.address.addressLocality",
+        "location.address.addressCountry"
+      ],
+      "recommended": [
+        "location.name",
+        "endDate",
+        "image",
+        "description",
+        "eventStatus",
+        "organizer.name"
+      ],
+      "confirm": [
+        "The event is open to the public.",
+        "The page is about this one event."
+      ],
+      "names": [
+        "name",
+        "startDate",
+        "endDate",
+        "location",
+        "address",
+        "streetAddress",
+        "addressLocality",
+        "addressCountry",
+        "image",
+        "description",
+        "eventStatus",
+        "organizer"
+      ]
+    },
+    "profile-page": {
+      "label": "Profile",
+      "for": "profile results",
+      "where": "Results from the page can show the person's name and photo.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/profile-page",
+      "on": [
+        "ProfilePage"
+      ],
+      "required": [
+        "mainEntity.name|mainEntity.alternateName"
+      ],
+      "recommended": [],
+      "confirm": [
+        "The page is about one person or organization connected to the site."
+      ],
+      "names": [
+        "mainEntity",
+        "name",
+        "alternateName"
+      ]
+    },
+    "organization-logo": {
+      "label": "Logo",
+      "for": "the logo in results",
+      "where": "Your logo beside your organization in search results, if search engines can crawl the file.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/organization",
+      "on": [
+        "Organization"
+      ],
+      "node": "identity",
+      "required": [
+        "logo"
+      ],
+      "rules": [
+        {
+          "path": "logo.width",
+          "gt": 111
+        },
+        {
+          "path": "logo.height",
+          "gt": 111
+        }
+      ],
+      "confirm": [
+        "Search engines can crawl the logo file."
+      ],
+      "names": [
+        "logo",
+        "width",
+        "height"
+      ]
+    },
+    "site-name": {
+      "label": "Site name",
+      "for": "the site name in results",
+      "where": "Your site's name above its results, instead of its address.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/site-names",
+      "on": [
+        "WebSite"
+      ],
+      "node": "website",
+      "required": [
+        "name",
+        "url"
+      ],
+      "recommended": [],
+      "not_for": [
+        {
+          "id": "subdirectory",
+          "subdirectory": true,
+          "reason": "the site is in a subdirectory",
+          "why": "Site names are shown for a whole domain or subdomain, not for a site in a folder of another one."
+        }
+      ],
+      "confirm": [
+        "The name is the one the site uses for itself on its home page."
+      ],
+      "names": [
+        "name",
+        "url",
+        "alternateName"
+      ]
+    },
+    "faq": {
+      "label": "FAQ",
+      "where": "Questions and answers under the result.",
+      "status": "retired",
+      "since": "2026-05-07",
+      "changelog": "https://developers.google.com/search/updates",
+      "on": [
+        "FAQPage"
+      ],
+      "names": []
+    },
+    "how-to": {
+      "label": "How-to steps",
+      "where": "Steps under the result.",
+      "status": "retired",
+      "changelog": "https://developers.google.com/search/blog/2023/08/howto-faq-changes",
+      "on": [
+        "HowTo"
+      ],
+      "names": []
+    },
+    "sitelinks-search-box": {
+      "label": "Search box",
+      "where": "A search box under the site's result.",
+      "status": "retired",
+      "changelog": "https://developers.google.com/search/blog/2024/10/sitelinks-search-box",
+      "on": [
+        "SearchAction"
+      ],
+      "names": []
+    },
+    "special-announcement": {
+      "label": "Announcement",
+      "where": "Announcements such as closures in results.",
+      "status": "retired",
+      "changelog": "https://developers.google.com/search/blog/2025/06/simplifying-search-results",
+      "on": [
+        "SpecialAnnouncement"
+      ],
+      "names": []
+    },
+    "course-info": {
+      "label": "Course details",
+      "where": "Course details in results.",
+      "status": "retired",
+      "changelog": "https://developers.google.com/search/blog/2025/06/simplifying-search-results",
+      "on": [
+        "Course"
+      ],
+      "names": []
+    },
+    "practice-problem": {
+      "label": "Practice problems",
+      "where": "Practice questions in results.",
+      "status": "retired",
+      "changelog": "https://developers.google.com/search/updates",
+      "on": [
+        "Quiz"
+      ],
+      "names": []
+    }
+  }
+}

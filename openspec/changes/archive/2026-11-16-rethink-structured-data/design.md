@@ -58,7 +58,7 @@ paths, counted on its recommended set), `needs` (with `missing`),
 
 Initial entries: product snippet, merchant listing (`not_for`: a billing
 duration in the offer's price specification; more than one offer at different
-prices without a product group; no `offers.seller` that is the identity),
+prices; no `offers.seller` that is the identity),
 article, event (address locality and country required by the feature;
 confirm lines for public events and one event per page), profile page,
 organization logo (organizations only), site name (`#website` on the home
@@ -161,8 +161,10 @@ hand-added items left out until they are on the page. The G-rules run over
 the merged graph: G1 second identity (its line points at the identity by its
 full address, `{home}#identity`), G2 dangling `@id`, G7 a `Review` or
 `AggregateRating` (not an `EmployerAggregateRating`) whose `itemReviewed`
-resolves to the identity or to an organization whose `url` or `sameAs`
-matches the identity's, G9 unknown stored kind, G10 relative address. Hidden
+resolves to the identity or to an organization of any type whose `url` or
+`sameAs` matches the identity's (a restaurant or a hotel with the site's
+address is the site; a page, the site's website and the registry's own
+kinds, such as a product, are not organizations), G9 unknown stored kind, G10 relative address. Hidden
 hand-added text is to fix. G7 is narrowed on purpose: the review rule is
 about an entity that controls the reviews of itself, and the employer rating
 documentation has no such clause, so a rating of another company is fine.
@@ -174,6 +176,132 @@ a feature needs something while another can show; a module fact not found on
 the page; an unknown stored kind; a product or service name equal to the page
 title; G1, G2, G10. Good to know: retired features in use, no search feature,
 "doesn't fit", an unanswered "Bought on this page".
+
+### 10. Adapted while implementing
+
+What the implementation found, and how the plan above was adapted:
+
+- **Facts are worded in the rules file, not the registry.** Hand-added items
+  get verdicts too, and they have no registry property. So the label and the
+  "need" of each feature path ("an image", "a country") are in the rules
+  file's `facts` map, keyed by path; the registry keeps its own labels. The
+  registry's `need` and `per_item` (task 2.1) were left out: nothing used
+  them.
+- **Site nodes are judged on the home page only.** Organization logo and
+  site name are evaluated on the module's identity and website nodes of the
+  front page; elsewhere they give no line, so a plain page reads "No search
+  feature". `not_here` is the verdict of a hand-added node of such a type.
+- **A withheld main node is judged as it would ship.** `build()` reports the
+  node with `withheld`, and `report()` evaluates it, so the dialog says what
+  it needs instead of "No search feature".
+- **Event address.** The event feature asks for the street address as well
+  as the town and the country, so that what withholds the Event node (the
+  street address) is what its least demanding feature requires
+  (`RegistryConsistencyTest`). The currency is no longer required to emit a
+  product: a product without one ships and the merchant listing needs one.
+- **The facts shown first are listed in the registry (`main`).** "What the
+  features need" in the order the spec gives (Price, Currency, Bought on
+  this page, Image) is a short list per kind; `RegistryConsistencyTest`
+  checks that every fact a feature needs and nothing fills by default is in
+  it.
+- **The spy is a call-site check.** `SchemaGraph` and `Resolver` are final
+  and static where it matters, so `DeliveryPathTest` is a unit test that
+  finds every call of `report()`, `features()` and `rules()` by the function
+  it is made in: only `ApiController::state()` calls `report()`, and only
+  `report()` calls the other two. A call added on the delivery path fails it,
+  as a spy would.
+- **An item without an `@id` is given one in the dialog.** Leaving out such
+  an item writes the custom JSON-LD with the new `@id` and the skip list in
+  one draft write (`model.ts` `leaveOut()`), so `SchemaGraph` only honours
+  the list.
+- **The kind sheet confirms every change.** A radio group changes on arrow
+  keys; the kind changes only with the sheet's "Change to ‹kind›" button,
+  which also carries the sentence naming what is removed.
+- **Parity compares what is set, never defaults.** A date or text that
+  comes from a fact by default (the First published date of an article) is
+  the page's own and is not compared; typed values, linked values and facts
+  chosen for a detail are. The stage says so: "The facts you set match the
+  page."
+
+### 11. Settled in review (round 1)
+
+- **The dialog's chrome is English.** Registry and rules strings arrive
+  translated; the client's frames around them ("Needs …", "Add … for …",
+  "‹Feature› doesn't fit: …") stay English, as every other line of the
+  dialog does. Decision 5's "no glued words" is about the read-back, which
+  stays whole sentences. Lists inside an English sentence are joined in
+  English. Dates are written one way in the whole dialog (`dateWords()`:
+  the dialog's language, and for English the style the fields use, "19 June
+  2027, 19:00"): the read-back, verdicts, the proof and the fields.
+- **A review names what it reviews.** `features()` counts a `Review` or
+  `AggregateRating` whose `itemReviewed` is a node of the graph as that
+  node's `review` or `aggregateRating`, so a hand-added review of a
+  hand-added product gives it a product result. A review of a withheld main
+  node has nothing to point at: its reference is left out with the node.
+- **Gates hold clean values.** A detail that is never emitted (`billing`,
+  `sold_here`) is reported with the value it was validated as, so a linked
+  " P1M" bills and "yes " sells.
+- **A site save names its effect for the currency only.** The identity's
+  name, kind and logo reach every page by design and are named in Site
+  itself; listing every page for them would say nothing. A content type
+  whose currency is unset or linked to a field is one place ("Every
+  Product"): it follows the site currency wherever the field is empty.
+  Pages are read 50 at a time and only 25 are named. The bar says how many
+  places; the Currency field names them and what may change, since the bar
+  holds two lines beside its buttons.
+- **A stored code is never lost without a word.** A three-letter currency
+  typed before the list of codes ("RMB") is kept when read, so the graph
+  reports it as dropped and the field shows it; anything else that was never
+  a code is dropped on read, as before.
+- **The name-is-title hint is for pages.** At template scope a product named
+  after each item's own title is right, so neither the field nor Checks asks
+  for another name there. On a page, the hint carries "Edit in Search" while
+  the name follows the title.
+- **Billed stays in More details.** The four facts shown first stay Price,
+  Currency, Bought on this page and Image. A price the page shows per month
+  or year leads to Billed instead: its "Couldn't find … as a one-time price"
+  row jumps there and says to set it.
+- **Output's headless line is unchanged.** The clause about markup that
+  scripts add later is not part of this change; it belongs with
+  `complete-the-headless-frontend`.
+- **The kinds sheet's confirm is a bar at its foot**, in sight wherever the
+  list is scrolled, and focus starts on the chosen kind.
+- **The proof says facts in the field's words**: the image by its media
+  name, the currency by its name, "Bought on this page" with its answer.
+
+### 12. Settled in review (round 2)
+
+- **A withheld main node is proved by its own values.** Its verdict is
+  judged as `extra` (decision 10); the proof reads the node the report keeps
+  under `withheld.node`, so only the fact that is truly missing says "Not
+  set". The read-back stays a web page: it says only what ships.
+- **The site currency fills a price, never an offer of nothing.** It is
+  applied only when the offer's price resolved; a service without a price
+  has no `offers`, so a currency change reaches exactly the places
+  `effect()` names.
+- **The kinds sheet's confirm is its foot, outside the scroller**, so it
+  never covers the chosen kind. In a frame too short for both (at most 320
+  px high) the sheet scrolls as one and the confirm follows the list. Its
+  sentence is announced through a status region of its own; the buttons are
+  not part of it.
+- **Focus is placed, never dropped.** A proof opens on its title (not on an
+  action Enter would run unseen) and wears the dialog's ring though it is
+  portaled; leaving a hidden item out from the stage keeps focus on the
+  stage's line; Undo returns to the control focused before the bar; a fix in
+  Checks moves on within its own group. A line is announced when its words
+  change or it comes, never because the stage was drawn again.
+- **A fix is named after what it sets** ("Add City", "Choose Image",
+  "Answer Bought on this page"), as the proof's buttons are.
+- **No match line when nothing is set here.** A page that sets no facts and
+  no JSON-LD of its own has nothing to compare with the page: a line saying
+  so was noise (review round 3).
+- **Read-only means at rest.** With nothing to preview, a linked or
+  defaulted value's box and the title ending are text, with no menu and no
+  link button.
+- **`@type` is one string.** `Values` refuses a list, so the graph and the
+  dialog handle only strings (a list belongs to `extend-structured-data-by-id`,
+  which brings it in with its own validation).
+- **Currency lives in Site's own "Prices" group**, after Sharing.
 
 ## Data model
 
@@ -188,8 +316,9 @@ title; G1, G2, G10. Good to know: retired features in use, no search feature,
 
 No stored value is converted. Existing products have no `billing` and no
 `sold_here`: they read "for ‹price›" and "Only if people buy it here". A
-currency typed as anything but a code is reported as dropped, as today it is
-silently refused. The site currency starts empty; no update guesses it.
+three-letter currency typed before the list of codes is kept and reported as
+dropped (decision 11); anything else that was never a code is dropped on
+read, as today. The site currency starts empty; no update guesses it.
 Rollback: the new keys are ignored by the previous release's cleaners only if
 they are removed first, so a rollback runs `drush config:delete` on
 `canvas_metatag.site:currency` and leaves page drafts as they are (unknown
@@ -217,8 +346,8 @@ reads (ARCHITECTURE.md §11, `host.ts`).
 - [Editors read "doesn't fit" as a bug] → the proof says why and what would
   fit; it is never amber and never counted.
 - [The rules file goes stale as documentation changes] → `reviewed` date in
-  the UI; a CI job warns after 120 days and opens an issue (never fails
-  unrelated merges).
+  the UI; a CI job that is allowed to fail warns after 120 days (it never
+  fails the pipeline).
 - [Parity false positives on prices] → only numbers next to a currency; a
   "check again" action; never auto-deleting.
 - [A sentence reads wrong in a language] → whole-sentence variants; the fact

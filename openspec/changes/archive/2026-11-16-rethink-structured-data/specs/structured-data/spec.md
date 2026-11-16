@@ -57,6 +57,56 @@ for the dialog.
 - **WHEN** a template links the currency to a field whose value for this node is "€"
 - **THEN** the offer MUST have no `priceCurrency` and the report MUST list the currency as dropped with the value "€"
 
+### Requirement: Property values are checked against their kind
+
+A typed value MUST pass its property's kind, options and pattern: text is any
+text; a url is an absolute http(s) URL with a host and no credentials; a date
+is a real `YYYY-MM-DD`, optionally with a time and an offset or `Z`; a number
+is digits with an optional decimal part; an enum is one of the options; a
+currency is a code of the ISO 4217 list the module ships. An image MUST be a
+chosen media item, the Image fact or a linked image field. A typed value that
+fails MUST be refused when saved. A linked value that fails, or a stored value
+that no longer passes, MUST be left out and reported as dropped with the value
+it gave, never as missing; when its property is required, the main node is
+withheld for it. A three-letter currency code stored before the list (such as
+"RMB") MUST be kept when read, so that it is reported as dropped instead of
+lost without a word.
+
+#### Scenario: Dates and numbers
+
+- **WHEN** a value is `2026-02-30`, `2026-07-01 18:00`, `49,90` or `-1`
+- **THEN** it MUST fail its kind
+
+#### Scenario: A currency in lower case
+
+- **WHEN** an editor saves the currency `eur`
+- **THEN** the save MUST be refused with a message asking for a currency code from the list
+
+#### Scenario: A linked currency "Euro (€)"
+
+- **WHEN** a template links a product's currency to a field whose value for this node is "Euro (€)"
+- **THEN** the offer MUST have no `priceCurrency`, the report MUST list the currency as dropped with the value "Euro (€)", never as missing, and the product MUST still ship
+
+#### Scenario: A required value that does not fit
+
+- **WHEN** a template links a product's price to a field whose value for this node is "€89"
+- **THEN** the main node MUST be withheld, with `offers_price` dropped and not missing
+
+#### Scenario: A code stored before the list
+
+- **WHEN** a page stored the currency "RMB" before currencies came from the list
+- **THEN** reading the page MUST keep "RMB", and the graph MUST report it as dropped with that value
+
+#### Scenario: A field that is not an address
+
+- **WHEN** a template links the author page to a field whose value is not an address
+- **THEN** the author page MUST be left out
+
+#### Scenario: Defaults are facts
+
+- **WHEN** a node of a type whose structured data type is Article sets none of the Article details
+- **THEN** its Article node's headline, image, dates and author name MUST come from its Title, Image, First published, Last updated and Author facts
+
 ## ADDED Requirements
 
 ### Requirement: A price says how it is billed
@@ -70,7 +120,7 @@ billed once, or with no billing set, MUST carry no price specification.
 #### Scenario: A monthly membership
 
 - **WHEN** a service costs 2500 EUR billed every month
-- **THEN** its offer MUST carry `price` 2500, `priceCurrency` "EUR" and a `priceSpecification` with `billingDuration` "P1M" and `unitCode` "MON"
+- **THEN** its offer MUST carry `price` "2500", `priceCurrency` "EUR" and a `priceSpecification` with `billingDuration` "P1M" and `unitCode` "MON"
 
 #### Scenario: A one-time price
 
@@ -95,8 +145,9 @@ offer MUST have no seller. The answer itself MUST NOT appear in the graph.
 
 ### Requirement: Prices default to the site currency
 
-A price's currency MUST default to the site currency when the target sets
-none. A currency MUST be a three-letter code from the ISO 4217 list.
+A price's currency MUST default to the site currency when the target sets a
+price and no currency; it MUST NOT fill an offer that has no price. A currency
+MUST be a code from the ISO 4217 list.
 
 #### Scenario: No currency on the page
 
@@ -107,6 +158,11 @@ none. A currency MUST be a three-letter code from the ISO 4217 list.
 
 - **WHEN** neither the site nor the product sets a currency
 - **THEN** the offer MUST have no `priceCurrency`, and the merchant listing MUST need one
+
+#### Scenario: A service without a price
+
+- **WHEN** the site currency is EUR and a service sets no price
+- **THEN** its node MUST have no `offers`
 
 ### Requirement: A hand-added item can be left out until it is on the page
 

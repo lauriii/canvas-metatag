@@ -1,11 +1,12 @@
-## Purpose
+# search-features Specification
 
+## Purpose
 Decide, for a page's built structured data, which search features apply, the
 verdict for each and why, from one dated set of rules that the dialog,
 Checks and every later report share. A verdict says what the markup makes
 possible; it never promises that a result will show.
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: Search features come from one dated rules file
 
@@ -31,7 +32,8 @@ For every feature whose types occur in the built graph, the module MUST give
 one verdict per node: can show, complete, needs (naming the missing facts),
 only if bought here, doesn't fit (with a reason), not shown here, retired, or,
 when no feature applies, no search feature. Verdicts MUST be computed on the
-graph that ships, following `@id` references inside it.
+graph that ships, and on a withheld main node as it would ship, following
+`@id` references inside it, both ways for a review or a rating.
 
 #### Scenario: A product with everything required
 
@@ -50,8 +52,13 @@ graph that ships, following `@id` references inside it.
 
 #### Scenario: A reference inside the graph
 
-- **WHEN** a hand-added review's `itemReviewed` is `{"@id": "#primary"}` and the main node is a product
-- **THEN** the review MUST be evaluated against that product
+- **WHEN** a hand-added product `#p` with a name and no price is followed by a hand-added review whose `itemReviewed` is `{"@id": "#p"}`
+- **THEN** the review MUST count as that product's review, and `#p`'s "Product result" MUST read "Can show"
+
+#### Scenario: A review of a withheld main node
+
+- **WHEN** the main node is a product withheld for want of a price and a hand-added review's `itemReviewed` is `{"@id": "#primary"}`
+- **THEN** the review MUST ship without that reference, as a reference to a module node that is not in the graph does (structured-data), and MUST count for no product
 
 ### Requirement: A feature without required facts is complete, not ready
 
@@ -68,9 +75,10 @@ present, and otherwise name what is missing from them.
 
 The merchant listing MUST read "Doesn't fit" with its reason when the offer
 carries a billing period, when one product carries more than one offer at
-different prices without a product group, or when the editor said people do
+different prices, or when the editor said people do
 not buy it on this page. It MUST read "Only if people buy it here" while that
-answer is unset.
+answer is unset. A hand-added product whose offer does not name the site's
+identity as its seller MUST read "Doesn't fit: not bought on this page".
 
 #### Scenario: A monthly price
 
@@ -79,8 +87,13 @@ answer is unset.
 
 #### Scenario: Several plans on one product
 
-- **WHEN** a product carries offers of €25, €45 and €95 from the same seller and no product group
+- **WHEN** a product carries offers of €25, €45 and €95 from the same seller
 - **THEN** "Merchant listing" and "Product result" MUST read "Doesn't fit: several plans on one product"
+
+#### Scenario: A hand-added product sold by someone else
+
+- **WHEN** a hand-added product's offer has a price and a currency and no seller, or another seller
+- **THEN** its "Merchant listing" MUST read "Doesn't fit: not bought on this page"
 
 #### Scenario: Not answered yet
 
@@ -134,8 +147,8 @@ feature MUST never be offered as a kind and MUST never be counted.
 
 ### Requirement: Verdicts never promise a result
 
-Verdict, proof and Checks copy MUST say what the markup makes possible and
-that search engines decide whether to show it. The words "will show",
+Structured data verdict, proof and Checks copy MUST say what the markup makes
+possible and that search engines decide whether to show it. The words "will show",
 "eligible", "AI-ready", "get cited" and "score" MUST NOT appear.
 
 #### Scenario: The proof's foot

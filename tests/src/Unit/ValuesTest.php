@@ -99,7 +99,12 @@ final class ValuesTest extends UnitTestCase {
 
     // Values.
     yield 'a string is not a value' => ['page', ['title' => 'Pricing'], 'title', $invalid];
-    yield 'two sources in one value' => ['template', ['title' => ['text' => 'A', 'fact' => 'title']], 'title', $invalid];
+    yield 'two sources in one value' => [
+      'template',
+      ['title' => ['text' => 'A', 'fact' => 'title']],
+      'title',
+      $invalid,
+    ];
     yield 'an unknown kind of value' => ['template', ['title' => ['token' => '{title}']], 'title', $invalid];
     yield 'typed text not a string' => ['page', ['title' => ['text' => ['a']]], 'title', $invalid];
     yield 'title too long' => [
@@ -256,9 +261,17 @@ final class ValuesTest extends UnitTestCase {
     yield 'max_image_preview' => ['page', ['robots' => ['max_image_preview' => 'huge']], 'robots.max_image_preview'];
 
     // Structured data.
+    // Read mode keeps a type this release no longer has, so it can be said.
     yield 'schema type' => [
       'page',
       ['schema' => ['type' => 'Recipe']],
+      'schema.type',
+      'Choose one of the listed page types.',
+      TRUE,
+    ];
+    yield 'schema type that is not a name' => [
+      'page',
+      ['schema' => ['type' => 'Recipe<script>']],
       'schema.type',
       'Choose one of the listed page types.',
     ];
@@ -266,8 +279,13 @@ final class ValuesTest extends UnitTestCase {
       'page',
       ['schema' => ['type' => 'Article', 'props' => ['offers_price' => $t('5')]]],
       'schema.props.offers_price',
+      $here,
     ];
-    yield 'prop without a type' => ['page', ['schema' => ['props' => ['headline' => $t('A')]]], 'schema.props.headline'];
+    yield 'prop without a type' => [
+      'page',
+      ['schema' => ['props' => ['headline' => $t('A')]]],
+      'schema.props.headline',
+    ];
     yield 'prop of the inherited type, named over' => [
       'page',
       ['schema' => ['type' => 'WebPage', 'props' => ['offers_price' => $t('5')]]],
@@ -295,8 +313,42 @@ final class ValuesTest extends UnitTestCase {
       'page',
       ['schema' => ['type' => 'Product', 'props' => ['offers_priceCurrency' => $t('euro')]]],
       'schema.props.offers_priceCurrency',
-      'Enter a three-letter currency code, like EUR.',
+      'Choose a currency code from the list, such as EUR.',
     ];
+    yield 'prop currency symbol' => [
+      'page',
+      ['schema' => ['type' => 'Product', 'props' => ['offers_priceCurrency' => $t('€')]]],
+      'schema.props.offers_priceCurrency',
+      'Choose a currency code from the list, such as EUR.',
+    ];
+    yield 'prop currency not a code' => [
+      'page',
+      ['schema' => ['type' => 'Service', 'props' => ['offers_priceCurrency' => $t('ABC')]]],
+      'schema.props.offers_priceCurrency',
+      'Choose a currency code from the list, such as EUR.',
+      // A code stored before the list is kept when read: the graph reports
+      // it as dropped.
+      TRUE,
+    ];
+    yield 'prop bought here' => [
+      'page',
+      ['schema' => ['type' => 'Product', 'props' => ['sold_here' => $t('maybe')]]],
+      'schema.props.sold_here',
+      'Choose one of the listed options.',
+    ];
+    yield 'prop bought here on a service' => [
+      'page',
+      ['schema' => ['type' => 'Service', 'props' => ['sold_here' => $t('yes')]]],
+      'schema.props.sold_here',
+    ];
+    yield 'prop billing' => [
+      'page',
+      ['schema' => ['type' => 'Product', 'props' => ['billing' => $t('weekly')]]],
+      'schema.props.billing',
+      'Choose one of the listed options.',
+    ];
+    yield 'skip not a list' => ['page', ['schema' => ['skip' => '#faq']], 'schema.skip', 'This value is not valid.'];
+    yield 'skip not strings' => ['page', ['schema' => ['skip' => [1]]], 'schema.skip', 'This value is not valid.'];
     yield 'prop pattern' => [
       'page',
       ['schema' => ['type' => 'Product', 'props' => ['sku' => $t('A 1')]]],
@@ -382,7 +434,13 @@ final class ValuesTest extends UnitTestCase {
       'schema.custom',
       $id,
     ];
-    foreach (['javascript:alert(5)', ' JavaScript :x', 'data:text/html,x', 'vbscript:x', 'file:///etc/passwd'] as $url) {
+    foreach ([
+      'javascript:alert(5)',
+      ' JavaScript :x',
+      'data:text/html,x',
+      'vbscript:x',
+      'file:///etc/passwd',
+    ] as $url) {
       yield 'custom script address ' . $url => [
         'page',
         ['schema' => ['custom' => (string) json_encode(['@type' => 'Thing', 'about' => ['sameAs' => [$url]]])]],
@@ -520,6 +578,56 @@ final class ValuesTest extends UnitTestCase {
   }
 
   /**
+   * Commerce details, the left-out list and the site currency.
+   */
+  public function testCommerce(): void {
+    $product = [
+      'schema' => [
+        'props' => [
+          'billing' => self::typed('P1M'),
+          'offers_priceCurrency' => self::typed('EUR'),
+          'sold_here' => self::typed('no'),
+        ],
+        'type' => 'Product',
+      ],
+    ];
+    self::assertSame([$product, []], Values::clean($product, 'page', self::accepts()));
+
+    // Only the @ids of items that are there stay listed, once, as written.
+    $custom = '[{"@id":"#faq","@type":"FAQPage"},{"@type":"Thing"}]';
+    [
+      $clean,
+      $errors,
+    ] = Values::clean([
+      'schema' => [
+        'custom' => $custom,
+        'skip' => ['#faq', '#gone', '#faq'],
+      ],
+    ], 'page', self::accepts());
+    self::assertSame([], $errors);
+    self::assertSame(['#faq'], $clean['schema']['skip']);
+    self::assertArrayNotHasKey('skip', Values::clean(['schema' => ['skip' => ['#faq']]], 'page', NULL)[0]['schema'] ?? []);
+    // The custom JSON-LD is stored as before.
+    self::assertSame($custom, $clean['schema']['custom']);
+
+    // The site currency is a code of the list, or nothing.
+    self::assertSame(['EUR', NULL], Values::currency('EUR'));
+    self::assertSame(['', NULL], Values::currency(''));
+    self::assertSame(['', NULL], Values::currency(NULL));
+    foreach (['€', 'eur', 'EURO', 'XXX', 5] as $refused) {
+      self::assertSame(['', 'Choose a currency code from the list, such as EUR.'], Values::currency($refused));
+    }
+
+    // A stored type this release no longer has is kept, as a web page.
+    self::assertSame(['schema' => ['type' => 'Recipe']], Values::clean([
+      'schema' => [
+        'type' => 'Recipe',
+        'props' => ['name' => self::typed('Soup')],
+      ],
+    ], 'page', NULL)[0]);
+  }
+
+  /**
    * A translation's details belong to the type it inherits.
    */
   public function testInheritedType(): void {
@@ -529,11 +637,20 @@ final class ValuesTest extends UnitTestCase {
     // Read mode keeps them, as the resolver reads a translation.
     self::assertSame($props, Values::clean($props, 'page', NULL, 'Product')[0]);
     // Without the inherited type they are not available.
-    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean($props, 'page', self::accepts())[1]));
+    self::assertSame([
+      'schema.props.name',
+      'schema.props.offers_price',
+    ], array_keys(Values::clean($props, 'page', self::accepts())[1]));
     // A type named in the values wins over the inherited one.
-    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean(['schema' => ['type' => 'Article'] + $props['schema']], 'page', self::accepts(), 'Product')[1]));
+    self::assertSame([
+      'schema.props.name',
+      'schema.props.offers_price',
+    ], array_keys(Values::clean(['schema' => ['type' => 'Article'] + $props['schema']], 'page', self::accepts(), 'Product')[1]));
     // An inherited type the registry does not know is WebPage.
-    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean($props, 'page', self::accepts(), 'Recipe')[1]));
+    self::assertSame([
+      'schema.props.name',
+      'schema.props.offers_price',
+    ], array_keys(Values::clean($props, 'page', self::accepts(), 'Recipe')[1]));
   }
 
   /**
@@ -618,7 +735,14 @@ final class ValuesTest extends UnitTestCase {
 
     // Nothing given: the defaults, and nothing to report.
     self::assertSame([
-      ['kind' => 'organization', 'name' => '', 'separator' => '|', 'logo' => '', 'default_image' => '', 'same_as' => []],
+      [
+        'kind' => 'organization',
+        'name' => '',
+        'separator' => '|',
+        'logo' => '',
+        'default_image' => '',
+        'same_as' => [],
+      ],
       [],
     ], Values::cleanIdentity([]));
 

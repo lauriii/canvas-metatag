@@ -155,7 +155,13 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     // A field taken off the form follows the fields on it.
     $this->container->get('entity_display.repository')->getFormDisplay('node', 'venue')->removeComponent('body')->save();
     $this->container->get('cache.static')->deleteAll();
-    self::assertSame(['field_street', 'field_postal_code', 'field_locality', 'field_country', 'body'], array_values(array_unique(array_column($sources->vocabulary('venue'), 'field'))));
+    self::assertSame([
+      'field_street',
+      'field_postal_code',
+      'field_locality',
+      'field_country',
+      'body',
+    ], array_values(array_unique(array_column($sources->vocabulary('venue'), 'field'))));
 
     // The Event type's Description field and the Description fact share a
     // label: the link menu tells them apart by their group.
@@ -369,7 +375,11 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       $expected = $this->resolver()->resolve($this->node($key))['head'];
       self::assertSame([$expected['title']], $head['titles'], $key);
       self::assertSame($expected['meta'], $head['meta'], $key);
-      self::assertSame([['rel' => 'canonical', 'href' => 'http://localhost' . $this->complex['path'][$key]]], $head['links'], $key);
+      self::assertSame([[
+        'rel' => 'canonical',
+        'href' => 'http://localhost' . $this->complex['path'][$key],
+      ],
+      ], $head['links'], $key);
       self::assertSame([$expected['script'][0]['textContent']], $head['json_ld'], $key);
       $heads[$key] = $expected;
     }
@@ -404,29 +414,23 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     ], [$graph['primary']['location']['name'], $graph['primary']['location']['address']['streetAddress']]);
     self::assertSame('https://schema.org/EventScheduled', $graph['primary']['eventStatus']);
     self::assertSame('An orchestra on an open-air stage at dusk', $graph['primaryimage']['caption']);
+    // What withholds the main node, and the values that do not fit.
     $reports = [
-      'event_full' => [FALSE, [], []],
-      // No end, no venue or poster for visitors.
-      'event_hidden_refs' => [TRUE, ['location_address_streetAddress'], ['endDate', 'location_name', 'image']],
+      'event_full' => [NULL, []],
+      // No venue for visitors: no street address.
+      'event_hidden_refs' => [['location_address_streetAddress'], []],
       // A text list gives its key, a currency code.
-      'product_lamp' => [FALSE, [], ['offers_availability']],
-      'product_rtl' => [FALSE, [], ['image', 'offers_availability']],
-      'product_empty' => [
-        TRUE,
-        ['offers_price', 'offers_priceCurrency'],
-        ['description', 'image', 'offers_availability'],
-      ],
-      'person_mira' => [FALSE, [], []],
-      'person_empty' => [FALSE, [], ['description']],
+      'product_lamp' => [NULL, []],
+      'product_rtl' => [NULL, []],
+      'product_empty' => [['offers_price'], []],
+      'person_mira' => [NULL, []],
+      'person_empty' => [NULL, []],
       // No structured data type: nothing to withhold.
-      'job_developer' => [FALSE, [], []],
+      'job_developer' => [NULL, []],
     ];
-    foreach ($reports as $key => [$withheld, $required, $recommended]) {
-      self::assertSame(
-        ['withheld' => $withheld, 'missing_required' => $required, 'missing_recommended' => $recommended],
-        $this->resolver()->resolve($this->node($key))['schema'],
-        $key,
-      );
+    foreach ($reports as $key => [$missing, $dropped]) {
+      $schema = $this->resolver()->resolve($this->node($key))['schema'];
+      self::assertSame([$missing, $dropped], [$schema['withheld']['missing'] ?? NULL, $schema['dropped']], $key);
     }
 
     // A long title keeps its ending whole and loses the last words of its
@@ -487,7 +491,12 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     // A square logo makes a small card, as the dialog's link preview shows.
     self::assertSame('summary', $meta['twitter:card']);
     self::assertArrayNotHasKey('og:image:alt', $meta);
-    self::assertSame(['identity', 'website', 'webpage', 'primaryimage'], array_keys(self::graph($heads['job_developer'])));
+    self::assertSame([
+      'identity',
+      'website',
+      'webpage',
+      'primaryimage',
+    ], array_keys(self::graph($heads['job_developer'])));
 
     // Emoji, joiners and flags survive the script element and the title.
     self::assertSame('Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮 | Events', $heads['event_hidden_refs']['title']);
@@ -738,13 +747,24 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $teaser = ContentTemplate::load('node.product.teaser');
     self::assertInstanceOf(ContentTemplate::class, $teaser);
     $response = $this->request(Request::create(self::STATE . '?entity_type=content_template&id=node.product.teaser&preview=' . $this->complex['node']['product_lamp']));
-    self::assertSame([404, 'not_found'], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
+    self::assertSame([
+      404,
+      'not_found',
+    ], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
     $response = $this->putTemplate($teaser, ['title' => ['text' => 'Teaser']]);
-    self::assertSame([404, 'not_found'], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
+    self::assertSame([
+      404,
+      'not_found',
+    ], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
     self::assertTrue($this->container->get(AutoSaveManager::class)->getAutoSaveEntity($teaser, TRUE)->isEmpty());
 
     // Someone who may use Canvas but not edit templates gets what is live.
-    $this->setUpCurrentUser(permissions: ['access content', 'view media', Page::EDIT_PERMISSION, 'edit canvas metatag']);
+    $this->setUpCurrentUser(permissions: [
+      'access content',
+      'view media',
+      Page::EDIT_PERMISSION,
+      'edit canvas metatag',
+    ]);
     $state = $this->state('node.event.full', 'event_full');
     self::assertFalse($state['target']['has_draft']);
     self::assertSame(['text' => 'Events'], $state['target']['values']['title_end']);
@@ -802,13 +822,16 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $meta = self::meta($head);
     self::assertArrayNotHasKey('og:image', $meta);
     self::assertSame('summary', $meta['twitter:card']);
-    self::assertSame(['identity', 'website', 'webpage', 'primary'], array_keys(self::graph(['script' => [['textContent' => $head['json_ld'][0]]]])));
-    $event = $this->node('event_full');
     self::assertSame([
-      'withheld' => FALSE,
-      'missing_required' => [],
-      'missing_recommended' => ['image'],
-    ], $this->resolver()->resolve($event)['schema']);
+      'identity',
+      'website',
+      'webpage',
+      'primary',
+    ], array_keys(self::graph(['script' => [['textContent' => $head['json_ld'][0]]]])));
+    $event = $this->node('event_full');
+    $schema = $this->resolver()->resolve($event)['schema'];
+    self::assertSame([NULL, []], [$schema['withheld'], $schema['dropped']]);
+    self::assertArrayNotHasKey('image', self::graph($this->resolver()->resolve($event)['head'])['primary']);
 
     // The template keeps its values and stays valid and in use; the field is
     // no longer offered.
@@ -1066,7 +1089,11 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $this->installEntitySchema('consumer');
     $this->installEntitySchema('oauth2_token');
     $this->installConfig(['simple_oauth', 'canvas_headless']);
-    $this->config('canvas_headless.settings')->set('frontends', [['url' => self::FRONTEND, 'components' => []]])->save();
+    $this->config('canvas_headless.settings')->set('frontends', [[
+      'url' => self::FRONTEND,
+      'components' => [],
+    ],
+    ])->save();
   }
 
   /**

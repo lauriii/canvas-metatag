@@ -205,10 +205,10 @@ final class AiControllerTest extends CanvasKernelTestBase {
       'type' => 'Event',
       'props' => [
         'name' => 'Giraffe meadow opening',
-        'startDate' => '2027-03-04T18:00',
         'location_name' => 'Garden Hall & Co <main> https://example.com/venue',
       ],
-      'unverified' => ['startDate', 'location_name'],
+      // Dates are for people: the start date is never proposed.
+      'unverified' => ['location_name'],
     ], self::decodeResponse($response));
 
     // A type without properties still answers with a JSON object.

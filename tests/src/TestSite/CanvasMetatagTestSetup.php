@@ -438,6 +438,16 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
       'canvas_metatag' => \json_encode(['title' => ['text' => self::STORED_SEO_TITLE]], JSON_THROW_ON_ERROR),
       'status' => 1,
     ])->save();
+
+    // Described with a type this release no longer has. Changed long ago, so
+    // it is never the page the dialog opens without one.
+    Page::create([
+      'title' => 'Rye bread',
+      'path' => ['alias' => '/rye-bread'],
+      'canvas_metatag' => \json_encode(['schema' => ['type' => 'Recipe']], JSON_THROW_ON_ERROR),
+      'status' => 1,
+      'changed' => 946684800,
+    ])->save();
   }
 
   /**

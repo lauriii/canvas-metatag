@@ -389,7 +389,10 @@ final class ResolverTest extends CanvasKernelTestBase {
     $resolved = $resolver->resolve($french);
     self::assertSame('Comment les équipes racontent.', self::meta($resolved['head'])['description']);
     self::assertSame('Ada (fr)', self::graph($resolved['head'])['primary']['author']['name']);
-    self::assertSame(['ok', 'http://localhost/fr/node/' . $node->id()], $resolver->link($this->linkTo('More', 'address')['source'], $french, 'address', new CacheableMetadata()));
+    self::assertSame([
+      'ok',
+      'http://localhost/fr/node/' . $node->id(),
+    ], $resolver->link($this->linkTo('More', 'address')['source'], $french, 'address', new CacheableMetadata()));
 
     $resolved = $head();
     $meta = self::meta($resolved['head']);
@@ -406,7 +409,12 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame('Ada', self::graph($resolved['head'])['primary']['author']['name']);
     // A published head never varies by user: the same cached head for all.
     self::assertSame([], array_filter($resolved['cacheability']->getCacheContexts(), static fn (string $context): bool => str_starts_with($context, 'user')));
-    foreach (['config:user.role.anonymous', 'node:' . $writer->id(), 'entity_field_info', 'config:media_type_list'] as $tag) {
+    foreach ([
+      'config:user.role.anonymous',
+      'node:' . $writer->id(),
+      'entity_field_info',
+      'config:media_type_list',
+    ] as $tag) {
       self::assertContains($tag, $resolved['cacheability']->getCacheTags());
     }
 
@@ -419,7 +427,10 @@ final class ResolverTest extends CanvasKernelTestBase {
     $writer->setUnpublished()->save();
     $this->forgetAccess();
     self::assertSame('Ada Writer', self::graph($head()['head'])['primary']['author']['name']);
-    self::assertSame(['hidden', NULL], $resolver->link($this->linkTo('Notes')['source'], $node, 'text', new CacheableMetadata()));
+    self::assertSame([
+      'hidden',
+      NULL,
+    ], $resolver->link($this->linkTo('Notes')['source'], $node, 'text', new CacheableMetadata()));
 
     // A linked image that is empty for the item: the item's Image fact, here
     // from another image field, before the site's default.
@@ -441,7 +452,9 @@ final class ResolverTest extends CanvasKernelTestBase {
     $file->setFileUri('temporary://hero.png');
     $file->save();
     $this->forgetAccess();
-    [, $value] = $resolver->link($this->linkTo('Hero › Image', 'image')['source'], Node::load($node->id()), 'image', new CacheableMetadata());
+    [,
+      $value,
+    ] = $resolver->link($this->linkTo('Hero › Image', 'image')['source'], Node::load($node->id()), 'image', new CacheableMetadata());
     self::assertNull($value);
     self::assertSame($this->imageOf($photo)['url'], self::meta($head()['head'])['og:image']);
     $file->setFileUri('public://hero.png');
@@ -508,7 +521,10 @@ final class ResolverTest extends CanvasKernelTestBase {
 
     // An address: a link inside the site is put on the public base.
     $node->set('field_more', ['uri' => 'internal:/pricing'])->save();
-    self::assertSame(['ok', 'http://localhost/pricing'], $resolver->link($this->linkTo('More', 'address')['source'], Node::load($node->id()), 'address', new CacheableMetadata()));
+    self::assertSame([
+      'ok',
+      'http://localhost/pricing',
+    ], $resolver->link($this->linkTo('More', 'address')['source'], Node::load($node->id()), 'address', new CacheableMetadata()));
   }
 
   /**
@@ -553,7 +569,14 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame(['type', 'textContent'], array_keys($resolved['head']['script'][0]));
     self::assertSame('application/ld+json', $resolved['head']['script'][0]['type']);
     self::assertSame($this->imageOf($hero) + ['source' => 'entity'], $resolved['image']);
-    self::assertSame(['withheld' => FALSE, 'missing_required' => [], 'missing_recommended' => []], $resolved['schema']);
+    self::assertSame([
+      NULL,
+      [],
+      NULL,
+    ], [$resolved['schema']['withheld'], $resolved['schema']['dropped'], $resolved['schema']['unknown_type']]);
+    // Delivery computes no verdicts and no rules.
+    self::assertArrayNotHasKey('features', $resolved['schema']);
+    self::assertArrayNotHasKey('rules', $resolved['schema']);
     self::assertSame([
       '@context' => 'https://schema.org',
       '@graph' => [
@@ -641,7 +664,12 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame('article', $meta['og:type']);
     self::assertSame(self::PUBLISHED, $meta['article:published_time']);
     self::assertSame(self::MODIFIED, $meta['article:modified_time']);
-    self::assertSame(['og:image:height', 'article:published_time', 'article:modified_time', 'twitter:card'], array_slice(array_keys($meta), -4));
+    self::assertSame([
+      'og:image:height',
+      'article:published_time',
+      'article:modified_time',
+      'twitter:card',
+    ], array_slice(array_keys($meta), -4));
     self::assertSame('override', $resolved['image']['source']);
     // Too small for the large card.
     self::assertSame('summary', $meta['twitter:card']);
@@ -727,16 +755,29 @@ final class ResolverTest extends CanvasKernelTestBase {
       ['rel' => 'alternate', 'hreflang' => 'fr', 'href' => 'http://localhost/fr/tarifs'],
       ['rel' => 'alternate', 'hreflang' => 'x-default', 'href' => 'http://localhost/prices'],
     ];
-    self::assertSame([['rel' => 'canonical', 'href' => 'http://localhost/prices'], ...$alternates], $resolver->resolve($page)['head']['link']);
+    self::assertSame([
+      ['rel' => 'canonical', 'href' => 'http://localhost/prices'],
+      ...$alternates,
+    ], $resolver->resolve($page)['head']['link']);
     $resolved = $resolver->resolve($page->getTranslation('fr'));
-    self::assertSame([['rel' => 'canonical', 'href' => 'http://localhost/fr/tarifs'], ...$alternates], $resolved['head']['link']);
+    self::assertSame([
+      ['rel' => 'canonical', 'href' => 'http://localhost/fr/tarifs'],
+      ...$alternates,
+    ], $resolved['head']['link']);
     self::assertSame('fr', self::graph($resolved['head'])['webpage']['inLanguage']);
     // The translated front page keeps its language prefix.
     self::assertSame('http://localhost/fr', $resolver->url($home->addTranslation('fr', ['title' => 'Accueil']), new CacheableMetadata()));
+    // It is still the front page where the site's nodes are judged.
+    self::assertTrue($resolver->resolve($home->getTranslation('fr'))['schema']['front']);
+    self::assertFalse($resolver->resolve($page->getTranslation('fr'))['schema']['front']);
     // One published translation is no alternate at all.
     $page->getTranslation('fr')->setUnpublished();
     $page->save();
-    self::assertSame([['rel' => 'canonical', 'href' => 'http://localhost/prices']], $resolver->resolve(Page::load($page->id()))['head']['link']);
+    self::assertSame([[
+      'rel' => 'canonical',
+      'href' => 'http://localhost/prices',
+    ],
+    ], $resolver->resolve(Page::load($page->id()))['head']['link']);
   }
 
   /**
@@ -877,7 +918,10 @@ final class ResolverTest extends CanvasKernelTestBase {
       ->save();
 
     $cacheability = new CacheableMetadata();
-    self::assertSame(['url' => 'https://www.example.com/shop', 'source' => 'frontend'], $this->resolver()->origin($cacheability));
+    self::assertSame([
+      'url' => 'https://www.example.com/shop',
+      'source' => 'frontend',
+    ], $this->resolver()->origin($cacheability));
     self::assertSame(['config:canvas_headless.settings'], $cacheability->getCacheTags());
     self::assertSame([], $cacheability->getCacheContexts());
     // A link field pointing at a page of the site gives its frontend address.
@@ -889,7 +933,10 @@ final class ResolverTest extends CanvasKernelTestBase {
       'field_more' => ['uri' => 'entity:canvas_page/' . $page->id()],
     ]);
     $node->save();
-    self::assertSame(['ok', 'https://www.example.com/shop/pricing'], $this->resolver()->link($this->linkTo('More', 'address')['source'], $node, 'address', new CacheableMetadata()));
+    self::assertSame([
+      'ok',
+      'https://www.example.com/shop/pricing',
+    ], $this->resolver()->link($this->linkTo('More', 'address')['source'], $node, 'address', new CacheableMetadata()));
     // The canonical, og:url and every @id are on the frontend.
     $resolved = $this->resolver()->resolve(Page::load($page->id()));
     self::assertSame('https://www.example.com/shop/plans', $resolved['head']['link'][0]['href']);
@@ -904,17 +951,58 @@ final class ResolverTest extends CanvasKernelTestBase {
     // another address, set per environment; it wins.
     $this->setSetting('canvas_metatag_public_base', 'https://www.example.org/');
     $cacheability = new CacheableMetadata();
-    self::assertSame(['url' => 'https://www.example.org', 'source' => 'settings'], $this->resolver()->origin($cacheability));
+    self::assertSame([
+      'url' => 'https://www.example.org',
+      'source' => 'settings',
+    ], $this->resolver()->origin($cacheability));
     // A fresh object: results are kept per entity object for the request.
     $resolved = $this->resolver()->resolve($this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID)->loadUnchanged($page->id()));
     self::assertSame('https://www.example.org/plans', $resolved['head']['link'][0]['href']);
     self::assertSame('https://www.example.org/plans', self::meta($resolved['head'])['og:url']);
     self::assertSame('https://www.example.org/pricing#webpage', self::graph($resolved['head'])['webpage']['@id']);
     // A value that is not a base URL is ignored.
-    foreach (['/relative', 'ftp://www.example.org', 'https://www.example.org/?a=b', 'https://user@www.example.org'] as $bad) {
+    foreach ([
+      '/relative',
+      'ftp://www.example.org',
+      'https://www.example.org/?a=b',
+      'https://user@www.example.org',
+    ] as $bad) {
       $this->setSetting('canvas_metatag_public_base', $bad);
       self::assertSame('frontend', $this->resolver()->origin(new CacheableMetadata())['source'], $bad);
     }
+  }
+
+  /**
+   * A product's image: the one shared, else the page's, never the site's.
+   *
+   * The site currency is the default currency of its price.
+   */
+  public function testProductImage(): void {
+    $hero = $this->createImage('Hero');
+    $shared = $this->createImage('Shared');
+    $default = $this->createImage('Default');
+    $this->config('canvas_metatag.site')->set('identity.default_image', $default->uuid())->set('currency', 'EUR')->save();
+    $product = ['schema' => ['type' => 'Product', 'props' => ['offers_price' => ['text' => '89']]]];
+    $image = fn (array $values, array $page = []): ?string => self::graph($this->resolver()->resolve($this->createPage($page + [
+      'canvas_metatag' => Values::encode(array_replace_recursive($product, $values)),
+      'path' => ['alias' => '/lamp-' . $this->randomMachineName()],
+    ]))['head'])['primary']['image']['url'] ?? NULL;
+
+    self::assertSame($this->imageOf($hero)['url'], $image([], ['image' => $hero->id()]));
+    self::assertSame($this->imageOf($shared)['url'], $image(['social' => ['image' => ['media' => $shared->uuid()]]], ['image' => $hero->id()]));
+    // The site's default image is for sharing, never the product's.
+    self::assertNull($image([]));
+    // Set on the product, its own.
+    self::assertSame($this->imageOf($hero)['url'], $image([
+      'schema' => ['props' => ['image' => ['media' => $hero->uuid()]]],
+      'social' => ['image' => ['media' => $shared->uuid()]],
+    ]));
+
+    $offer = self::graph($this->resolver()->resolve($this->createPage([
+      'canvas_metatag' => Values::encode($product),
+      'path' => ['alias' => '/lamp'],
+    ]))['head'])['primary']['offers'];
+    self::assertSame('EUR', $offer['priceCurrency']);
   }
 
 }

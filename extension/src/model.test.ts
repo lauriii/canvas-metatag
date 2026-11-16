@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import textCases from '../../tests/fixtures/text-cases.json';
 import { ApiError } from './api';
+import { EMPTY_SCHEMA, REGISTRY, RULES } from './data.test-helper';
 import type { EditorToken } from './host';
 import {
   type DraftIO,
   LIMITS,
   MESSAGES,
-  REGISTRY,
   aiError,
   aiOffText,
   applyChanges,
@@ -16,6 +16,9 @@ import {
   canon,
   cascade,
   clip,
+  currencyName,
+  currencyOptions,
+  currencyChoices,
   dateText,
   diff,
   dirOf,
@@ -26,6 +29,15 @@ import {
   inSentence,
   inherited,
   initialState,
+  kindOfType,
+  kinds,
+  leaveOut,
+  changeKindText,
+  proposalLossText,
+  removed,
+  stageVerdicts,
+  typeOf,
+  withKind,
   fileSize,
   imageSize,
   largeCardNeeds,
@@ -38,6 +50,7 @@ import {
   meter,
   openPending,
   pendingFor,
+  placesText,
   plain,
   previewNote,
   previewText,
@@ -69,6 +82,7 @@ import type {
   StatePayload,
   Target,
   Value,
+  Verdict,
 } from './types';
 
 // Fixtures.
@@ -85,6 +99,7 @@ const SITE = {
   values: {
     robots: { max_image_preview: 'large' as const },
   },
+  currency: '',
 };
 
 /** Typed text. */
@@ -106,6 +121,9 @@ const target = (over: Partial<Target> = {}): Target => ({
 });
 
 const payload = (over: Partial<StatePayload> = {}): StatePayload => ({
+  ui: 'en',
+  registry: REGISTRY,
+  search_features: RULES,
   langcode: 'en',
   languages: { en: 'English' },
   origin: { url: 'https://www.example.com', source: 'request' },
@@ -723,6 +741,33 @@ describe('reducer', () => {
     expect(undone.siteDirty).toBe(true);
   });
 
+  it('a site currency names where it goes live before it is saved', () => {
+    const dirty = run(
+      ready(),
+      { type: 'scope', scope: 'site' },
+      edit('currency', 'EUR', 'site'),
+    );
+    const names = Array.from({ length: 25 }, (_, at) => `Lamp ${at + 1}`);
+    const many = run(dirty, { type: 'effect', effect: { count: 30, places: names } });
+    expect(footer(many)).toMatchObject({
+      dot: 'blue',
+      text: 'Also changes 30 places.',
+      actions: ['discard', 'save'],
+      labels: { save: 'Save and update 30 places' },
+    });
+    // The Currency field names 25 of them and counts the rest.
+    expect(placesText({ count: 30, places: names })).toBe(`${names.join(', ')} and 5 more`);
+    expect(placesText({ count: 3, places: ['Oak desk lamp', 'Membership', 'Every Product'] })).toBe('Oak desk lamp, Membership and Every Product');
+    // One place, by its name.
+    const one = run(dirty, { type: 'effect', effect: { count: 1, places: ['Every Product'] } });
+    expect(footer(one)).toMatchObject({
+      text: 'Also changes Every Product.',
+      labels: { save: 'Save and update Every Product' },
+    });
+    // Nowhere: the usual words.
+    expect(footer(run(dirty, { type: 'effect', effect: { count: 0, places: [] } })).text).toBe('Unsaved changes · not live yet');
+  });
+
   it('apply: a fix edits the working copy exactly as typing would', () => {
     const hidden = run(ready(), edit('robots.noindex', true));
     const fixed = run(hidden, {
@@ -980,11 +1025,7 @@ describe('view()', () => {
         script: [],
       },
       image: null,
-      schema: {
-        withheld: false,
-        missing_required: [],
-        missing_recommended: [],
-      },
+      schema: EMPTY_SCHEMA,
     };
     const state = ready({ resolved });
     const shown = view(state)!;
@@ -1553,17 +1594,115 @@ describe('footer and strips', () => {
     });
   });
 
-  it('the registry resolves extends', () => {
-    expect(REGISTRY.BlogPosting).toMatchObject({
-      label: 'Blog post',
-      group: 'Article',
-      primary_type: 'BlogPosting',
-      og_type: 'article',
+  it('kinds: six, in order, each type reached through one', () => {
+    expect(kinds(REGISTRY)).toEqual(['Product', 'Service', 'Article', 'Event', 'ProfilePage', 'WebPage']);
+    expect(kindOfType(REGISTRY, 'BlogPosting')).toBe('Article');
+    expect(kindOfType(REGISTRY, 'AboutPage')).toBe('WebPage');
+    // A type this site no longer has is a web page.
+    expect(kindOfType(REGISTRY, 'Recipe')).toBe('WebPage');
+    expect(typeOf(REGISTRY, 'Recipe')).toBe(REGISTRY.WebPage);
+    expect(REGISTRY.BlogPosting.props).toEqual(REGISTRY.Article.props);
+    expect(REGISTRY.BlogPosting.kind).toBeUndefined();
+  });
+
+  it('the kind always reads what is output, and the inherited one can be chosen', () => {
+    const choose = (state: State, to: string) =>
+      run(state, { type: 'apply', scope: 'target', values: withKind(state.server!, state.edits.target, to) });
+    // Back to a web page: nothing is stored, and the field reads the default.
+    const article = ready({ target: target({ values: { schema: { type: 'Article', props: { headline: t('Hi') } } } }) });
+    expect(choose(article, 'WebPage').edits.target).toEqual({});
+    // Over an inherited article, a web page is stored: it differs.
+    const translation = ready({ target: target({ values: {}, from_default: { schema: { type: 'Article' } } }) });
+    expect(choose(translation, 'WebPage').edits.target).toEqual({ schema: { type: 'WebPage' } });
+    // Choosing the inherited kind follows it again.
+    const own = ready({ target: target({ values: { schema: { type: 'WebPage' } }, from_default: { schema: { type: 'Article' } } }) });
+    expect(choose(own, 'Article').edits.target).toEqual({});
+  });
+
+  it('names currencies with their codes, sorted by name in the dialog\'s language', () => {
+    expect(currencyName('EUR', 'en')).toBe('Euro · EUR');
+    expect(currencyName('EUR', 'fi')).toBe('Euro · EUR');
+    expect(currencyName('USD', 'fi')).toBe('Yhdysvaltain dollari · USD');
+    // A code with no name of its own is said as the code.
+    expect(currencyName('XXX', 'en')).toMatch(/XXX$/);
+    expect(currencyName('ZZZ', 'en')).toBe('ZZZ');
+    const en = currencyOptions('en');
+    expect(en.map(([, name]) => name)).toEqual([...en.map(([, name]) => name)].sort((a, b) => a.localeCompare(b, 'en')));
+    expect(en.find(([code]) => code === 'EUR')).toEqual(['EUR', 'Euro · EUR']);
+    // Those in use first, then the most common, then the rest.
+    const { common, rest } = currencyChoices('en', ['SEK', undefined, 'EUR']);
+    expect(common.map(([code]) => code)).toEqual(['SEK', 'EUR', 'USD', 'GBP']);
+    expect(rest).toHaveLength(en.length - 4);
+    expect(rest.some(([code]) => code === 'EUR')).toBe(false);
+    // Another language, its own names and order.
+    expect(currencyOptions('fi').find(([code]) => code === 'USD')?.[1]).toBe('Yhdysvaltain dollari · USD');
+  });
+
+  it('lists the stage\'s lines with "No search feature" last', () => {
+    const main = "https://example.com/plans#primary";
+    const page = "https://example.com/plans#webpage";
+    const faq = { feature: 'faq', node: "https://example.com/plans#faq", verdict: 'retired' as const };
+    const report = (features: Verdict[]) => ({ ...EMPTY_SCHEMA, type: 'Service', nodes: [{ id: main, type: 'Service', origin: 'main' as const, at: 3 }], features });
+    // A service has no feature of its own: the hand-added FAQ comes first.
+    expect(stageVerdicts(report([faq]), main, page)).toEqual([faq, { feature: null, node: main, verdict: 'none' }]);
+    // Only "No search feature" from the server: said once.
+    expect(stageVerdicts(report([{ feature: null, node: null, verdict: 'none' }]), main, page)).toHaveLength(1);
+    // A main node with a feature: no made-up line.
+    expect(stageVerdicts(report([{ feature: 'merchant-listing', node: main, verdict: 'ready' }]), main, page)).toHaveLength(1);
+    // A profile is judged on the page, which covers its person.
+    expect(stageVerdicts(report([{ feature: 'profile-page', node: page, verdict: 'ready' }]), main, page)).toEqual([{ feature: 'profile-page', node: page, verdict: 'ready' }]);
+  });
+
+  it('a change of kind keeps the details the new one has, and names the rest', () => {
+    const product = ready({ target: target({ values: { schema: { type: 'Product', props: { name: t('Studio'), offers_price: t('120'), offers_priceCurrency: t('EUR'), billing: t('P1M'), sold_here: t('yes') } } } }) });
+    const server = product.server!;
+    expect(removed(server, product.edits.target, 'Event', 'en')).toEqual(['the price (€120)', 'the answer to “Bought on this page” (yes, from us)', 'the billing (every month)']);
+    // A draft price that is not a number yet is said as typed, never "€NaN".
+    const draft = ready({ target: target({ values: { schema: { type: 'Product', props: { offers_price: t('49,90'), offers_priceCurrency: t('EUR') } } } }) });
+    expect(removed(draft.server!, draft.edits.target, 'Event', 'en')).toEqual(['the price (49,90)']);
+    // An event's dates, as the dialog writes dates, by their nouns, in the form's order.
+    const event = ready({ target: target({ values: { schema: { type: 'Event', props: { endDate: t('2027-05-11'), startDate: t('2027-05-12T18:00'), location_name: t('Hall') } } } }) });
+    expect(removed(event.server!, event.edits.target, 'Article', 'en')).toEqual(['the start (12 May 2027, 18:00)', 'the end (11 May 2027)', 'the venue (Hall)']);
+    // Plans for a service keep the name, the price, the currency and the billing.
+    expect(withKind(server, product.edits.target, 'Service').schema).toEqual({
+      type: 'Service',
+      props: { name: t('Studio'), offers_price: t('120'), offers_priceCurrency: t('EUR'), billing: t('P1M') },
     });
-    expect(REGISTRY.BlogPosting.props).toBe(REGISTRY.Article.props);
-    expect(REGISTRY.WebPage.props).toBeUndefined();
+  });
+
+  it('says what a change of kind removes, one value or several', () => {
+    expect(changeKindText('an event', ['the price (€2,500)', 'the availability (in stock)'])).toBe(
+      'Changing to an event removes the price (€2,500) and the availability (in stock) you set. Undo brings them back.',
+    );
+    expect(changeKindText('an article', ['the start (12 May 2027, 18:00)', 'the end (13 May 2027)', 'the venue (The New Mill)'])).toBe(
+      'Changing to an article removes the start (12 May 2027, 18:00), the end (13 May 2027) and the venue (The New Mill) you set. Undo brings them back.',
+    );
+    expect(changeKindText('an event', ['the price (€89)'])).toBe('Changing to an event removes the price (€89) you set. Undo brings it back.');
+    expect(changeKindText('a web page', [])).toBe('Change this page to a web page.');
+    // The AI tray says the same before a proposed kind is used.
+    expect(proposalLossText(['the price (€89)', 'the billing (every month)'])).toBe('Using this removes the price (€89) and the billing (every month) you set.');
+  });
+
+  it('leaves out a hand-added item, giving it an id first', () => {
+    const faq = { '@type': 'FAQPage', name: 'Questions' };
+    const base = 'https://example.com/plans';
+    const left = leaveOut({ schema: { custom: JSON.stringify([faq, { '@type': 'FAQPage', '@id': '#faqpage' }]) } }, { item: 0, id: null, type: 'FAQPage' }, base)!;
+    expect(left).toMatchObject({ id: '#faqpage-2', given: true });
+    expect(JSON.parse(left.values.schema!.custom!)[0]).toEqual({ '@id': '#faqpage-2', ...faq });
+    expect(left.values.schema!.skip).toEqual(['#faqpage-2']);
+    // With an id: listed as written, the JSON-LD unchanged.
+    const custom = JSON.stringify({ '@type': 'FAQPage', '@id': '#faq' });
+    expect(leaveOut({ schema: { custom } }, { item: 0, id: `${base}#faq`, type: 'FAQPage' }, base)).toEqual({ values: { schema: { custom, skip: ['#faq'] } }, id: '#faq', given: false });
+    expect(leaveOut({ schema: { custom: 'not json' } }, { item: 0, id: null, type: 'FAQPage' }, base)).toBeNull();
+    // An unsent edit moved the items: the one the report named is found by
+    // its id, and one without an id is never mistaken for another.
+    const moved = JSON.stringify([{ '@type': 'Product', '@id': '#p' }, { '@type': 'FAQPage', '@id': '#faq' }]);
+    expect(leaveOut({ schema: { custom: moved } }, { item: 0, id: `${base}#faq`, type: 'FAQPage' }, base)?.id).toBe('#faq');
+    expect(leaveOut({ schema: { custom: JSON.stringify([{ '@type': 'Product' }, faq]) } }, { item: 0, id: null, type: 'FAQPage' }, base)).toBeNull();
+    expect(leaveOut({ schema: { custom: moved } }, { item: 0, id: `${base}#gone`, type: 'FAQPage' }, base)).toBeNull();
   });
 });
+
 
 // What the components lean on.
 
@@ -1662,11 +1801,7 @@ describe('what previews and rows say', () => {
     const resolved = {
       head: { title: '', meta: [], link: [], script: [] },
       image: { ...image, name: 'New', source: 'override' as const },
-      schema: {
-        withheld: false,
-        missing_required: [],
-        missing_recommended: [],
-      },
+      schema: EMPTY_SCHEMA,
     };
     const confirmed = reducer(state, {
       type: 'confirmed',
@@ -1724,7 +1859,7 @@ describe('what previews and rows say', () => {
     const resolved = {
       head: { title: '', meta: [], link: [], script: [] },
       image: { ...image, source: 'entity' as const },
-      schema: { withheld: false, missing_required: [], missing_recommended: [] },
+      schema: EMPTY_SCHEMA,
     };
     const state = withImage({
       target: target({ values: { social: { image: { media: 'uuid-private' } } } }),
@@ -1802,7 +1937,7 @@ describe('fixes from the reviews', () => {
         script: [],
       },
       image: null,
-      schema: { withheld: false, missing_required: [], missing_recommended: [] },
+      schema: EMPTY_SCHEMA,
     };
     const hidden = ready({
       target: target({ values: { robots: { noindex: true } } }),

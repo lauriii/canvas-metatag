@@ -532,8 +532,9 @@ test("an Article page's dates follow its own, and a key on a date box finds a fi
   const draft = async () => (await seoState(page, pageQuery(PAGES.stored.id))).target?.values.schema;
   const before = await draft();
   await tab(frame, UI.tab.schema).click();
-  await frame.getByRole('combobox', { name: 'Type', exact: true }).click();
-  await frame.getByRole('option', { name: /^Article/ }).click();
+  await button(frame, UI.schema.kind).click();
+  await frame.getByRole('radio', { name: UI.schema.article }).check();
+  await button(frame, 'Change to an article').click();
   const more = button(frame, 'More details');
   if ((await more.getAttribute('aria-expanded')) !== 'true') {
     await more.click();
@@ -559,7 +560,10 @@ test("an Article page's dates follow its own, and a key on a date box finds a fi
     .poll(async () => ((await draft()) as { props?: Record<string, unknown> } | undefined)?.props?.datePublished)
     .toEqual({ fact: 'modified' });
   await button(frame, 'Unlink Published').click();
-  // Back to the type it had.
-  await button(frame, 'Reset Type').click();
+  // Back to the kind it had: Undo.
+  await button(frame, UI.schema.kind).click();
+  await frame.getByRole('radio', { name: UI.schema.webPage }).check();
+  await button(frame, 'Change to a web page').click();
   await expect.poll(draft, { timeout: 30_000 }).toEqual(before);
+
 });

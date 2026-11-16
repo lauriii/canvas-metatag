@@ -156,6 +156,8 @@ function useLink(options: LinkOptions) {
   const menuId = useId();
   const linkButton = useRef<HTMLButtonElement>(null);
   const disabled = locked.target;
+  // Nothing to preview: the value is said at rest, with no menu to open.
+  const atRest = state.readonly === 'empty';
   // A template's value, and a page's value that may be linked, follows its
   // default while nothing is set: shown as a box.
   const byDefault = !value && (template || options.linkable) ? options.byDefault : null;
@@ -306,7 +308,7 @@ function useLink(options: LinkOptions) {
   const buttonName = boxed ? `Change the link for ${label}` : `Link ${label} to a field`;
 
   // One name, and the tooltip says it first.
-  const button = options.linkable && (
+  const button = options.linkable && !atRest && (
     <IconBtn
       ref={linkButton}
       label={buttonName}
@@ -365,64 +367,85 @@ function useLink(options: LinkOptions) {
       : `Linked to ${group}${source}. ${said_}`
     : `Follows the default: ${defaultName}. ${said_}`;
 
+  /** What the box says: where the value comes from, and what it gives. */
+  const boxWords = (
+    <>
+      <span className="seo-linked-tag" title={tag}>
+        {!linked ? null : shown.status === 'broken' ? <LinkBreak2Icon aria-hidden /> : <Link2Icon aria-hidden />}
+        {tag.includes(' › ') ? (
+          // A path gives way from its start: the field it ends at stays.
+          <>
+            <span className="seo-linked-path" dir="auto">{tag.slice(0, tag.lastIndexOf(' › ') + 3)}</span>
+            <span className="seo-linked-leaf" dir="auto">{tag.slice(tag.lastIndexOf(' › ') + 3)}</span>
+          </>
+        ) : (
+          <span className="seo-linked-leaf" dir="auto">{tag}</span>
+        )}
+      </span>
+      <span className="seo-linked-value" data-state={shown.status} dir={shown.status === 'ok' ? 'auto' : undefined} title={shown.status === 'ok' ? valueText : undefined}>
+        {valueText}
+      </span>
+    </>
+  );
+
   /** The box that stands for a linked value, or one that follows its default. */
   const boxNode = (field: FieldParts & { describedBy?: string }, lines = 1, inline = false) => {
     fieldId.current = field.id;
     return (
       <div className="seo-linked" data-look={linked ? (shown.status === 'broken' ? 'broken' : 'linked') : 'default'} ref={box}>
         {/* A combobox, as a select's trigger is: named for the field, its
-            value the text it shows. */}
-        <button
-          ref={boxButton}
-          id={field.id}
-          type="button"
-          role="combobox"
-          aria-controls={menu ? menuId : undefined}
-          className="seo-linked-box"
-          data-lines={lines}
-          data-inline={inline || undefined}
-          data-x={(linked && !disabled) || undefined}
-          aria-labelledby={field.labelId}
-          aria-describedby={[`${field.id}-said`, field.describedBy].filter(Boolean).join(' ')}
-          aria-haspopup="dialog"
-          aria-expanded={menu}
-          onClick={(event) => openMenu(event.currentTarget)}
-          onKeyDown={(event) => {
-            if (event.altKey && event.key === 'ArrowDown') {
-              event.preventDefault();
-              openMenu(event.currentTarget);
-            } else if ((event.key === 'Backspace' || event.key === 'Delete') && !disabled) {
-              event.preventDefault();
-              unlink();
-            } else if (event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey && !disabled) {
-              event.preventDefault();
-              if (options.typing) {
-                // Typing on a box replaces it with typed text.
-                unlink(event.key);
-              } else {
-                // A date, a choice: a key never writes a value that cannot
-                // be one. It finds a field instead.
-                openMenu(event.currentTarget, event.key);
+            value the text it shows. At rest, the same words with no menu. */}
+        {atRest ? (
+          <div
+            id={field.id}
+            className="seo-linked-box"
+            role="group"
+            data-lines={lines}
+            data-inline={inline || undefined}
+            aria-labelledby={field.labelId}
+            aria-describedby={[`${field.id}-said`, field.describedBy].filter(Boolean).join(' ')}
+          >
+            {boxWords}
+          </div>
+        ) : (
+          <button
+            ref={boxButton}
+            id={field.id}
+            type="button"
+            role="combobox"
+            aria-controls={menu ? menuId : undefined}
+            className="seo-linked-box"
+            data-lines={lines}
+            data-inline={inline || undefined}
+            data-x={(linked && !disabled) || undefined}
+            aria-labelledby={field.labelId}
+            aria-describedby={[`${field.id}-said`, field.describedBy].filter(Boolean).join(' ')}
+            aria-haspopup="dialog"
+            aria-expanded={menu}
+            onClick={(event) => openMenu(event.currentTarget)}
+            onKeyDown={(event) => {
+              if (event.altKey && event.key === 'ArrowDown') {
+                event.preventDefault();
+                openMenu(event.currentTarget);
+              } else if ((event.key === 'Backspace' || event.key === 'Delete') && !disabled) {
+                event.preventDefault();
+                unlink();
+              } else if (event.key.length === 1 && event.key !== ' ' && !event.ctrlKey && !event.metaKey && !event.altKey && !disabled) {
+                event.preventDefault();
+                if (options.typing) {
+                  // Typing on a box replaces it with typed text.
+                  unlink(event.key);
+                } else {
+                  // A date, a choice: a key never writes a value that cannot
+                  // be one. It finds a field instead.
+                  openMenu(event.currentTarget, event.key);
+                }
               }
-            }
-          }}
-        >
-          <span className="seo-linked-tag" title={tag}>
-            {!linked ? null : shown.status === 'broken' ? <LinkBreak2Icon aria-hidden /> : <Link2Icon aria-hidden />}
-            {tag.includes(' › ') ? (
-              // A path gives way from its start: the field it ends at stays.
-              <>
-                <span className="seo-linked-path" dir="auto">{tag.slice(0, tag.lastIndexOf(' › ') + 3)}</span>
-                <span className="seo-linked-leaf" dir="auto">{tag.slice(tag.lastIndexOf(' › ') + 3)}</span>
-              </>
-            ) : (
-              <span className="seo-linked-leaf" dir="auto">{tag}</span>
-            )}
-          </span>
-          <span className="seo-linked-value" data-state={shown.status} dir={shown.status === 'ok' ? 'auto' : undefined} title={shown.status === 'ok' ? valueText : undefined}>
-            {valueText}
-          </span>
-        </button>
+            }}
+          >
+            {boxWords}
+          </button>
+        )}
         <span id={`${field.id}-said`} hidden>
           {description}
         </span>
@@ -561,7 +584,7 @@ export function ValueField(
   props: Omit<FieldOptions, 'scope'> &
     LinkOptions & {
       required?: boolean;
-      missing?: string;
+      missing?: ReactNode;
       info?: ReactNode;
       meter?: Parameters<typeof Field>[0]['meter'];
       onSuggest?(): void;
@@ -736,6 +759,23 @@ function Ending(props: { scope: Scope; disabled: boolean; wide?: boolean }) {
     ];
   };
 
+  const words = (
+    <>
+      {fellBack && <Link2Icon aria-hidden className="seo-ending-link" data-look={ownLink?.status === 'broken' ? 'broken' : undefined} />}
+      {!none && <span className="seo-ending-sep" aria-hidden>{separator}</span>}
+      <span dir="auto">{none ? 'No ending' : shownEnd || 'Site name'}</span>
+    </>
+  );
+  if (state.readonly === 'empty') {
+    // Nothing to preview: the ending is said at rest, as text.
+    return (
+      <span className="seo-ending" data-wide={props.wide || undefined}>
+        <span className="seo-ending-btn" data-static="" data-set={own !== undefined || undefined} title={fellBack ?? undefined}>
+          {words}
+        </span>
+      </span>
+    );
+  }
   return (
     <span
       className="seo-ending"
@@ -779,9 +819,7 @@ function Ending(props: { scope: Scope; disabled: boolean; wide?: boolean }) {
           }
         }}
       >
-        {fellBack && <Link2Icon aria-hidden className="seo-ending-link" data-look={ownLink?.status === 'broken' ? 'broken' : undefined} />}
-        {!none && <span className="seo-ending-sep" aria-hidden>{separator}</span>}
-        <span dir="auto">{none ? 'No ending' : shownEnd || 'Site name'}</span>
+        {words}
         <ChevronDownIcon aria-hidden />
       </button>
       <LinkMenu

@@ -661,6 +661,9 @@ describe('the editor document', () => {
     expect(facts.h1).toEqual(['Simple plans']);
     expect(facts.imagesWithoutAlt).toHaveLength(20);
     expect(facts.imagesWithoutAlt[0]).toBe('photo-0.jpg');
+    // Every image the page shows, for the structured data's image.
+    expect(facts.images).toHaveLength(25);
+    expect(facts.images?.[0]).toBe('/sites/default/files/photo-0.jpg?itok=abc');
     expect(facts.text).toHaveLength(20000);
   });
 

@@ -3,6 +3,7 @@ import type {
   MediaPage,
   SchemaSuggestion,
   SeoValues,
+  SiteEffect,
   SiteSettings,
   StatePayload,
   SuggestRequest,
@@ -182,9 +183,14 @@ export function createApi(base: string, fetchFn: typeof fetch = fetch) {
       );
     },
 
-    /** PUT /site: both whole objects. Last save wins. */
+    /** PUT /site: the whole settings. Last save wins. */
     putSite(site: SiteSettings): Promise<{ site: SiteSettings }> {
       return request('site', json('PUT', site));
+    },
+
+    /** PUT /site as a dry run: where the save would change structured data. */
+    siteEffect(site: SiteSettings): Promise<{ effect: SiteEffect | null }> {
+      return request('site', json('PUT', { ...site, dry_run: true }));
     },
 
     /** GET /media: image media the user may view, newest first. */

@@ -7,8 +7,9 @@ from the values the dialog shows, unsaved edits and Canvas's live page title
 and description included. At template scope they MUST be about the node the
 editor previews, named once on one line of the Checks sheet and called "this
 ‹type›" in its issues; when the template renders the front page (front-page),
-the front page visibility rules MUST judge the front node. The Site scope MUST
-have no checks of its own.
+the front page visibility rules MUST judge the front node. A value empty for
+the previewed node MUST be stated as a fact, good to know and not counted. The
+Site scope MUST have no checks of its own.
 
 #### Scenario: Typing changes the checks
 
@@ -30,10 +31,15 @@ have no checks of its own.
 - **WHEN** "Every Event"'s description holds {Performers} and the previewed event has no performers
 - **THEN** the issue MUST say "Performers is empty for this event", not "Fill in Performers", and be good to know, not counted in the Checks button; the same MUST hold for a value the title or the social texts use
 
+#### Scenario: A description linked to a field empty for the previewed node
+
+- **WHEN** "Every Product"'s description is linked to SKU and the previewed product has no SKU and no description of its own
+- **THEN** "SKU is empty for this product" MUST be listed as good to know, and "Add a description" MUST NOT be listed or counted
+
 #### Scenario: A structured data property linked to a field empty for the previewed node
 
 - **WHEN** "Every Event" links its Ends property to the field Ends and the previewed event has no end
-- **THEN** the issue MUST say "Ends is empty for this event", be good to know, not counted, and "Event is missing: Ends." MUST NOT be listed
+- **THEN** the issue MUST say "Ends is empty for this event", be good to know, not counted, and "Also helps the event result: Ends." MUST NOT be listed
 
 #### Scenario: Shown in search, not saved yet
 

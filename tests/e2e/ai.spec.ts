@@ -119,12 +119,18 @@ test('the social suggestion fills title and description together', async ({ page
     .toEqual({ title: { text: expect.stringMatching(/\S/) }, description: { text: expect.stringMatching(/\S/) } });
 });
 
-test('a structured-data proposal leaves what it could not verify unchecked', async ({ page }) => {
+test('a structured-data proposal offers only what it found, and counts the rest', async ({ page }) => {
   await tab(frame, UI.tab.schema).click();
   await button(frame, UI.ai.suggestSchema).click();
   await expect(frame.getByText(/^This looks like an? /)).toBeVisible({ timeout: 30_000 });
-  await expect(frame.getByText(UI.ai.notFound).first()).toBeVisible();
-  await expect(frame.getByRole('checkbox', { checked: false }).first()).toBeVisible();
+  // The test provider proposes an event with a venue that is not on the
+  // page and a start date: the venue is counted, never shown; the date is
+  // for people.
+  await expect(frame.getByText(UI.ai.guesses)).toBeVisible();
+  await expect(frame.getByRole('checkbox', { checked: false })).toHaveCount(0);
+  await expect(frame.getByText('Garden Hall')).toHaveCount(0);
+  await expect(frame.getByText(UI.ai.yourself, { exact: true })).toBeVisible();
+  await expect(frame.getByText(UI.ai.reserved)).toBeVisible();
   await expect(frame.getByText(UI.ai.disclosure)).toBeVisible();
 
   // A proposal is only a proposal.

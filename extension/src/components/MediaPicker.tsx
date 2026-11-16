@@ -9,6 +9,7 @@ import {
 import { useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
+import { rankImages } from '../checks';
 import {
   dimensions,
   imageSize,
@@ -102,7 +103,7 @@ export function ImageRow(
         </span>
       )}
       {props.tag ? (
-        // As a box: its source over its value, the size beside the name.
+        // As a box: its source over its value; the name over its size, as at every scope.
         <div className="seo-image-name" data-tagged="">
           <span className="seo-image-tag" data-look={props.tag.look} title={props.tag.text}>
             {props.tag.look === 'broken' ? <LinkBreak2Icon aria-hidden /> : props.tag.look === 'linked' ? <Link2Icon aria-hidden /> : null}
@@ -111,11 +112,9 @@ export function ImageRow(
           {props.state ? (
             <div data-state="">{props.state}</div>
           ) : (
-            <div title={image?.name}>
-              <span>{image ? <ImageName name={image.name} /> : 'No image'}</span>
-              {image && <small>{imageSize(image)}</small>}
-            </div>
+            <div title={image?.name}>{image ? <ImageName name={image.name} /> : 'No image'}</div>
           )}
+          {!props.state && image && <small>{imageSize(image)}</small>}
         </div>
       ) : (
         <div className="seo-image-name">
@@ -229,11 +228,7 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
     props.onDone();
   };
   const chosen = request.chosen && 'media' in request.chosen ? request.chosen.media : undefined;
-  // Picked in this session first.
-  const picked = Object.keys(PICKED);
-  const sorted = [...items].sort(
-    (a, b) => Number(picked.includes(b.uuid)) - Number(picked.includes(a.uuid)),
-  );
+  const sorted = rankImages(items, state.facts?.images ?? [], Object.keys(PICKED));
 
   return (
     <>

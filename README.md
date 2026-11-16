@@ -51,6 +51,43 @@ If building the head fails (an invalid site timezone, an incompatible Canvas
 version), the page is served with core's head and the error is logged under
 `canvas_metatag`.
 
+## Structured data: the Schema tab
+
+The Schema tab opens on what search engines read: one to three plain
+sentences built only from the structured data the page ships ("Oak desk lamp,
+a product sold by Humanify Studio for €89, in stock."). Each fact in them
+leads to where it is set. Under them, one line per search feature the page's
+structured data applies to, with a verdict:
+
+- **Can show** / **Complete**: the markup has what the feature asks for.
+  A feature without required facts (an article's title, image and date) is
+  complete, never "can show".
+- **Needs ‹fact›**: what is missing, with a button to set it.
+- **Only if people buy it here**: a product's merchant listing waits for the
+  answer to "Bought on this page".
+- **Doesn't fit**: the feature is not for this, such as a shopping listing
+  for a monthly membership. It is gray and never counted.
+- **Not shown since ‹date›** / **No longer shown**: a retired feature.
+- **No search feature**: the page still says what it is about.
+
+A verdict says what the markup makes possible; search engines decide whether
+to show a result. Each line opens its proof: where the feature appears, what
+it needs and what also helps, the guidelines no machine checks, the date the
+rules were last reviewed and their source (`data/search-features.json`).
+
+**What this page is** is one of six kinds: a product people buy, plans for a
+service (memberships, subscriptions and services: no search feature of their
+own, never shopping listings), an article (Kind of article: blog post, news
+article), an event people attend in person, a person's profile, or a web page
+(Kind of page: about, contact, collection). A product says how its price is
+**Billed** (once, every month, every year) and whether it is **Bought on this
+page**; only then is the site its seller. Site › Prices › Currency is the
+currency of every price that names none.
+
+Your own JSON-LD is under **Code › Add your own JSON-LD**. Each item gets its
+verdicts and checks: text that is not on the page can be left out until it
+is, without changing the JSON-LD.
+
 ## The three scopes
 
 | Scope | Where you edit it | Saved | Goes live |
@@ -295,7 +332,7 @@ XML sitemaps, redirects, `robots.txt` or `llms.txt`; keyword or readability
 scoring, or any score; bulk editing; overrides for a single node (a node uses
 its content type's settings); import of Metatag data; search console
 integrations; head output on routes it does not own; breadcrumb structured
-data; repeating structured data such as FAQs or recipe steps (use custom
+data; repeating structured data such as FAQs or recipe steps (add your own
 JSON-LD); robots rules for single crawlers and AI-training opt-outs (those
 belong in `robots.txt`); `og:locale`; image upload or image styles; a site-wide
 default description or social text; a UI for translating template or site
