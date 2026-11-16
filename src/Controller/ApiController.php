@@ -10,6 +10,7 @@ use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\SchemaGraph;
+use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Component\Uuid\Uuid;
@@ -57,10 +58,11 @@ final class ApiController implements ContainerInjectionInterface {
     private readonly LanguageManagerInterface $languageManager,
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly AccountInterface $currentUser,
+    private readonly Sources $sources,
   ) {}
 
   /**
-   * Everything the dialog needs to open: settings, tokens and the output.
+   * Everything the dialog needs to open: settings, facts, links and output.
    *
    * The context is a page, a content template with the node it is previewed
    * with (or without one, when its type has no content yet), or nothing.
@@ -86,7 +88,7 @@ final class ApiController implements ContainerInjectionInterface {
     if ($context instanceof JsonResponse) {
       return $context;
     }
-    ['target' => $target, 'entity' => $entity, 'draft' => $draft, 'vocabulary' => [$entity_type_id, $bundle]] = $context;
+    ['target' => $target, 'entity' => $entity, 'draft' => $draft, 'vocabulary' => [, $bundle]] = $context;
 
     // The edit copy is what is stored, not what a configuration override
     // makes of it; the resolver keeps reading with overrides.
@@ -99,10 +101,12 @@ final class ApiController implements ContainerInjectionInterface {
     $media = $this->describeMedia([
       $identity['logo'],
       $identity['default_image'],
-      $target['values']['social']['image'] ?? '',
-      $target['from_default']['social']['image'] ?? '',
-      ...array_values($target['values']['schema']['props'] ?? []),
+      $target['values']['social']['image']['media'] ?? '',
+      $target['from_default']['social']['image']['media'] ?? '',
+      ...array_column($target['values']['schema']['props'] ?? [], 'media'),
     ]);
+    $template = ($target['scope'] ?? NULL) === 'template';
+    $broken = $template ? $this->broken($target['values'], $bundle) : [];
     if ($target !== NULL) {
       // An empty map is an object in JSON.
       $target['values'] = (object) $target['values'];
@@ -136,7 +140,11 @@ final class ApiController implements ContainerInjectionInterface {
           ? $target['published']
           : !$entity instanceof EntityPublishedInterface || $entity->isPublished(),
       ],
-      'tokens' => $this->resolver->tokens($entity, $entity_type_id, $bundle, $cacheability),
+      'facts' => $this->resolver->facts($entity, $cacheability),
+      'separator' => $this->resolver->separator($cacheability),
+      // Only a template links fields; read with its preview node.
+      'sources' => $template ? $this->resolver->sourceRows($entity, $bundle, $cacheability) : [],
+      'broken' => (object) $broken,
       'media' => (object) $media,
       'resolved' => $entity === NULL ? NULL : array_diff_key($this->resolver->resolve($entity, $draft), ['cacheability' => TRUE]),
     ]);
@@ -146,13 +154,12 @@ final class ApiController implements ContainerInjectionInterface {
    * Saves the site identity and the site-wide defaults. Last save wins.
    */
   public function putSite(Request $request): JsonResponse {
-    $body = self::body($request);
-    if ($body === NULL || !self::isMap($body['identity'] ?? NULL) || !self::isMap($body['values'] ?? NULL)) {
+    $body = self::body($request, ['identity', 'values']);
+    if ($body === NULL) {
       return self::badRequest();
     }
     [$identity, $identity_errors] = Values::cleanIdentity($body['identity']);
-    // The site pattern accepts the tokens every entity has.
-    [$values, $errors] = Values::clean($body['values'], 'site', $this->resolver->tokenTypes(Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID));
+    [$values, $errors] = Values::clean($body['values'], 'site', static fn (): bool => FALSE);
     $config = $this->configFactory->getEditable('canvas_metatag.site');
     if ($errors) {
       $stored = $config->get('values');
@@ -249,7 +256,7 @@ final class ApiController implements ContainerInjectionInterface {
         $keep = array_diff_key($props, array_column(SchemaGraph::types()[$type]['props'] ?? [], 'key', 'key'));
       }
     }
-    return $this->putDraft($page, 'page', $this->resolver->tokenTypes('canvas_page', 'canvas_page'), $body, $type, $keep);
+    return $this->putDraft($page, 'page', static fn (): bool => FALSE, $body, $type, $keep);
   }
 
   /**
@@ -268,7 +275,8 @@ final class ApiController implements ContainerInjectionInterface {
     if (!$template instanceof ContentTemplate || $template->getTargetEntityTypeId() !== 'node' || $template->getMode() !== 'full') {
       return self::error(404, 'not_found', 'SEO settings exist only for the full content template of a content type.');
     }
-    return $this->putDraft($template, 'template', $this->resolver->tokenTypes('node', $template->getTargetBundle()), $body);
+    $bundle = $template->getTargetBundle();
+    return $this->putDraft($template, 'template', fn (array $source, string $kind): bool => $this->sources->accepts($bundle, $source, $kind), $body);
   }
 
   /**
@@ -282,8 +290,8 @@ final class ApiController implements ContainerInjectionInterface {
    *   is never saved.
    * @param string $scope
    *   Either 'page' or 'template'.
-   * @param array<string, string> $tokens
-   *   Token name => type.
+   * @param callable(array, string): bool $accepts
+   *   Whether a source may be stored for a value of a kind.
    * @param array<string, mixed> $body
    *   The request body, as draftBody() returned it.
    * @param string $type
@@ -292,10 +300,12 @@ final class ApiController implements ContainerInjectionInterface {
    *   Structured-data details written besides the values and never echoed:
    *   those of a page translation's published type (putPage()).
    */
-  private function putDraft(Page|ContentTemplate $entity, string $scope, array $tokens, array $body, string $type = 'WebPage', array $keep = []): JsonResponse {
-    [$clean, $errors] = Values::clean($body['values'], $scope, $tokens, $type);
-    if ($errors) {
-      $current = $this->autoSaveManager->getAutoSaveEntity($entity, bypass_cache: TRUE)->entity ?? $entity;
+  private function putDraft(Page|ContentTemplate $entity, string $scope, callable $accepts, array $body, string $type = 'WebPage', array $keep = []): JsonResponse {
+    [$clean, $errors] = Values::clean($body['values'], $scope, $accepts, $type);
+    // A refused value sent back exactly as the draft or the stored entity has
+    // it is kept: an Undo back to the stored value while a draft exists.
+    $draft = $errors ? $this->autoSaveManager->getAutoSaveEntity($entity, bypass_cache: TRUE)->entity : NULL;
+    foreach ($errors ? array_filter([$draft, $entity]) : [] as $current) {
       $current = Values::clean(match (TRUE) {
         $current instanceof Page => Values::decode($current->get('canvas_metatag')->value),
         $current instanceof ContentTemplate => (array) $current->getThirdPartySetting('canvas_metatag', 'values', []),
@@ -337,6 +347,37 @@ final class ApiController implements ContainerInjectionInterface {
   }
 
   /**
+   * The template's links that cannot be read, by dotted path.
+   *
+   * @return array<string, array{field: string, reason: string}>
+   *   The machine name of the field each starts from, and why: `missing`,
+   *   `kind` or `error`.
+   */
+  private function broken(array $values, string $bundle): array {
+    $kinds = [
+      'title' => 'text',
+      'title_end' => 'text',
+      'description' => 'text',
+      'social.title' => 'text',
+      'social.description' => 'text',
+      'social.image' => 'image',
+    ];
+    $props = array_column(SchemaGraph::types()[$values['schema']['type'] ?? 'WebPage']['props'] ?? [], 'kind', 'key');
+    foreach ($props as $key => $kind) {
+      $kinds["schema.props.$key"] = Values::KINDS[$kind];
+    }
+    $broken = [];
+    foreach ($kinds as $path => $kind) {
+      $source = NestedArray::getValue($values, [...explode('.', $path), 'source']);
+      $reason = is_array($source) ? $this->sources->problem($bundle, $source, $kind) : NULL;
+      if ($reason !== NULL) {
+        $broken[$path] = ['field' => (string) Sources::machineName($source), 'reason' => $reason];
+      }
+    }
+    return $broken;
+  }
+
+  /**
    * Carries forward each refused value that was sent back exactly as stored.
    *
    * Also when its vocabulary has changed since: read mode keeps it, and every
@@ -349,7 +390,7 @@ final class ApiController implements ContainerInjectionInterface {
    * @param array<string, string> $errors
    *   What write mode refused, by dotted path.
    * @param array $current
-   *   The values as stored (or in the draft), cleaned in read mode.
+   *   The values in the draft or as stored, cleaned in read mode.
    * @param string $scope
    *   Either 'page', 'template' or 'site'.
    * @param string $type
@@ -406,11 +447,9 @@ final class ApiController implements ContainerInjectionInterface {
    *   the editor's client id.
    */
   private static function draftBody(Request $request): ?array {
-    $body = self::body($request);
+    $body = self::body($request, ['values', 'auto_saves']);
     $valid = $body !== NULL
-      && self::isMap($body['values'] ?? NULL)
       && is_string($body['client_instance_id'] ?? NULL) && $body['client_instance_id'] !== ''
-      && self::isMap($body['auto_saves'] ?? NULL)
       && !array_filter($body['auto_saves'], static fn (mixed $entry): bool => !is_array($entry));
     return $valid ? $body : NULL;
   }
@@ -418,20 +457,27 @@ final class ApiController implements ContainerInjectionInterface {
   /**
    * The request body, or NULL when it is too large or not a JSON object.
    *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The request.
+   * @param list<string> $objects
+   *   Members that must be JSON objects. Told from the raw JSON: decoded to
+   *   arrays, an empty object and an empty list are alike.
+   *
    * @return array<string, mixed>|null
    *   The decoded object.
    */
-  private static function body(Request $request): ?array {
+  private static function body(Request $request, array $objects = []): ?array {
     $content = $request->getContent();
-    $body = strlen($content) > self::MAX_BODY ? NULL : json_decode($content, TRUE);
-    return self::isMap($body) ? $body : NULL;
-  }
-
-  /**
-   * Whether a decoded JSON value is an object.
-   */
-  private static function isMap(mixed $value): bool {
-    return is_array($value) && ($value === [] || !array_is_list($value));
+    $raw = strlen($content) > self::MAX_BODY ? NULL : json_decode($content);
+    if (!$raw instanceof \stdClass) {
+      return NULL;
+    }
+    foreach ($objects as $member) {
+      if (!($raw->{$member} ?? NULL) instanceof \stdClass) {
+        return NULL;
+      }
+    }
+    return json_decode($content, TRUE);
   }
 
   /**

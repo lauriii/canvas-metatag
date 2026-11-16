@@ -17,10 +17,11 @@ its draft; the link MUST become broken (dynamic-values).
 
 A content type's values MUST be stored as a third-party setting of its Full
 content template, and MUST export and import with it as configuration. A type
-MAY set a title and its ending, a description of at most 1000 characters, social title, description and image, robots directives
-and a structured data type with its details and custom JSON-LD, by the rules
-of a page (page-seo). It MUST
-NOT set a canonical: a node's canonical is its own address. Type values MUST be the same in every language.
+MAY set a title and its ending, a description of at most 1000 characters, social
+title, description and image, robots directives and a structured data type with
+its details and custom JSON-LD, by the rules of a page (page-seo). It MUST NOT
+set a canonical: a node's canonical is its own address. Type values MUST be the
+same in every language.
 
 #### Scenario: Export and import
 

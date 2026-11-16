@@ -2,22 +2,13 @@ import { Select, Switch } from '@radix-ui/themes';
 import { useEffect, useId, useRef, useState } from 'react';
 
 import { useApp } from '../App';
-import {
-  inherited,
-  meter,
-  seedTitle,
-  setPath,
-  texts,
-  tokensIn,
-  wellFormed,
-} from '../model';
+import { meter, setPath, wellFormed } from '../model';
 import type { Robots, Scope, SuggestField } from '../types';
 import { Field, useHeld } from './Field';
 import { SearchPreview } from './Previews';
 import { Disclosure, List, Row } from './SettingsList';
 import { SuggestIcon, TextSuggest } from './Suggest';
-import { TemplateInput } from './TemplateInput';
-import { Btn } from './ui';
+import { TitleField, ValueField } from './Value';
 
 const ADVANCED = [
   'robots.nofollow',
@@ -246,7 +237,7 @@ export function Visibility(props: { scope: Scope }) {
                   id={field.id}
                   className="seo-input"
                   inputMode="url"
-                  placeholder={view?.tokens.url?.value}
+                  placeholder={view?.facts.url?.value}
                   disabled={field.disabled}
                   aria-invalid={field.invalid || undefined}
                   aria-describedby={field.describedBy}
@@ -276,7 +267,6 @@ export function SearchTab() {
   const server = state.server!;
   const target = server.target!;
   const page = target.scope === 'page';
-  const edits = state.edits.target;
   const edit = (path: string, value: unknown) =>
     dispatch({ type: 'edit', scope: 'target', path, value });
   const ids = { title: useId(), description: useId() };
@@ -297,12 +287,6 @@ export function SearchTab() {
     }
   }, [jump]);
 
-  const pattern = String(inherited(server, 'target', 'title') ?? '');
-  // What each field shows while nothing is stored for it.
-  const unset = texts(
-    { ...view.effective, title: pattern, description: undefined },
-    view.values,
-  );
   const source = (path: string) =>
     ({
       target: '',
@@ -313,7 +297,7 @@ export function SearchTab() {
 
   // Canvas's own Description: the field's text is its own while it has focus.
   const [typing, setTyping] = useState<string | null>(null);
-  const live = state.live.description ?? view.tokens.description?.value ?? '';
+  const live = state.live.description ?? view.facts.description?.value ?? '';
   const handOver = () => {
     if (typing !== null) {
       commitDescription(typing);
@@ -339,72 +323,35 @@ export function SearchTab() {
           if (field === 'description') {
             return commitDescription(variant.description ?? '');
           }
-          // Applied as typing is: the site's suffix stays.
-          edit('title', seedTitle(pattern, variant.title ?? ''));
+          // The main part, as typed text: the ending stays.
+          edit('title', variant.title ? { text: variant.title } : undefined);
           return true;
         }}
       />
     );
   const titleMeter = meter('title', view.texts.title, measurer);
+  // A typed description is counted as typed, also while the server refuses
+  // it (too long) and the output still shows the default.
+  const typedDescription = state.edits.target.description;
   const descriptionMeter = meter(
     'description',
-    view.texts.description,
+    !page && typedDescription && 'text' in typedDescription
+      ? typedDescription.text
+      : view.texts.description,
     measurer,
   );
 
   return (
     <>
       {server.preview && <SearchPreview />}
-      <Field
+      <TitleField
         scope="target"
-        path="title"
-        label="Title"
         meter={titleMeter}
-        resolved={
-          tokensIn(edits.title ?? pattern).length ? view.texts.title : undefined
-        }
         onSuggest={() => setSuggesting('title')}
         after={tray('title')}
-        action={
-          !page &&
-          edits.title === undefined &&
-          pattern !== '' && (
-            <Btn
-              variant="ghost"
-              size={24}
-              accent
-              onClick={() => edit('title', pattern)}
-            >
-              Use the site pattern
-            </Btn>
-          )
-        }
-      >
-        {(field) => (
-          <TemplateInput
-            id={field.id}
-            describedBy={field.describedBy}
-            invalid={field.invalid}
-            disabled={field.disabled}
-            lang={server.langcode}
-            value={edits.title ?? ''}
-            onChange={(value) => edit('title', value)}
-            inherited={unset.title}
-            inheritedFrom={source('title')}
-            // A page's own title reads as text; the site's values as chips.
-            pattern={
-              page
-                ? pattern.replaceAll('{title}', view.values.title ?? '')
-                : pattern
-            }
-            tokens={view.tokens}
-            fields={!page}
-            seed={page ? pattern : undefined}
-            insert={page ? 'focus' : 'always'}
-            trailing={sparkle('title')}
-          />
-        )}
-      </Field>
+        placeholder={view.facts.title?.value}
+        trailing={sparkle('title')}
+      />
 
       {page ? (
         <Field
@@ -452,36 +399,22 @@ export function SearchTab() {
           )}
         </Field>
       ) : (
-        <Field
-          scope="target"
+        <ValueField
           path="description"
           label="Description"
-          meter={descriptionMeter}
-          resolved={
-            tokensIn(edits.description ?? '').length
-              ? view.texts.description
-              : undefined
+          kind="text"
+          linkable
+          byDefault={{ fact: 'description' }}
+          instead={
+            view.facts.description?.via
+              ? `its ${view.facts.description.via} summary, else the start of its ${view.facts.description.via} is used`
+              : 'its own description is used'
           }
-        >
-          {(field) => (
-            <TemplateInput
-              id={field.id}
-              describedBy={field.describedBy}
-              invalid={field.invalid}
-              disabled={field.disabled}
-              lang={server.langcode}
-              value={edits.description ?? ''}
-              onChange={(value) => edit('description', value)}
-              inherited={unset.description}
-              inheritedFrom={source('description')}
-              // With nothing to fill in: the value it falls back to.
-              pattern={server.resolved ? undefined : '{description}'}
-              tokens={view.tokens}
-              fields
-              multiline
-            />
-          )}
-        </Field>
+          meter={descriptionMeter}
+          multiline
+          lines={3}
+          placeholder={source('description') ? view.facts.description?.value : undefined}
+        />
       )}
 
       <Visibility scope="target" />

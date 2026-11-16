@@ -292,11 +292,11 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     $auto_save = $this->container->get(AutoSaveManager::class);
     $page = $this->createPage();
     $draft = clone $page;
-    $draft->set('title', 'Draft title')->set('canvas_metatag', '{"robots":{"noindex":true},"title":"{title} draft"}');
+    $draft->set('title', 'Draft title')->set('canvas_metatag', '{"robots":{"noindex":true},"title":{"text":"Draft words"}}');
     $auto_save->saveEntity($draft);
 
     $this->createField('field_byline', 'string', 'Byline');
-    $template = $this->createTemplate(TRUE, ['title' => '{title} {sep} Blog']);
+    $template = $this->createTemplate(TRUE, ['title_end' => ['text' => 'Blog']]);
     $node = Node::create([
       'type' => 'article',
       'title' => 'Hello',
@@ -305,7 +305,11 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     ]);
     $node->save();
     $template_draft = clone $template;
-    $template_draft->setThirdPartySetting('canvas_metatag', 'values', ['title' => '{field.field_byline}: {title}']);
+    $template_draft->setThirdPartySetting('canvas_metatag', 'values', [
+      'title' => [
+        'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'],
+      ],
+    ]);
     $auto_save->saveEntity($template_draft);
     $node_path = '/node/' . $node->id();
 
@@ -323,17 +327,17 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     $this->setCurrentAccount($this->tokenAccount(TRUE));
     $response = $this->content('/pricing');
     $head = self::decodeResponse($response)['head'];
-    self::assertSame('Draft title draft', $head['title']);
+    self::assertSame('Draft words | Example', $head['title']);
     self::assertSame('noindex, max-image-preview:large', self::meta($head)['robots']);
     self::assertSame(['title', 'meta', 'link', 'script'], array_keys($head));
     self::assertSame(self::FRONTEND . '/pricing', $head['link'][0]['href']);
     self::assertInstanceOf(CacheableJsonResponse::class, $response);
     self::assertContains(AutoSaveManager::CACHE_TAG, $response->getCacheableMetadata()->getCacheTags());
-    self::assertSame('Grace Hopper: Hello', self::decodeResponse($this->content($node_path))['head']['title']);
+    self::assertSame('Grace Hopper | Example', self::decodeResponse($this->content($node_path))['head']['title']);
     // The head is the full view's: a preview of another view mode keeps
     // Canvas's own.
     $view_mode = CanvasContentApiRequest::PREVIEW_VIEW_MODE_QUERY;
-    self::assertSame('Grace Hopper: Hello', self::decodeResponse($this->content($node_path, [$view_mode => 'full']))['head']['title']);
+    self::assertSame('Grace Hopper | Example', self::decodeResponse($this->content($node_path, [$view_mode => 'full']))['head']['title']);
     self::assertSame(['title' => 'Hello'], self::decodeResponse($this->content($node_path, [$view_mode => 'teaser']))['head']);
     // Unless the frontend asks for the published state.
     $exclude = [CanvasContentApiRequest::EXCLUDE_AUTO_SAVE_QUERY => 'true'];
@@ -344,9 +348,9 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     // only there is the head ours.
     $template->setStatus(FALSE)->save();
     $unpublished = clone $template;
-    $unpublished->setThirdPartySetting('canvas_metatag', 'values', ['title' => 'Never published: {title}']);
+    $unpublished->setThirdPartySetting('canvas_metatag', 'values', ['title_end' => ['text' => 'Never published']]);
     $auto_save->saveEntity($unpublished);
-    self::assertSame('Never published: Hello', self::decodeResponse($this->content($node_path))['head']['title']);
+    self::assertSame('Hello | Never published', self::decodeResponse($this->content($node_path))['head']['title']);
     $this->setCurrentAccount(new AnonymousUserSession());
     self::assertSame(['title' => 'Hello'], self::decodeResponse($this->content($node_path))['head']);
     ContentTemplate::load('node.article.full')?->setStatus(TRUE)->save();
@@ -370,7 +374,7 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
    * Everything that is not a canonical route of an owned entity is Canvas's.
    */
   public function testOtherRoutesAreUntouched(): void {
-    $this->createTemplate(TRUE, ['title' => '{title} {sep} Blog']);
+    $this->createTemplate(TRUE, ['title_end' => ['text' => 'Blog']]);
     $node = Node::create(['type' => 'article', 'title' => 'Hello', 'uid' => $this->author->id()]);
     $node->save();
     $page = $this->createPage();

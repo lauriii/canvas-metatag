@@ -2,7 +2,16 @@ import { describe, expect, it } from 'vitest';
 
 import { type ChecksInput, checks, countIssues, identityGaps } from './checks';
 import { REGISTRY, cascade, merge, source, texts as textsOf } from './model';
-import type { ImageInfo, Issue, Resolved, SeoValues, TokenInfo } from './types';
+import type {
+  BrokenLink,
+  Fact,
+  ImageInfo,
+  Issue,
+  Resolved,
+  SeoValues,
+  SourceRow,
+} from './types';
+import { FACT_KINDS, type Lookup, textOf } from './values';
 
 // A page with nothing to report. Every row below changes one thing.
 
@@ -18,34 +27,35 @@ const IMAGE: ImageInfo = {
   source: 'entity',
 };
 
-const text = (label: string, value: string): TokenInfo => ({
-  label,
-  type: 'text',
-  value,
-});
+/** A fact's value; the label is for the reader. */
+const text = (_label: string, value: string) => value;
 
-const TOKENS: Record<string, TokenInfo> = {
-  title: text('Page title', 'Pricing'),
-  description: text('Description', 'Simple plans for teams of every size.'),
-  site: text('Site name', 'Example'),
-  sep: text('Separator', '|'),
-  url: {
-    label: 'Page address',
-    type: 'url',
-    value: 'https://www.example.com/pricing',
-  },
-  published: {
-    label: 'First published',
-    type: 'datetime',
-    value: '2026-03-02T09:00:00+02:00',
-  },
-  modified: {
-    label: 'Last updated',
-    type: 'datetime',
-    value: '2026-03-04T11:30:00+02:00',
-  },
-  image: { label: 'Page image', type: 'image', value: '', image: IMAGE },
+/** Typed text. */
+const t = (value: string) => ({ text: value });
+
+const FACTS: Record<Fact, string> = {
+  title: 'Pricing',
+  description: 'Simple plans for teams of every size.',
+  site: 'Example',
+  url: 'https://www.example.com/pricing',
+  author: 'Ada',
+  published: '2026-03-02T09:00:00+02:00',
+  modified: '2026-03-04T11:30:00+02:00',
+  image: '',
 };
+
+/** A field of the type, linked as a source. */
+const field = (name: string, label: string, over: Partial<SourceRow> = {}): SourceRow => ({
+  source: { sourceType: 'entity-field', expression: `ℹ︎␜entity:node:article␝${name}␞␟value` },
+  label,
+  path: [label],
+  field: name,
+  hop: false,
+  kinds: ['text'],
+  status: 'ok',
+  value: 'A value',
+  ...over,
+});
 
 const SITE = {
   identity: {
@@ -57,7 +67,6 @@ const SITE = {
     same_as: ['https://social.example.com/example'],
   },
   values: {
-    title: '{title} {sep} {site}',
     robots: { max_image_preview: 'large' as const },
   },
 };
@@ -66,7 +75,10 @@ interface Setup {
   target?: SeoValues;
   fromDefault?: SeoValues;
   site?: SeoValues;
-  tokens?: Record<string, TokenInfo>;
+  /** Fact name => value. */
+  facts?: Partial<Record<Fact, string>>;
+  sources?: SourceRow[];
+  broken?: Record<string, BrokenLink>;
   resolved?: Partial<Resolved> | null;
   robotsMeta?: string;
   canonical?: string;
@@ -74,7 +86,24 @@ interface Setup {
 }
 
 function input(setup: Setup = {}): ChecksInput {
-  const tokens = { ...TOKENS, ...setup.tokens };
+  const facts = { ...FACTS, ...setup.facts };
+  const lookup: Lookup = {
+    facts: Object.fromEntries(
+      (Object.keys(facts) as Fact[]).map((name) => [
+        name,
+        {
+          label: name,
+          kind: FACT_KINDS[name],
+          value: facts[name],
+          ...(name === 'image' ? { image: IMAGE } : {}),
+        },
+      ]),
+    ),
+    sources: setup.sources ?? [],
+    broken: setup.broken ?? {},
+    media: {},
+    resolvable: true,
+  };
   const layers = {
     target: setup.target ?? {},
     from_default: setup.fromDefault ?? {},
@@ -84,14 +113,12 @@ function input(setup: Setup = {}): ChecksInput {
     merge(layers.from_default, layers.target),
     layers.site,
   );
-  const flat = Object.fromEntries(
-    Object.entries(tokens).map(([name, token]) => [name, token.value]),
-  );
   return {
     effective,
     sources: (path) => source(path, layers),
-    texts: textsOf(effective, flat),
-    tokens,
+    texts: textsOf(effective, textOf(lookup), '|'),
+    lookup,
+    separator: '|',
     resolved:
       setup.resolved === null
         ? null
@@ -167,29 +194,40 @@ describe('checks()', () => {
       'title-empty',
       'fix',
       {
-        tokens: { title: text('Page title', ''), site: text('Site name', '') },
+        facts: { title: text('Title', ''), site: text('Site name', '') },
       },
       ['Add a title', 'This page has no title for search results.'],
     ],
     [
       'title-generic',
       'improve',
-      { tokens: { title: text('Page title', 'Home') } },
+      { facts: { title: text('Title', 'Home') } },
       ['Make the title specific', '"Home" says little about this page.'],
     ],
     [
-      'token-empty:description',
+      'link-broken:description',
+      'fix',
+      {
+        target: { description: { source: field('field_summary', 'Summary').source } },
+        broken: { description: { field: 'field_summary', reason: 'missing' } },
+        input: { scope: 'template' },
+      },
+      ['Link the description again', 'It was linked to field_summary, which no longer exists. Each article uses its default until another field is linked.'],
+    ],
+    [
+      'link-hidden:description',
       'improve',
       {
-        target: { social: { description: '{description} More.' } },
-        tokens: { description: text('Description', '') },
+        target: { description: { source: field('field_notes', 'Notes').source } },
+        sources: [field('field_notes', 'Notes', { status: 'hidden', value: '' })],
+        input: { scope: 'template' },
       },
-      ['Fill in Description or remove it', '"Description" is empty for this page, so it is left out.'],
+      ['Notes is hidden from visitors', 'Description uses its default. Link a field visitors can see.'],
     ],
     [
       'title-site-twice',
       'improve',
-      { target: { title: 'Example pricing {sep} {site}' } },
+      { target: { title: t('Example pricing') } },
       ['Remove the repeated site name', 'The site name appears twice in the title.'],
     ],
     [
@@ -209,25 +247,25 @@ describe('checks()', () => {
     [
       'title-long',
       'info',
-      { target: { title: long(14) } },
+      { target: { title: t(long(14)) } },
       ['Shorten the title', 'May be cut off after “…words words words”.'],
     ],
     [
       'description-missing',
       'improve',
-      { tokens: { description: text('Description', '') } },
+      { facts: { description: text('Description', '') } },
       ['Add a description', 'Without one, search engines pick text from the page.'],
     ],
     [
       'description-long',
       'info',
-      { tokens: { description: text('Description', long(20)) } },
+      { facts: { description: text('Description', long(20)) } },
       ['Shorten the description', 'May be cut off after “…words words words”.'],
     ],
     [
       'description-title',
       'improve',
-      { tokens: { description: text('Description', 'pricing!') } },
+      { facts: { description: text('Description', 'pricing!') } },
       ['Make the description say more', 'It repeats the title.'],
     ],
     [
@@ -360,8 +398,8 @@ describe('checks()', () => {
           schema: {
             type: 'Event',
             props: {
-              startDate: '2027-03-04T18:00',
-              endDate: '2027-03-04T16:00',
+              startDate: t('2027-03-04T18:00'),
+              endDate: t('2027-03-04T16:00'),
             },
           },
         },
@@ -373,9 +411,7 @@ describe('checks()', () => {
       'improve',
       {
         target: { schema: { type: 'Article' } },
-        tokens: {
-          modified: { ...TOKENS.modified, value: '2026-03-01T09:00:00+02:00' },
-        },
+        facts: { modified: '2026-03-01T09:00:00+02:00' },
       },
       '"Updated" is before "Published".',
     ],
@@ -384,7 +420,7 @@ describe('checks()', () => {
       'improve',
       {
         target: {
-          schema: { type: 'Event', props: { location_name: 'The New Mill' } },
+          schema: { type: 'Event', props: { location_name: t('The New Mill') } },
         },
       },
       ['Check Venue', 'It does not appear on the page. Structured data should match what visitors see.'],
@@ -427,7 +463,8 @@ describe('checks()', () => {
       [
         'title-empty',
         'title-generic',
-        'token-empty',
+        'link-broken',
+        'link-hidden',
         'title-site-twice',
         'title-heading',
         'title-long',
@@ -492,7 +529,7 @@ describe('checks()', () => {
         target: {
           schema: {
             type: 'Product',
-            props: { offers_priceCurrency: 'EUR', sku: 'DESK-1' },
+            props: { offers_priceCurrency: t('EUR'), sku: t('DESK-1') },
           },
         },
         input: { facts: { h1: ['Desk'], imagesWithoutAlt: [], text: 'Desk $2,500' } },
@@ -535,25 +572,17 @@ describe('checks()', () => {
 
 describe('fixes', () => {
   it.each([
+    // The page's own words name the site, and its ending is the site name:
+    // no ending.
     [
       'title-site-twice',
-      { target: { title: 'Example pricing {sep} {site}' } },
-      { title: 'pricing {sep} {site}' },
+      { target: { title: t('Example pricing') } },
+      { title: t('Example pricing'), title_end: t('') },
     ],
     [
       'title-site-twice',
-      { target: { title: 'Pricing {sep} Example {sep} {site}' } },
-      { title: 'Pricing {sep} {site}' },
-    ],
-    [
-      'title-site-twice',
-      { target: { title: 'Pricing | Example | {site}' } },
-      { title: 'Pricing | {site}' },
-    ],
-    [
-      'title-site-twice',
-      { target: { title: '{site} {sep} Plans at Example' } },
-      { title: '{site} {sep} Plans at' },
+      { target: { title: t('Plans at Example'), title_end: { fact: 'site' } } },
+      { title: t('Plans at Example'), title_end: t('') },
     ],
     [
       'noindex',
@@ -595,7 +624,7 @@ describe('fixes', () => {
     const label = (setup: Setup, id: string) => find(setup, id)!.fix!.label;
     expect(
       label(
-        { target: { title: 'Example pricing {sep} {site}' } },
+        { target: { title: t('Example pricing') } },
         'title-site-twice',
       ),
     ).toBe('Remove the repeat');
@@ -627,17 +656,35 @@ describe('fixes', () => {
     for (const id of ['noindex', 'snippet-off', 'image-preview']) {
       expect(find(bySite, id)!.fix).toBeUndefined();
     }
-    // The repeat comes from the page title itself: nothing literal to remove.
+    // The repeat comes from the page title itself: nothing typed to remove.
     expect(
       find(
-        { tokens: { title: text('Page title', 'Example pricing') } },
+        { facts: { title: text('Title', 'Example pricing') } },
+        'title-site-twice',
+      )!.fix,
+    ).toBeUndefined();
+    // A main part linked to the Title fact: one item's words, never a fix.
+    expect(
+      find(
+        {
+          target: { title: { fact: 'title' } },
+          facts: { title: 'Example pricing' },
+          input: { scope: 'template' },
+        },
+        'title-site-twice',
+      )!.fix,
+    ).toBeUndefined();
+    // An ending of its own that is not the site name: not certain.
+    expect(
+      find(
+        { target: { title: t('Example and Example pricing'), title_end: t('Docs') } },
         'title-site-twice',
       )!.fix,
     ).toBeUndefined();
   });
 
   it('suggest is offered at page scope with AI only', () => {
-    const missing = { tokens: { description: text('Description', '') } };
+    const missing = { facts: { description: text('Description', '') } };
     expect(find(missing, 'description-missing')!.fix).toBeUndefined();
     expect(
       find({ ...missing, input: { ai: true } }, 'description-missing')!.fix,
@@ -651,7 +698,7 @@ describe('fixes', () => {
     expect(
       find(
         {
-          tokens: { description: text('Description', long(25)) },
+          facts: { description: text('Description', long(25)) },
           input: { ai: true },
         },
         'description-long',
@@ -670,7 +717,7 @@ describe('rules that need the page preview', () => {
         target: {
           schema: {
             type: 'Event',
-            props: { location_name: 'Nowhere to be found' },
+            props: { location_name: t('Nowhere to be found') },
           },
         },
         input: { facts: null },
@@ -688,7 +735,7 @@ describe('rules that need the page preview', () => {
 
   it('title-heading is silent for an identical two-character title and heading', () => {
     const setup: Setup = {
-      target: { title: '价格' },
+      target: { title: t('价格') },
       input: { facts: { h1: ['价格'], imagesWithoutAlt: [], text: '' } },
     };
     expect(find(setup, 'title-heading')).toBeUndefined();
@@ -701,7 +748,7 @@ describe('rules that need the page preview', () => {
     expect(
       find(
         {
-          target: { title: 'Pricing and plans {sep} {site}' },
+          target: { title: t('Pricing and plans') },
           ...facts('Pricing'),
         },
         'title-heading',
@@ -709,26 +756,26 @@ describe('rules that need the page preview', () => {
     ).toBeUndefined();
     expect(
       find(
-        { target: { title: 'Plans' }, ...facts('Our plans, compared') },
+        { target: { title: t('Plans') }, ...facts('Our plans, compared') },
         'title-heading',
       ),
     ).toBeUndefined();
     expect(
       find(
-        { target: { title: 'Team plans' }, ...facts('Plans for teams') },
+        { target: { title: t('Team plans') }, ...facts('Plans for teams') },
         'title-heading',
       ),
     ).toBeUndefined();
     // Short Latin words do not count as shared; two characters do in other scripts.
     expect(
       find(
-        { target: { title: 'How we do it' }, ...facts('What we do') },
+        { target: { title: t('How we do it'), title_end: t('') }, ...facts('What we do') },
         'title-heading',
       ),
     ).toBeDefined();
     expect(
       find(
-        { target: { title: '价格 方案' }, ...facts('方案 比较') },
+        { target: { title: t('价格 方案') }, ...facts('方案 比较') },
         'title-heading',
       ),
     ).toBeUndefined();
@@ -745,9 +792,17 @@ describe('rules that need the page preview', () => {
     ).toBeUndefined();
   });
 
-  it('schema-not-on-page compares literals only, normalized', () => {
-    const event = (props: Record<string, string>) => ({
-      target: { schema: { type: 'Event', props } },
+  it('schema-not-on-page compares typed text only, normalized', () => {
+    const event = (props: Record<string, string | { fact: Fact }>): Setup => ({
+      target: {
+        schema: {
+          type: 'Event',
+          props: Object.fromEntries(
+            Object.entries(props).map(([key, value]) => [key, typeof value === 'string' ? t(value) : value]),
+          ),
+        },
+      },
+      input: { scope: 'template' },
     });
     expect(
       find(
@@ -755,12 +810,20 @@ describe('rules that need the page preview', () => {
         'schema-not-on-page:location_name',
       ),
     ).toBeUndefined();
+    // Linked to a fact, a value is the page's own: never compared.
+    expect(
+      find(
+        event({ location_name: { fact: 'author' } }),
+        'schema-not-on-page:location_name',
+      ),
+    ).toBeUndefined();
+    // Braces are typed text, compared as written.
     expect(
       find(
         event({ location_name: '{title} hall' }),
         'schema-not-on-page:location_name',
       ),
-    ).toBeUndefined();
+    ).toBeDefined();
     // Dates and other kinds are never compared with the text.
     expect(
       ids(checks(input(event({ startDate: '2027-03-04' })))).filter((id) =>
@@ -772,7 +835,7 @@ describe('rules that need the page preview', () => {
 
 describe('rules with conditions', () => {
   it('title-generic is silent outside English', () => {
-    const home = { tokens: { title: text('Page title', 'Home') } };
+    const home = { facts: { title: text('Title', 'Home') } };
     expect(
       find({ ...home, input: { langcode: 'en-gb' } }, 'title-generic'),
     ).toBeDefined();
@@ -781,7 +844,7 @@ describe('rules with conditions', () => {
     ).toBeUndefined();
     expect(
       find(
-        { tokens: { title: text('Page title', 'Homes for sale') } },
+        { facts: { title: text('Title', 'Homes for sale') } },
         'title-generic',
       ),
     ).toBeUndefined();
@@ -896,22 +959,45 @@ describe('rules with conditions', () => {
     ).toEqual(['image-small']);
   });
 
-  it('token-empty: one row per value, not for names outside the vocabulary', () => {
-    const issues = checks(
+  it('a link that is only empty for this item is not listed; broken and hidden ones are', () => {
+    const summary = field('field_summary', 'Summary');
+    const template = { scope: 'template', typeLabel: 'Article' } as const;
+    const empty = checks(
       input({
-        target: {
-          title: '{title} {field.gone} {sep} {site}',
-          social: { title: '{title}' },
-        },
-        tokens: { title: text('Page title', '') },
+        target: { description: { source: summary.source } },
+        sources: [{ ...summary, status: 'empty', value: '' }],
+        input: template,
       }),
     );
-    expect(ids(issues).filter((id) => id.startsWith('token-empty'))).toEqual([
-      'token-empty:title',
-    ]);
+    expect(ids(empty).filter((id) => id.startsWith('link-'))).toEqual([]);
+    const broken = find(
+      {
+        target: { title_end: { source: summary.source } },
+        input: template,
+      },
+      'link-broken:title_end',
+    )!;
+    expect(broken).toMatchObject({
+      message: 'Link the title ending again',
+      jump: { scope: 'target', tab: 'search', field: 'title_end' },
+      fix: { label: 'Link another field', link: true },
+    });
+    // A page never links fields: nothing to say there.
     expect(
-      issues.find((issue) => issue.id === 'token-empty:title')!.jump,
-    ).toEqual({ scope: 'target', tab: 'search', field: 'title' });
+      ids(checks(input({ target: { description: { source: summary.source } } }))).filter((id) => id.startsWith('link-')),
+    ).toEqual([]);
+  });
+
+  it('a title that may be cut inside its ending says the ending is lost', () => {
+    const detail = find(
+      { target: { title: t(long(13)), title_end: t('Journal') } },
+      'title-long',
+    )?.detail;
+    expect(detail).toMatch(/^May be cut off after “….+”\. The ending “Journal” is the part that gets lost\.$/);
+    // Cut inside the main part: the usual sentence.
+    expect(
+      find({ target: { title: t(long(20)), title_end: t('Journal') } }, 'title-long')?.detail,
+    ).toBe('May be cut off after “…words words words”.');
   });
 
   it('without a page to resolve for, the image rules stay silent', () => {
@@ -922,45 +1008,129 @@ describe('rules with conditions', () => {
     ).toEqual([]);
   });
 
+  it('says links hidden by one reference in one row, for this item', () => {
+    const venue = (name: string, label: string) =>
+      field(name, `Venue › ${label}`, { path: ['Venue', label], hop: true, status: 'hidden', value: '' });
+    const rows = [
+      venue('field_venue_street', 'Street address'),
+      venue('field_venue_city', 'City'),
+      venue('field_venue_name', 'Title'),
+      venue('field_venue_code', 'Postal code'),
+    ];
+    const all = checks(
+      input({
+        target: {
+          schema: {
+            type: 'Event',
+            props: {
+              location_address_streetAddress: { source: rows[0].source },
+              location_address_addressLocality: { source: rows[1].source },
+              location_name: { source: rows[2].source },
+              location_address_postalCode: { source: rows[3].source },
+            },
+          },
+        },
+        sources: rows,
+        resolved: {
+          schema: { withheld: true, missing_required: ['location_address_streetAddress'], missing_recommended: [] },
+        },
+        input: { scope: 'template', typeLabel: 'Event' },
+      }),
+    );
+    const hidden = all.filter((issue) => issue.id.startsWith('link-hidden:'));
+    expect(hidden).toHaveLength(1);
+    expect(hidden[0]).toMatchObject({
+      severity: 'improve',
+      message: 'Venue is hidden from visitors for this event',
+      jump: { field: 'schema.props.location_address_streetAddress' },
+    });
+    expect(hidden[0].detail).toBe("Event details are left out for this event, because visitors can't see its venue. Publish the venue or preview another event.");
+    // The required detail is said with its reference, not as one to add.
+    expect(ids(all)).not.toContain('schema-required:location_address_streetAddress');
+  });
+
+  it('says a required detail linked to a field this item has empty for the item', () => {
+    const ends = field('field_starts', 'Starts', { kinds: ['date'], status: 'empty', value: '' });
+    expect(
+      find(
+        {
+          target: { schema: { type: 'Event', props: { startDate: { source: ends.source } } } },
+          sources: [ends],
+          resolved: { schema: { withheld: true, missing_required: ['startDate'], missing_recommended: [] } },
+          input: { scope: 'template', typeLabel: 'Event' },
+        },
+        'schema-required:startDate',
+      ),
+    ).toMatchObject({ message: 'Starts is empty for this event', detail: 'Event details are left out for this event.' });
+  });
+
+  it('says why a link is broken by its reason, naming the machine name', () => {
+    const starts = field('field_starts', 'Starts', { kinds: ['date'] });
+    // The field still exists, as a date: it no longer gives text.
+    expect(
+      find(
+        {
+          target: { description: { source: starts.source } },
+          sources: [starts],
+          broken: { description: { field: 'field_starts', reason: 'kind' } },
+          input: { scope: 'template', typeLabel: 'Event' },
+        },
+        'link-broken:description',
+      )?.detail,
+    ).toBe('It was linked to field_starts, which no longer gives text. Each event uses its default until another field is linked.');
+  });
+
+  it('says a field visitors may never view in its own row, leading to the value', () => {
+    const notes = field('field_notes', 'Notes', { status: 'hidden', value: '' });
+    expect(
+      find(
+        {
+          target: { description: { source: notes.source } },
+          sources: [notes],
+          input: { scope: 'template', typeLabel: 'Event' },
+        },
+        'link-hidden:description',
+      ),
+    ).toMatchObject({
+      severity: 'improve',
+      message: 'Notes is hidden from visitors',
+      detail: 'Description uses its default. Link a field visitors can see.',
+      jump: { scope: 'target', tab: 'search', field: 'description' },
+    });
+  });
+
   it('at template scope "this page" is "this event", never the preview\'s title', () => {
     const template = { scope: 'template', typeLabel: 'Event' } as const;
     const title = find(
       {
-        tokens: { title: text('Page title', ''), site: text('Site name', '') },
+        facts: { title: text('Title', ''), site: text('Site name', '') },
         input: template,
       },
       'title-empty',
     )!;
     expect(title.detail).toBe('This event has no title for search results.');
-    const empty = find(
+    const hidden = find(
       {
-        target: { social: { description: '{description} More.' } },
-        tokens: { description: text('Description', '') },
+        target: { description: { source: field('field_notes', 'Notes').source } },
+        sources: [field('field_notes', 'Notes', { status: 'hidden', value: '' })],
         input: template,
       },
-      'token-empty:description',
+      'link-hidden:description',
     )!;
-    // The template cannot fill it in: a fact, not a task.
-    expect(empty).toMatchObject({
-      severity: 'info',
-      message: 'Description is empty for this event',
-      detail:
-        'It is left out for this event, and filled in wherever another event has one.',
-    });
+    expect(hidden.detail).toBe('Description uses its default. Link a field visitors can see.');
     // The previewed node's title is in the values, never in a sentence.
     const all = checks(
       input({
-        target: { social: { description: '{description} More.' } },
-        tokens: {
-          title: text('Page title', 'Hello world'),
+        target: { description: { source: field('field_notes', 'Notes').source } },
+        sources: [field('field_notes', 'Notes', { status: 'hidden', value: '' })],
+        facts: {
+          title: text('Title', 'Hello world'),
           description: text('Description', ''),
         },
         input: template,
       }),
     );
-    expect(
-      all.find((issue) => issue.id === 'token-empty:description')?.detail,
-    ).toContain('this event');
+    expect(all.find((issue) => issue.id === 'link-hidden:description')).toBeDefined();
     for (const issue of all) {
       expect(`${issue.message} ${issue.detail ?? ''}`).not.toContain(
         'Hello world',
@@ -973,13 +1143,16 @@ describe('rules with conditions', () => {
         target: {
           schema: {
             type: 'Event',
-            props: { endDate: '{field.field_ends}', image: '{field.field_poster}' },
+            props: {
+              endDate: { source: field('field_ends', 'Ends').source },
+              image: { source: field('field_poster', 'Poster').source },
+            },
           },
         },
-        tokens: {
-          'field.field_ends': { label: 'Field: Ends', type: 'datetime', value: '' },
-          'field.field_poster': { label: 'Field: Poster', type: 'image', value: '', image: null },
-        },
+        sources: [
+          field('field_ends', 'Ends', { kinds: ['date'], status: 'empty', value: '' }),
+          field('field_poster', 'Poster', { kinds: ['image'], status: 'empty', value: '', image: null }),
+        ],
         resolved: {
           schema: {
             withheld: false,
@@ -1005,8 +1178,8 @@ describe('rules with conditions', () => {
     expect(
       find(
         {
-          target: { schema: { type: 'Event', props: { endDate: '{field.field_ends}' } } },
-          tokens: { 'field.field_ends': { label: 'Field: Ends', type: 'datetime', value: '' } },
+          target: { schema: { type: 'Event', props: { endDate: { source: field('field_ends', 'Ends').source } } } },
+          sources: [field('field_ends', 'Ends', { kinds: ['date'], status: 'empty', value: '' })],
           resolved: {
             schema: { withheld: false, missing_required: [], missing_recommended: ['endDate'] },
           },
@@ -1018,7 +1191,7 @@ describe('rules with conditions', () => {
     expect(
       find(
         {
-          tokens: { title: text('Page title', ''), site: text('Site name', '') },
+          facts: { title: text('Title', ''), site: text('Site name', '') },
           input: { scope: 'template', typeLabel: 'FAQ page' },
         },
         'title-empty',
@@ -1037,12 +1210,12 @@ describe('rules with conditions', () => {
 
   it('the words a long text may be cut after end without their own mark', () => {
     const title = Array.from({ length: 14 }, () => 'words,').join(' ');
-    expect(find({ target: { title } }, 'title-long')?.detail).toBe(
+    expect(find({ target: { title: t(title), title_end: t('') } }, 'title-long')?.detail).toBe(
       'May be cut off after “…words, words, words”.',
     );
     // Also a mark of another script, as the server's plain text knows it.
     const arabic = Array.from({ length: 14 }, () => 'words،').join(' ');
-    expect(find({ target: { title: arabic } }, 'title-long')?.detail).toBe(
+    expect(find({ target: { title: t(arabic), title_end: t('') } }, 'title-long')?.detail).toBe(
       'May be cut off after “…words، words، words”.',
     );
   });
@@ -1050,7 +1223,7 @@ describe('rules with conditions', () => {
   it('long text cannot be judged without a measurer', () => {
     expect(
       find(
-        { target: { title: long(20) }, input: { measurer: null } },
+        { target: { title: t(long(20)) }, input: { measurer: null } },
         'title-long',
       ),
     ).toBeUndefined();
@@ -1089,15 +1262,12 @@ describe('identity-incomplete', () => {
   });
 
   it('a site name stands in for an identity name', () => {
-    // The site token is filled from the site name when the identity has none.
+    // The Site name fact is the site's name when the identity has none.
     expect(
-      identityGaps(bare.input.site, TOKENS).map((gap) => gap.text),
+      identityGaps(bare.input.site, FACTS.site).map((gap) => gap.text),
     ).toEqual(['no logo', 'no profile link']);
     expect(
-      identityGaps(bare.input.site, {
-        ...TOKENS,
-        site: text('Site name', ''),
-      }).map((gap) => gap.field),
+      identityGaps(bare.input.site, '').map((gap) => gap.field),
     ).toEqual(['identity.name', 'identity.logo', 'identity.same_as']);
     expect(find(bare, 'identity-incomplete')!.jump).toEqual({
       scope: 'site',

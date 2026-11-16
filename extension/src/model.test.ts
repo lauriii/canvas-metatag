@@ -15,15 +15,12 @@ import {
   breadcrumb,
   canon,
   cascade,
-  chipsIn,
   clip,
   dateText,
   diff,
   dirOf,
-  displayLabels,
   draftPayload,
   fieldNames,
-  fill,
   footer,
   getPath,
   inSentence,
@@ -36,8 +33,6 @@ import {
   smallCard,
   freshStore,
   holdsStore,
-  insertChip,
-  jsonStrings,
   measure,
   merge,
   meter,
@@ -50,10 +45,7 @@ import {
   readPending,
   robotsUnsent,
   reducer,
-  removeChip,
   saveDraft,
-  seedCaret,
-  seedTitle,
   setPath,
   sitePaths,
   siteTexts,
@@ -62,22 +54,21 @@ import {
   strips,
   tabOf,
   texts,
-  toDisplay,
-  toStored,
-  tokenGroups,
   truncate,
   unsent,
   view,
-  wholeChips,
 } from './model';
 import type {
   Action,
+  Fact,
   Measurer,
   Resolved,
   SeoValues,
+  SourceRow,
   State,
   StatePayload,
   Target,
+  Value,
 } from './types';
 
 // Fixtures.
@@ -92,10 +83,12 @@ const SITE = {
     same_as: [],
   },
   values: {
-    title: '{title} {sep} {site}',
     robots: { max_image_preview: 'large' as const },
   },
 };
+
+/** Typed text. */
+const t = (text: string) => ({ text });
 
 const target = (over: Partial<Target> = {}): Target => ({
   scope: 'page',
@@ -127,12 +120,19 @@ const payload = (over: Partial<StatePayload> = {}): StatePayload => ({
     url: 'https://www.example.com/pricing',
     published: true,
   },
-  tokens: {
-    title: { label: 'Page title', type: 'text', value: 'Pricing' },
-    description: { label: 'Description', type: 'text', value: 'Plans.' },
-    site: { label: 'Site name', type: 'text', value: 'Example' },
-    sep: { label: 'Separator', type: 'text', value: '|' },
+  facts: {
+    title: { label: 'Title', kind: 'text', value: 'Pricing' },
+    description: { label: 'Description', kind: 'text', value: 'Plans.' },
+    site: { label: 'Site name', kind: 'text', value: 'Example' },
+    url: { label: 'Page address', kind: 'address', value: 'https://www.example.com/pricing' },
+    author: { label: 'Author', kind: 'text', value: 'Ada' },
+    published: { label: 'First published', kind: 'date', value: '2026-03-02T09:00:00+02:00' },
+    modified: { label: 'Last updated', kind: 'date', value: '2026-03-04T09:00:00+02:00' },
+    image: { label: 'Image', kind: 'image', value: '', image: null },
   },
+  separator: '|',
+  sources: [],
+  broken: {},
   media: {},
   resolved: null,
   ...over,
@@ -160,22 +160,37 @@ const edit = (
 // Text outputs, shared with PHP.
 
 describe('text outputs (tests/fixtures/text-cases.json)', () => {
-  const file = textCases as {
-    tokens: Record<string, string>;
+  const file = textCases as unknown as {
+    facts: Record<string, string>;
+    separator: string;
     site: SeoValues;
     cases: {
       name: string;
       target?: SeoValues;
       site?: SeoValues;
-      tokens?: Record<string, string>;
+      facts?: Record<string, string>;
+      links?: Record<string, string>;
+      separator?: string;
       expect: Record<string, string>;
     }[];
   };
   it.each(file.cases.map((row) => [row.name, row] as const))('%s', (_, row) => {
-    const out = texts(cascade(row.target ?? {}, row.site ?? file.site), {
-      ...file.tokens,
-      ...row.tokens,
-    });
+    const facts = { ...file.facts, ...row.facts };
+    const text = (value: Value) =>
+      'text' in value
+        ? value.text
+        : 'fact' in value
+          ? (facts[value.fact] ?? '')
+          : 'source' in value
+            ? (row.links?.[value.source.expression] ?? '')
+            : '';
+    const site = row.site ?? file.site;
+    const out = texts(
+      cascade(row.target ?? {}, site),
+      text,
+      row.separator ?? file.separator,
+      site.title_end,
+    );
     expect(
       Object.fromEntries(
         Object.keys(row.expect).map((key) => [
@@ -184,22 +199,6 @@ describe('text outputs (tests/fixtures/text-cases.json)', () => {
         ]),
       ),
     ).toEqual(row.expect);
-  });
-
-  it('separators with nothing to separate go, as in PHP', () => {
-    const title = (tokens: Record<string, string>) =>
-      texts(
-        { title: '{title} {sep} {field.section} {sep} {site}' },
-        { ...file.tokens, 'field.section': '', ...tokens },
-      ).title;
-    // "| | Example" and "Pricing | |" before trimming.
-    expect(title({ title: '' })).toBe('Example');
-    expect(title({ site: '' })).toBe('Pricing');
-    expect(title({ title: '', site: '' })).toBe('');
-  });
-
-  it('fill() ignores names that only exist on the prototype', () => {
-    expect(fill('{constructor} {title}', { title: 'A' })).toBe(' A');
   });
 
   it('plain() cuts in code points and removes DEL like PHP', () => {
@@ -217,39 +216,40 @@ describe('layers', () => {
   it('merge() replaces per leaf', () => {
     expect(
       merge<SeoValues>(
-        { robots: { noindex: true, nofollow: true }, social: { image: 'a' } },
-        { robots: { noindex: false }, title: 'T' },
+        { robots: { noindex: true, nofollow: true }, social: { image: { media: 'a' } } },
+        { robots: { noindex: false }, title: t('T') },
       ),
     ).toEqual({
       robots: { noindex: false, nofollow: true },
-      social: { image: 'a' },
-      title: 'T',
+      social: { image: { media: 'a' } },
+      title: t('T'),
     });
   });
 
-  it('cascade() takes the title and robots from the site, and nothing else', () => {
+  it('cascade() takes the title ending and robots from the site, and nothing else', () => {
     expect(
       cascade({ robots: { noindex: true } }, {
-        title: 'S',
-        description: 'ignored',
+        title: t('ignored'),
+        title_end: t('S'),
+        description: t('ignored'),
         robots: { noindex: false, max_image_preview: 'large' },
-      } as SeoValues),
+      }),
     ).toEqual({
-      title: 'S',
+      title_end: t('S'),
       robots: { noindex: true, max_image_preview: 'large' },
     });
-    expect(cascade({ title: 'T' }, {})).toEqual({ title: 'T' });
+    expect(cascade({ title: t('T'), title_end: t('') }, { title_end: t('S') })).toEqual({ title: t('T'), title_end: t('') });
   });
 
   it('source() walks target, default-language version, site, fallback', () => {
-    const layers = {
-      target: { title: 'T', robots: { nofollow: true } },
+    const layers: { target: SeoValues; from_default: SeoValues; site: SeoValues } = {
+      target: { title: t('T'), robots: { nofollow: true } },
       from_default: {
         robots: { noindex: true },
-        social: { image: 'uuid' },
+        social: { image: { media: 'uuid' } },
         schema: { type: 'Article' },
       },
-      site: { title: 'S', robots: { max_image_preview: 'large' as const } },
+      site: { title_end: t('S'), robots: { max_image_preview: 'large' as const } },
     };
     expect(source('title', layers)).toBe('target');
     expect(source('robots.nofollow', layers)).toBe('target');
@@ -260,13 +260,16 @@ describe('layers', () => {
     // A directive follows Site › Defaults even where the site stores none.
     expect(source('robots.nosnippet', layers)).toBe('site');
     expect(source('social.title', layers)).toBe('fallback');
-    expect(source('title', { ...layers, target: {} })).toBe('site');
-    // The site layer cannot supply anything but the title and robots.
+    // The ending follows Site whether or not the site stores one.
+    expect(source('title_end', layers)).toBe('site');
+    expect(source('title_end', { ...layers, site: {} })).toBe('site');
+    expect(source('title', { ...layers, target: {} })).toBe('fallback');
+    // The site layer cannot supply anything but the ending and robots.
     expect(
       source('description', {
         target: {},
         from_default: {},
-        site: { description: 'x' } as SeoValues,
+        site: { description: t('x') },
       }),
     ).toBe('fallback');
   });
@@ -289,6 +292,8 @@ describe('prune() and canon()', () => {
       schema: { custom: ' x ' },
     });
     expect(prune({})).toEqual({});
+    // "No ending" is the one empty value that is kept.
+    expect(prune({ title_end: { text: '' }, title: { text: ' ' } })).toEqual({ title_end: { text: '' } });
   });
 
   it('canon() is independent of key order and keeps list order', () => {
@@ -303,9 +308,9 @@ describe('prune() and canon()', () => {
   });
 
   it('setPath() and getPath()', () => {
-    const values = setPath<SeoValues>({}, 'schema.props.headline', 'H');
-    expect(values).toEqual({ schema: { props: { headline: 'H' } } });
-    expect(getPath(values, 'schema.props.headline')).toBe('H');
+    const values = setPath<SeoValues>({}, 'schema.props.headline', t('H'));
+    expect(values).toEqual({ schema: { props: { headline: t('H') } } });
+    expect(getPath(values, 'schema.props.headline')).toEqual(t('H'));
     expect(getPath(values, 'schema.props.constructor')).toBeUndefined();
     expect(setPath(values, 'schema.props.headline', undefined)).toEqual({});
     expect(setPath({ title: 'T' }, 'social.image', undefined)).toEqual({
@@ -314,106 +319,72 @@ describe('prune() and canon()', () => {
   });
 });
 
-// Chips.
+// Typed text and links.
 
-describe('chips', () => {
-  const tokens = {
-    title: { label: 'Page title' },
-    sep: { label: 'Separator' },
-    site: { label: 'Site name' },
-    'field.field_hero': { label: 'Image' },
-    'field.field_thumb': { label: 'Image' },
-    'field.field_odd': { label: 'Sum{mary}' },
-  };
-
-  it('round trips', () => {
-    for (const stored of [
-      '{title} {sep} {site}',
-      'Plans {sep} Blog',
-      '{field.field_hero} and {field.field_thumb} and {field.field_odd}',
-      '{field.gone} {Title} {a b} {} { title }',
-    ]) {
-      expect(toStored(toDisplay(stored, tokens), tokens)).toBe(stored);
-    }
-    expect(toDisplay('{title} {sep} Blog', tokens)).toBe(
-      '{Page title} {Separator} Blog',
-    );
-  });
-
-  it('tells colliding labels apart by machine name and removes braces from labels', () => {
-    expect(displayLabels(tokens)).toMatchObject({
-      'field.field_hero': 'Image (field.field_hero)',
-      'field.field_thumb': 'Image (field.field_thumb)',
-      'field.field_odd': 'Summary',
-      title: 'Page title',
+describe('values in the reducer', () => {
+  const templateCtx = {
+    kind: 'template',
+    id: 'node.article.full',
+    bundle: 'article',
+    previewId: '11',
+  } as const;
+  const loaded = (over: Partial<StatePayload> = {}) =>
+    reducer(initialState(templateCtx), {
+      type: 'loaded',
+      ctx: templateCtx,
+      payload: payload({ target: target({ scope: 'template', label: 'Article' }), ...over }),
+      readonly: 'no',
     });
-    expect(toDisplay('{field.field_hero}', tokens)).toBe(
-      '{Image (field.field_hero)}',
-    );
-  });
-
-  it('accepts pasted names and leaves unknown brace text alone', () => {
-    expect(toStored('{title} by {Site name}', tokens)).toBe(
-      '{title} by {site}',
-    );
-    expect(toStored('{Unknown} {field.gone} {', tokens)).toBe(
-      '{Unknown} {field.gone} {',
-    );
-    expect(toDisplay('{field.gone}', tokens)).toBe('{field.gone}');
-  });
-});
-
-describe('seedTitle()', () => {
-  it('replaces the first {title}, or the whole pattern without one', () => {
-    expect(seedTitle('{title} {sep} {site}', 'Plans')).toBe(
-      'Plans {sep} {site}',
-    );
-    expect(seedTitle('{site}: {title} and {title}', 'A')).toBe(
-      '{site}: A and {title}',
-    );
-    expect(seedTitle('{site}', 'Plans')).toBe('Plans');
-    expect(seedTitle('{title} {sep} {site}', '$& {x}')).toBe(
-      '$& {x} {sep} {site}',
-    );
-  });
 
   it('half of a character, as a cut paste leaves it, becomes the replacement character', () => {
     const typed = run(
       ready(),
-      edit('description', 'Cut \uD83D here, whole \uD83D\uDE00, end \uDE00'),
+      edit('social.description', t('Cut \uD83D here, whole \uD83D\uDE00, end \uDE00')),
     );
-    expect(typed.edits.target.description).toBe(
-      'Cut \uFFFD here, whole \uD83D\uDE00, end \uFFFD',
+    expect(typed.edits.target.social?.description).toEqual(
+      t('Cut \uFFFD here, whole \uD83D\uDE00, end \uFFFD'),
     );
   });
 
-  it('an override equal to the empty seed is removed again (page scope)', () => {
-    const typed = run(ready(), edit('title', 'Plans {sep} {site}'));
-    expect(typed.edits.target.title).toBe('Plans {sep} {site}');
-    const deleted = run(typed, edit('title', ' {sep} {site}'));
-    expect(deleted.edits.target).toEqual({});
+  it("a page's title holds only the editor's words", () => {
+    const typed = run(ready(), edit('title', t('Pricing plans')));
+    expect(typed.edits.target).toEqual({ title: t('Pricing plans') });
+    expect(view(typed)!.texts.title).toBe('Pricing plans | Example');
+    expect(run(typed, edit('title', t(' '))).edits.target).toEqual({});
   });
 
-  it('a template pattern is not seeded and may equal the inherited one', () => {
-    const template = {
-      kind: 'template',
-      id: 'node.article.full',
-      bundle: 'article',
-      previewId: '11',
-    } as const;
-    const state = run(
-      reducer(initialState(template), {
-        type: 'loaded',
-        ctx: template,
-        payload: payload({ target: target({ scope: 'template' }) }),
-        readonly: 'no',
-      }),
-      edit('title', '{title} {sep} {site}'),
-    );
-    expect(state.edits.target.title).toBe('{title} {sep} {site}');
-    expect(run(state, edit('title', '{sep} {site}')).edits.target.title).toBe(
-      '{sep} {site}',
-    );
+  it("choosing the site's ending stores nothing; another ending and No ending are stored", () => {
+    expect(run(ready(), edit('title_end', { fact: 'site' })).edits.target).toEqual({});
+    expect(run(ready(), edit('title_end', t(''))).edits.target).toEqual({ title_end: t('') });
+    const site = { ...SITE, values: { ...SITE.values, title_end: t('Example Co') } };
+    // Over a typed site ending, the site name is an ending of its own.
+    expect(run(ready({ site }), edit('title_end', { fact: 'site' })).edits.target).toEqual({ title_end: { fact: 'site' } });
+    expect(run(ready({ site }), edit('title_end', t('Example Co'))).edits.target).toEqual({});
+  });
+
+  it('a link to the default source is stored at template scope', () => {
+    const state = run(loaded(), edit('title', { fact: 'title' }));
+    expect(state.edits.target).toEqual({ title: { fact: 'title' } });
+  });
+
+  it('a linked value resolves through the sources, and gives its default when empty', () => {
+    const summary = {
+      source: { sourceType: 'entity-field', expression: 'ℹ︎␜entity:node:article␝field_summary␞␟value' },
+      label: 'Summary',
+      path: ['Summary'],
+      field: 'field_summary',
+      hop: false,
+      kinds: ['text'],
+      status: 'ok',
+      value: 'A short summary.',
+    } satisfies SourceRow;
+    const linked = run(loaded({ sources: [summary] }), edit('description', { source: summary.source }));
+    expect(view(linked)!.texts.description).toBe('A short summary.');
+    const empty = run(loaded({ sources: [{ ...summary, status: 'empty', value: '' }] }), edit('description', { source: summary.source }));
+    expect(view(empty)!.texts.description).toBe('Plans.');
+    // A link the type no longer offers is broken: the default too.
+    const broken = run(loaded(), edit('description', { source: summary.source }));
+    expect(view(broken)!.texts.description).toBe('Plans.');
   });
 });
 
@@ -457,7 +428,7 @@ describe('measure, truncate and the meter', () => {
     const estimate =
       'This preview is an estimate; search engines sometimes rewrite titles and descriptions.';
     const node =
-      "This event isn't published yet. Values that only editors can see are left out.";
+      "This event isn't published yet. Its fields are read with your access until visitors can see it.";
     expect(note(false, true)).toEqual({ suffix: null, unpublished: '', info: estimate });
     // What the caption adds is in the ⓘ too: a narrow caption leaves it out.
     expect(note(false, false)).toEqual({
@@ -574,13 +545,13 @@ describe('measure, truncate and the meter', () => {
 describe('reducer', () => {
   it('load: the target is selected first, working copies are the server values', () => {
     const state = ready({
-      target: target({ values: { title: 'Plans {sep} {site}' } }),
+      target: target({ values: { title: t('Plans') } }),
     });
     expect(state).toMatchObject({
       phase: 'ready',
       scope: 'target',
       tab: 'search',
-      edits: { target: { title: 'Plans {sep} {site}' }, site: SITE },
+      edits: { target: { title: t('Plans') }, site: SITE },
       sent: null,
       siteDirty: false,
       readonly: 'no',
@@ -619,13 +590,13 @@ describe('reducer', () => {
   });
 
   it('edit: undefined, empty and whitespace-only values remove the override', () => {
-    const set = run(ready(), edit('social.title', 'Hello'));
-    for (const value of [undefined, '', '  \n']) {
+    const set = run(ready(), edit('social.title', t('Hello')));
+    for (const value of [undefined, t(''), t('  \n')]) {
       expect(run(set, edit('social.title', value)).edits.target).toEqual({});
     }
     // A trailing space is what the user typed.
-    expect(run(set, edit('social.title', 'Hello ')).edits.target).toEqual({
-      social: { title: 'Hello ' },
+    expect(run(set, edit('social.title', t('Hello '))).edits.target).toEqual({
+      social: { title: t('Hello ') },
     });
   });
 
@@ -666,7 +637,7 @@ describe('reducer', () => {
         auto_save_key: 'canvas_page:8:fi',
         from_default: {
           robots: { noindex: true },
-          social: { image: 'aaaaaaaa-0000-4000-8000-000000000000' },
+          social: { image: { media: 'aaaaaaaa-0000-4000-8000-000000000000' } },
           schema: { type: 'Article' },
         },
       }),
@@ -680,7 +651,7 @@ describe('reducer', () => {
       schema: { type: 'WebPage' },
     });
     expect(
-      run(state, edit('social.image', 'aaaaaaaa-0000-4000-8000-000000000000'))
+      run(state, edit('social.image', { media: 'aaaaaaaa-0000-4000-8000-000000000000' }))
         .edits.target,
     ).toEqual({});
     expect(view(state)!.source('robots.noindex')).toBe('default');
@@ -692,7 +663,7 @@ describe('reducer', () => {
       ready(),
       edit('values.robots.max_image_preview', 'standard', 'site'),
     );
-    expect(state.edits.site.values).toEqual({ title: '{title} {sep} {site}' });
+    expect(state.edits.site.values).toEqual({});
     expect(state.siteDirty).toBe(true);
     const back = run(
       state,
@@ -714,20 +685,20 @@ describe('reducer', () => {
     const set = run(
       ready(),
       edit('schema.custom', '{"@type":"Thing"}'),
-      edit('title', 'T'),
+      edit('title', t('T')),
     );
     const reset = run(set, {
       type: 'reset',
       scope: 'target',
       path: 'schema.custom',
     });
-    expect(reset.edits.target).toEqual({ title: 'T' });
+    expect(reset.edits.target).toEqual({ title: t('T') });
     expect(reset.undo).toMatchObject({ text: 'Reset', path: 'schema.custom' });
     const undone = run(reset, { type: 'undo' });
     expect(undone.edits.target).toEqual(set.edits.target);
     expect(undone.undo).toBeNull();
     // Undo is cleared by the next edit and by a scope change.
-    expect(run(reset, edit('title', 'U')).undo).toBeNull();
+    expect(run(reset, edit('title', t('U'))).undo).toBeNull();
     expect(run(reset, { type: 'scope', scope: 'site' }).undo).toBeNull();
   });
 
@@ -764,7 +735,7 @@ describe('reducer', () => {
     const restored = run(ready(), {
       type: 'apply',
       scope: 'target',
-      values: { title: 'T' },
+      values: { title: t('T') },
       undo: MESSAGES.restored,
     });
     expect(restored.undo).toMatchObject({
@@ -786,7 +757,7 @@ describe('reducer', () => {
     const state = run(
       ready(),
       { type: 'tab', tab: 'social' },
-      edit('title', 'T'),
+      edit('title', t('T')),
       edit('identity.name', 'Example Inc', 'site'),
       { type: 'errors', scope: 'target', fields: { title: 'Bad.' } },
     );
@@ -806,7 +777,7 @@ describe('reducer', () => {
         target: target({
           id: '9',
           label: 'About us',
-          values: { title: 'About' },
+          values: { title_end: t('About') },
         }),
         site: {
           ...SITE,
@@ -820,7 +791,7 @@ describe('reducer', () => {
       phase: 'ready',
       scope: 'target',
       tab: 'social',
-      edits: { target: { title: 'About' } },
+      edits: { target: { title_end: t('About') } },
       flash: 'Now editing: About us',
     });
     expect(loaded.edits.site.identity.name).toBe('Example Inc');
@@ -837,7 +808,7 @@ describe('reducer', () => {
       id: 'node.event.full',
       label: 'Event',
       auto_save_key: 'content_template:node.event.full',
-      values: { title: 'Saved' },
+      values: { title: t('Saved') },
     });
     const one = { kind: 'template', id: 'node.event.full', bundle: 'event', previewId: '1' } as const;
     const two = { ...one, previewId: '2' } as const;
@@ -851,7 +822,7 @@ describe('reducer', () => {
     expect(refreshing).toMatchObject({
       phase: 'refreshing',
       ctx: two,
-      edits: { target: { title: 'Saved' } },
+      edits: { target: { title: t('Saved') } },
     });
     expect(refreshing.server).toBe(state.server);
     const answer = {
@@ -861,17 +832,47 @@ describe('reducer', () => {
       readonly: 'store',
     } as const;
     // Typed meanwhile: kept, and waiting to be sent.
-    const typed = run(refreshing, edit('title', 'Typed'), answer);
+    const typed = run(refreshing, edit('title', t('Typed')), answer);
     expect(typed).toMatchObject({
       phase: 'ready',
-      edits: { target: { title: 'Typed' } },
+      edits: { target: { title: t('Typed') } },
       save: { target: { phase: 'pending' } },
     });
     // Nothing typed: the server's values.
     expect(run(refreshing, answer)).toMatchObject({
-      edits: { target: { title: 'Saved' } },
+      edits: { target: { title: t('Saved') } },
       save: { target: { phase: 'idle' } },
     });
+    // An Undo of the template's values goes with the node it was made on.
+    const changed = run(state, { type: 'apply', scope: 'target', values: { title: t('Linked') }, undo: 'Linked to Byline' });
+    expect(changed.undo).not.toBeNull();
+    expect(run(changed, { type: 'loading', ctx: two, refresh: true }).undo).toBeNull();
+  });
+
+  it('a publish takes away an Undo that would change the target', () => {
+    const draft = target({
+      scope: 'template',
+      entity_type: 'content_template',
+      id: 'node.event.full',
+      label: 'Event',
+      auto_save_key: 'content_template:node.event.full',
+      has_draft: true,
+      values: { title: t('Linked') },
+    });
+    const one = { kind: 'template', id: 'node.event.full', bundle: 'event', previewId: '1' } as const;
+    const state = run(
+      reducer(initialState(one), { type: 'loaded', ctx: one, payload: payload({ target: { ...draft, values: {} } }), readonly: 'no' }),
+      { type: 'apply', scope: 'target', values: { title: t('Linked') }, undo: 'Linked to Byline' },
+    );
+    expect(state.undo).not.toBeNull();
+    // Still a draft: the Undo stays.
+    expect(run(state, { type: 'refreshed', payload: payload({ target: draft }), readonly: 'no' }).undo).not.toBeNull();
+    // Published: gone.
+    const published = run(
+      { ...state, server: payload({ target: draft }) },
+      { type: 'refreshed', payload: payload({ target: { ...draft, has_draft: false } }), readonly: 'no' },
+    );
+    expect(published.undo).toBeNull();
   });
 
   it('each scope remembers its tab', () => {
@@ -889,34 +890,34 @@ describe('reducer', () => {
 
   it('an editor round trip replaces the inputs only when nothing is unsent', () => {
     const fresh = payload({
-      target: target({ values: { title: 'Published' }, has_draft: false }),
+      target: target({ values: { title: t('Published') }, has_draft: false }),
     });
     const clean = run(ready(), {
       type: 'refreshed',
       payload: fresh,
       readonly: 'no',
     });
-    expect(clean.edits.target).toEqual({ title: 'Published' });
+    expect(clean.edits.target).toEqual({ title: t('Published') });
 
-    const typing = run(ready(), edit('title', 'Mine'), {
+    const typing = run(ready(), edit('title', t('Mine')), {
       type: 'refreshed',
       payload: fresh,
       readonly: 'no',
     });
-    expect(typing.edits.target).toEqual({ title: 'Mine' });
+    expect(typing.edits.target).toEqual({ title: t('Mine') });
     expect(typing.server).toBe(fresh);
 
     // Confirmed, then discarded in "Review changes": the fields return to the published values.
-    const confirmed = run(ready(), edit('title', 'Mine'), {
+    const confirmed = run(ready(), edit('title', t('Mine')), {
       type: 'confirmed',
-      payload: payload({ target: target({ values: { title: 'Mine' } }) }),
-      sent: canon({ title: 'Mine' }),
+      payload: payload({ target: target({ values: { title: t('Mine') } }) }),
+      sent: canon({ title: t('Mine') }),
     });
     expect(
       run(confirmed, { type: 'refreshed', payload: fresh, readonly: 'no' })
         .edits.target,
     ).toEqual({
-      title: 'Published',
+      title: t('Published'),
     });
 
     // A refused field keeps what was typed.
@@ -929,7 +930,7 @@ describe('reducer', () => {
       run(refused, { type: 'refreshed', payload: fresh, readonly: 'no' }).edits
         .target,
     ).toEqual({
-      title: 'Mine',
+      title: t('Mine'),
     });
   });
 
@@ -950,7 +951,7 @@ describe('reducer', () => {
 // Derived values.
 
 describe('view()', () => {
-  it("lays Canvas's live title and description over the tokens", () => {
+  it("lays Canvas's live title and description over the facts", () => {
     const state = run(ready(), {
       type: 'live',
       live: { title: 'Prices', description: 'New.' },
@@ -960,6 +961,8 @@ describe('view()', () => {
       description: 'New.',
       social_title: 'Prices',
       social_description: 'New.',
+      title_main: 'Prices',
+      title_end: 'Example',
     });
   });
 
@@ -996,8 +999,8 @@ describe('view()', () => {
       },
     ]);
     // While typing, the client's own text.
-    const typed = run(state, edit('title', 'Mine'));
-    expect(view(typed)!.texts.title).toBe('Mine');
+    const typed = run(state, edit('title', t('Mine')));
+    expect(view(typed)!.texts.title).toBe('Mine | Example');
     // Typing elsewhere leaves the server's robots tag true; a robots change
     // not yet sent does not.
     expect(view(typed)).toMatchObject({ hidden: true, hiddenBy: 'config' });
@@ -1063,16 +1066,16 @@ describe('saveDraft()', () => {
   it('confirmed: one write, the server truth is replaced, the inputs are not', async () => {
     const sim = harness();
     // A trailing space is the user's text and stays the user's text.
-    sim.dispatch(edit('title', 'Plans {sep} {site} '));
+    sim.dispatch(edit('title', t('Plans {sep} {site} ')));
     const before = sim.state.edits;
     expect(await saveDraft(sim.io)).toBe('done');
-    expect(sim.puts).toEqual([{ title: 'Plans {sep} {site} ' }]);
+    expect(sim.puts).toEqual([{ title: t('Plans {sep} {site} ') }]);
     expect(sim.state.edits).toBe(before);
     expect(sim.state.server!.target).toMatchObject({
       has_draft: true,
-      values: { title: 'Plans {sep} {site} ' },
+      values: { title: t('Plans {sep} {site} ') },
     });
-    expect(sim.state.sent).toBe(canon({ title: 'Plans {sep} {site} ' }));
+    expect(sim.state.sent).toBe(canon({ title: t('Plans {sep} {site} ') }));
     expect(unsent(sim.state)).toBe(false);
   });
 
@@ -1098,46 +1101,46 @@ describe('saveDraft()', () => {
 
   it('overwritten by an editor save: written again', async () => {
     const sim = harness();
-    sim.dispatch(edit('title', 'Mine'));
+    sim.dispatch(edit('title', t('Mine')));
     sim.afterPut = (attempt) => {
       if (attempt === 1) {
         sim.draft = {};
       }
     };
     expect(await saveDraft(sim.io)).toBe('done');
-    expect(sim.puts).toEqual([{ title: 'Mine' }, { title: 'Mine' }]);
-    expect(sim.draft).toEqual({ title: 'Mine' });
+    expect(sim.puts).toEqual([{ title: t('Mine') }, { title: t('Mine') }]);
+    expect(sim.draft).toEqual({ title: t('Mine') });
   });
 
   it('newer edits that arrive while saving go out in the same call', async () => {
     const sim = harness();
-    sim.dispatch(edit('title', 'One'));
+    sim.dispatch(edit('title', t('One')));
     sim.afterPut = (attempt) => {
       if (attempt === 1) {
-        sim.dispatch(edit('title', 'One two'));
+        sim.dispatch(edit('title', t('One two')));
       }
     };
     expect(await saveDraft(sim.io)).toBe('done');
-    expect(sim.puts).toEqual([{ title: 'One' }, { title: 'One two' }]);
-    expect(sim.state.sent).toBe(canon({ title: 'One two' }));
+    expect(sim.puts).toEqual([{ title: t('One') }, { title: t('One two') }]);
+    expect(sim.state.sent).toBe(canon({ title: t('One two') }));
   });
 
   it('five overwritten writes: the change could not be stored', async () => {
     const sim = harness();
-    sim.dispatch(edit('title', 'Mine'));
+    sim.dispatch(edit('title', t('Mine')));
     sim.afterPut = () => {
       sim.draft = {};
     };
     expect(await saveDraft(sim.io)).toBe('failed');
     expect(sim.puts).toHaveLength(5);
-    expect(sim.state.edits.target).toEqual({ title: 'Mine' });
+    expect(sim.state.edits.target).toEqual({ title: t('Mine') });
     expect(sim.state.sent).toBeNull();
   });
 
   it('a refused field never deletes a saved one', async () => {
-    const sim = harness({ canonical: '/pricing', title: 'Saved' });
+    const sim = harness({ canonical: '/pricing', title: t('Saved') });
     sim.dispatch(edit('canonical', 'not an address'));
-    sim.dispatch(edit('social.title', 'New'));
+    sim.dispatch(edit('social.title', t('New')));
     sim.refuse = (values) =>
       values.canonical === 'not an address'
         ? { canonical: 'Enter a full address.' }
@@ -1145,8 +1148,8 @@ describe('saveDraft()', () => {
     expect(await saveDraft(sim.io)).toBe('done');
     // The refusal is not counted; the second write carries the stored value.
     expect(sim.puts).toEqual([
-      { canonical: 'not an address', social: { title: 'New' }, title: 'Saved' },
-      { canonical: '/pricing', social: { title: 'New' }, title: 'Saved' },
+      { canonical: 'not an address', social: { title: t('New') }, title: t('Saved') },
+      { canonical: '/pricing', social: { title: t('New') }, title: t('Saved') },
     ]);
     expect(sim.draft.canonical).toBe('/pricing');
     // The field keeps what was typed and shows the server's sentence.
@@ -1167,15 +1170,15 @@ describe('saveDraft()', () => {
 
   it('a refused path without a stored value is left out, and the same refusal twice stops', async () => {
     expect(
-      draftPayload({ canonical: 'x', title: 'T' }, {}, ['canonical']),
-    ).toEqual({ title: 'T' });
+      draftPayload({ canonical: 'x', title: t('T') }, {}, ['canonical']),
+    ).toEqual({ title: t('T') });
     const sim = harness();
-    sim.dispatch(edit('title', 'T'));
+    sim.dispatch(edit('title', t('T')));
     sim.refuse = () => ({ title: 'Never good.' });
     const result = await saveDraft(sim.io);
     expect(result).toBeInstanceOf(ApiError);
     expect((result as ApiError).code).toBe('invalid');
-    expect(sim.puts).toEqual([{ title: 'T' }, {}]);
+    expect(sim.puts).toEqual([{ title: t('T') }, {}]);
   });
 
   it('editing a refused field sends it again', async () => {
@@ -1192,7 +1195,7 @@ describe('saveDraft()', () => {
 
   it('no editor token: nothing is written', async () => {
     const sim = harness();
-    sim.dispatch(edit('title', 'T'));
+    sim.dispatch(edit('title', t('T')));
     sim.token = null;
     expect(await saveDraft(sim.io)).toBe('readonly');
     expect(sim.puts).toEqual([]);
@@ -1200,7 +1203,7 @@ describe('saveDraft()', () => {
 
   it('a conflict or a network failure stops with the error', async () => {
     const sim = harness();
-    sim.dispatch(edit('title', 'T'));
+    sim.dispatch(edit('title', t('T')));
     sim.io.put = async () => {
       throw new ApiError(
         'conflict',
@@ -1218,15 +1221,15 @@ describe('saveDraft()', () => {
 // The pending rule.
 
 describe('pending changes', () => {
-  const server = { title: 'Saved', robots: { noindex: true } };
+  const server = { title: t('Saved'), robots: { noindex: true } };
 
   it('diff() and applyChanges() are inverses over leaves', () => {
-    const edits = { title: 'Mine', social: { image: 'uuid' } };
+    const edits = { title: t('Mine'), social: { image: { media: 'uuid' } } };
     const changes = diff(server, edits);
     expect(changes).toEqual({
-      title: 'Mine',
+      title: t('Mine'),
       'robots.noindex': null,
-      'social.image': 'uuid',
+      'social.image': { media: 'uuid' },
     });
     expect(prune(applyChanges(server, changes))).toEqual(edits);
     expect(
@@ -1240,23 +1243,23 @@ describe('pending changes', () => {
   });
 
   it('mirrors every edit against the values it was first made against', () => {
-    const first = pendingFor(null, '1', server, { ...server, title: 'Mine' })!;
+    const first = pendingFor(null, '1', server, { ...server, title: t('Mine') })!;
     expect(first).toEqual({
       uid: '1',
       base: canon(server),
-      changes: { title: 'Mine' },
+      changes: { title: t('Mine') },
     });
     // The base and the user stay those of the first change.
     const second = pendingFor(
       first,
       '2',
-      { title: 'Other' },
-      { ...server, title: 'Mine too' },
+      { title: t('Other') },
+      { ...server, title: t('Mine too') },
     )!;
     expect(second).toEqual({
       uid: '1',
       base: canon(server),
-      changes: { title: 'Mine too' },
+      changes: { title: t('Mine too') },
     });
     // Back to the base: nothing to keep.
     expect(pendingFor(second, '1', server, server)).toBeNull();
@@ -1265,20 +1268,37 @@ describe('pending changes', () => {
       pendingFor(
         null,
         '1',
-        { title: 'Mine' },
-        { title: 'Mine', canonical: 'bad' },
+        { title: t('Mine') },
+        { title: t('Mine'), canonical: 'bad' },
         ['canonical'],
       ),
     ).toEqual({
       uid: '1',
-      base: canon({ title: 'Mine' }),
+      base: canon({ title: t('Mine') }),
       changes: { canonical: 'bad' },
     });
-    expect(pendingFor(null, null, server, { title: 'x' })!.uid).toBe('');
+    // A refused link is not kept: it can be picked again, and kept it would
+    // be sent again on every opening.
+    const gone = {
+      source: {
+        sourceType: 'entity-field' as const,
+        expression: 'ℹ︎␜entity:node:article␝field_gone␞␟value',
+      },
+    };
+    expect(
+      pendingFor(
+        null,
+        '1',
+        { title: t('Mine') },
+        { title: t('Mine'), description: gone },
+        ['description'],
+      ),
+    ).toBeNull();
+    expect(pendingFor(null, null, server, { title: t('x') })!.uid).toBe('');
   });
 
   it('readPending() refuses what is not an entry', () => {
-    const entry = { uid: '1', base: canon(server), changes: { title: 'Mine' } };
+    const entry = { uid: '1', base: canon(server), changes: { title: t('Mine') } };
     expect(readPending(JSON.stringify(entry))).toEqual(entry);
     for (const raw of [
       null,
@@ -1293,10 +1313,10 @@ describe('pending changes', () => {
     }
   });
 
-  const entry = { uid: '1', base: canon(server), changes: { title: 'Mine' } };
+  const entry = { uid: '1', base: canon(server), changes: { title: t('Mine') } };
 
   it('a change the server already has is dropped silently', () => {
-    expect(openPending(entry, '1', { ...server, title: 'Mine' })).toBe('drop');
+    expect(openPending(entry, '1', { ...server, title: t('Mine') })).toBe('drop');
     expect(
       openPending(
         { ...entry, changes: { 'robots.nofollow': null } },
@@ -1308,12 +1328,12 @@ describe('pending changes', () => {
 
   it('same user and same base: restored', () => {
     expect(
-      openPending(entry, '1', { robots: { noindex: true }, title: 'Saved' }),
+      openPending(entry, '1', { robots: { noindex: true }, title: t('Saved') }),
     ).toBe('restore');
   });
 
   it('changed base: offered', () => {
-    expect(openPending(entry, '1', { title: 'Published since' })).toBe('offer');
+    expect(openPending(entry, '1', { title: t('Published since') })).toBe('offer');
   });
 
   it('another user, or an unreadable one: offered', () => {
@@ -1333,8 +1353,8 @@ describe('pending changes', () => {
           pending: {
             ...entry,
             changes: {
-              title: 'Mine',
-              'social.image': 'uuid',
+              title: t('Mine'),
+              'social.image': { media: 'uuid' },
               'robots.noindex': true,
               'robots.nofollow': true,
             },
@@ -1357,8 +1377,8 @@ describe('pending changes', () => {
       },
     ]);
     expect(
-      fieldNames(['identity.same_as', 'values.title', 'schema.props.name']),
-    ).toEqual(['Profiles elsewhere', 'Title pattern', 'Structured data']);
+      fieldNames(['identity.same_as', 'values.title_end', 'schema.props.name']),
+    ).toEqual(['Profiles elsewhere', 'Title ending', 'Structured data']);
   });
 });
 
@@ -1547,104 +1567,6 @@ describe('footer and strips', () => {
 
 // What the components lean on.
 
-describe('chips in the editor', () => {
-  const tokens = payload().tokens;
-  const text = 'Plans {Separator} {Site name}';
-
-  it('a chip is brace text that names a known value by its label', () => {
-    expect(chipsIn(`${text} {nope} {sep}`, tokens)).toEqual([
-      { start: 6, end: 17, name: 'sep', label: 'Separator' },
-      { start: 18, end: 29, name: 'site', label: 'Site name' },
-    ]);
-  });
-
-  it('Backspace and Delete next to or inside a chip remove the whole chip', () => {
-    const chips = chipsIn(text, tokens);
-    // Right behind the chip, and inside it.
-    for (const caret of [17, 10]) {
-      expect(removeChip(text, chips, caret, 'Backspace')).toEqual({
-        text: 'Plans {Site name}',
-        caret: 5,
-        label: 'Separator',
-      });
-    }
-    expect(removeChip(text, chips, 6, 'Delete')?.label).toBe('Separator');
-    // Right in front of a chip Backspace is an ordinary key, as is Delete behind one.
-    expect(removeChip(text, chips, 6, 'Backspace')).toBeNull();
-    expect(removeChip(text, chips, 17, 'Delete')).toBeNull();
-    expect(removeChip(text, chips, 3, 'Backspace')).toBeNull();
-    // The last chip leaves the space before it, so a word typed next does not
-    // run into the chip in front of it.
-    expect(removeChip(text, chips, 29, 'Backspace')).toEqual({
-      text: 'Plans {Separator} ',
-      caret: 18,
-      label: 'Site name',
-    });
-  });
-
-  it('a selection never ends inside a chip; a caret stays where it is', () => {
-    const chips = chipsIn(text, tokens);
-    expect(wholeChips(chips, 2, 9)).toEqual([2, 17]);
-    expect(wholeChips(chips, 9, 20)).toEqual([6, 29]);
-    expect(wholeChips(chips, 9, 9)).toEqual([9, 9]);
-    expect(wholeChips(chips, 0, 6)).toEqual([0, 6]);
-  });
-
-  it('a chip from the button is set off by spaces and never lands inside another', () => {
-    const chips = chipsIn(text, tokens);
-    expect(insertChip(text, chips, 5, 'Page title', false)).toEqual({
-      text: 'Plans {Page title} {Separator} {Site name}',
-      caret: 18,
-    });
-    expect(insertChip(text, chips, 9, 'Page title', false).text).toBe(
-      'Plans {Separator} {Page title} {Site name}',
-    );
-    expect(insertChip('', [], 0, 'Page title', false)).toEqual({
-      text: '{Page title}',
-      caret: 12,
-    });
-  });
-
-  it('a chip from a typed brace replaces the brace', () => {
-    const typed = 'Plans by { {Separator} {Site name}';
-    expect(
-      insertChip(typed, chipsIn(typed, tokens), 10, 'Page title', true),
-    ).toEqual({
-      text: 'Plans by {Page title} {Separator} {Site name}',
-      caret: 21,
-    });
-  });
-
-  it('the caret of a seeded title stays behind what was typed', () => {
-    expect(seedCaret('{title} {sep} {site}', 'P', tokens)).toBe(1);
-    expect(seedCaret('{site} {sep} {title}', 'Pr', tokens)).toBe(
-      '{Site name} {Separator} '.length + 2,
-    );
-    expect(seedCaret('{site}', 'Pr', tokens)).toBe(2);
-  });
-
-  it('the insert menu groups values and leaves images out', () => {
-    const all = {
-      ...tokens,
-      image: { label: 'Page image', type: 'image' as const, value: '' },
-      'field.field_byline': {
-        label: 'Byline',
-        type: 'text' as const,
-        value: 'Ada',
-      },
-    };
-    expect(tokenGroups(all, true)).toEqual([
-      { label: 'PAGE', names: ['title', 'description'] },
-      { label: 'SITE', names: ['site', 'sep'] },
-      { label: 'FIELDS', names: ['field.field_byline'] },
-    ]);
-    expect(tokenGroups(all, false).map((group) => group.label)).toEqual([
-      'PAGE',
-      'SITE',
-    ]);
-  });
-});
-
 describe('what previews and rows say', () => {
   it('an address reads as a breadcrumb', () => {
     expect(breadcrumb('https://www.example.com/blog/hello%20world')).toBe(
@@ -1675,27 +1597,34 @@ describe('what previews and rows say', () => {
     name: 'Hero',
     thumb: '/hero-thumb.jpg',
   };
+  const hero = {
+    source: { sourceType: 'entity-field', expression: 'ℹ︎␜entity:node:article␝field_hero␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}' },
+    label: 'Hero image',
+    path: ['Hero image'],
+    field: 'field_hero',
+    hop: false,
+    kinds: ['image'],
+    status: 'ok',
+    value: '',
+    image: { ...image, name: 'Field hero' },
+  } satisfies SourceRow;
   const withImage = (over: Partial<StatePayload> = {}) =>
     ready({
-      tokens: {
-        ...payload().tokens,
-        image: { label: 'Page image', type: 'image', value: '', image },
-        'field.field_hero': {
-          label: 'Hero image',
-          type: 'image',
-          value: '',
-          image: { ...image, name: 'Field hero' },
-        },
-      },
+      facts: {
+        ...payload().facts,
+        image: { label: 'Image', kind: 'image', value: '', image },
+      } as Record<Fact, StatePayload['facts'][Fact]>,
+      sources: [hero],
+      target: target({ scope: 'template', label: 'Product' }),
       ...over,
     });
-  const shown = (state: State) => socialImage(state, view(state)!, {});
+  const shown = (state: State, picked = {}) => socialImage(state, view(state, picked)!);
 
   it('the social image names where it comes from', () => {
-    expect(shown(withImage())).toEqual({ image, from: 'From the page image' });
+    expect(shown(withImage())).toEqual({ image, from: 'Image' });
     expect(
-      shown(run(withImage(), edit('social.image', '{field.field_hero}'))),
-    ).toMatchObject({ image: { name: 'Field hero' }, from: 'From Hero image' });
+      shown(run(withImage(), edit('social.image', { source: hero.source }))),
+    ).toMatchObject({ image: { name: 'Field hero' }, from: 'Hero image' });
     expect(shown(ready())).toEqual({ image: null, from: 'No image' });
     expect(
       shown(
@@ -1709,13 +1638,23 @@ describe('what previews and rows say', () => {
           },
         }),
       ),
-    ).toMatchObject({ image: { name: 'Card' }, from: 'Site default' });
+    ).toMatchObject({ image: { name: 'Card' }, from: 'Site default image' });
+  });
+
+  it('a linked image that gives nothing says so, and what is used instead', () => {
+    const hidden = run(
+      withImage({ sources: [{ ...hero, status: 'hidden', image: null }] }),
+      edit('social.image', { source: hero.source }),
+    );
+    expect(shown(hidden)).toEqual({ image, from: 'Image', state: 'hidden' });
+    const gone = run(withImage({ sources: [] }), edit('social.image', { source: hero.source }));
+    expect(shown(gone)).toEqual({ image, from: 'Image', state: 'broken' });
   });
 
   it('an image chosen here shows before the server knows it', () => {
-    const state = run(withImage(), edit('social.image', 'uuid-new'));
+    const state = run(withImage(), edit('social.image', { media: 'uuid-new' }));
     const picked = { name: 'New', thumb: '/n.jpg', width: 800, height: 400 };
-    expect(socialImage(state, view(state)!, { 'uuid-new': picked })).toEqual({
+    expect(shown(state, { 'uuid-new': picked })).toEqual({
       image: picked,
       from: 'Chosen here',
     });
@@ -1732,13 +1671,13 @@ describe('what previews and rows say', () => {
     const confirmed = reducer(state, {
       type: 'confirmed',
       payload: payload({
-        target: target({ values: { social: { image: 'uuid-new' } } }),
+        target: target({ values: { social: { image: { media: 'uuid-new' } } } }),
         resolved,
       }),
       sent: canon(state.edits.target),
     });
     expect(
-      socialImage(confirmed, view(confirmed)!, { 'uuid-new': picked }).image,
+      shown(confirmed, { 'uuid-new': picked }).image,
     ).toBe(resolved.image);
   });
 
@@ -1746,7 +1685,7 @@ describe('what previews and rows say', () => {
     const state = ready({
       langcode: 'fi',
       languages: { en: 'English', fi: 'Finnish' },
-      target: target({ from_default: { social: { image: 'uuid-en' } } }),
+      target: target({ from_default: { social: { image: { media: 'uuid-en' } } } }),
     });
     expect(shown(state).from).toBe('From the English version');
   });
@@ -1764,7 +1703,7 @@ describe('what previews and rows say', () => {
     const state = run(
       ready(),
       edit('schema.type', 'Event'),
-      edit('schema.props.name', 'Launch'),
+      edit('schema.props.name', t('Launch')),
     );
     const reset = reducer(state, {
       type: 'apply',
@@ -1788,7 +1727,7 @@ describe('what previews and rows say', () => {
       schema: { withheld: false, missing_required: [], missing_recommended: [] },
     };
     const state = withImage({
-      target: target({ values: { social: { image: 'uuid-private' } } }),
+      target: target({ values: { social: { image: { media: 'uuid-private' } } } }),
       media: {},
       resolved,
     });
@@ -1816,27 +1755,17 @@ describe('fixes from the reviews', () => {
         languages: { en: 'English', fi: 'Finnish' },
         target: target({ from_default: { schema: { type: 'Product' } } }),
       }),
-      edit('schema.props.name', 'Widget'),
+      edit('schema.props.name', t('Widget')),
     );
     expect(inherited(state.server!, 'target', 'schema.type')).toBe('Product');
     expect(view(state)!.effective.schema).toEqual({
       type: 'Product',
-      props: { name: 'Widget' },
+      props: { name: t('Widget') },
     });
     // What is sent: the server cleans it against the inherited type.
     expect(draftPayload(state.edits.target, {}, [])).toEqual({
-      schema: { props: { name: 'Widget' } },
+      schema: { props: { name: t('Widget') } },
     });
-  });
-
-  it('labels in custom JSON-LD text values are stored as names, keys are left alone', () => {
-    const tokens = payload().tokens;
-    const typed = '{"@type": "Thing", "{Page title}": 1, "name": "{Page title} at \\"{Site name}\\"", "url": "/s?q={search_term_string}"}';
-    const stored = jsonStrings(typed, (text) => toStored(text, tokens));
-    expect(stored).toBe(
-      '{"@type": "Thing", "{Page title}": 1, "name": "{title} at \\"{site}\\"", "url": "/s?q={search_term_string}"}',
-    );
-    expect(jsonStrings(stored, (text) => toDisplay(text, tokens))).toBe(typed);
   });
 
   it('a repeated refusal says nothing else was saved', () => {
@@ -2035,7 +1964,7 @@ describe('nowEditing()', () => {
   });
 
   it('is quiet when only the previewed node changes', () => {
-    expect(nowEditing(template, { ...template, values: { title: 'x' } })).toBeUndefined();
+    expect(nowEditing(template, { ...template, values: { title: t('x') } })).toBeUndefined();
   });
 
   it('names another page, also under the same title, and another language', () => {

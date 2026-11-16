@@ -22,6 +22,23 @@ the title's main part: each page and node uses its own.
 - **WHEN** a site save includes a title main part
 - **THEN** the system MUST refuse it with "This setting is not available here."
 
+### Requirement: A site value the site may not hold is ignored
+
+A site value the site may not hold, such as a title ending linked to a field
+by a configuration import, MUST be ignored: not shown, not used in the head,
+and dropped by the next save, so that the other site settings stay savable. A
+value that differs from what the dialog shows MUST be validated as usual.
+
+#### Scenario: An ending that a configuration import linked to a field
+
+- **WHEN** the stored site values hold `title_end: {source: …}` after a configuration import, and an administrator changes only the logo
+- **THEN** the dialog MUST show the Site name as the ending, the head MUST end titles with the Site name, the save MUST be accepted, the logo MUST be stored and the ending MUST be gone
+
+#### Scenario: Linking the ending again
+
+- **WHEN** the administrator then sends a title ending linked to a field
+- **THEN** the save MUST be refused for `title_end` with "This setting is not available here."
+
 ## MODIFIED Requirements
 
 ### Requirement: Site settings are one configuration object
@@ -99,3 +116,12 @@ changed last, else for nothing.
 
 - **WHEN** the site has no published Canvas page
 - **THEN** the state MUST have no preview and no output, and the facts MUST be listed with empty values
+
+## REMOVED Requirements
+
+### Requirement: A site value sent back unchanged is kept
+
+**Reason**: The site holds only its title ending and robots. A value it may
+not hold is ignored and dropped by the next save, never sent back.
+
+**Migration**: "A site value the site may not hold is ignored" (above).

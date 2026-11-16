@@ -1,25 +1,54 @@
 import type { HostContext, PageFacts } from './host';
 
-/** Plain text that may contain {tokens}. A literal is a template with no tokens. */
-export type Template = string;
+/** What every page and node has: the facts a value can link to. */
+export type Fact =
+  | 'title'
+  | 'description'
+  | 'site'
+  | 'url'
+  | 'author'
+  | 'published'
+  | 'modified'
+  | 'image';
+
+/** The kind of value a place takes, and a fact or a source gives. */
+export type Kind = 'text' | 'address' | 'date' | 'number' | 'image';
+
+/** A Canvas entity-field source: a template's link to a field. */
+export interface SourceRef {
+  sourceType: 'entity-field';
+  expression: string;
+}
+
+/**
+ * A value: typed text (never scanned for names), a fact, a chosen media item
+ * (images only) or a link to a field (templates only).
+ */
+export type Value =
+  | { text: string }
+  | { fact: Fact }
+  | { media: string }
+  | { source: SourceRef };
 
 /** One shape at every scope. Every key is optional and absent means "inherit". */
 export interface SeoValues {
-  title?: Template;
+  /** The title's main part. Not at site scope. */
+  title?: Value;
+  /** The title's ending; `{text: ''}` is "No ending". */
+  title_end?: Value;
   /** Template scope only: a page uses Canvas's own field. */
-  description?: Template;
+  description?: Value;
   /** Page scope only. */
   canonical?: string;
   social?: {
-    title?: Template;
-    description?: Template;
-    /** A media UUID, or exactly one image token. */
-    image?: string;
+    title?: Value;
+    description?: Value;
+    image?: Value;
   };
   robots?: Robots;
   schema?: {
     type?: string;
-    props?: Record<string, Template>;
+    props?: Record<string, Value>;
     custom?: string;
   };
 }
@@ -54,7 +83,7 @@ export interface SchemaProp {
   key: string;
   label: string;
   kind: 'text' | 'url' | 'date' | 'number' | 'enum' | 'image';
-  default?: Template;
+  default?: Value;
   level?: 'required' | 'recommended';
   options?: string[];
   pattern?: string;
@@ -91,11 +120,44 @@ export interface ImageInfo {
   source?: 'override' | 'entity' | 'site';
 }
 
-export interface TokenInfo {
+export interface FactInfo {
   label: string;
-  type: 'text' | 'url' | 'datetime' | 'number' | 'image';
+  kind: Kind;
+  value: string;
+  /** The Image fact's image. */
+  image?: ImageInfo | null;
+  /** The field a node's Description or Image fact is taken from. */
+  via?: string;
+}
+
+/** A field a template value can link to, with the previewed node's value. */
+export interface SourceRow {
+  source: SourceRef;
+  /** The path joined: "Venue › Street address". */
+  label: string;
+  /** The labels along the way, entity type hops left out. */
+  path: string[];
+  /** The machine name of the field it starts from. */
+  field: string;
+  /** It follows a reference: its first label is a level of the menu. */
+  hop: boolean;
+  kinds: Kind[];
+  /** `none`: there is no node to preview. A hidden entry has no value. */
+  status: 'ok' | 'empty' | 'hidden' | 'none';
   value: string;
   image?: ImageInfo | null;
+  /** A list key's label, which the dialog shows. */
+  shown?: string;
+  /** A list field: its value is one of its keys. */
+  list?: true;
+  /** The referenced item's own name (its title, its name). */
+  names?: true;
+}
+
+/** A stored link that cannot be read, and why. */
+export interface BrokenLink {
+  field: string;
+  reason: 'missing' | 'kind' | 'error';
 }
 
 export interface MediaInfo {
@@ -162,7 +224,13 @@ export interface StatePayload {
     /** Whether visitors can see it now. */
     published: boolean;
   } | null;
-  tokens: Record<string, TokenInfo>;
+  facts: Record<Fact, FactInfo>;
+  /** The identity's separator, with configuration overrides. */
+  separator: string;
+  /** Template scope: the fields the values may link to. */
+  sources: SourceRow[];
+  /** Template scope: stored links that cannot be read, by dotted path. */
+  broken: Record<string, BrokenLink>;
   media: Record<string, MediaInfo>;
   resolved: Resolved | null;
 }
@@ -190,7 +258,8 @@ export type SuggestRequest =
       langcode: string;
       current: Partial<Record<SuggestField, string>>;
       hint: string;
-      page: { title: string; site: string; text: string };
+      /** `ending`: the separator and the title ending, added after a title. */
+      page: { title: string; site: string; text: string; ending?: string };
     }
   | {
       task: 'schema';
@@ -325,7 +394,9 @@ export interface Issue {
   jump?: Jump;
   fix?:
     | { label: string; apply(values: SeoValues): SeoValues }
-    | { label: string; suggest: string };
+    | { label: string; suggest: string }
+    /** Leads to the field and opens its link menu. */
+    | { label: string; link: true };
 }
 
 export type Source = 'target' | 'default' | 'site' | 'fallback';
@@ -335,6 +406,9 @@ export interface Texts {
   description: string;
   social_title: string;
   social_description: string;
+  /** The parts the title is made of, as cut. */
+  title_main: string;
+  title_end: string;
 }
 
 /** Text width in px for a CSS font, or null when text cannot be measured. */

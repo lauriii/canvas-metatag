@@ -124,12 +124,13 @@ previewed with a node, to that node. Without view access the system MUST answer
 
 ### Requirement: Only people with update access read drafts
 
-The dialog's state MUST include draft data (draft values, the draft label and
-tokens, and the output built from them) only for a user with Canvas's update
-access to the page or template. Anyone else MUST get what is stored and
-`has_draft: false`. A translation that exists only as a Canvas draft MUST be
-reported as not found to users without update access. Update access without
-`edit canvas metatag` MUST give the draft with `can.target: false`.
+The dialog's state MUST include draft data (draft values, the draft label, the
+facts and link values read from the draft, and the output built from them)
+only for a user with Canvas's update access to the page or template. Anyone
+else MUST get what is stored and `has_draft: false`. A translation that exists
+only as a Canvas draft MUST be reported as not found to users without update
+access. Update access without `edit canvas metatag` MUST give the draft with
+`can.target: false`.
 
 #### Scenario: A viewer of a page with a draft
 
@@ -150,6 +151,11 @@ reported as not found to users without update access. Update access without
 
 - **WHEN** a user who may update the page and has `administer canvas metatag` but not `edit canvas metatag` asks for its state
 - **THEN** the response MUST include the draft, with `can.target: false`
+
+#### Scenario: Link values of an unpublished node
+
+- **WHEN** a user asks for a template's state while the previewed node is unpublished and one of its linked fields is one that user may not view
+- **THEN** that field's value MUST NOT be in the response
 
 ### Requirement: The stored overrides are not public
 

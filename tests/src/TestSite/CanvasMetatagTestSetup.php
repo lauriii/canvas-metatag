@@ -81,10 +81,10 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
   // No main heading, a small image, and a stored title that is too long and
   // names the site twice.
   public const string CHECKS_TITLE = 'Checks';
-  public const string CHECKS_STORED_TITLE = 'Example pricing plans compared in detail for every team size and every budget {sep} {site}';
+  public const string CHECKS_STORED_TITLE = 'Example pricing plans compared in detail for every team size and every budget';
   // A page whose published SEO title differs from the inherited one.
   public const string STORED_TITLE = 'Stored';
-  public const string STORED_SEO_TITLE = 'Published title {sep} {site}';
+  public const string STORED_SEO_TITLE = 'Published title';
   // A search result prompt without {count}. The Prompt Library's form would
   // refuse it; a configuration import would not.
   public const string AI_SEARCH_PROMPT = 'Write the search result title and description of this page in {language}.';
@@ -128,7 +128,12 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     'recipe_bread' => 19,
     'recipe_rtl' => 20,
     'job_developer' => 21,
+    'article_mixed' => 24,
   ];
+
+  // The Article template's stored description in the complex project: a
+  // link to a field that no longer exists.
+  public const string GONE_FIELD = 'field_gone';
 
   /**
    * {@inheritdoc}
@@ -423,14 +428,14 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
       'path' => ['alias' => '/checks'],
       'image' => ['target_id' => $small->id()],
       'components' => self::heading($heading, '9d2e4c71-5a3b-4f60-8e17-2c6b0a9d4f02', 'A section heading', 'h2'),
-      'canvas_metatag' => \json_encode(['title' => self::CHECKS_STORED_TITLE], JSON_THROW_ON_ERROR),
+      'canvas_metatag' => \json_encode(['title' => ['text' => self::CHECKS_STORED_TITLE]], JSON_THROW_ON_ERROR),
       'status' => 1,
     ])->save();
 
     Page::create([
       'title' => self::STORED_TITLE,
       'path' => ['alias' => '/stored'],
-      'canvas_metatag' => \json_encode(['title' => self::STORED_SEO_TITLE], JSON_THROW_ON_ERROR),
+      'canvas_metatag' => \json_encode(['title' => ['text' => self::STORED_SEO_TITLE]], JSON_THROW_ON_ERROR),
       'status' => 1,
     ])->save();
   }
@@ -475,7 +480,7 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
       'status' => TRUE,
     ])->save();
 
-    // The author's name is what {author} publishes.
+    // The author's name is what the Author fact publishes.
     $author = User::create(['name' => 'Site Author', 'mail' => 'author@example.com', 'status' => 1]);
     $author->save();
     $articles = [
@@ -525,6 +530,18 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     if ($wrong) {
       throw new \RuntimeException('The complex fixture made other node ids than the specs expect: ' . \implode(', ', \array_keys($wrong)));
     }
+    // A template whose link broke: its field was deleted after it was
+    // linked. Stored as it would be; no write could make it now.
+    $template = ContentTemplate::load('node.article.full');
+    \assert($template instanceof ContentTemplate);
+    $template->setThirdPartySetting('canvas_metatag', 'values', [
+      'description' => [
+        'source' => [
+          'sourceType' => 'entity-field',
+          'expression' => 'ℹ︎␜entity:node:article␝' . self::GONE_FIELD . '␞␟value',
+        ],
+      ],
+    ])->save();
   }
 
   /**

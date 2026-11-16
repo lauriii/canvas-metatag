@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Drupal\canvas_metatag;
 
+use Drupal\Component\Utility\Html;
+use Drupal\Component\Utility\Unicode;
 use Drupal\Component\Utility\UrlHelper;
 use Drupal\Component\Uuid\Uuid;
 
@@ -11,14 +13,45 @@ use Drupal\Component\Uuid\Uuid;
  * The SEO value shape: validation, canonical encoding, layers and text output.
  *
  * Static and pure. The same rules exist once more in TypeScript
- * (extension/src/model.ts); tests/fixtures/text-cases.json pins both.
+ * (extension/src/model.ts and values.ts); tests/fixtures/text-cases.json pins
+ * both.
+ *
+ * A value is a map with exactly one key: `text` (typed, never scanned),
+ * `fact` (one of FACTS), `media` (a media UUID, images only) or `source` (a
+ * Canvas entity-field source, templates only; see Sources).
  */
 final class Values {
 
   /**
-   * The token grammar. Brace text that does not match is literal.
+   * The facts every page and node has, with the kind of value each gives.
    */
-  public const TOKEN = '/\{([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)?)\}/';
+  public const FACTS = [
+    'title' => 'text',
+    'description' => 'text',
+    'site' => 'text',
+    'url' => 'address',
+    'author' => 'text',
+    'published' => 'date',
+    'modified' => 'date',
+    'image' => 'image',
+  ];
+
+  /**
+   * The value kind of each structured data property kind.
+   */
+  public const KINDS = [
+    'text' => 'text',
+    'url' => 'address',
+    'date' => 'date',
+    'number' => 'number',
+    'enum' => 'text',
+    'image' => 'image',
+  ];
+
+  /**
+   * The names custom JSON-LD strings may use. Other brace text is literal.
+   */
+  private const FILLED = '/\{(title|description|site|sep|url|author|published|modified|image)\}/';
 
   /**
    * C0, DEL and C1 controls except tab, LF and CR; bidi overrides and isolates.
@@ -26,9 +59,9 @@ final class Values {
   private const UNSAFE = '/[\x{00}-\x{08}\x{0B}\x{0C}\x{0E}-\x{1F}\x{7F}-\x{9F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u';
 
   private const KEYS = [
-    'page' => ['title', 'canonical', 'social', 'robots', 'schema'],
-    'template' => ['title', 'description', 'social', 'robots', 'schema'],
-    'site' => ['title', 'robots'],
+    'page' => ['title', 'title_end', 'canonical', 'social', 'robots', 'schema'],
+    'template' => ['title', 'title_end', 'description', 'social', 'robots', 'schema'],
+    'site' => ['title_end', 'robots'],
   ];
 
   private const PREVIEWS = ['none', 'standard', 'large'];
@@ -36,6 +69,8 @@ final class Values {
   private const INVALID = 'This value is not valid.';
   private const NOT_HERE = 'This setting is not available here.';
   private const IMAGE = 'Choose an image from the list.';
+  private const FACT = 'Choose a value from the list.';
+  private const FIELD = 'Choose a field from the list.';
   private const CUSTOM_SHAPE = 'Use one object, or a list of up to 10 objects, each with "@type".';
 
   private const LITERAL = [
@@ -52,10 +87,11 @@ final class Values {
    *   The sparse values object.
    * @param string $scope
    *   One of 'page', 'template', 'site'.
-   * @param array<string, string>|null $tokens
-   *   Token name => type for this scope and bundle (write mode), or NULL for
-   *   read mode: token names are not checked and callers ignore the errors,
-   *   because every offending key is already left out of the clean values.
+   * @param (callable(array, string): bool)|null $accepts
+   *   Write mode: whether the template may store a source for a value of a
+   *   kind. NULL for read mode: any well-shaped source is kept (it reads as
+   *   broken when it cannot be read), and callers ignore the errors, because
+   *   every offending key is already left out of the clean values.
    * @param string $inheritedType
    *   The structured-data type that applies when the values name none: a
    *   page translation's details belong to the type of the default one.
@@ -63,21 +99,24 @@ final class Values {
    * @return array{0: array, 1: array<string, string>}
    *   The clean values in canonical key order, and field path => message.
    */
-  public static function clean(array $input, string $scope, ?array $tokens, string $inheritedType = 'WebPage'): array {
+  public static function clean(array $input, string $scope, ?callable $accepts, string $inheritedType = 'WebPage'): array {
     $errors = [];
     $clean = [];
-    foreach ($input as $key => $value) {
+    $value = static function (mixed $item, string $path, string $kind, int $max = 255) use ($scope, $accepts, &$errors): ?array {
+      return self::value($item, $path, $kind, $scope, $accepts, $max, $errors);
+    };
+    foreach ($input as $key => $item) {
       if (!in_array($key, self::KEYS[$scope] ?? [], TRUE)) {
         $errors[(string) $key] = self::NOT_HERE;
         continue;
       }
       $clean[$key] = match ($key) {
-        'title' => self::text($value, 255, $tokens, 'title', $errors),
-        'description' => self::text($value, 1000, $tokens, 'description', $errors),
-        'canonical' => self::canonical($value, $errors),
-        'social' => self::social($value, $tokens, $errors),
-        'robots' => self::robots($value, $errors),
-        'schema' => self::schema($value, $tokens, $inheritedType, $errors),
+        'title', 'title_end' => $value($item, $key, 'text'),
+        'description' => $value($item, 'description', 'text', 1000),
+        'canonical' => self::canonical($item, $errors),
+        'social' => self::social($item, $value, $errors),
+        'robots' => self::robots($item, $errors),
+        'schema' => self::schema($item, $value, $inheritedType, $errors),
       };
     }
     return [self::canon($clean), $errors];
@@ -109,7 +148,16 @@ final class Values {
       $errors['identity.kind'] = self::LITERAL['enum'];
     }
 
-    $clean['name'] = self::text($input['name'] ?? '', 255, NULL, 'identity.name', $errors) ?? '';
+    $name = $input['name'] ?? '';
+    if (!is_string($name)) {
+      $errors['identity.name'] = self::INVALID;
+    }
+    elseif (!self::blank($name = self::strip($name))) {
+      if (mb_strlen($name) > 255) {
+        $errors['identity.name'] = 'Use at most 255 characters.';
+      }
+      $clean['name'] = mb_substr($name, 0, 255);
+    }
 
     $separator = $input['separator'] ?? $clean['separator'];
     $separator = is_string($separator) ? preg_replace('/^\s+|\s+$/u', '', mb_scrub($separator)) : '';
@@ -172,12 +220,12 @@ final class Values {
   /**
    * The effective values: the target over the site layer.
    *
-   * Only the title and the robots directives exist at site level.
+   * Only the title ending and the robots directives exist at site level.
    */
   public static function cascade(array $target, array $site): array {
     $effective = $target;
-    if (!isset($effective['title']) && isset($site['title'])) {
-      $effective['title'] = $site['title'];
+    if (!isset($effective['title_end']) && isset($site['title_end'])) {
+      $effective['title_end'] = $site['title_end'];
     }
     $robots = ($target['robots'] ?? []) + ($site['robots'] ?? []);
     if ($robots) {
@@ -187,21 +235,19 @@ final class Values {
   }
 
   /**
-   * Replaces every token in one pass; a substituted value is never rescanned.
+   * Fills the fixed names in a custom JSON-LD string, in one pass.
    *
-   * @param string $template
-   *   Text with {tokens}.
+   * `{title}`, `{description}`, `{site}`, `{sep}`, `{url}`, `{author}`,
+   * `{published}`, `{modified}` and `{image}`. Every other brace text stays
+   * as written, and a filled value is never scanned again.
+   *
+   * @param string $text
+   *   The text.
    * @param array<string, string> $values
-   *   Token name => value.
-   * @param bool $keepUnknown
-   *   Leave a name that is not in $values as written instead of blanking it.
+   *   Name => value.
    */
-  public static function fill(string $template, array $values, bool $keepUnknown = FALSE): string {
-    return (string) preg_replace_callback(
-      self::TOKEN,
-      static fn (array $m): string => (string) ($values[$m[1]] ?? ($keepUnknown ? $m[0] : '')),
-      $template,
-    );
+  public static function fillFacts(string $text, array $values): string {
+    return (string) preg_replace_callback(self::FILLED, static fn (array $m): string => (string) ($values[$m[1]] ?? ''), $text);
   }
 
   /**
@@ -239,36 +285,113 @@ final class Values {
   }
 
   /**
-   * The four text outputs.
+   * The four text outputs, and the two parts of the title.
+   *
+   * A value that is not set, or that gives nothing for the item (an empty,
+   * hidden or broken link), gives its default.
    *
    * @param array $effective
    *   The result of cascade().
-   * @param array<string, string> $tokens
-   *   Token name => value.
+   * @param callable(array): string $text
+   *   The text a value gives for the item; '' for none.
+   * @param string $separator
+   *   The identity's separator.
+   * @param array|null $siteEnd
+   *   The site layer's ending: what an ending that gives nothing for the item
+   *   falls back to. Not set means the site name.
    *
-   * @return array{title: string, description: string, social_title: string, social_description: string}
-   *   Plain text; the consumer escapes it.
+   * @return array{title: string, description: string, social_title: string, social_description: string, title_main: string, title_end: string}
+   *   Plain text; the consumer escapes it. `title_main` and `title_end` are
+   *   the parts the title is made of, as they were cut.
    */
-  public static function texts(array $effective, array $tokens): array {
-    $filled = static fn (mixed $template, int $max): string => self::cut(self::fill(is_string($template) ? $template : '', $tokens), $max);
-    $token = static fn (string $name, int $max): string => self::cut((string) ($tokens[$name] ?? ''), $max);
-
-    $title = self::trimSeparators($filled($effective['title'] ?? '', 255), (string) ($tokens['sep'] ?? ''));
-    $title = $title !== '' ? $title : $token('title', 255);
-    $title = $title !== '' ? $title : $token('site', 255);
-
-    $description = $filled($effective['description'] ?? '', 1000);
-    $description = $description !== '' ? $description : $token('description', 1000);
-
-    $social_title = $filled($effective['social']['title'] ?? '', 255);
-    $social_description = $filled($effective['social']['description'] ?? '', 1000);
-
+  public static function texts(array $effective, callable $text, string $separator, ?array $siteEnd = NULL): array {
+    $value = static function (?array $value, ?array $default, int $max) use ($text): string {
+      $out = $value === NULL ? '' : self::cut($text($value), $max);
+      return $out !== '' || $default === NULL ? $out : self::cut($text($default), $max);
+    };
+    $main = $value($effective['title'] ?? NULL, ['fact' => 'title'], 255);
+    // Without an ending of its own, or with one that gives nothing for the
+    // item, the site's; without one there, the site name. "No ending" is the
+    // empty typed ending.
+    $site_end = $siteEnd ?? ['fact' => 'site'];
+    $ending = $effective['title_end'] ?? $site_end;
+    $end = $ending === ['text' => ''] ? '' : $value($ending, $site_end, 255);
+    [$title, $main, $end] = self::title($main, $end, $separator);
+    $description = $value($effective['description'] ?? NULL, ['fact' => 'description'], 1000);
+    $social = $effective['social'] ?? [];
+    $social_description = $value($social['description'] ?? NULL, NULL, 1000);
     return [
-      'title' => $title,
+      'title' => $title !== '' ? $title : $value(['fact' => 'site'], NULL, 255),
       'description' => $description,
-      'social_title' => $social_title !== '' ? $social_title : $token('title', 255),
+      'social_title' => $value($social['title'] ?? NULL, ['fact' => 'title'], 255),
       'social_description' => $social_description !== '' ? $social_description : $description,
+      'title_main' => $main,
+      'title_end' => $end,
     ];
+  }
+
+  /**
+   * Whether the string is an absolute http(s) URL with a host and no login.
+   */
+  public static function isHttpUrl(string $url): bool {
+    if (!UrlHelper::isValid($url, TRUE)) {
+      return FALSE;
+    }
+    $parts = parse_url($url);
+    return is_array($parts)
+      && in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], TRUE)
+      && ($parts['host'] ?? '') !== ''
+      && !isset($parts['user'])
+      && !isset($parts['pass']);
+  }
+
+  /**
+   * Formatted text as plain text.
+   *
+   * The content of elements that never display (script, style, template,
+   * also nested templates) removed, then tags stripped, entities decoded
+   * once, whitespace collapsed. A heading, list item, definition, table row
+   * or caption ends a sentence, as does the text before a list or a heading:
+   * a full stop follows it unless it ends in a stop, an ellipsis, a question
+   * or exclamation mark, a colon, semicolon or comma, or their equivalents in
+   * other scripts (closing quotes and brackets after it included). Such an
+   * element with no text of its own still ends the text before it. An opening
+   * tag may hold ">" in a quoted attribute. Should a markup pattern fail, the
+   * text is kept as it was; text that is not valid UTF-8 gives an empty
+   * string.
+   */
+  public static function fromHtml(string $html): string {
+    if (!mb_check_encoding($html, 'UTF-8')) {
+      return '';
+    }
+    // The end of a sentence. Entities never decode to a control character,
+    // so only the text's own need removing.
+    $end = "\x01";
+    $html = str_replace($end, '', $html);
+    $attributes = '(?:"[^"]*+"|\'[^\']*+\'|[^\'">]++)*+';
+    $html = preg_replace('~<(script|style)\b' . $attributes . '>(?:[^<]++|<(?!/\1\s*>))*+(?:</\1\s*>|\z)~i', ' ', $html) ?? $html;
+    $html = preg_replace('~<template\b' . $attributes . '>(?:[^<]++|(?R)|<(?!/?template\b))*+(?:</template\s*>|\z)~i', ' ', $html) ?? $html;
+    $html = preg_replace('~</(?:h[1-6]|li|dd|tr|caption)\s*>|<(?:ul|ol|dl|h[1-6])(?=[\s\/>])~i', $end . '$0', $html) ?? $html;
+    // A space keeps the words of neighboring blocks apart; inline markup
+    // joins its words as written.
+    $html = preg_replace('~<(?=/?(?:p|div|br|li|ul|ol|h[1-6]|td|th|tr|blockquote|pre|hr|dt|dd|section|article|figure|figcaption)[\s\/>])~i', ' <', $html) ?? $html;
+    $text = Html::decodeEntities(strip_tags($html));
+    // Nested ends are one end; after a sentence or clause mark, or with
+    // nothing before it, an end adds nothing; else a full stop.
+    $ends = '[.!?…:;,。！？、，．：；｡؟۔।॥،؛][\p{Pe}\p{Pf}"\'»]*';
+    // Should this fail, no mark is left in the text.
+    $text = preg_replace(['/\s*\x01(?:\s*\x01)*/u', "/(^|$ends)\x01/u", '/\x01/'], [$end, '$1', '.'], $text) ?? str_replace($end, ' ', $text);
+    return trim((string) preg_replace('/\s+/u', ' ', $text));
+  }
+
+  /**
+   * The start of a text read from formatted text.
+   *
+   * 160 characters at most, cut at a word boundary, never inside a character
+   * drawn as one.
+   */
+  public static function excerpt(string $text): string {
+    return rtrim(self::whole($text, Unicode::truncate($text, 160, TRUE)));
   }
 
   /**
@@ -288,41 +411,24 @@ final class Values {
   }
 
   /**
-   * Whether the string is an absolute http(s) URL with a host and no login.
-   */
-  public static function isHttpUrl(string $url): bool {
-    if (!UrlHelper::isValid($url, TRUE)) {
-      return FALSE;
-    }
-    $parts = parse_url($url);
-    return is_array($parts)
-      && in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], TRUE)
-      && ($parts['host'] ?? '') !== ''
-      && !isset($parts['user'])
-      && !isset($parts['pass']);
-  }
-
-  /**
-   * Removes a separator word that has nothing to separate.
+   * Joins the title's parts; an empty part goes with its separator.
    *
-   * A separator is only ever a whole word equal to $sep. One is dropped when
-   * no other word precedes it, when it follows another separator and when no
-   * other word follows it.
+   * Over 255 characters the main part is shortened, by the rules of cut(),
+   * so that the ending stays whole.
+   *
+   * @return array{string, string, string}
+   *   The title, and its main part and ending as used.
    */
-  private static function trimSeparators(string $text, string $sep): string {
-    if ($sep === '') {
-      return $text;
+  private static function title(string $main, string $end, string $separator): array {
+    if ($main === '' || $end === '') {
+      return [$main . $end, $main, $end];
     }
-    $kept = [];
-    foreach (explode(' ', $text) as $word) {
-      if ($word !== $sep || ($kept && end($kept) !== $sep)) {
-        $kept[] = $word;
-      }
+    $glue = ' ' . self::plain($separator, 3) . ' ';
+    $room = 255 - mb_strlen($glue) - mb_strlen($end);
+    if (mb_strlen($main) > $room) {
+      $main = $room > 0 ? self::cut($main, $room) : '';
     }
-    if (end($kept) === $sep) {
-      array_pop($kept);
-    }
-    return implode(' ', $kept);
+    return $main === '' ? [$end, '', $end] : [$main . $glue . $end, $main, $end];
   }
 
   /**
@@ -351,6 +457,10 @@ final class Values {
    */
   private static function canon(array $values): array {
     foreach ($values as $key => $value) {
+      // "No ending" is the one empty value that is stored.
+      if ($key === 'title_end' && $value === ['text' => '']) {
+        continue;
+      }
       if (is_array($value)) {
         $values[$key] = $value = self::canon($value);
       }
@@ -370,52 +480,91 @@ final class Values {
   }
 
   /**
-   * Cleans one template. Returns NULL when there is nothing to store.
+   * Cleans one value. Returns NULL when there is nothing to store.
    *
-   * A text that is too long is reported and cut, so that read mode keeps the
-   * cut text; an unknown or image token is reported in write mode only.
+   * Typed text that is too long is reported and cut, so that read mode keeps
+   * the cut text.
+   *
+   * @param mixed $value
+   *   The value as sent or stored.
+   * @param string $path
+   *   Its dotted path, for errors.
+   * @param string $kind
+   *   The kind of value its place takes: text, address, date, number or
+   *   image.
+   * @param string $scope
+   *   One of 'page', 'template', 'site'.
+   * @param callable|null $accepts
+   *   See clean().
+   * @param int $max
+   *   The length typed text may have.
+   * @param array<string, string> $errors
+   *   Collects path => sentence.
    */
-  private static function text(mixed $value, int $max, ?array $tokens, string $path, array &$errors): ?string {
-    if (!is_string($value)) {
+  private static function value(mixed $value, string $path, string $kind, string $scope, ?callable $accepts, int $max, array &$errors): ?array {
+    if (!is_array($value) || count($value) !== 1) {
       $errors[$path] = self::INVALID;
       return NULL;
     }
-    $value = self::strip($value);
-    if (self::blank($value)) {
-      return NULL;
-    }
-    if (mb_strlen($value) > $max) {
-      $errors[$path] = sprintf('Use at most %d characters.', $max);
-      $value = mb_substr($value, 0, $max);
-    }
-    if ($tokens !== NULL && preg_match_all(self::TOKEN, $value, $matches)) {
-      foreach ($matches[1] as $name) {
-        if (!isset($tokens[$name])) {
-          $errors[$path] = sprintf('"{%s}" is not a value SEO knows. Choose one from the list.', $name);
+    $key = array_key_first($value);
+    $item = $value[$key];
+    switch ($key) {
+      case 'text':
+        if ($kind === 'image') {
+          $errors[$path] = self::IMAGE;
+          return NULL;
         }
-        elseif ($tokens[$name] === 'image') {
-          $errors[$path] = sprintf('"{%s}" is an image and can\'t be used in text.', $name);
+        if (!is_string($item)) {
+          $errors[$path] = self::INVALID;
+          return NULL;
         }
-      }
-    }
-    return $value;
-  }
+        $item = self::strip($item);
+        // An empty ending is "No ending"; anything else empty is no value.
+        if (self::blank($item)) {
+          return $path === 'title_end' ? ['text' => ''] : NULL;
+        }
+        if (mb_strlen($item) > $max) {
+          $errors[$path] = sprintf('Use at most %d characters.', $max);
+          $item = mb_substr($item, 0, $max);
+        }
+        return ['text' => $item];
 
-  /**
-   * A media UUID, or exactly one token (write mode: an image token).
-   */
-  private static function image(mixed $value, ?array $tokens, string $path, array &$errors): ?string {
-    if ($value === '') {
+      case 'fact':
+        // A page links only its ending to the site name and its structured
+        // data addresses, dates and images to its own facts. The site links
+        // only its ending, to the site name.
+        $here = match ($scope) {
+          'template' => TRUE,
+          'site' => $path === 'title_end',
+          default => $path === 'title_end' || (str_starts_with($path, 'schema.props.') && $kind !== 'text'),
+        };
+        $fits = is_string($item) && (self::FACTS[$item] ?? NULL) === $kind && ($path !== 'title_end' || $scope === 'template' || $item === 'site');
+        $error = !$here ? self::NOT_HERE : (!$fits ? self::FACT : NULL);
+        break;
+
+      case 'media':
+        $error = $kind !== 'image' ? self::INVALID : (is_string($item) && Uuid::isValid($item) ? NULL : self::IMAGE);
+        break;
+
+      case 'source':
+        // Keys in canonical order, whatever order they came in.
+        $item = Sources::wellShaped($item) ? ['expression' => $item['expression'], 'sourceType' => $item['sourceType']] : NULL;
+        $error = match (TRUE) {
+          $item === NULL => self::INVALID,
+          $scope !== 'template' => self::NOT_HERE,
+          $accepts !== NULL && !$accepts($item, $kind) => self::FIELD,
+          default => NULL,
+        };
+        break;
+
+      default:
+        $error = $kind === 'image' ? self::IMAGE : self::INVALID;
+    }
+    if ($error !== NULL) {
+      $errors[$path] = $error;
       return NULL;
     }
-    $valid = is_string($value) && (Uuid::isValid($value) || (
-      preg_match(self::TOKEN, $value, $m) && $m[0] === $value && ($tokens === NULL || ($tokens[$m[1]] ?? '') === 'image')
-    ));
-    if (!$valid) {
-      $errors[$path] = self::IMAGE;
-      return NULL;
-    }
-    return $value;
+    return [$key => $item];
   }
 
   /**
@@ -446,25 +595,25 @@ final class Values {
   /**
    * Cleans the `social` map.
    */
-  private static function social(mixed $value, ?array $tokens, array &$errors): array {
+  private static function social(mixed $value, callable $clean, array &$errors): array {
     if (!is_array($value)) {
       $errors['social'] = self::INVALID;
       return [];
     }
-    $clean = [];
+    $values = [];
     foreach ($value as $key => $item) {
       $path = "social.$key";
+      $values[$key] = match ($key) {
+        'title' => $clean($item, $path, 'text'),
+        'description' => $clean($item, $path, 'text', 1000),
+        'image' => $clean($item, $path, 'image'),
+        default => NULL,
+      };
       if (!in_array($key, ['title', 'description', 'image'], TRUE)) {
         $errors[$path] = self::NOT_HERE;
-        continue;
       }
-      $clean[$key] = match ($key) {
-        'title' => self::text($item, 255, $tokens, $path, $errors),
-        'description' => self::text($item, 1000, $tokens, $path, $errors),
-        'image' => self::image($item, $tokens, $path, $errors),
-      };
     }
-    return $clean;
+    return $values;
   }
 
   /**
@@ -496,7 +645,7 @@ final class Values {
   /**
    * Cleans the `schema` map against the type registry.
    */
-  private static function schema(mixed $value, ?array $tokens, string $inheritedType, array &$errors): array {
+  private static function schema(mixed $value, callable $clean_value, string $inheritedType, array &$errors): array {
     if (!is_array($value)) {
       $errors['schema'] = self::INVALID;
       return [];
@@ -523,14 +672,11 @@ final class Values {
           $errors[$path] = self::NOT_HERE;
           continue;
         }
-        if ($props[$key]['kind'] === 'image') {
-          $clean['props'][$key] = self::image($item, $tokens, $path, $errors);
-          continue;
-        }
-        $item = self::text($item, 2000, $tokens, $path, $errors);
-        // A literal is checked now; a value with tokens after substitution.
-        if ($item !== NULL && !preg_match(self::TOKEN, $item) && !SchemaGraph::validLiteral($type, (string) $key, $item)) {
-          $errors[$path] = self::LITERAL[$props[$key]['kind']] ?? match ($props[$key]['pattern'] ?? '') {
+        $kind = $props[$key]['kind'];
+        $item = $clean_value($item, $path, self::KINDS[$kind], 2000);
+        // Typed text is checked now; a linked value when it is read.
+        if (isset($item['text']) && !SchemaGraph::validLiteral($type, (string) $key, $item['text'])) {
+          $errors[$path] = self::LITERAL[$kind] ?? match ($props[$key]['pattern'] ?? '') {
             '^[A-Z]{3}$' => 'Enter a three-letter currency code, like EUR.',
             default => 'This value has characters that are not allowed here.',
           };

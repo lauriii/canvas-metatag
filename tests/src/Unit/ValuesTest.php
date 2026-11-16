@@ -20,28 +20,48 @@ final class ValuesTest extends UnitTestCase {
 
   private const UUID = '6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44';
 
-  private const TOKENS = [
-    'title' => 'text',
-    'site' => 'text',
-    'sep' => 'text',
-    'published' => 'datetime',
-    'image' => 'image',
-    'field.field_summary' => 'text',
-    'field.field_hero' => 'image',
+  /**
+   * A source the template's link menu offers, and one it does not.
+   */
+  private const SUMMARY = [
+    'expression' => 'ℹ︎␜entity:node:article␝field_summary␞␟value',
+    'sourceType' => 'entity-field',
   ];
+  private const HERO = [
+    'expression' => 'ℹ︎␜entity:node:article␝field_hero␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}',
+    'sourceType' => 'entity-field',
+  ];
+  private const CRAFTED = [
+    'expression' => 'ℹ︎␜entity:node:article␝uid␞␟entity␜␜entity:user␝mail␞␟value',
+    'sourceType' => 'entity-field',
+  ];
+
+  /**
+   * Write mode's check of a source: the two offered ones, each of its kind.
+   */
+  private static function accepts(): \Closure {
+    return static fn (array $source, string $kind): bool => ($source === self::SUMMARY && $kind === 'text') || ($source === self::HERO && $kind === 'image');
+  }
+
+  /**
+   * Typed text.
+   */
+  private static function typed(string $text): array {
+    return ['text' => $text];
+  }
 
   /**
    * Every rule refuses what it must, at the path the dialog shows it on.
    */
   #[DataProvider('providerRefused')]
   public function testRefused(string $scope, array $input, string $path, ?string $message = NULL, bool $readKeeps = FALSE): void {
-    $errors = Values::clean($input, $scope, self::TOKENS)[1];
+    $errors = Values::clean($input, $scope, self::accepts())[1];
     self::assertSame([$path], array_keys($errors));
     if ($message !== NULL) {
       self::assertSame($message, $errors[$path]);
     }
     // Read mode drops the offending key instead of failing. It keeps a text
-    // that was too long (cut) and a token it cannot check.
+    // that was too long (cut) and a source it cannot check.
     $leaf = Values::clean($input, $scope, NULL)[0];
     foreach (explode('.', $path) as $segment) {
       $leaf = is_array($leaf) ? ($leaf[$segment] ?? NULL) : NULL;
@@ -56,59 +76,125 @@ final class ValuesTest extends UnitTestCase {
     $address = 'Enter a full address that starts with https://, or a path that starts with /.';
     $hash = 'Leave out the # and everything after it.';
     $image = 'Choose an image from the list.';
+    $invalid = 'This value is not valid.';
+    $here = 'This setting is not available here.';
+    $list = 'Choose a value from the list.';
+    $field = 'Choose a field from the list.';
     $shape = 'Use one object, or a list of up to 10 objects, each with "@type".';
     $id = 'An "@id" must be a full address, or a name that starts with #.';
+    $t = self::typed(...);
 
     // Shape and scope.
-    yield 'unknown key' => ['page', ['keywords' => 'a, b'], 'keywords'];
-    yield 'site description' => ['site', ['description' => 'Text'], 'description'];
-    yield 'page description' => ['page', ['description' => 'Text'], 'description'];
+    yield 'unknown key' => ['page', ['keywords' => $t('a, b')], 'keywords'];
+    yield 'site description' => ['site', ['description' => $t('Text')], 'description', $here];
+    yield 'site main part' => ['site', ['title' => $t('Text')], 'title', $here];
+    yield 'page description' => ['page', ['description' => $t('Text')], 'description'];
     yield 'template canonical' => ['template', ['canonical' => '/a'], 'canonical'];
-    yield 'site social' => ['site', ['social' => ['title' => 'A']], 'social'];
+    yield 'site social' => ['site', ['social' => ['title' => $t('A')]], 'social'];
     yield 'site schema' => ['site', ['schema' => ['type' => 'Article']], 'schema'];
-    yield 'unknown social key' => ['page', ['social' => ['card' => 'x']], 'social.card'];
+    yield 'unknown social key' => ['page', ['social' => ['card' => $t('x')]], 'social.card'];
     yield 'unknown robots key' => ['page', ['robots' => ['noarchive' => TRUE]], 'robots.noarchive'];
     yield 'unknown schema key' => ['page', ['schema' => ['context' => 'x']], 'schema.context'];
     yield 'map expected' => ['page', ['robots' => 'noindex'], 'robots'];
 
-    // Templates.
-    yield 'title not a string' => ['page', ['title' => ['a']], 'title'];
-    yield 'title too long' => ['page', ['title' => str_repeat('é', 256)], 'title', 'Use at most 255 characters.', TRUE];
+    // Values.
+    yield 'a string is not a value' => ['page', ['title' => 'Pricing'], 'title', $invalid];
+    yield 'two sources in one value' => ['template', ['title' => ['text' => 'A', 'fact' => 'title']], 'title', $invalid];
+    yield 'an unknown kind of value' => ['template', ['title' => ['token' => '{title}']], 'title', $invalid];
+    yield 'typed text not a string' => ['page', ['title' => ['text' => ['a']]], 'title', $invalid];
+    yield 'title too long' => [
+      'page',
+      ['title' => $t(str_repeat('é', 256))],
+      'title',
+      'Use at most 255 characters.',
+      TRUE,
+    ];
+    yield 'ending too long' => [
+      'page',
+      ['title_end' => $t(str_repeat('é', 256))],
+      'title_end',
+      'Use at most 255 characters.',
+      TRUE,
+    ];
     yield 'social title too long' => [
       'page',
-      ['social' => ['title' => str_repeat('a', 256)]],
+      ['social' => ['title' => $t(str_repeat('a', 256))]],
       'social.title',
       'Use at most 255 characters.',
       TRUE,
     ];
     yield 'description too long' => [
       'template',
-      ['description' => str_repeat('a', 1001)],
+      ['description' => $t(str_repeat('a', 1001))],
       'description',
       'Use at most 1000 characters.',
       TRUE,
     ];
     yield 'social description too long' => [
       'page',
-      ['social' => ['description' => str_repeat('a', 1001)]],
+      ['social' => ['description' => $t(str_repeat('a', 1001))]],
       'social.description',
       'Use at most 1000 characters.',
       TRUE,
     ];
-    yield 'unknown token' => [
+    yield 'an unknown fact' => ['page', ['title_end' => ['fact' => 'nope']], 'title_end', $list];
+    yield 'an image in text' => ['template', ['title' => ['fact' => 'image']], 'title', $list];
+    yield 'a date in text' => ['template', ['description' => ['fact' => 'published']], 'description', $list];
+    yield 'a page links its main part' => ['page', ['title' => ['fact' => 'title']], 'title', $here];
+    yield 'a page links its social image to its Image fact, its default' => [
       'page',
-      ['title' => '{title} {nope}'],
-      'title',
-      '"{nope}" is not a value SEO knows. Choose one from the list.',
-      TRUE,
+      ['social' => ['image' => ['fact' => 'image']]],
+      'social.image',
+      $here,
     ];
-    yield 'image token in text' => [
+    yield 'a page links its social title' => [
+      'page',
+      ['social' => ['title' => ['fact' => 'title']]],
+      'social.title',
+      $here,
+    ];
+    yield 'a page ending linked to the title' => ['page', ['title_end' => ['fact' => 'title']], 'title_end', $list];
+    yield 'a site ending linked to the title' => ['site', ['title_end' => ['fact' => 'title']], 'title_end', $list];
+    yield 'a page text detail linked to a fact' => [
+      'page',
+      ['schema' => ['type' => 'Article', 'props' => ['headline' => ['fact' => 'title']]]],
+      'schema.props.headline',
+      $here,
+    ];
+    yield 'a field link on a page' => [
+      'page',
+      ['social' => ['description' => ['source' => self::SUMMARY]]],
+      'social.description',
+      $here,
+    ];
+    yield 'a field link in site settings' => ['site', ['title_end' => ['source' => self::SUMMARY]], 'title_end', $here];
+    yield 'a field the menu does not offer' => [
       'template',
-      ['description' => 'See {field.field_hero}'],
+      ['description' => ['source' => self::CRAFTED]],
       'description',
-      '"{field.field_hero}" is an image and can\'t be used in text.',
+      $field,
       TRUE,
     ];
+    yield 'a field of another kind' => [
+      'template',
+      ['description' => ['source' => self::HERO]],
+      'description',
+      $field,
+      TRUE,
+    ];
+    yield 'a source with an adapter' => [
+      'template',
+      ['description' => ['source' => self::SUMMARY + ['adapter' => 'x']]],
+      'description',
+      $invalid,
+    ];
+    yield 'a source of another type' => [
+      'template',
+      ['description' => ['source' => ['sourceType' => 'static', 'expression' => 'x']]],
+      'description',
+      $invalid,
+    ];
+    yield 'media in text' => ['template', ['title' => ['media' => self::UUID]], 'title', $invalid];
 
     // Canonical.
     yield 'canonical relative' => ['page', ['canonical' => 'pricing'], 'canonical', $address];
@@ -144,10 +230,16 @@ final class ValuesTest extends UnitTestCase {
     ];
 
     // Social image.
-    yield 'image not a UUID' => ['page', ['social' => ['image' => 'pricing.jpg']], 'social.image', $image];
-    yield 'image text token' => ['page', ['social' => ['image' => '{title}']], 'social.image', $image, TRUE];
-    yield 'image two tokens' => ['page', ['social' => ['image' => '{image}{image}']], 'social.image', $image];
-    yield 'image token with text' => ['page', ['social' => ['image' => '{image} x']], 'social.image', $image];
+    yield 'image not a UUID' => ['page', ['social' => ['image' => ['media' => 'pricing.jpg']]], 'social.image', $image];
+    yield 'image as typed text' => ['template', ['social' => ['image' => $t('pricing.jpg')]], 'social.image', $image];
+    yield 'image a text fact' => ['template', ['social' => ['image' => ['fact' => 'title']]], 'social.image', $list];
+    yield 'image two values' => [
+      'page',
+      ['social' => ['image' => ['media' => self::UUID, 'fact' => 'image']]],
+      'social.image',
+      $invalid,
+    ];
+    yield 'image a stored UUID string' => ['page', ['social' => ['image' => self::UUID]], 'social.image', $invalid];
 
     // Robots.
     yield 'boolean as string' => ['page', ['robots' => ['noindex' => 'true']], 'robots.noindex'];
@@ -172,70 +264,68 @@ final class ValuesTest extends UnitTestCase {
     ];
     yield 'prop of another type' => [
       'page',
-      ['schema' => ['type' => 'Article', 'props' => ['offers_price' => '5']]],
+      ['schema' => ['type' => 'Article', 'props' => ['offers_price' => $t('5')]]],
       'schema.props.offers_price',
     ];
-    yield 'prop without a type' => ['page', ['schema' => ['props' => ['headline' => 'A']]], 'schema.props.headline'];
+    yield 'prop without a type' => ['page', ['schema' => ['props' => ['headline' => $t('A')]]], 'schema.props.headline'];
     yield 'prop of the inherited type, named over' => [
       'page',
-      ['schema' => ['type' => 'WebPage', 'props' => ['offers_price' => '5']]],
+      ['schema' => ['type' => 'WebPage', 'props' => ['offers_price' => $t('5')]]],
       'schema.props.offers_price',
     ];
     yield 'prop url' => [
       'page',
-      ['schema' => ['type' => 'Article', 'props' => ['author_url' => '/me']]],
+      ['schema' => ['type' => 'Article', 'props' => ['author_url' => $t('/me')]]],
       'schema.props.author_url',
       'Enter a full address that starts with https://.',
     ];
     yield 'prop date' => [
       'page',
-      ['schema' => ['type' => 'Event', 'props' => ['startDate' => 'tomorrow']]],
+      ['schema' => ['type' => 'Event', 'props' => ['startDate' => $t('tomorrow')]]],
       'schema.props.startDate',
       'Choose a date.',
     ];
     yield 'prop number' => [
       'page',
-      ['schema' => ['type' => 'Product', 'props' => ['offers_price' => '49,90']]],
+      ['schema' => ['type' => 'Product', 'props' => ['offers_price' => $t('49,90')]]],
       'schema.props.offers_price',
       'Enter a number, like 49 or 49.90.',
     ];
     yield 'prop currency' => [
       'page',
-      ['schema' => ['type' => 'Product', 'props' => ['offers_priceCurrency' => 'euro']]],
+      ['schema' => ['type' => 'Product', 'props' => ['offers_priceCurrency' => $t('euro')]]],
       'schema.props.offers_priceCurrency',
       'Enter a three-letter currency code, like EUR.',
     ];
     yield 'prop pattern' => [
       'page',
-      ['schema' => ['type' => 'Product', 'props' => ['sku' => 'A 1']]],
+      ['schema' => ['type' => 'Product', 'props' => ['sku' => $t('A 1')]]],
       'schema.props.sku',
       'This value has characters that are not allowed here.',
     ];
     yield 'prop enum' => [
       'page',
-      ['schema' => ['type' => 'Product', 'props' => ['offers_availability' => 'Maybe']]],
+      ['schema' => ['type' => 'Product', 'props' => ['offers_availability' => $t('Maybe')]]],
       'schema.props.offers_availability',
       'Choose one of the listed options.',
     ];
-    yield 'prop image' => [
+    yield 'prop image as text' => [
       'page',
-      ['schema' => ['type' => 'Article', 'props' => ['image' => '{title}']]],
+      ['schema' => ['type' => 'Article', 'props' => ['image' => $t('{title}')]]],
       'schema.props.image',
       $image,
-      TRUE,
+    ];
+    yield 'prop date linked to the title' => [
+      'template',
+      ['schema' => ['type' => 'Article', 'props' => ['datePublished' => ['fact' => 'title']]]],
+      'schema.props.datePublished',
+      $list,
     ];
     yield 'prop too long' => [
       'page',
-      ['schema' => ['type' => 'Article', 'props' => ['headline' => str_repeat('a', 2001)]]],
+      ['schema' => ['type' => 'Article', 'props' => ['headline' => $t(str_repeat('a', 2001))]]],
       'schema.props.headline',
       'Use at most 2000 characters.',
-      TRUE,
-    ];
-    yield 'prop unknown token' => [
-      'page',
-      ['schema' => ['type' => 'Article', 'props' => ['headline' => '{nope}']]],
-      'schema.props.headline',
-      NULL,
       TRUE,
     ];
 
@@ -313,28 +403,44 @@ final class ValuesTest extends UnitTestCase {
    */
   #[DataProvider('providerAccepted')]
   public function testAccepted(string $scope, array $input, ?array $expected = NULL): void {
-    self::assertSame([$expected ?? $input, []], Values::clean($input, $scope, self::TOKENS));
+    self::assertSame([$expected ?? $input, []], Values::clean($input, $scope, self::accepts()));
   }
 
   /**
    * Data provider for testAccepted().
    */
   public static function providerAccepted(): \Generator {
-    yield 'text is stored as typed' => ['page', ['title' => 'I <3 Canvas & more ']];
-    yield 'format characters survive' => ['template', ['title' => "Team 👨‍👩 \u{200C}\u{200F}"]];
-    yield 'brace text outside the grammar' => ['page', ['title' => '{Title} {a b} {} { title }']];
-    yield 'tokens' => ['template', ['description' => '{field.field_summary}', 'title' => '{title} {sep} {site}']];
+    $t = self::typed(...);
+    yield 'text is stored as typed' => ['page', ['title' => $t('I <3 Canvas & more ')]];
+    yield 'format characters survive' => ['template', ['title' => $t("Team 👨‍👩 \u{200C}\u{200F}")]];
+    yield 'braces are typed text' => ['page', ['title' => $t('{Title} {site} {field.x}')]];
+    yield 'facts and a field on a template' => ['template', [
+      'description' => ['source' => self::SUMMARY],
+      'social' => ['image' => ['source' => self::HERO], 'title' => ['fact' => 'author']],
+      'title' => ['fact' => 'title'],
+      'title_end' => ['fact' => 'site'],
+    ],
+    ];
+    yield 'source keys in canonical order' => [
+      'template',
+      ['description' => ['source' => array_reverse(self::SUMMARY, TRUE)]],
+      ['description' => ['source' => ['expression' => self::SUMMARY['expression'], 'sourceType' => 'entity-field']]],
+    ];
+    yield 'no ending is stored' => ['page', ['title_end' => $t('')]];
+    yield 'no ending, whitespace only' => ['site', ['title_end' => $t('  ')], ['title_end' => $t('')]];
+    yield 'a page ending linked to the site name' => ['page', ['title_end' => ['fact' => 'site']]];
+    yield 'a site ending' => ['site', ['title_end' => $t('Example Co')]];
     yield 'control and bidi characters are removed' => [
       'page',
-      ['title' => "Pri\x07cing\u{202E}\u{2066}\u{0085}\tplans\n"],
-      ['title' => "Pricing\tplans\n"],
+      ['title' => $t("Pri\x07cing\u{202E}\u{2066}\u{0085}\tplans\n")],
+      ['title' => $t("Pricing\tplans\n")],
     ];
     yield 'empty values are pruned' => [
       'page',
       [
-        'title' => " \n",
+        'title' => $t(" \n"),
         'canonical' => '',
-        'social' => ['image' => '', 'title' => ''],
+        'social' => ['title' => $t('')],
         'robots' => [],
         'schema' => ['props' => [], 'custom' => ' '],
       ],
@@ -344,9 +450,11 @@ final class ValuesTest extends UnitTestCase {
     yield 'canonical path with every allowed character' => ['page', ['canonical' => "/a-._~!$&'()*+,;=:@%20/b?c=d"]];
     yield 'canonical path with non-ASCII letters' => ['page', ['canonical' => '/hinnasto/päivä']];
     yield 'canonical URL' => ['page', ['canonical' => 'https://www.example.com/pricing']];
-    yield 'image UUID' => ['page', ['social' => ['image' => self::UUID]]];
-    yield 'image token' => ['page', ['social' => ['image' => '{image}']]];
-    yield 'image field token' => ['template', ['social' => ['image' => '{field.field_hero}']]];
+    yield 'image media' => ['page', ['social' => ['image' => ['media' => self::UUID]]]];
+    yield 'a page date linked to a fact' => [
+      'page',
+      ['schema' => ['props' => ['dateModified' => ['fact' => 'modified']], 'type' => 'Article']],
+    ];
     yield 'max_snippet no limit' => ['site', ['robots' => ['max_snippet' => -1]]];
     yield 'max_snippet zero' => ['page', ['robots' => ['max_snippet' => 0]]];
     yield 'max_snippet highest' => ['page', ['robots' => ['max_snippet' => 1000]]];
@@ -359,33 +467,33 @@ final class ValuesTest extends UnitTestCase {
       'schema' => [
         'type' => 'Product',
         'props' => [
-          'name' => 'Desk',
-          'offers_price' => '49.90',
-          'offers_priceCurrency' => 'EUR',
-          'offers_availability' => 'InStock',
-          'image' => self::UUID,
+          'name' => $t('Desk'),
+          'offers_price' => $t('49.90'),
+          'offers_priceCurrency' => $t('EUR'),
+          'offers_availability' => $t('InStock'),
+          'image' => ['media' => self::UUID],
         ],
       ],
     ], [
       'schema' => [
         'props' => [
-          'image' => self::UUID,
-          'name' => 'Desk',
-          'offers_availability' => 'InStock',
-          'offers_price' => '49.90',
-          'offers_priceCurrency' => 'EUR',
+          'image' => ['media' => self::UUID],
+          'name' => $t('Desk'),
+          'offers_availability' => $t('InStock'),
+          'offers_price' => $t('49.90'),
+          'offers_priceCurrency' => $t('EUR'),
         ],
         'type' => 'Product',
       ],
     ],
     ];
-    yield 'a prop with a token is checked at resolve time' => [
+    yield 'a linked detail is checked when it is read' => [
       'template',
-      ['schema' => ['props' => ['startDate' => '{field.field_summary}'], 'type' => 'Event']],
+      ['schema' => ['props' => ['description' => ['source' => self::SUMMARY]], 'type' => 'Event']],
     ];
     yield 'extended type has the props of its parent' => [
       'page',
-      ['schema' => ['props' => ['headline' => 'A'], 'type' => 'BlogPosting']],
+      ['schema' => ['props' => ['headline' => $t('A')], 'type' => 'BlogPosting']],
     ];
     $typed = <<<'JSON'
        { "name" : "Q&A <b>", "@type":"FAQPage", "@id": "#faq",
@@ -415,43 +523,45 @@ final class ValuesTest extends UnitTestCase {
    * A translation's details belong to the type it inherits.
    */
   public function testInheritedType(): void {
-    $props = ['schema' => ['props' => ['name' => 'Widget', 'offers_price' => '49']]];
-    self::assertSame([$props, []], Values::clean($props, 'page', self::TOKENS, 'Product'));
-    self::assertSame([[], []], Values::clean([], 'page', self::TOKENS, 'Product'));
+    $props = ['schema' => ['props' => ['name' => self::typed('Widget'), 'offers_price' => self::typed('49')]]];
+    self::assertSame([$props, []], Values::clean($props, 'page', self::accepts(), 'Product'));
+    self::assertSame([[], []], Values::clean([], 'page', self::accepts(), 'Product'));
     // Read mode keeps them, as the resolver reads a translation.
     self::assertSame($props, Values::clean($props, 'page', NULL, 'Product')[0]);
     // Without the inherited type they are not available.
-    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean($props, 'page', self::TOKENS)[1]));
+    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean($props, 'page', self::accepts())[1]));
     // A type named in the values wins over the inherited one.
-    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean(['schema' => ['type' => 'Article'] + $props['schema']], 'page', self::TOKENS, 'Product')[1]));
+    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean(['schema' => ['type' => 'Article'] + $props['schema']], 'page', self::accepts(), 'Product')[1]));
     // An inherited type the registry does not know is WebPage.
-    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean($props, 'page', self::TOKENS, 'Recipe')[1]));
+    self::assertSame(['schema.props.name', 'schema.props.offers_price'], array_keys(Values::clean($props, 'page', self::accepts(), 'Recipe')[1]));
   }
 
   /**
    * Read mode cuts, drops and keeps what write mode refuses.
    */
   public function testReadMode(): void {
+    $gone = ['expression' => 'ℹ︎␜entity:node:article␝field_gone␞␟value', 'sourceType' => 'entity-field'];
     [$clean, $errors] = Values::clean([
-      'title' => str_repeat('é', 300),
-      'description' => 'not allowed on a page',
+      'title' => self::typed(str_repeat('é', 300)),
+      'description' => self::typed('not allowed on a page'),
       'canonical' => 'javascript:alert(1)',
-      'social' => ['title' => '{title} {field.gone}', 'image' => '{field.gone}', 'card' => 'x'],
+      'social' => ['title' => ['source' => $gone], 'image' => ['media' => 'nope'], 'card' => 'x'],
       'robots' => ['noindex' => TRUE, 'max_snippet' => 5000],
       'schema' => [
         'type' => 'Article',
-        'props' => ['headline' => '{field.gone}', 'author_url' => 'nope'],
+        'props' => ['headline' => ['fact' => 'nope'], 'author_url' => self::typed('nope')],
         'custom' => '<script>',
       ],
     ], 'page', NULL);
     self::assertSame([
       'robots' => ['noindex' => TRUE],
-      'schema' => ['props' => ['headline' => '{field.gone}'], 'type' => 'Article'],
-      // A token that no longer exists is kept, and blanked when filled.
-      'social' => ['image' => '{field.gone}', 'title' => '{title} {field.gone}'],
-      'title' => str_repeat('é', 255),
+      'schema' => ['type' => 'Article'],
+      'title' => self::typed(str_repeat('é', 255)),
     ], $clean);
     self::assertNotEmpty($errors);
+    // On a template a source that can no longer be read is kept: it reads as
+    // broken, and recreating its field heals it.
+    self::assertSame(['description' => ['source' => $gone]], Values::clean(['description' => ['source' => $gone]], 'template', NULL)[0]);
   }
 
   /**
@@ -530,31 +640,40 @@ final class ValuesTest extends UnitTestCase {
    */
   public function testEncodeDecode(): void {
     $a = [
-      'title' => 'Pricing {sep} {site}',
-      'social' => ['image' => self::UUID],
-      'schema' => ['type' => 'Article', 'props' => ['headline' => 'Plans and prices']],
+      'title' => self::typed('Pricing'),
+      'social' => ['image' => ['media' => self::UUID]],
+      'schema' => ['type' => 'Article', 'props' => ['headline' => self::typed('Plans and prices')]],
       'robots' => ['max_snippet' => 160],
       'canonical' => '/pricing',
     ];
     $b = [
       'canonical' => '/pricing',
       'robots' => ['max_snippet' => 160, 'nofollow' => NULL],
-      'schema' => ['props' => ['headline' => 'Plans and prices'], 'type' => 'Article', 'custom' => ''],
-      'social' => ['image' => self::UUID, 'title' => '  '],
-      'title' => 'Pricing {sep} {site}',
-      'description' => '',
+      'schema' => ['props' => ['headline' => self::typed('Plans and prices')], 'type' => 'Article', 'custom' => ''],
+      'social' => ['image' => ['media' => self::UUID], 'title' => self::typed('  ')],
+      'title' => self::typed('Pricing'),
+      'description' => self::typed(''),
     ];
-    $expected = '{"canonical":"/pricing","robots":{"max_snippet":160},"schema":{"props":{"headline":"Plans and prices"},"type":"Article"},"social":{"image":"' . self::UUID . '"},"title":"Pricing {sep} {site}"}';
+    $expected = '{"canonical":"/pricing","robots":{"max_snippet":160},"schema":{"props":{"headline":{"text":"Plans and prices"}},"type":"Article"},"social":{"image":{"media":"' . self::UUID . '"}},"title":{"text":"Pricing"}}';
     self::assertSame($expected, Values::encode($a));
     self::assertSame($expected, Values::encode($b));
     self::assertSame($expected, Values::encode(Values::decode($expected)));
-    self::assertSame('{"robots":{"noindex":false},"title":"Ünïcode / ✓"}', Values::encode([
-      'title' => 'Ünïcode / ✓',
+    self::assertSame('{"robots":{"noindex":false},"title":{"text":"Ünïcode / ✓"}}', Values::encode([
+      'title' => self::typed('Ünïcode / ✓'),
       'robots' => ['noindex' => FALSE],
+    ]));
+    // "No ending" is the one empty value that is kept.
+    self::assertSame('{"title_end":{"text":""}}', Values::encode([
+      'title_end' => self::typed(''),
+      'title' => self::typed(''),
     ]));
 
     self::assertNull(Values::encode([]));
-    self::assertNull(Values::encode(['title' => ' ', 'social' => ['title' => ''], 'robots' => []]));
+    self::assertNull(Values::encode([
+      'title' => self::typed(' '),
+      'social' => ['title' => self::typed('')],
+      'robots' => [],
+    ]));
 
     self::assertSame([], Values::decode(NULL));
     self::assertSame([], Values::decode(''));
@@ -564,14 +683,14 @@ final class ValuesTest extends UnitTestCase {
   }
 
   /**
-   * Tokens are replaced in one pass.
+   * Custom JSON-LD fills the fixed names in one pass, and only those.
    */
-  public function testFill(): void {
-    $values = ['title' => '{site}', 'site' => 'Example', 'field.field_summary' => 'Summary'];
-    self::assertSame('{site} | Example', Values::fill('{title} | {site}', $values));
-    self::assertSame('Summary  end', Values::fill('{field.field_summary} {field.gone} end', $values));
-    self::assertSame('/s?q={search_term_string}&site=Example', Values::fill('/s?q={search_term_string}&site={site}', $values, TRUE));
-    self::assertSame('{Title} {a b} {} { title } {a.b.c}', Values::fill('{Title} {a b} {} { title } {a.b.c}', $values));
+  public function testFillFacts(): void {
+    $values = ['title' => '{site}', 'site' => 'Example', 'url' => 'https://example.com/a'];
+    self::assertSame('{site} | Example', Values::fillFacts('{title} | {site}', $values));
+    self::assertSame('https://example.com/a?q={search_term_string}', Values::fillFacts('{url}?q={search_term_string}', $values));
+    // A field name is literal text; a fixed name without a value is empty.
+    self::assertSame('{field.field_byline} {Title} {a b} {} .', Values::fillFacts('{field.field_byline} {Title} {a b} {} {author}.', $values));
   }
 
   /**
@@ -591,10 +710,16 @@ final class ValuesTest extends UnitTestCase {
    * The shared fixture: the same cases run against model.ts.
    */
   #[DataProvider('providerTextCases')]
-  public function testTexts(array $target, array $site, array $tokens, array $expect): void {
-    $texts = Values::texts(Values::cascade($target, $site), $tokens);
-    foreach ($expect as $key => $text) {
-      self::assertSame($text, $texts[$key], $key);
+  public function testTexts(array $target, array $site, array $facts, array $links, string $separator, array $expect): void {
+    $text = static fn (array $value): string => match (array_key_first($value)) {
+      'text' => $value['text'],
+      'fact' => $facts[$value['fact']] ?? '',
+      'source' => $links[$value['source']['expression']] ?? '',
+      default => '',
+    };
+    $texts = Values::texts(Values::cascade($target, $site), $text, $separator, $site['title_end'] ?? NULL);
+    foreach ($expect as $key => $expected) {
+      self::assertSame($expected, $texts[$key], $key);
     }
   }
 
@@ -602,50 +727,57 @@ final class ValuesTest extends UnitTestCase {
    * Data provider for testTexts().
    */
   public static function providerTextCases(): \Generator {
-    $file = json_decode((string) file_get_contents(dirname(__DIR__, 2) . '/fixtures/text-cases.json'), TRUE, 16, JSON_THROW_ON_ERROR);
+    $file = json_decode((string) file_get_contents(dirname(__DIR__, 2) . '/fixtures/text-cases.json'), TRUE, 32, JSON_THROW_ON_ERROR);
     foreach ($file['cases'] as $case) {
       yield $case['name'] => [
         $case['target'] ?? [],
         $case['site'] ?? $file['site'],
-        ($case['tokens'] ?? []) + $file['tokens'],
+        ($case['facts'] ?? []) + $file['facts'],
+        $case['links'] ?? [],
+        $case['separator'] ?? $file['separator'],
         $case['expect'],
       ];
     }
   }
 
   /**
-   * Separators that separate nothing go, wherever they are.
-   */
-  public function testSeparators(): void {
-    $title = static fn (string $template, array $tokens = []): string => Values::texts(['title' => $template], $tokens + ['sep' => '|'])['title'];
-    self::assertSame('Example', $title('{a} {sep} {b} {sep} Example'));
-    self::assertSame('Pricing', $title('Pricing {sep} {a} {sep} {b}'));
-    self::assertSame('A | B', $title('{sep} A {sep} {sep} {sep} B {sep}'));
-    self::assertSame('A|B | C', $title('A|B {sep} C'));
-    self::assertSame('A | B', $title('A | B', ['sep' => '']));
-  }
-
-  /**
-   * Only the title and the robots directives come from the site layer.
+   * Only the title ending and the robots directives come from the site layer.
    */
   public function testCascade(): void {
     $site = [
-      'title' => '{title} {sep} {site}',
-      'description' => 'Ignored',
-      'social' => ['title' => 'Ignored'],
+      'title_end' => self::typed('Example Co'),
+      'title' => self::typed('Ignored'),
+      'description' => self::typed('Ignored'),
+      'social' => ['title' => self::typed('Ignored')],
       'schema' => ['type' => 'Article'],
       'robots' => ['noindex' => TRUE, 'max_image_preview' => 'large'],
     ];
     self::assertSame([
-      'title' => '{title} {sep} {site}',
+      'title_end' => self::typed('Example Co'),
       'robots' => ['noindex' => TRUE, 'max_image_preview' => 'large'],
     ], Values::cascade([], $site));
     self::assertSame([
-      'title' => 'Own',
+      'title' => self::typed('Own'),
+      'title_end' => self::typed(''),
       'robots' => ['noindex' => FALSE, 'max_snippet' => -1, 'max_image_preview' => 'large'],
       'canonical' => '/a',
-    ], Values::cascade(['title' => 'Own', 'robots' => ['noindex' => FALSE, 'max_snippet' => -1], 'canonical' => '/a'], $site));
+    ], Values::cascade([
+      'title' => self::typed('Own'),
+      'title_end' => self::typed(''),
+      'robots' => ['noindex' => FALSE, 'max_snippet' => -1],
+      'canonical' => '/a',
+    ], $site));
     self::assertSame([], Values::cascade([], []));
+  }
+
+  /**
+   * Formatted text reads as sentences, and only as text.
+   */
+  public function testFromHtml(): void {
+    self::assertSame('Made to last. Solid oak. Dimmable. Fabric cable, 3 m.', Values::fromHtml('<h2>Made to last</h2><p>Solid oak.</p><ul><li>Dimmable</li><li>Fabric cable, 3 m.</li></ul>'));
+    self::assertSame('Ask us', Values::fromHtml('<p>Ask us</p><script>alert(1)</script><style>p{color:red}</style>'));
+    self::assertSame('One Two & three', Values::fromHtml('<p>One</p><p>Two &amp; <b>three</b></p>'));
+    self::assertSame('', Values::fromHtml("\xC3\x28"));
   }
 
 }

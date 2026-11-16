@@ -25,22 +25,41 @@
     "schema": {
         "type": "Product",
         "props": {
-            "name": "{title}, oak",
-            "image": "6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44",
-            "offers_price": "{field.field_price}",
-            "offers_priceCurrency": "EUR",
-            "offers_availability": "InStock",
-            "brand_name": "Example Works",
-            "sku": "DESK-1"
+            "name": {
+                "text": "Standing desk, oak"
+            },
+            "image": {
+                "media": "6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44"
+            },
+            "offers_price": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:page␝field_price␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "offers_priceCurrency": {
+                "text": "EUR"
+            },
+            "offers_availability": {
+                "text": "InStock"
+            },
+            "brand_name": {
+                "text": "Example Works"
+            },
+            "sku": {
+                "text": "DESK-1"
+            }
         }
     },
-    "tokens": {
+    "facts": {
         "title": "Standing desk",
-        "description": "A desk that goes up and down.",
-        "field.field_price": "499.00"
+        "description": "A desk that goes up and down."
+    },
+    "links": {
+        "ℹ︎␜entity:node:page␝field_price␞␟value": "499.00"
     },
     "images": {
-        "{image}": {
+        "image": {
             "url": "https://cms.example.com/sites/default/files/hello.jpg",
             "width": 1200,
             "height": 630,

@@ -39,6 +39,11 @@ configurable. The dialog's preview and the head MUST follow the same rule.
 - **WHEN** the Article template links the social image to Hero and an article has no hero image
 - **THEN** the image MUST be the article's Image fact, else the site's default image
 
+#### Scenario: An empty linked ending
+
+- **WHEN** the site sets the ending "Example Co", "Every Article" links its ending to Section, and an article's section is empty, hidden or broken
+- **THEN** that article's title MUST end with "| Example Co", in the head and in the dialog; with the site's "No ending" it MUST have no ending
+
 ### Requirement: A link to a field that no longer fits is broken
 
 A stored link MUST be kept when its field is deleted, changes to a type that no
@@ -93,7 +98,7 @@ A draft MUST keep its other changes and its client id.
 #### Scenario: A composite title
 
 - **WHEN** a template's title is `{title} by {field.field_byline}`
-- **THEN** after the update its main part MUST be the Title fact, and the log MUST say that "by" and the byline were dropped
+- **THEN** after the update its main part MUST be the Title fact, and the log MUST say that it kept its first part and dropped typed text and the byline, without the words themselves
 
 #### Scenario: An old revision
 
@@ -119,7 +124,7 @@ convert the stored links.
 
 #### Scenario: Links made before sources
 
-- **WHEN** the database is updated on a site whose templates link fields by name
+- **WHEN** the database is updated on a site whose templates use whole `{field.NAME}` values
 - **THEN** each link MUST become the Canvas source for that field and kind, a link to the type's first formatted text with a summary MUST become the Description fact, and a link with no matching source MUST be dropped and logged
 
 ### Requirement: Links can follow references
@@ -132,7 +137,7 @@ give nothing.
 
 #### Scenario: A writer's name
 
-- **WHEN** the Article template links the author name detail to Writer › Name and an article's writer is "Ada"
+- **WHEN** the Article template links the author name detail to Writer › Title and an article's writer is "Ada"
 - **THEN** that article's author name MUST be "Ada"
 
 #### Scenario: Several tags
@@ -149,14 +154,15 @@ give nothing.
 
 The fields a template value can link to MUST be those Canvas offers when
 linking a component prop of that kind in a content template, with Canvas's
-labels, in the order of the type's form, less the module's exclusions and
-facts. A formatted text with a summary MUST be offered as its text and as its
-summary. A text list MUST give its stored key.
+labels, in the order of the type's form (then fields off the form), less the
+module's exclusions and facts. A formatted text with a summary MUST be offered
+as two entries; a link to its text MUST give the text cut at a word within 160
+characters, for any value. A text list MUST give its stored key.
 
 #### Scenario: Body and its summary
 
 - **WHEN** the Article type has a Body field with a summary
-- **THEN** the description's link menu MUST offer "Body" and "Body › Processed summary" as two entries
+- **THEN** the description's link menu MUST offer "Body" and "Body › Summary" as two entries
 
 #### Scenario: A text list
 
@@ -367,10 +373,10 @@ Text typed into a plain text field MUST NOT be stripped.
 - **WHEN** a body holds text that is not valid UTF-8
 - **THEN** its value MUST be empty
 
-#### Scenario: A description linked to a long formatted text
+#### Scenario: A value linked to a long formatted text
 
-- **WHEN** an Article template links the description to a Body of 1,000 characters
-- **THEN** the description MUST be that text cut at a word boundary within 160 characters
+- **WHEN** an Article template links the description, or the title or a structured data detail, to a Body of 1,000 characters
+- **THEN** that value MUST be the Body's text, not its summary, cut at a word boundary within 160 characters
 
 #### Scenario: Formatted text with a script and a style block
 
@@ -439,6 +445,14 @@ text.
 - **THEN** `og:image:alt` MUST be the alt text of the media item's default language
 
 ## REMOVED Requirements
+
+### Requirement: A type's fields are listed in the order of its form
+
+**Reason**: The state no longer lists tokens. The order of the fields a link
+menu offers is part of "Field links offer what Canvas offers": the order of
+the type's form, then the fields off the form in the type's field order.
+
+**Migration**: None; the state's `sources` replace `tokens`.
 
 ### Requirement: Dynamic values are names in braces
 

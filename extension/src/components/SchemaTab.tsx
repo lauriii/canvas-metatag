@@ -1,7 +1,6 @@
 import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import { Select } from '@radix-ui/themes';
 import {
-  Fragment,
   type ReactNode,
   useEffect,
   useId,
@@ -10,26 +9,15 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
-import {
-  REGISTRY,
-  chipsIn,
-  dateText,
-  fill,
-  inSentence,
-  inherited,
-  jsonStrings,
-  plain,
-  toDisplay,
-  toStored,
-  tokensIn,
-} from '../model';
+import { REGISTRY, dateText, inSentence, inherited } from '../model';
 import type { SchemaProp } from '../types';
+import { PROP_KINDS, brokenWhy, factsFor, resolve, sameValue } from '../values';
 import { Field, Guide, useField, useHeld } from './Field';
-import { ImageRow, PICKED } from './MediaPicker';
+import { ImageRow } from './MediaPicker';
 import { Disclosure, List, NavRow } from './SettingsList';
 import { SchemaSuggest, SuggestButton } from './Suggest';
-import { TemplateInput } from './TemplateInput';
 import { Btn, InfoTip, Notice, settleList } from './ui';
+import { type InputProps, TextInput, ValueField } from './Value';
 
 const IDS = Object.keys(REGISTRY);
 const FAMILIES = IDS.filter((id) => !REGISTRY[id].extends);
@@ -55,19 +43,11 @@ const GROUPS = [
   },
 ].filter((group) => group.ids.length > 0);
 
-/** The token type a typed detail can be bound to, and the name of its fixed value. */
-const TYPED = {
-  url: { token: 'url', fixed: 'A fixed address…' },
-  date: { token: 'datetime', fixed: 'A fixed date…' },
-  number: { token: 'number', fixed: 'A fixed number…' },
-  image: { token: 'image', fixed: 'Choose an image…' },
-} as const;
-
 /** What an unset detail says about its default. */
 const DEFAULTS: Record<string, string> = {
-  '{title}': 'From the page title',
-  '{description}': 'Same as description',
-  '{image}': 'From the Image field',
+  title: 'From the page title',
+  description: 'Same as description',
+  image: 'From the Image field',
 };
 
 /** "InStock" → "In stock", "FAQPage" → "FAQ page". */
@@ -108,117 +88,170 @@ function jsonError(text: string): string | undefined {
   }
 }
 
+/** A typed input whose half-typed states are invalid: handed over on blur or Enter. */
+function HeldInput(props: InputProps & { kind: 'text' | 'url' | 'number'; label: string; required?: boolean; placeholder?: string }) {
+  const held = useHeld(props.value, (text) => props.set(text));
+  return (
+    <input
+      id={props.id}
+      className="seo-input"
+      dir={props.kind === 'text' ? 'auto' : undefined}
+      inputMode={props.kind === 'url' ? 'url' : props.kind === 'number' ? 'decimal' : undefined}
+      placeholder={props.placeholder ?? (props.kind === 'url' ? 'https://' : props.kind === 'number' ? '0.00' : undefined)}
+      aria-required={props.required || undefined}
+      aria-invalid={props.invalid || undefined}
+      aria-describedby={props.describedBy}
+      disabled={props.disabled}
+      {...held}
+      onKeyDown={(event) => {
+        held.onKeyDown(event);
+        props.onKeyDown(event);
+      }}
+    />
+  );
+}
+
+/** A date and a time: the time is the site's own. */
+function DateInput(props: InputProps & { label: string }) {
+  const [, date = '', time = ''] = props.value.match(/^(\d{4}-\d\d-\d\d)(?:T(\d\d:\d\d))?/) ?? [];
+  return (
+    <div className="seo-pair" data-even="">
+      <input
+        id={props.id}
+        className="seo-input"
+        type="date"
+        aria-invalid={props.invalid || undefined}
+        aria-describedby={props.describedBy}
+        disabled={props.disabled}
+        value={date}
+        onKeyDown={props.onKeyDown}
+        onChange={(event) =>
+          props.set(event.target.value ? event.target.value + (time ? `T${time}` : '') : undefined)
+        }
+      />
+      <input
+        className="seo-input"
+        type="time"
+        aria-label={`${props.label}, time`}
+        disabled={props.disabled || !date}
+        value={time}
+        onChange={(event) => props.set(date + (event.target.value ? `T${event.target.value}` : ''))}
+      />
+    </div>
+  );
+}
+
 /** One detail of the chosen type, by its kind. A stored value overrides the default. */
 function Detail(props: { prop: SchemaProp; type: string }) {
   const { prop } = props;
-  const { state, dispatch, ...app } = useApp();
+  const { state, dispatch, openSheet, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
-  const page = server.target!.scope === 'page';
+  const template = server.target!.scope === 'template';
   const path = `schema.props.${prop.key}`;
+  const kind = PROP_KINDS[prop.kind];
   const stored = state.edits.target.schema?.props?.[prop.key];
-  const edit = (value: string | undefined) =>
-    dispatch({
-      type: 'edit',
-      scope: 'target',
-      path,
-      // The default itself is not an override.
-      value: value === prop.default ? undefined : value,
-    });
-  // Values with a pattern are the field's own until it is left.
-  const [held, setHeld] = useState<string | null>(null);
-  const [fixing, setFixing] = useState(false);
-  const fixed = useHeld(stored ?? '', (text) => edit(text));
-
-  const common = {
-    scope: 'target' as const,
-    path,
-    label: prop.label,
-    required: prop.level === 'required',
-    missing:
-      prop.level === 'required' && stored === undefined && !prop.default
-        ? `Needed for ${REGISTRY[props.type].label}`
-        : undefined,
-    fallback:
-      stored === undefined && prop.default
-        ? (DEFAULTS[prop.default] ?? 'From the page')
-        : undefined,
-    noStage: true,
+  const fact = prop.default && 'fact' in prop.default ? prop.default.fact : undefined;
+  // On a page, addresses, dates and images may link to the page's facts;
+  // not when its only fact is the default it follows: no choice to offer.
+  const facts = factsFor(path, kind, 'page');
+  const linkable =
+    template ||
+    (facts.length > 0 &&
+      !(facts.length === 1 && sameValue({ fact: facts[0] }, prop.default) && !(stored && 'fact' in stored)));
+  // What a page shows while nothing is typed: the default, as the page has it.
+  const unset = prop.default ? resolve(prop.default, kind, view.lookup) : undefined;
+  const placeholder =
+    unset?.status === 'ok'
+      ? kind === 'date'
+        ? dateText(unset.text)
+        : fact === 'description'
+          ? view.texts.description
+          : unset.text
+      : undefined;
+  const edit = (value: unknown) => dispatch({ type: 'edit', scope: 'target', path, value });
+  // The Description fact of a detail is the description as search shows it,
+  // as the head gives it (SchemaGraph::build()).
+  const lookup = {
+    ...view.lookup,
+    facts: {
+      ...view.lookup.facts,
+      ...(view.lookup.facts.description && {
+        description: { ...view.lookup.facts.description, value: view.texts.description },
+      }),
+    },
   };
 
-  if (prop.kind === 'text') {
-    const value = held ?? stored ?? '';
-    const done = () => {
-      if (held !== null && held !== (stored ?? '')) {
-        edit(held);
+  return (
+    <ValueField
+      path={path}
+      label={prop.label}
+      kind={kind}
+      linkable={linkable}
+      lookup={lookup}
+      typing={prop.kind === 'text' && !prop.pattern}
+      choices={prop.kind === 'enum' ? prop.options : undefined}
+      byDefault={prop.default ?? null}
+      instead={fact ? `its ${view.facts[fact]?.label ?? fact} is used` : 'the detail is left out'}
+      required={prop.level === 'required'}
+      missing={
+        prop.level === 'required' && stored === undefined && !prop.default
+          ? `Needed for ${REGISTRY[props.type].label}`
+          : undefined
       }
-      setHeld(null);
-    };
-    const template = value || prop.default || '';
-    // A summary left at its default is the description search shows.
-    const own =
-      prop.default === '{description}'
-        ? plain(view.texts.description, 2000)
-        : plain(fill(prop.default ?? '', view.values), 2000);
-    return (
-      <Field
-        {...common}
-        resolved={
-          !value && prop.default
-            ? own
-            : tokensIn(template).length
-              ? plain(fill(template, view.values), 2000)
-              : undefined
-        }
-      >
-        {(field) => (
-          <TemplateInput
-            id={field.id}
-            describedBy={field.describedBy}
-            invalid={field.invalid}
-            disabled={field.disabled}
-            required={common.required}
-            lang={server.langcode}
-            value={value}
-            onChange={prop.pattern ? setHeld : edit}
-            onBlur={prop.pattern ? done : undefined}
-            onKeyDown={
-              prop.pattern
-                ? (event) => event.key === 'Enter' && done()
-                : undefined
+      fallback={stored === undefined && fact ? (DEFAULTS[fact] ?? 'From the page') : undefined}
+      noStage
+      group={kind === 'image'}
+      info={
+        kind === 'date' &&
+        stored !== undefined &&
+        'text' in stored && <InfoTip label="About times" text="Times are in the site's time zone." />
+      }
+      library={
+        kind === 'image'
+          ? () =>
+              openSheet({
+                kind: 'image',
+                request: { minWidth: 600, chosen: stored, onPick: edit },
+              })
+          : undefined
+      }
+      image={
+        kind === 'image'
+          ? (field, link) => {
+              const shown = resolve(stored ?? prop.default, 'image', view.lookup);
+              return (
+                <ImageRow
+                  describedBy={field.describedBy}
+                  image={shown.image}
+                  tag={link.imageTag}
+                  state={link.imageState}
+                  onUnlink={link.linked && !link.disabled ? () => link.unlink() : undefined}
+                  disabled={field.disabled}
+                  minWidth={600}
+                  chosen={stored}
+                  onPick={edit}
+                />
+              );
             }
-            inherited={prop.default ? own : undefined}
-            inheritedFrom="the page"
-            tokens={view.tokens}
-            fields={!page}
-            insert={page ? 'focus' : 'always'}
-          />
-        )}
-      </Field>
-    );
-  }
-
-  if (prop.kind === 'enum') {
-    return (
-      <Field {...common}>
-        {(field) => (
+          : undefined
+      }
+      lines={1}
+      placeholder={placeholder}
+      input={(input) =>
+        prop.kind === 'enum' ? (
           <Select.Root
-            value={stored ?? 'none'}
-            disabled={field.disabled}
-            onValueChange={(value) =>
-              edit(value === 'none' ? undefined : value)
-            }
+            value={input.value || 'none'}
+            disabled={input.disabled}
+            onValueChange={(value) => input.set(value === 'none' ? undefined : value)}
           >
             <Select.Trigger
-              id={field.id}
+              id={input.id}
               className="seo-select-box"
-              aria-labelledby={field.labelId}
-              aria-describedby={field.describedBy}
+              aria-describedby={input.describedBy}
+              onKeyDown={input.onKeyDown}
             />
-            <Select.Content
-              position="popper"
-              className="seo-select-content seo-select-fit"
-            >
+            <Select.Content position="popper" className="seo-select-content seo-select-fit">
               <Select.Item value="none">Not set</Select.Item>
               {(prop.options ?? []).map((option) => (
                 <Select.Item key={option} value={option}>
@@ -227,163 +260,21 @@ function Detail(props: { prop: SchemaProp; type: string }) {
               ))}
             </Select.Content>
           </Select.Root>
-        )}
-      </Field>
-    );
-  }
-
-  // Typed values are valid by construction: a matching value of the page, or a fixed one.
-  const typed = TYPED[prop.kind];
-  const matching = Object.entries(view.tokens).filter(
-    ([, token]) => token.type === typed.token,
-  );
-  const bound = (stored ?? prop.default)?.match(/^\{(.+)\}$/)?.[1];
-  const token = bound && !fixing ? view.tokens[bound] : undefined;
-  const literal = stored !== undefined && !token;
-  const mode = token
-    ? `token:${bound}`
-    : literal || fixing || matching.length === 0
-      ? 'fixed'
-      : 'none';
-  const [, date = '', time = ''] =
-    (literal ? stored : '').match(/^(\d{4}-\d\d-\d\d)(?:T(\d\d:\d\d))?/) ?? [];
-  const image = literal
-    ? (PICKED[stored] ?? server.media[stored] ?? null)
-    : (token?.image ?? null);
-
-  return (
-    <Field
-      {...common}
-      group={matching.length === 0 && prop.kind === 'image'}
-      info={
-        prop.kind === 'date' &&
-        mode === 'fixed' && (
-          <InfoTip
-            label="About times"
-            text="Times are in the site's time zone."
+        ) : prop.kind === 'date' ? (
+          <DateInput {...input} label={prop.label} />
+        ) : prop.kind === 'url' || prop.kind === 'number' || prop.pattern ? (
+          <HeldInput
+            {...input}
+            kind={prop.kind === 'url' ? 'url' : prop.kind === 'number' ? 'number' : 'text'}
+            label={prop.label}
+            required={prop.level === 'required'}
+            placeholder={placeholder}
           />
+        ) : (
+          <TextInput {...input} placeholder={placeholder} lang={server.langcode} required={prop.level === 'required'} />
         )
       }
-      resolved={
-        token && prop.kind !== 'image'
-          ? token.value
-            ? prop.kind === 'date'
-              ? dateText(token.value)
-              : token.value
-            : 'Empty for this page'
-          : undefined
-      }
-    >
-      {(field) => {
-        // The first control carries the label: the select, or the fixed input alone.
-        const first = matching.length > 0 ? undefined : field.id;
-        return (
-          <>
-            {matching.length > 0 && (
-              <Select.Root
-                value={mode}
-                disabled={field.disabled}
-                onValueChange={(value) => {
-                  setFixing(value === 'fixed');
-                  edit(
-                    value.startsWith('token:')
-                      ? `{${value.slice(6)}}`
-                      : undefined,
-                  );
-                }}
-              >
-                <Select.Trigger
-                  id={field.id}
-                  className="seo-select-box"
-                  aria-labelledby={field.labelId}
-                  aria-describedby={field.describedBy}
-                />
-                <Select.Content
-                  position="popper"
-                  className="seo-select-content seo-select-fit"
-                >
-                  {!prop.default && (
-                    <Select.Item value="none">Not set</Select.Item>
-                  )}
-                  {matching.map(([name, item]) => (
-                    <Select.Item key={name} value={`token:${name}`}>
-                      {name.startsWith('field.')
-                        ? `Field: ${item.label}`
-                        : item.label}
-                    </Select.Item>
-                  ))}
-                  <Select.Item value="fixed">{typed.fixed}</Select.Item>
-                </Select.Content>
-              </Select.Root>
-            )}
-            {mode === 'fixed' && prop.kind === 'date' && (
-              <div
-                className="seo-pair"
-                data-even=""
-                style={{ marginTop: matching.length ? 8 : 0 }}
-              >
-                <input
-                  id={first}
-                  className="seo-input"
-                  type="date"
-                  aria-label={first ? undefined : `${prop.label}, date`}
-                  aria-invalid={field.invalid || undefined}
-                  disabled={field.disabled}
-                  value={date}
-                  onChange={(event) =>
-                    edit(
-                      event.target.value
-                        ? event.target.value + (time ? `T${time}` : '')
-                        : undefined,
-                    )
-                  }
-                />
-                <input
-                  className="seo-input"
-                  type="time"
-                  aria-label={`${prop.label}, time`}
-                  disabled={field.disabled || !date}
-                  value={time}
-                  onChange={(event) =>
-                    edit(
-                      date +
-                        (event.target.value ? `T${event.target.value}` : ''),
-                    )
-                  }
-                />
-              </div>
-            )}
-            {mode === 'fixed' &&
-              (prop.kind === 'url' || prop.kind === 'number') && (
-                <input
-                  id={first}
-                  className="seo-input"
-                  style={{ marginTop: matching.length ? 8 : 0 }}
-                  inputMode={prop.kind === 'url' ? 'url' : 'decimal'}
-                  placeholder={prop.kind === 'url' ? 'https://' : '0.00'}
-                  aria-label={first ? undefined : `${prop.label}, fixed`}
-                  aria-required={common.required || undefined}
-                  aria-invalid={field.invalid || undefined}
-                  aria-describedby={first ? field.describedBy : undefined}
-                  disabled={field.disabled}
-                  {...fixed}
-                />
-              )}
-            {prop.kind === 'image' && (mode === 'fixed' || token) && (
-              <div style={{ marginTop: matching.length ? 8 : 0 }}>
-                <ImageRow
-                  image={image}
-                  disabled={field.disabled || mode !== 'fixed'}
-                  minWidth={600}
-                  chosen={literal ? stored : undefined}
-                  onPick={edit}
-                />
-              </div>
-            )}
-          </>
-        );
-      }}
-    </Field>
+    />
   );
 }
 
@@ -493,11 +384,32 @@ export function SchemaTab() {
     (target.values.schema?.type ??
       target.from_default.schema?.type ??
       'WebPage') === typeId;
-  const missing = current
-    ? (report.missing_required ?? [])
-        .map((key) => props.find((prop) => prop.key === key)?.label)
-        .filter((label) => label !== undefined)
+  const missingProps = current
+    ? (report.missing_required ?? []).flatMap((key) => props.filter((prop) => prop.key === key))
     : [];
+  const missing = missingProps.map((prop) => prop.label);
+  // A missing detail that is linked gives nothing for the previewed item: the
+  // line says that, not "Add".
+  const typeName = target.scope === 'template' ? inSentence(target.label) : 'page';
+  const linkState = (prop: SchemaProp) => {
+    const value = view.effective.schema?.props?.[prop.key];
+    if (!value || !('source' in value)) {
+      return null;
+    }
+    const status = resolve(value, PROP_KINDS[prop.kind], view.lookup).status;
+    return status === 'hidden'
+      ? `hidden from visitors for this ${typeName}`
+      : status === 'broken'
+        ? `linked to a field that ${brokenWhy(view.lookup.broken?.[`schema.props.${prop.key}`]?.reason, PROP_KINDS[prop.kind])}`
+        : `empty for this ${typeName}`;
+  };
+  const toAdd = missingProps.filter((prop) => linkState(prop) === null).map((prop) => prop.label);
+  const linkedOut = missingProps.filter((prop) => linkState(prop) !== null);
+  const missingLine = toAdd.length
+    ? `Add ${toAdd.join(' and ')} to show ${type.label} details in search.`
+    : linkedOut.length === 1
+      ? `${linkedOut[0].label} is ${linkState(linkedOut[0])}, so ${type.label} details are left out.`
+      : `${linkedOut.map((prop) => prop.label).join(' and ')} give nothing for this ${typeName}, so ${type.label} details are left out.`;
   const main = props.filter(
     (prop) =>
       prop.level === 'required' ||
@@ -596,10 +508,7 @@ export function SchemaTab() {
         ) : missing.length > 0 ? (
           <div className="seo-guide" data-tone="improve" id={lineId}>
             <ExclamationTriangleIcon aria-hidden />
-            <span className="seo-guide-text">
-              Add {missing.join(' and ')} to show {type.label} details in
-              search.
-            </span>
+            <span className="seo-guide-text">{missingLine}</span>
           </div>
         ) : bare ? null : (
           <Guide id={lineId}>
@@ -702,20 +611,12 @@ export function SchemaTab() {
 
 /** One object or a list, parsed here when the field is left and validated again by the server. */
 export function CustomJson() {
-  const { state, dispatch, ...app } = useApp();
-  const view = app.view!;
+  const { state, dispatch } = useApp();
   const stored = state.edits.target.schema?.custom ?? '';
   const [bad, setBad] = useState<string>();
-  // Text values show and take labels, as every other field does.
   const held = useHeld(
-    pretty(jsonStrings(stored, (text) => toDisplay(text, view.tokens))),
-    (text) =>
-      dispatch({
-        type: 'edit',
-        scope: 'target',
-        path: 'schema.custom',
-        value: jsonStrings(text, (value) => toStored(value, view.tokens)),
-      }),
+    pretty(stored),
+    (text) => dispatch({ type: 'edit', scope: 'target', path: 'schema.custom', value: text }),
     true,
   );
   const area = useRef<HTMLTextAreaElement>(null);
@@ -728,7 +629,9 @@ export function CustomJson() {
         {target?.scope === 'template'
           ? `every ${inSentence(target.label)}'s`
           : "this page's"}{' '}
-        structured data. Values in braces are filled in.
+        structured data. In its texts, {'{title}'}, {'{description}'}, {'{site}'},{' '}
+        {'{sep}'}, {'{url}'}, {'{author}'}, {'{published}'}, {'{modified}'} and {'{image}'} are
+        filled in with the page's values; other text in braces stays as typed.
       </p>
       <div className="seo-json-wrap">
         <Field
@@ -739,24 +642,7 @@ export function CustomJson() {
           error={bad}
         >
           {(field) => (
-            <div className="seo-json-box">
-              {/* Paints the text, each value in braces as a chip. */}
-              <div className="seo-json seo-json-mirror" aria-hidden>
-                {chipsIn(held.value, view.tokens).map((chip, index, all) => (
-                  <Fragment key={chip.start}>
-                    {held.value.slice(index ? all[index - 1].end : 0, chip.start)}
-                    <span className="seo-chip">
-                      <span className="seo-brace">{'{'}</span>
-                      {chip.label}
-                      <span className="seo-brace">{'}'}</span>
-                    </span>
-                  </Fragment>
-                ))}
-                {held.value.slice(
-                  chipsIn(held.value, view.tokens).at(-1)?.end ?? 0,
-                )}
-                {'​'}
-              </div>
+            <div>
               <textarea
                 ref={area}
                 id={field.id}

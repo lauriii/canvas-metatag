@@ -16,14 +16,27 @@ field and opens its link menu.
 ### Requirement: A link hidden from visitors is listed to improve
 
 A value linked to a field that anonymous visitors may not view MUST be listed
-to improve as "‹Source› is hidden from visitors", with a detail saying that
-the default is used instead and to link a field visitors can see, and with
-Show. A link that is only empty for the previewed item MUST NOT be listed.
+to improve as "‹Source› is hidden from visitors", with Show and a detail that
+says what is used instead. Links hidden by one reference MUST be one row,
+"‹Reference› is hidden from visitors for this ‹type›", that names the affected
+values ("and N more" after two) and advises to publish it or preview another
+item. A link that is only empty for the previewed item MUST NOT be listed.
 
 #### Scenario: A hidden field
 
 - **WHEN** the Article template links the description to a field that anonymous visitors may not view
 - **THEN** "Notes is hidden from visitors" MUST be listed to improve, for a field labelled Notes, leading to Description
+
+### Requirement: Required details hidden by a reference are said once
+
+When a required structured data detail is among the links one reference hides,
+the row MUST say once that the type's details are left out for this item and
+why, instead of naming each detail.
+
+#### Scenario: A hidden venue
+
+- **WHEN** "Every Event" links Venue name, Street address, City and Postal code through Venue, and the previewed event's venue is unpublished
+- **THEN** one row "Venue is hidden from visitors for this event" MUST be listed to improve, saying "Event details are left out for this event, because visitors can't see its venue. Publish the venue or preview another event.", and no "Add Street address" row MUST be listed
 
 #### Scenario: Empty for this article
 
@@ -145,13 +158,18 @@ ending, the detail MUST say that the ending is the part that gets lost.
 ### Requirement: Structured data rules
 
 The checks MUST judge the page's structured data: required and recommended
-details the server reports missing, dates in the wrong order, and typed text
-that is not on the page.
+details the server reports missing (a linked one as missing for the previewed
+item), dates in the wrong order, and typed text that is not on the page.
 
 #### Scenario: A required detail is missing
 
 - **WHEN** an Event has no start date
 - **THEN** "Add Starts" MUST be listed to fix, saying Event details are left out until it is filled in, and leading to that detail in the Schema tab
+
+#### Scenario: A required detail linked to a field this item has empty
+
+- **WHEN** "Every Event" links Starts to a field and the previewed event has no start
+- **THEN** "Starts is empty for this event" MUST be listed to fix, saying Event details are left out for this event, not "Add Starts"
 
 #### Scenario: Recommended details are missing
 

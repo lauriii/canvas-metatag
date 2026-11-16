@@ -65,8 +65,9 @@ because every reader cleans in read mode. The config schema gains a
 `canvas_metatag.value` mapping type with the four optional keys and a choice
 constraint on `fact` and `sourceType`.
 
-While the fallback half is the shipped state, a fifth key `{field: NAME}`
-(today's field reading) stands in for `source`. The full plan deletes it.
+The product owner chose the full plan (proposal.md, "Decisions taken"), so
+the fallback's fifth key `{field: NAME}` was never built: links are stored as
+`source` from the start.
 
 Alternatives considered:
 
@@ -103,6 +104,11 @@ A link that is empty, hidden from visitors or broken for an item gives exactly
 what an unlinked field gives. It cannot be configured. The stored shape leaves
 room for an explicit fallback key later with no migration.
 
+For the title's ending, "what an unlinked field gives" is the site layer's
+ending (its typed ending, "No ending", else the site name): `texts()` takes it
+as the fallback on both sides, since `cascade()` has already put the target's
+link in its place.
+
 Alternative considered: a configurable fallback per link. Every fallback chain
 the module has today is the field's default, so it adds UI and evaluation code
 for no stored case.
@@ -134,29 +140,43 @@ the address, impossible at site scope); keep the module's own field reading
 `Drupal\canvas\PropSource`, `Drupal\canvas\ShapeMatcher` or
 `Drupal\canvas\PropExpressions`. `Values` and `SchemaGraph` stay pure. A unit
 test greps `src/` and `modules/` to enforce it. Public methods:
-`vocabulary($bundle)`, `previewRows($node)`, `evaluate($source, $host, $kind,
-$cacheability)`, `accepts($bundle, $source, $kind)` and
-`machineName($source)`.
+`vocabulary($bundle)`, `evaluate($source, $host, $kind, $cacheability)`,
+`accepts($bundle, $source, $kind)`, `problem($bundle, $source, $kind)`,
+`sourceFor($bundle, $field, $kind)` (the migration's lookup), `shown()` (a text
+list's label) and `machineName($source)`. The previewed rows are built by
+`Resolver::sourceRows()`, which adds what the module finishes itself (an
+address on the public base, an image through its file).
 
 ### 6. The vocabulary comes from Canvas's suggester (full plan)
 
 `vocabulary($bundle)` calls `PropSourceSuggester::suggest()` with a synthetic
 component description that has one optional prop per value shape (text, text
 list, HTML, image object, URL, date-time, date, number). It keeps only
-`entity-field` suggestions without adapters, then:
+`entity-field` suggestions without adapters, then (as built):
 
 - removes the module's own field, revision author fields, paths through the
   owner, comment fields, `public://` URIs and image objects whose width and
   height do not map to width and height;
-- replaces `title` with the Title fact (first), `created` and `changed` with
-  the date facts, and the owner's name with the Author fact; adds the Page
-  address fact to address rows;
+- leaves out `title`, `created`, `changed` and the owner, which are the Title,
+  date and Author facts. The facts are not interleaved with the fields: the
+  menu lists the type's fields first, then the facts as their own "Page"
+  group, because a template's link is for the type's fields;
+- reads formatted text as stored (`processed` becomes `value`,
+  `summary_processed` becomes `summary`, labelled "Summary"), and a text list
+  as its stored key (`label` becomes `value`; the label is kept to show);
+- adds decimal fields, which Canvas never matches (JSON numbers would lose
+  their digits), read as their stored digits with their scale;
 - rewrites image objects from `src_with_alternate_widths` to a hop through the
   file entity, so file access is checked and `src` is a clean path (the one
   place the module writes Canvas grammar; pinned by a test);
 - merges rows that share an expression across shapes, labels them with
   `Labeler` (split into a path; entity-type hops dropped), and keeps Canvas's
-  form-display order.
+  form-display order. There is no separate crumb: a row's path is its label,
+  and a reference is a level named by its first step.
+
+A build that throws is logged under `canvas_metatag` and gives no rows, so a
+Canvas change empties the menu instead of failing the dialog. Canvas keeps its
+matches in `cache.static` for the rest of a request.
 
 It is cached per bundle and interface language, tagged with field info, the
 bundle's form display and the media type list. Cost measured on the farm site:
@@ -233,10 +253,11 @@ one-line switch if hallway tests show accidental replacement.
 ### 12. Land the fallback first, then the Canvas half
 
 An earlier draft pinned the Canvas contract before anything else. This change
-lands the fallback first (tasks groups 1–5) and pins the contract at the start
-of the full plan (group 6), still before anything depends on it. So the
-fallback stopping point carries no unused Canvas code, and the product owner's
-decision can be taken at the gate.
+planned to land the fallback first (tasks groups 1–5) and pin the contract at
+the start of the full plan (group 6). The product owner decided for the full
+plan before implementation started, so the fallback stopping point was not
+built: the field link went straight to a Canvas source, with one post_update
+(see the Migration Plan).
 
 ### 13. Smaller decisions
 
@@ -246,9 +267,9 @@ decision can be taken at the gate.
 - **Custom JSON-LD** keeps its fill of the fixed names (title, description,
   site, sep, url, author, published, modified, image). Only field names stop
   being filled; the update logs templates whose custom JSON-LD uses one.
-- **Linking a value to its default source is stored.** The aside offers Reset.
-  This is an explicit exception to "values equal to what is inherited are not
-  stored".
+- **Linking a value to its default source is stored.** Its box offers × to go
+  back (and no Reset beside it). This is an explicit exception to "values
+  equal to what is inherited are not stored".
 - **A page's number details** have no fact to link to, so they get no link
   icon.
 - **AI:** a title variant is stored as `{text}` in the main part. The request
@@ -279,9 +300,10 @@ decision can be taken at the gate.
   on a bundle" service.
 - [Free composition is gone.] → Only tests used it. The update logs every
   composite it shortens.
-- [Gray (default) versus blue (set here) must be learned.] → The aside, the
-  icon colour and the accessible description say it too; hallway test with two
-  site builders.
+- [Gray (default) versus blue (set here) must be learned.] → Only the box's
+  tag carries the colour (the box itself is drawn as an input, review round
+  3); the tag's words ("Default", the link's path), the aside and the
+  accessible description say it too; hallway test with two site builders.
 - [An unpublished node previews with the editor's access (full plan); a field
   restricted by field permissions may show a value visitors will not get.] →
   Documented in the README as a known gap.
@@ -299,9 +321,9 @@ decision can be taken at the gate.
 
 The module is unreleased, so there is no permanent read shim. A pure,
 `@internal` converter (`src/Legacy.php`) holds the only remaining copy of the
-old brace regex; it and the post_updates are deleted after 1.0.
+old brace regex; it and the post_update are deleted after 1.0.
 
-1. **`canvas_metatag_post_update_values_as_parts`** (fallback half). Batched,
+1. **`canvas_metatag_post_update_values_as_parts`**. Batched,
    50 rows at a time. Converts the site settings, every node `full` template
    (read its draft first, save the stored template, write the converted draft
    back under its client id, as `canvas_metatag_uninstall()` does), every
@@ -311,15 +333,18 @@ old brace regex; it and the post_updates are deleted after 1.0.
    Titles split at the last separator: the part before it is the main part,
    the part after it the ending; an ending equal to the layer below is dropped;
    a title without a separator gets "No ending"; `{site}` becomes the Site name
-   fact; whole fact names become facts; a whole `{field.NAME}` becomes a field
-   link; a media UUID becomes `{media}`; other composites keep their first
-   piece and are logged; unknown names are dropped and logged. Log lines name
-   the entity and key, never the value.
-2. **`canvas_metatag_post_update_fields_as_sources`** (full plan). Same walk,
-   templates and their drafts only. A field link to the bundle's first
-   formatted text with a summary becomes the Description fact (lossless);
-   otherwise it takes the first vocabulary row for that field and kind,
-   preferring one hop; with no row, it is dropped and logged.
+   fact; whole fact names become facts; a media UUID becomes `{media}`; other
+   composites keep their first piece and are logged; unknown names are
+   dropped and logged. A whole `{field.NAME}` becomes a Canvas source at once
+   (the full plan needs no second update): the bundle's first formatted text
+   with a summary becomes the Description fact (lossless); otherwise the first
+   vocabulary row for that field and kind (`Sources::sourceFor()`, one hop
+   preferred, else a row ending at a title or name); an image field with no
+   row becomes the Image fact; with nothing, it is dropped and logged. Log
+   lines name the key and say "typed text" for typed words, never a value of
+   the content.
+2. *(Planned `canvas_metatag_post_update_fields_as_sources`: folded into 1,
+   because the fallback's `{field: NAME}` never shipped.)*
 
 **Rollback.** Restore the database from before `drush updb`. If the Canvas
 dependency must be withdrawn after shipping the full plan: revert the full-plan

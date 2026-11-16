@@ -1,13 +1,49 @@
+canvas_metatag.value:
+  type: mapping
+  label: 'Value: typed text, a fact, a media item or a field source'
+  mapping:
+    text:
+      type: string
+      label: 'Typed text'
+      requiredKey: false
+    fact:
+      type: string
+      label: 'Fact'
+      requiredKey: false
+      constraints:
+        Choice: [title, description, site, url, author, published, modified, image]
+    media:
+      type: string
+      label: 'Media UUID'
+      requiredKey: false
+    source:
+      type: mapping
+      label: 'Canvas entity-field source'
+      requiredKey: false
+      mapping:
+        expression:
+          type: string
+          label: 'Expression'
+        sourceType:
+          type: string
+          label: 'Source type'
+          constraints:
+            Choice: [entity-field]
+
 canvas_metatag.values:
   type: mapping
   label: 'SEO values'
   mapping:
     title:
-      type: string
-      label: 'Title'
+      type: canvas_metatag.value
+      label: 'Title main part'
+      requiredKey: false
+    title_end:
+      type: canvas_metatag.value
+      label: 'Title ending (empty typed text: no ending)'
       requiredKey: false
     description:
-      type: string
+      type: canvas_metatag.value
       label: 'Description'
       requiredKey: false
     social:
@@ -16,16 +52,16 @@ canvas_metatag.values:
       requiredKey: false
       mapping:
         title:
-          type: string
+          type: canvas_metatag.value
           label: 'Social title'
           requiredKey: false
         description:
-          type: string
+          type: canvas_metatag.value
           label: 'Social description'
           requiredKey: false
         image:
-          type: string
-          label: 'Social image (media UUID or image token)'
+          type: canvas_metatag.value
+          label: 'Social image'
           requiredKey: false
     robots:
       type: mapping
@@ -72,7 +108,7 @@ canvas_metatag.values:
           label: 'Property values'
           requiredKey: false
           sequence:
-            type: string
+            type: canvas_metatag.value
             label: 'Value'
         custom:
           type: string

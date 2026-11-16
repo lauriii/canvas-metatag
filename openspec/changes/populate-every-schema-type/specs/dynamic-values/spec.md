@@ -60,10 +60,10 @@ MUST NOT be stripped.
 - **WHEN** a body holds text that is not valid UTF-8
 - **THEN** its value MUST be empty
 
-#### Scenario: A description linked to a long formatted text
+#### Scenario: A value linked to a long formatted text
 
-- **WHEN** an Article template links the description to a Body of 1,000 characters
-- **THEN** the description MUST be that text cut at a word boundary within 160 characters
+- **WHEN** an Article template links the description, or the title or a structured data detail, to a Body of 1,000 characters
+- **THEN** that value MUST be the Body's text, not its summary, cut at a word boundary within 160 characters
 
 #### Scenario: Formatted text with a script and a style block
 

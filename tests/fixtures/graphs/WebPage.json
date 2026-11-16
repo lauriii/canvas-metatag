@@ -22,9 +22,10 @@
     "schema": {
         "type": "AboutPage"
     },
-    "tokens": {
+    "facts": {
         "title": "About Ada"
     },
+    "links": {},
     "images": [],
     "report": {
         "withheld": false,

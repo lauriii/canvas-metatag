@@ -24,14 +24,19 @@
     "schema": {
         "type": "ProfilePage",
         "props": {
-            "jobTitle": "Editor",
-            "sameAs": "https://social.example.com/ada"
+            "jobTitle": {
+                "text": "Editor"
+            },
+            "sameAs": {
+                "text": "https://social.example.com/ada"
+            }
         }
     },
-    "tokens": {
+    "facts": {
         "title": "Ada Writer",
         "description": "Ada writes about pages."
     },
+    "links": {},
     "images": [],
     "report": {
         "withheld": false,

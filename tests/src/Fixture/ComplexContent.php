@@ -677,7 +677,7 @@ final class ComplexContent {
     ],
     ];
     $template->set('component_tree', self::tree($tree));
-    $template->setThirdPartySetting('canvas_metatag', 'values', ['title' => '{title} {sep} Tickets'] + $live['values']);
+    $template->setThirdPartySetting('canvas_metatag', 'values', ['title_end' => ['text' => 'Tickets']] + $live['values']);
     $switcher = \Drupal::service('account_switcher');
     \assert($author instanceof User);
     $switcher->switchTo($author);
@@ -746,6 +746,22 @@ final class ComplexContent {
    */
   private static function link(string $bundle, string $path): array {
     return ['sourceType' => 'entity-field', 'expression' => 'ℹ︎␜entity:node:' . $bundle . '␝' . $path];
+  }
+
+  /**
+   * A value linked to a field: a template's SEO value.
+   */
+  private static function linked(string $bundle, string $path): array {
+    return ['source' => self::link($bundle, $path)];
+  }
+
+  /**
+   * A value linked to the image of an image media reference field.
+   *
+   * Read through its file, as the SEO dialog links it.
+   */
+  private static function linkedImage(string $bundle, string $field): array {
+    return self::linked($bundle, $field . '␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}');
   }
 
   /**
@@ -902,6 +918,8 @@ final class ComplexContent {
         'field_starts' => '2027-02-06T10:00:00',
         'field_venue' => '@node.venue_hidden',
         'field_performers' => ['@node.person_hidden', '@node.person_mira'],
+        // Not published: the poster is hidden from visitors.
+        'field_poster' => '@media.lamp_prototype',
         'field_event_status' => 'EventPostponed',
         'path' => ['alias' => '/complex/events/strings-workshop'],
       ],
@@ -1092,16 +1110,17 @@ final class ComplexContent {
           ],
         ],
         'values' => [
-          'title' => '{title} {sep} Events',
-          'social' => ['image' => '{field.field_poster}'],
+          'title_end' => ['text' => 'Events'],
+          'social' => ['image' => self::linkedImage('event', 'field_poster')],
           'schema' => [
             'type' => 'Event',
             'props' => [
-              'startDate' => '{field.field_starts}',
-              'endDate' => '{field.field_ends}',
-              'location_name' => '{field.field_venue}',
-              'eventStatus' => '{field.field_event_status}',
-              'image' => '{field.field_poster}',
+              'startDate' => self::linked('event', 'field_starts␞␟value'),
+              'endDate' => self::linked('event', 'field_ends␞␟value'),
+              'location_name' => self::linked('event', 'field_venue␞␟entity␜␜entity:node␝title␞␟value'),
+              'location_address_streetAddress' => self::linked('event', 'field_venue␞␟entity␜␜entity:node:venue␝field_street␞␟value'),
+              'eventStatus' => self::linked('event', 'field_event_status␞␟value'),
+              'image' => self::linkedImage('event', 'field_poster'),
             ],
           ],
         ],
@@ -1126,16 +1145,15 @@ final class ComplexContent {
           ],
           ],
         ],
+        // The description and the image are the product's own Description
+        // and Image facts: its body and its gallery.
         'values' => [
-          'description' => '{field.body}',
-          'social' => ['image' => '{field.field_gallery}'],
           'schema' => [
             'type' => 'Product',
             'props' => [
-              'offers_price' => '{field.field_price}',
-              'offers_priceCurrency' => '{field.field_currency}',
-              'sku' => '{field.field_sku}',
-              'image' => '{field.field_gallery}',
+              'offers_price' => self::linked('product', 'field_price␞␟value'),
+              'offers_priceCurrency' => self::linked('product', 'field_currency␞␟value'),
+              'sku' => self::linked('product', 'field_sku␞␟value'),
             ],
           ],
         ],
@@ -1174,8 +1192,8 @@ final class ComplexContent {
           ],
         ],
         'values' => [
-          'title' => '{title} {sep} Recipes',
-          'description' => '{field.field_ingredients}',
+          'title_end' => ['text' => 'Recipes'],
+          'description' => self::linked('recipe', 'field_ingredients␞␟value'),
         ],
       ],
       // Published with no SEO settings.
@@ -1220,9 +1238,9 @@ final class ComplexContent {
           'schema' => [
             'type' => 'ProfilePage',
             'props' => [
-              'jobTitle' => '{field.field_role}',
-              'sameAs' => '{field.field_links}',
-              'image' => '{field.field_photo}',
+              'jobTitle' => self::linked('person', 'field_role␞␟value'),
+              'sameAs' => self::linked('person', 'field_links␞␟uri'),
+              'image' => self::linkedImage('person', 'field_photo'),
             ],
           ],
         ],
@@ -1238,7 +1256,7 @@ final class ComplexContent {
           ],
           ],
         ],
-        'values' => ['title' => '{title} {sep} News'],
+        'values' => ['title_end' => ['text' => 'News']],
       ],
     ];
   }

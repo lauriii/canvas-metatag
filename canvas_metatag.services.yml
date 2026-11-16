@@ -3,6 +3,7 @@ services:
     autowire: true
     autoconfigure: true
   Drupal\canvas_metatag\Resolver: {}
+  Drupal\canvas_metatag\Sources: {}
   # Removed from the container when canvas_headless is not installed.
   Drupal\canvas_metatag\Controller\HeadlessContentController:
     decorates: Drupal\canvas_headless\Controller\CanvasContentController

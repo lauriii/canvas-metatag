@@ -75,8 +75,9 @@ final class EchoSeoProvider extends EchoProvider {
     if (str_contains($message, '#quota')) {
       throw new AiQuotaException('You exceeded your current quota');
     }
-    // The fixed text the assistant adds after every configured prompt.
-    $told = (bool) preg_match('~\n\nThe user message contains page text between <page_content> tags\. [^\n]+\nAnswer with JSON only, in this shape: \{[^\n]+\}\z~', (string) $input->getSystemPrompt());
+    // The fixed text the assistant adds after every configured prompt; a
+    // title request also has the ending rule.
+    $told = (bool) preg_match('~\n\nThe user message contains page text between <page_content> tags\. [^\n]+\n(?:The title ending given in the user message [^\n]+\n)?Answer with JSON only, in this shape: \{[^\n]+\}\z~', (string) $input->getSystemPrompt());
     if (str_contains($message, '#garbage') || !$told) {
       $answer = 'I cannot help with that.';
     }

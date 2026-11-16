@@ -63,6 +63,10 @@ final class ApiTest extends CanvasKernelTestBase {
     'canvas_test_sdc',
     'node',
     'field',
+    'datetime',
+    // Refuses `view` on a field named field_no_view_access.
+    'entity_test',
+    'field_test',
     'language',
     'content_translation',
     'canvas_metatag',
@@ -194,7 +198,7 @@ final class ApiTest extends CanvasKernelTestBase {
     $logo = $this->createImage('Logo', ['width' => 512, 'height' => 512]);
     $hidden = $this->createImage('Hidden', values: ['status' => FALSE]);
     $this->config('canvas_metatag.site')->set('identity.logo', $logo->uuid())->set('identity.default_image', $hidden->uuid())->save();
-    $stored = ['robots' => ['noindex' => TRUE], 'social' => ['image' => $picked->uuid()]];
+    $stored = ['robots' => ['noindex' => TRUE], 'social' => ['image' => ['media' => $picked->uuid()]]];
     $page = $this->createPage(['image' => $hero->id(), 'canvas_metatag' => Values::encode($stored)]);
     $query = '?entity_type=canvas_page&id=' . $page->id();
 
@@ -207,11 +211,11 @@ final class ApiTest extends CanvasKernelTestBase {
     $auto_save->saveEntity($draft, self::CLIENT);
     $values = [
       'robots' => ['noindex' => TRUE],
-      'social' => ['image' => $picked->uuid()],
-      'title' => 'Pricing plans {sep} {site}',
+      'social' => ['image' => ['media' => $picked->uuid()]],
+      'title' => ['text' => 'Pricing plans'],
     ];
     $response = $this->request(Request::create("/canvas-metatag/api/draft/canvas_page/{$page->id()}", 'PUT', content: (string) json_encode([
-      'values' => $values,
+      'values' => (object) $values,
       'langcode' => 'en',
       'client_instance_id' => self::CLIENT,
       'auto_saves' => ['canvas_page:' . $page->id() . ':en' => $auto_save->getClientAutoSaveData($page)],
@@ -233,7 +237,10 @@ final class ApiTest extends CanvasKernelTestBase {
       'site',
       'target',
       'preview',
-      'tokens',
+      'facts',
+      'separator',
+      'sources',
+      'broken',
       'media',
       'resolved',
     ], array_keys($state));
@@ -255,7 +262,7 @@ final class ApiTest extends CanvasKernelTestBase {
           'default_image' => $hidden->uuid(),
           'same_as' => [],
         ],
-        'values' => ['robots' => ['max_image_preview' => 'large'], 'title' => '{title} {sep} {site}'],
+        'values' => ['robots' => ['max_image_preview' => 'large']],
       ],
       'target' => [
         'scope' => 'page',
@@ -277,17 +284,20 @@ final class ApiTest extends CanvasKernelTestBase {
         'url' => 'http://localhost/pricing',
         'published' => TRUE,
       ],
-      'tokens' => [
-        'title' => ['label' => 'Page title', 'type' => 'text', 'value' => 'Draft title'],
-        'description' => ['label' => 'Description', 'type' => 'text', 'value' => 'Plans and prices for Example.'],
-        'site' => ['label' => 'Site name', 'type' => 'text', 'value' => 'Example'],
-        'sep' => ['label' => 'Separator', 'type' => 'text', 'value' => '|'],
-        'url' => ['label' => 'Page address', 'type' => 'url', 'value' => 'http://localhost/pricing'],
-        'author' => ['label' => 'Author', 'type' => 'text', 'value' => 'Ada Writer'],
-        'published' => ['label' => 'First published', 'type' => 'datetime', 'value' => self::PUBLISHED],
-        'modified' => ['label' => 'Last updated', 'type' => 'datetime', 'value' => self::MODIFIED],
-        'image' => ['label' => 'Page image', 'type' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
+      'facts' => [
+        'title' => ['label' => 'Title', 'kind' => 'text', 'value' => 'Draft title'],
+        'description' => ['label' => 'Description', 'kind' => 'text', 'value' => 'Plans and prices for Example.'],
+        'site' => ['label' => 'Site name', 'kind' => 'text', 'value' => 'Example'],
+        'url' => ['label' => 'Page address', 'kind' => 'address', 'value' => 'http://localhost/pricing'],
+        'author' => ['label' => 'Author', 'kind' => 'text', 'value' => 'Ada Writer'],
+        'published' => ['label' => 'First published', 'kind' => 'date', 'value' => self::PUBLISHED],
+        'modified' => ['label' => 'Last updated', 'kind' => 'date', 'value' => self::MODIFIED],
+        'image' => ['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
       ],
+      'separator' => '|',
+      // A page links no field.
+      'sources' => [],
+      'broken' => [],
       // The site's default image is not one the user may view: absent.
       'media' => [
         $picked->uuid() => array_intersect_key($this->imageOf($picked), [
@@ -335,7 +345,7 @@ final class ApiTest extends CanvasKernelTestBase {
       ['label' => 'Pricing', 'has_draft' => FALSE, 'values' => $stored],
       array_intersect_key($viewer['target'], ['label' => 1, 'has_draft' => 1, 'values' => 1]),
     );
-    self::assertSame('Pricing', $viewer['tokens']['title']['value']);
+    self::assertSame('Pricing', $viewer['facts']['title']['value']);
     self::assertSame('Pricing', $viewer['preview']['label']);
     self::assertSame('Pricing | Example', $viewer['resolved']['head']['title']);
     // Update access without the dialog's permission: the draft, read-only.
@@ -410,8 +420,9 @@ final class ApiTest extends CanvasKernelTestBase {
       'handler' => 'default:media',
       'handler_settings' => ['target_bundles' => ['image' => 'image']],
     ]);
+    $this->createField('field_no_view_access', 'string', 'Notes');
     $hero = $this->createImage('Article hero');
-    $stored = ['social' => ['image' => '{field.field_hero}'], 'title' => '{title} {sep} Blog'];
+    $stored = ['social' => ['image' => $this->linkTo('Hero image › Image', 'image')], 'title_end' => ['text' => 'Blog']];
     $this->createTemplate(TRUE, $stored);
     $node = Node::create([
       'type' => 'article',
@@ -430,11 +441,11 @@ final class ApiTest extends CanvasKernelTestBase {
 
     // The template's editor writes a draft and sees it.
     $this->setUpCurrentUser(permissions: [...self::VISITOR, ContentTemplate::ADMIN_PERMISSION, 'edit canvas metatag']);
-    $values = ['schema' => ['type' => 'BlogPosting'], 'title' => '{field.field_byline}: {title}'];
+    $values = ['schema' => ['type' => 'BlogPosting'], 'title' => $this->linkTo('Byline')];
     $template = ContentTemplate::load('node.article.full');
     self::assertInstanceOf(ContentTemplate::class, $template);
     $response = $this->request(Request::create('/canvas-metatag/api/draft/content_template/node.article.full', 'PUT', content: (string) json_encode([
-      'values' => $values,
+      'values' => (object) $values,
       'client_instance_id' => self::CLIENT,
       'auto_saves' => ['content_template:node.article.full' => $this->container->get(AutoSaveManager::class)->getClientAutoSaveData($template)],
     ])));
@@ -450,7 +461,10 @@ final class ApiTest extends CanvasKernelTestBase {
       'site',
       'target',
       'preview',
-      'tokens',
+      'facts',
+      'separator',
+      'sources',
+      'broken',
       'media',
       'resolved',
     ], array_keys($state));
@@ -476,27 +490,31 @@ final class ApiTest extends CanvasKernelTestBase {
       'url' => 'http://localhost/node/' . $node->id(),
       'published' => TRUE,
     ], $state['preview']);
-    // The tokens every entity has, then one per supported field.
+    // The facts every entity has; the type's fields with the previewed
+    // node's values.
+    self::assertSame(['title', 'description', 'site', 'url', 'author', 'published', 'modified', 'image'], array_keys($state['facts']));
+    self::assertSame($this->imageOf($hero), $state['facts']['image']['image']);
+    $rows = array_column($state['sources'], NULL, 'label');
     self::assertSame(
       [
-        'title',
-        'description',
-        'site',
-        'sep',
-        'url',
-        'author',
-        'published',
-        'modified',
-        'image',
-        'field.field_byline',
-        'field.field_hero',
+        'source' => $this->linkTo('Byline')['source'],
+        'label' => 'Byline',
+        'path' => ['Byline'],
+        'field' => 'field_byline',
+        'hop' => FALSE,
+        'kinds' => ['text'],
+        'status' => 'ok',
+        'value' => 'Grace Hopper',
       ],
-      array_keys($state['tokens']),
+      $rows['Byline'],
     );
-    self::assertSame(['label' => 'Byline', 'type' => 'text', 'value' => 'Grace Hopper'], $state['tokens']['field.field_byline']);
-    self::assertSame(['label' => 'Hero image', 'type' => 'image', 'value' => '', 'image' => $this->imageOf($hero)], $state['tokens']['field.field_hero']);
-    self::assertSame($this->imageOf($hero), $state['tokens']['image']['image']);
-    self::assertSame('Grace Hopper: Hello', $state['resolved']['head']['title']);
+    // A link reads the image through its file: it is named by the file.
+    $linked = array_replace($this->imageOf($hero), ['name' => 'article-hero.png']);
+    self::assertSame($linked, $rows['Hero image › Image']['image']);
+    // A field visitors may not view is listed, with no value.
+    self::assertSame(['hidden', ''], [$rows['Notes']['status'], $rows['Notes']['value']]);
+    self::assertSame([], $state['broken']);
+    self::assertSame('Grace Hopper | Example', $state['resolved']['head']['title']);
     self::assertSame('article', self::meta($state['resolved']['head'])['og:type']);
     self::assertSame($this->imageOf($hero) + ['source' => 'entity'], $state['resolved']['image']);
     self::assertSame(['withheld' => FALSE, 'missing_required' => [], 'missing_recommended' => []], $state['resolved']['schema']);
@@ -513,17 +531,24 @@ final class ApiTest extends CanvasKernelTestBase {
       'values' => 1,
     ]));
     self::assertSame('Hello | Blog', $viewer['resolved']['head']['title']);
-    // An image bound to a field comes from the entity.
+    // An image linked to a field comes from the entity.
     self::assertSame('entity', $viewer['resolved']['image']['source']);
 
     // A stored value is edited as it is stored: a configuration override of
     // the template reaches the output only.
-    $GLOBALS['config']['canvas.content_template.node.article.full']['third_party_settings']['canvas_metatag']['values']['title'] = 'Overridden';
+    $GLOBALS['config']['canvas.content_template.node.article.full']['third_party_settings']['canvas_metatag']['values']['title'] = ['text' => 'Overridden'];
     $this->container->get('config.factory')->clearStaticCache();
     $this->container->get('entity_type.manager')->getStorage(ContentTemplate::ENTITY_TYPE_ID)->resetCache();
     $overridden = self::decodeResponse($this->request(Request::create(self::STATE . $query)));
     self::assertSame($stored, $overridden['target']['values']);
-    self::assertSame('Overridden', $overridden['resolved']['head']['title']);
+    self::assertSame('Overridden | Blog', $overridden['resolved']['head']['title']);
+    // The ending too: the dialog keeps the stored "Blog".
+    $GLOBALS['config']['canvas.content_template.node.article.full']['third_party_settings']['canvas_metatag']['values']['title_end'] = ['text' => 'Override'];
+    $this->container->get('config.factory')->clearStaticCache();
+    $this->container->get('entity_type.manager')->getStorage(ContentTemplate::ENTITY_TYPE_ID)->resetCache();
+    $overridden = self::decodeResponse($this->request(Request::create(self::STATE . $query)));
+    self::assertSame(['text' => 'Blog'], $overridden['target']['values']['title_end']);
+    self::assertSame('Overridden | Override', $overridden['resolved']['head']['title']);
     unset($GLOBALS['config']['canvas.content_template.node.article.full']);
     $this->container->get('config.factory')->clearStaticCache();
     $this->container->get('entity_type.manager')->getStorage(ContentTemplate::ENTITY_TYPE_ID)->resetCache();
@@ -534,6 +559,8 @@ final class ApiTest extends CanvasKernelTestBase {
       'title' => 'Draft',
       'status' => FALSE,
       'uid' => $this->author->id(),
+      'field_byline' => 'Byline being written',
+      'field_no_view_access' => 'Secret notes',
     ]);
     $draft_node->save();
     $this->setUpCurrentUser(permissions: [
@@ -543,8 +570,20 @@ final class ApiTest extends CanvasKernelTestBase {
       'bypass node access',
     ]);
     $draft_query = '?entity_type=content_template&id=node.article.full&preview=' . $draft_node->id();
-    $unpublished = self::decodeResponse($this->request(Request::create(self::STATE . $draft_query)))['preview'];
-    self::assertSame(['Draft', FALSE], [$unpublished['label'], $unpublished['published']]);
+    $response = $this->request(Request::create(self::STATE . $draft_query));
+    $unpublished = self::decodeResponse($response);
+    self::assertSame(['Draft', FALSE], [$unpublished['preview']['label'], $unpublished['preview']['published']]);
+    // A node visitors cannot view yet is read with the editor's access, and
+    // a field this editor may not view is not sent.
+    self::assertSame('Byline being written', array_column($unpublished['sources'], 'value', 'label')['Byline']);
+    self::assertStringNotContainsString('Secret notes', (string) $response->getContent());
+
+    // A stored link to a field that is gone is listed as broken.
+    $template = ContentTemplate::load('node.article.full');
+    \assert($template instanceof ContentTemplate);
+    $gone = ['source' => ['expression' => 'ℹ︎␜entity:node:article␝field_gone␞␟value', 'sourceType' => 'entity-field']];
+    $this->container->get(AutoSaveManager::class)->saveEntity((clone $template)->setThirdPartySetting('canvas_metatag', 'values', ['description' => $gone]), self::CLIENT);
+    self::assertSame(['description' => ['field' => 'field_gone', 'reason' => 'missing']], self::decodeResponse($this->request(Request::create(self::STATE . $query)))['broken']);
 
     $errors = [
       $query . '&langcode=en' => [400, 'bad_request'],
@@ -572,7 +611,7 @@ final class ApiTest extends CanvasKernelTestBase {
    */
   public function testTemplateWithoutNodes(): void {
     $this->createField('field_byline', 'string', 'Byline');
-    $stored = ['title' => '{title} {sep} News'];
+    $stored = ['title_end' => ['text' => 'News']];
     $this->createTemplate(TRUE, $stored);
     ContentTemplate::create([
       'content_entity_type_id' => 'node',
@@ -592,14 +631,18 @@ final class ApiTest extends CanvasKernelTestBase {
     );
     self::assertNull($state['preview']);
     self::assertNull($state['resolved']);
-    // The type's vocabulary, without values.
-    self::assertSame(['label' => 'Byline', 'type' => 'text', 'value' => ''], $state['tokens']['field.field_byline']);
-    self::assertSame([''], array_values(array_unique(array_column($state['tokens'], 'value'))));
+    // The type's fields and the facts, without values but the site name.
+    self::assertSame([
+      'Byline',
+      'none',
+      '',
+    ], [$state['sources'][0]['label'], $state['sources'][0]['status'], $state['sources'][0]['value']]);
+    self::assertSame(['', 'Example'], array_values(array_unique(array_column($state['facts'], 'value'))));
 
     // The draft, for who may update the template.
     $template = ContentTemplate::load('node.article.full');
     self::assertInstanceOf(ContentTemplate::class, $template);
-    $draft = ['title' => '{title} {sep} Updates'];
+    $draft = ['title_end' => ['text' => 'Updates']];
     $this->container->get(AutoSaveManager::class)->saveEntity((clone $template)->setThirdPartySetting('canvas_metatag', 'values', $draft), self::CLIENT);
     self::assertSame($draft, self::decodeResponse($this->request(Request::create(self::STATE . $query)))['target']['values']);
 
@@ -621,7 +664,7 @@ final class ApiTest extends CanvasKernelTestBase {
    */
   public function testSite(): void {
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'administer canvas metatag']);
-    // No page at all: the vocabulary with empty values, and no output.
+    // No page at all: the facts, empty but the site name, and no output.
     $response = $this->request(Request::create(self::STATE));
     self::assertStringContainsString('"media":{}', (string) $response->getContent());
     $state = self::decodeResponse($response);
@@ -634,7 +677,10 @@ final class ApiTest extends CanvasKernelTestBase {
       'site',
       'target',
       'preview',
-      'tokens',
+      'facts',
+      'separator',
+      'sources',
+      'broken',
       'media',
       'resolved',
     ], array_keys($state));
@@ -645,9 +691,10 @@ final class ApiTest extends CanvasKernelTestBase {
       $state['resolved'],
     ]);
     self::assertSame(['target' => FALSE, 'site' => TRUE], $state['can']);
-    self::assertSame(['title', 'description', 'site', 'sep', 'url', 'author', 'published', 'modified', 'image'], array_keys($state['tokens']));
-    self::assertSame([''], array_values(array_unique(array_column($state['tokens'], 'value'))));
-    self::assertSame(['label' => 'Page image', 'type' => 'image', 'value' => '', 'image' => NULL], $state['tokens']['image']);
+    self::assertSame(['title', 'description', 'site', 'url', 'author', 'published', 'modified', 'image'], array_keys($state['facts']));
+    self::assertSame(['', 'Example'], array_values(array_unique(array_column($state['facts'], 'value'))));
+    self::assertSame(['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => NULL], $state['facts']['image']);
+    self::assertSame(['|', [], []], [$state['separator'], $state['sources'], $state['broken']]);
 
     // The page to preview with: the published page that changed last, or
     // the front page when it is a Canvas page.
@@ -667,7 +714,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'published' => TRUE,
     ], $state['preview']);
     self::assertNull($state['target']);
-    self::assertSame('Newer', $state['tokens']['title']['value']);
+    self::assertSame('Newer', $state['facts']['title']['value']);
     self::assertSame('Newer | Example', $state['resolved']['head']['title']);
     foreach (['/page/' . $older->id(), '/older'] as $front) {
       $this->config('system.site')->set('page.front', $front)->save();
@@ -685,7 +732,7 @@ final class ApiTest extends CanvasKernelTestBase {
     $GLOBALS['config']['canvas_metatag.site']['identity']['name'] = 'Staging';
     $this->container->get('config.factory')->clearStaticCache();
     $state = self::decodeResponse($this->request(Request::create(self::STATE)));
-    self::assertSame(['robots' => ['max_image_preview' => 'large'], 'title' => '{title} {sep} {site}'], $state['site']['values']);
+    self::assertSame(['robots' => ['max_image_preview' => 'large']], $state['site']['values']);
     self::assertSame('', $state['site']['identity']['name']);
     self::assertSame('noindex, max-image-preview:large', self::meta($state['resolved']['head'])['robots']);
     self::assertSame('Older | Staging', $state['resolved']['head']['title']);
@@ -700,8 +747,11 @@ final class ApiTest extends CanvasKernelTestBase {
         'same_as' => ['https://social.example.com/example', 'example'],
       ],
       'values' => [
-        'title' => '{title} {field.field_x}',
-        'description' => 'Site-wide',
+        'title' => ['text' => 'Every page'],
+        'title_end' => [
+          'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_x␞␟value', 'sourceType' => 'entity-field'],
+        ],
+        'description' => ['text' => 'Site-wide'],
         'robots' => ['max_snippet' => 2000],
       ],
     ]);
@@ -712,6 +762,7 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertEqualsCanonicalizing(
       [
         'title',
+        'title_end',
         'description',
         'robots.max_snippet',
         'identity.kind',
@@ -722,6 +773,7 @@ final class ApiTest extends CanvasKernelTestBase {
       array_keys($error['fields']),
     );
     self::assertSame('Line 2 is not a full address. Start with https://.', $error['fields']['identity.same_as.1']);
+    self::assertSame('This setting is not available here.', $error['fields']['title_end']);
     self::assertSame('', $this->config('canvas_metatag.site')->getRawData()['identity']['name']);
 
     // Saved at once, and what is saved is what was sent: no override.
@@ -733,10 +785,10 @@ final class ApiTest extends CanvasKernelTestBase {
       'default_image' => '',
       'same_as' => ['https://social.example.com/ada'],
     ];
-    $values = ['robots' => ['nofollow' => TRUE], 'title' => '{title} {sep} {site}'];
+    $values = ['robots' => ['nofollow' => TRUE], 'title_end' => ['text' => 'Example Co']];
     // Sent in another order, with empties: the answer is canonical.
     $response = $this->putSite([
-      'values' => ['title' => $values['title'], 'robots' => ['nofollow' => TRUE]],
+      'values' => ['title_end' => $values['title_end'], 'robots' => ['nofollow' => TRUE]],
       'identity' => array_reverse($identity, TRUE),
     ]);
     self::assertSame(200, $response->getStatusCode());
@@ -750,7 +802,7 @@ final class ApiTest extends CanvasKernelTestBase {
     unset($GLOBALS['config']['canvas_metatag.site']);
     $this->container->get('config.factory')->clearStaticCache();
     $state = self::decodeResponse($this->request(Request::create(self::STATE)));
-    self::assertSame('Older · Ada Writer', $state['resolved']['head']['title']);
+    self::assertSame('Older · Example Co', $state['resolved']['head']['title']);
     self::assertSame('nofollow', self::meta($state['resolved']['head'])['robots']);
     // Clearing everything leaves the identity defaults and no values.
     $response = $this->putSite(['identity' => [], 'values' => []]);
@@ -764,6 +816,9 @@ final class ApiTest extends CanvasKernelTestBase {
       'no identity' => '{"values":{}}',
       'no values' => '{"identity":{}}',
       'values a list' => '{"identity":{},"values":["a"]}',
+      // Decoded to arrays, an empty list and an empty object are alike.
+      'values an empty list' => '{"identity":{},"values":[]}',
+      'identity an empty list' => '{"identity":[],"values":{}}',
       'identity a string' => '{"identity":"x","values":{}}',
       'too large' => (string) json_encode(['identity' => [], 'values' => [], 'padding' => str_repeat('a', 131072)]),
     ];
@@ -789,31 +844,26 @@ final class ApiTest extends CanvasKernelTestBase {
   }
 
   /**
-   * A site value sent back exactly as stored is kept, also when it fails.
+   * A site value that is not one the site may hold is never used.
    */
-  public function testSiteKeepsStoredValue(): void {
+  public function testSiteIgnoresStoredLinks(): void {
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'administer canvas metatag']);
-    // A configuration import stored a title with an unknown value.
-    $title = '{field.field_x} {sep} {site}';
-    $this->config('canvas_metatag.site')->set('values.title', $title)->save();
+    // A configuration import stored an ending linked to a field.
+    $this->config('canvas_metatag.site')->set('values.title_end', [
+      'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_x␞␟value', 'sourceType' => 'entity-field'],
+    ])->save();
+    $this->createPage();
     $state = self::decodeResponse($this->request(Request::create(self::STATE)));
-    self::assertSame($title, $state['site']['values']['title']);
+    self::assertSame(['robots' => ['max_image_preview' => 'large']], $state['site']['values']);
+    self::assertSame('Pricing | Example', $state['resolved']['head']['title']);
 
-    // Changing only the logo is accepted; the title stays as stored.
+    // Saving the identity writes the values the dialog shows.
     $logo = $this->createImage('Logo');
     $identity = ['logo' => $logo->uuid()] + $state['site']['identity'];
     $response = $this->putSite(['identity' => $identity, 'values' => $state['site']['values']]);
     self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
-    self::assertSame($title, self::decodeResponse($response)['site']['values']['title']);
     self::assertSame($logo->uuid(), $this->config('canvas_metatag.site')->get('identity.logo'));
-    self::assertSame($title, $this->config('canvas_metatag.site')->get('values.title'));
-
-    // Changing the title is validated as usual.
-    $values = ['title' => '{field.field_x} {sep} Example'] + $state['site']['values'];
-    $response = $this->putSite(['identity' => $identity, 'values' => $values]);
-    self::assertSame(422, $response->getStatusCode());
-    self::assertSame(['title'], array_keys(self::decodeResponse($response)['error']['fields']));
-    self::assertSame($title, $this->config('canvas_metatag.site')->get('values.title'));
+    self::assertNull($this->config('canvas_metatag.site')->get('values.title_end'));
   }
 
   /**
@@ -890,7 +940,15 @@ final class ApiTest extends CanvasKernelTestBase {
     $page->addTranslation('fr', ['title' => 'Tarifs', 'status' => TRUE, 'path' => ['alias' => '/tarifs']])->save();
     $french = Page::load($page->id())?->getTranslation('fr');
     \assert($french instanceof Page);
-    $values = ['schema' => ['props' => ['name' => 'Bureau', 'offers_price' => '49', 'offers_priceCurrency' => 'EUR']]];
+    $values = [
+      'schema' => [
+        'props' => [
+          'name' => ['text' => 'Bureau'],
+          'offers_price' => ['text' => '49'],
+          'offers_priceCurrency' => ['text' => 'EUR'],
+        ],
+      ],
+    ];
     $path = "/canvas-metatag/api/draft/canvas_page/{$page->id()}";
     $response = $this->putDraft($path, $french, $values, ['langcode' => 'fr']);
     self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
@@ -906,18 +964,59 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame(422, $response->getStatusCode());
     self::assertSame(['schema.props.name', 'schema.props.offers_price', 'schema.props.offers_priceCurrency'], array_keys(self::decodeResponse($response)['error']['fields']));
 
-    // A template value that names a field that no longer exists is carried
-    // as it is: the other fields stay savable. Changing it is refused.
-    $template = $this->createTemplate(TRUE, ['title' => '{title} {field.field_gone}']);
-    $path = '/canvas-metatag/api/draft/content_template/' . $template->id();
-    $response = $this->putDraft($path, $template, ['description' => 'New', 'title' => '{title} {field.field_gone}']);
-    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
-    self::assertSame('{"values":{"description":"New","title":"{title} {field.field_gone}"}}', $response->getContent());
-    $response = $this->putDraft($path, $template, ['description' => 'New', 'title' => '{title} {field.field_gone} x']);
+    // A page links no field, in any write.
+    $response = $this->putDraft($path, $english, [
+      'title_end' => [
+        'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'],
+      ],
+      'canonical' => 'pricing',
+    ], ['langcode' => 'en']);
     self::assertSame(422, $response->getStatusCode());
-    self::assertSame(['title'], array_keys(self::decodeResponse($response)['error']['fields']));
-    $response = $this->putDraft($path, $template, ['description' => 'New']);
-    self::assertSame('{"values":{"description":"New"}}', $response->getContent());
+    self::assertSame([
+      'title_end' => 'This setting is not available here.',
+      'canonical' => 'Enter a full address that starts with https://, or a path that starts with /.',
+    ], self::decodeResponse($response)['error']['fields']);
+    // A refused write makes no draft.
+    self::assertTrue($this->container->get(AutoSaveManager::class)->getAutoSaveEntity($english, TRUE)->isEmpty());
+
+    // A template value linked to a field that no longer exists is carried
+    // as it is: the other fields stay savable. Linking another field the
+    // menu does not offer is refused.
+    $this->createField('field_byline', 'string', 'Byline');
+    $this->createField('field_when', 'datetime', 'When', ['datetime_type' => 'datetime']);
+    $gone = ['source' => ['expression' => 'ℹ︎␜entity:node:article␝field_gone␞␟value', 'sourceType' => 'entity-field']];
+    $template = $this->createTemplate(TRUE, ['description' => $gone]);
+    $path = '/canvas-metatag/api/draft/content_template/' . $template->id();
+    $response = $this->putDraft($path, $template, ['description' => $gone, 'title' => ['text' => 'New']]);
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    self::assertSame(['values' => ['description' => $gone, 'title' => ['text' => 'New']]], json_decode((string) $response->getContent(), TRUE));
+    $refused = [
+      // An expression the menu does not offer.
+      [
+        'source' => [
+          'expression' => 'ℹ︎␜entity:node:article␝uid␞␟entity␜␜entity:user␝mail␞␟value',
+          'sourceType' => 'entity-field',
+        ],
+      ],
+      // A date as text.
+      $this->linkTo('When', 'date'),
+      // A field that is gone, newly linked.
+      ['source' => ['expression' => 'ℹ︎␜entity:node:article␝field_other_gone␞␟value', 'sourceType' => 'entity-field']],
+    ];
+    foreach ($refused as $source) {
+      $response = $this->putDraft($path, $template, ['description' => $source]);
+      self::assertSame(422, $response->getStatusCode());
+      self::assertSame(['description' => 'Choose a field from the list.'], self::decodeResponse($response)['error']['fields']);
+    }
+    $response = $this->putDraft($path, $template, ['description' => $this->linkTo('Byline')]);
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    // Undo back to the stored link while the draft holds another: the value
+    // the template has stored is carried too.
+    $response = $this->putDraft($path, $template, ['description' => $gone]);
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    self::assertSame(['values' => ['description' => $gone]], json_decode((string) $response->getContent(), TRUE));
+    $response = $this->putDraft($path, $template, []);
+    self::assertSame('{"values":{}}', $response->getContent());
   }
 
   /**
@@ -951,6 +1050,12 @@ final class ApiTest extends CanvasKernelTestBase {
    * Sends a site settings save.
    */
   private function putSite(array $body): Response {
+    // Maps as JSON objects, as the dialog sends them, even when empty.
+    foreach (['identity', 'values'] as $member) {
+      if (isset($body[$member]) && is_array($body[$member])) {
+        $body[$member] = (object) $body[$member];
+      }
+    }
     return $this->request(Request::create(self::SITE, 'PUT', content: (string) json_encode($body)));
   }
 

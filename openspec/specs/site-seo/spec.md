@@ -2,8 +2,9 @@
 
 ## Purpose
 
-Hold what is safe as a site-wide value: who runs the site, the title pattern
-and separator, a default social image and the search visibility defaults.
+Hold what is safe as a site-wide value: who runs the site, the default title
+ending and the separator, a default social image and the search visibility
+defaults.
 Site settings are saved as configuration, apply to every owned page and node
 at once, and sit below every page and content type value (head-output).
 
@@ -15,7 +16,7 @@ Site settings MUST be stored in the configuration object
 `canvas_metatag.site` and MUST export and import like any other configuration.
 The identity MUST hold the kind (organization or person), a name, the title
 separator, a logo, a default social image and up to ten profile addresses. The
-site-wide values MAY hold only a title pattern and robots directives: there is
+site-wide values MAY hold only a title ending and robots directives: there is
 no site-wide description, social text, canonical or structured data type. Site
 settings MUST be the same in every language.
 
@@ -31,9 +32,9 @@ settings MUST be the same in every language.
 
 ### Requirement: Installed defaults
 
-Installing the module MUST set the title pattern `{title} {sep} {site}`,
-`max_image_preview` large, the kind organization, the separator `|`, an empty
-name and no images or profiles.
+Installing the module MUST store no title ending (so the ending is the Site
+name), `max_image_preview` large, the kind organization, the separator `|`, an
+empty name and no images or profiles.
 
 #### Scenario: A fresh install
 
@@ -50,7 +51,7 @@ store nothing. An identity member that is left out MUST take its default.
 
 #### Scenario: Several invalid members
 
-- **WHEN** a save has the kind "robot", the separator "ab", the logo "nope", a second profile "example", a field value in the title and a text preview limit of 2000
+- **WHEN** a save has the kind "robot", the separator "ab", the logo "nope", a second profile "example", a title ending linked to a field and a text preview limit of 2000
 - **THEN** the system MUST answer 422 naming each of them, and the stored settings MUST be unchanged
 
 #### Scenario: Clearing everything
@@ -124,7 +125,7 @@ changed last, else for nothing.
 #### Scenario: No page at all
 
 - **WHEN** the site has no published Canvas page
-- **THEN** the state MUST have no preview and no output, and the dynamic values MUST be listed with empty values
+- **THEN** the state MUST have no preview and no output, and the facts MUST be listed with empty values
 
 ### Requirement: Overrides from outside apply to the output only
 
@@ -150,19 +151,41 @@ settings MUST show it.
 - **WHEN** neither the setting nor a headless frontend is configured
 - **THEN** the state MUST report the request's address with the source `request`
 
-### Requirement: A site value sent back unchanged is kept
+### Requirement: The site sets the default title ending
 
-A site save that sends a value exactly as it is stored MUST accept it as
-stored, even when it would no longer pass, so that the other site settings
-stay savable. A value that differs from the stored one MUST be validated as
-usual.
+The site's title ending MUST be one of: the Site name (the default, stored as
+nothing), "No ending", or typed text of at most 255 characters. Every page and
+content type that sets no ending of its own MUST use it. The site MUST NOT set
+the title's main part: each page and node uses its own.
 
-#### Scenario: A title that a configuration import made invalid
+#### Scenario: A typed ending
 
-- **WHEN** the stored site title is `{field.field_x} {sep} {site}` after a configuration import, and an administrator changes only the logo
-- **THEN** the save MUST be accepted, the logo MUST be stored, and the title MUST stay as stored
+- **WHEN** an administrator sets the title ending "Example Co" and saves
+- **THEN** a page "About us" that sets no ending MUST have the title "About us | Example Co"
 
-#### Scenario: Changing that title
+#### Scenario: No ending
 
-- **WHEN** the administrator then changes that title to `{field.field_x} {sep} Example`
-- **THEN** the save MUST be refused for `title` until the unknown value is removed
+- **WHEN** an administrator sets the title ending to "No ending" and saves
+- **THEN** a page "About us" that sets no ending MUST have the title "About us"
+
+#### Scenario: A main part sent for the site
+
+- **WHEN** a site save includes a title main part
+- **THEN** the system MUST refuse it with "This setting is not available here."
+
+### Requirement: A site value the site may not hold is ignored
+
+A site value the site may not hold, such as a title ending linked to a field
+by a configuration import, MUST be ignored: not shown, not used in the head,
+and dropped by the next save, so that the other site settings stay savable. A
+value that differs from what the dialog shows MUST be validated as usual.
+
+#### Scenario: An ending that a configuration import linked to a field
+
+- **WHEN** the stored site values hold `title_end: {source: …}` after a configuration import, and an administrator changes only the logo
+- **THEN** the dialog MUST show the Site name as the ending, the head MUST end titles with the Site name, the save MUST be accepted, the logo MUST be stored and the ending MUST be gone
+
+#### Scenario: Linking the ending again
+
+- **WHEN** the administrator then sends a title ending linked to a field
+- **THEN** the save MUST be refused for `title_end` with "This setting is not available here."

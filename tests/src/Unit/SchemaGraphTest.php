@@ -7,6 +7,7 @@ namespace Drupal\Tests\canvas_metatag\Unit;
 use Drupal\canvas_metatag\Hook\CanvasMetatagHooks;
 use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
+use Drupal\Component\Uuid\Uuid;
 use Drupal\Tests\UnitTestCase;
 use Masterminds\HTML5;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -47,14 +48,44 @@ final class SchemaGraphTest extends UnitTestCase {
 
   /**
    * Builds a graph the way the resolver does.
+   *
+   * @param array $schema
+   *   The effective `schema` value.
+   * @param array<string, string> $facts
+   *   Fact name => text; also what custom JSON-LD strings are filled with.
+   * @param array<string, array> $images
+   *   Media UUID, or `image` for the Image fact => image array.
+   * @param array $ctx
+   *   Overrides of the context.
+   * @param array<string, string> $links
+   *   Source expression => what the link gives.
    */
-  private static function build(array $schema, array $tokens = [], array $images = [], array $ctx = []): array {
+  private static function build(array $schema, array $facts = [], array $images = [], array $ctx = [], array $links = []): array {
     return SchemaGraph::build(
-      $ctx + self::CTX,
+      $ctx + ['facts' => $facts] + self::CTX,
       $schema,
-      static fn (string $template, bool $keep = FALSE): string => Values::fill($template, $tokens, $keep),
-      static fn (string $reference): ?array => $images[$reference] ?? NULL,
+      static fn (array $value, string $kind): string|array|null => match (array_key_first($value)) {
+        'text' => $value['text'],
+        'fact' => $kind === 'image' ? $images[$value['fact']] ?? NULL : $facts[$value['fact']] ?? '',
+        'media' => $images[$value['media']] ?? NULL,
+        'source' => $links[$value['source']['expression']] ?? NULL,
+        default => NULL,
+      },
     );
+  }
+
+  /**
+   * Typed text.
+   */
+  private static function typed(string $text): array {
+    return ['text' => $text];
+  }
+
+  /**
+   * A field link.
+   */
+  private static function link(string $field): array {
+    return ['source' => ['expression' => "ℹ︎␜entity:node:page␝{$field}␞␟value", 'sourceType' => 'entity-field']];
   }
 
   /**
@@ -93,7 +124,7 @@ final class SchemaGraphTest extends UnitTestCase {
   #[DataProvider('providerFixtures')]
   public function testFixture(string $name): void {
     $fixture = json_decode((string) file_get_contents(dirname(__DIR__, 2) . "/fixtures/graphs/$name.json"), TRUE, 32, JSON_THROW_ON_ERROR);
-    $result = self::build($fixture['schema'], $fixture['tokens'], $fixture['images'], $fixture['ctx']);
+    $result = self::build($fixture['schema'], $fixture['facts'], $fixture['images'], $fixture['ctx'], $fixture['links']);
     self::assertSame($fixture['graph'], $result['graph']);
     self::assertSame($fixture['report'], array_diff_key($result, ['graph' => TRUE]));
     self::assertGraphRules($result['graph'], $fixture['ctx']['home'], $fixture['ctx']['url']);
@@ -166,7 +197,7 @@ final class SchemaGraphTest extends UnitTestCase {
    * The @id table, exactly. These are identity and never change.
    */
   public function testIds(): void {
-    $result = self::build(['type' => 'Article'], ['title' => 'Hello'], ['{image}' => self::IMAGE], [
+    $result = self::build(['type' => 'Article'], ['title' => 'Hello'], ['image' => self::IMAGE], [
       'logo' => ['url' => 'https://cms.example.com/logo.png', 'width' => 10, 'height' => 10],
       'image' => self::IMAGE,
     ]);
@@ -182,14 +213,50 @@ final class SchemaGraphTest extends UnitTestCase {
   }
 
   /**
-   * A summary left at its default is the page's description, not the token.
+   * The Description fact is the page's description as search shows it.
    */
   public function testSummaryDefault(): void {
     $result = self::build(['type' => 'Article'], ['description' => 'Raw body text cut at'], [], ['description' => 'The summary.']);
     self::assertSame('The summary.', $result['graph']['@graph'][3]['description']);
-    // Stored, it is filled like any other value.
-    $result = self::build(['type' => 'Article', 'props' => ['description' => '{description}']], ['description' => 'Raw body text cut at']);
-    self::assertSame('Raw body text cut at', $result['graph']['@graph'][3]['description']);
+    // Linked to it explicitly, the same.
+    $result = self::build(['type' => 'Article', 'props' => ['description' => ['fact' => 'description']]], ['description' => 'Raw body text cut at'], [], ['description' => 'The summary.']);
+    self::assertSame('The summary.', $result['graph']['@graph'][3]['description']);
+  }
+
+  /**
+   * A link that gives nothing gives the default.
+   *
+   * One that does not fit is left out.
+   */
+  public function testLinkedValues(): void {
+    $article = static fn (array $props, array $links): array => self::build([
+      'type' => 'Article',
+      'props' => $props,
+    ], ['title' => 'Hello', 'author' => 'Ada'], [], [], $links)['graph']['@graph'][3];
+    // Empty: the default.
+    self::assertSame(['@type' => 'Person', 'name' => 'Ada'], $article(['author_name' => self::link('field_byline')], [])['author']);
+    self::assertSame('Hello', $article(['headline' => self::link('field_headline')], ['ℹ︎␜entity:node:page␝field_headline␞␟value' => ''])['headline']);
+    // Linked: the value, never scanned for names.
+    self::assertSame(['@type' => 'Person', 'name' => '{site}'], $article(['author_name' => self::link('field_byline')], ['ℹ︎␜entity:node:page␝field_byline␞␟value' => '{site}'])['author']);
+    // A field that is not an address: the author page is left out.
+    self::assertArrayNotHasKey('url', $article(['author_url' => self::link('field_link')], ['ℹ︎␜entity:node:page␝field_link␞␟value' => 'not an address'])['author'] ?? []);
+    // Defaults are facts.
+    $defaults = self::build([
+      'type' => 'Article',
+    ], ['title' => 'Hello', 'author' => 'Ada', 'published' => '2026-01-02', 'modified' => '2026-01-03'], ['image' => self::IMAGE])['graph']['@graph'][3];
+    self::assertSame([
+      'Hello',
+      '2026-01-02',
+      '2026-01-03',
+      'Ada',
+      self::IMAGE['url'],
+    ], [
+      $defaults['headline'],
+      $defaults['datePublished'],
+      $defaults['dateModified'],
+      $defaults['author']['name'],
+      $defaults['image']['url'],
+    ]);
   }
 
   /**
@@ -198,11 +265,10 @@ final class SchemaGraphTest extends UnitTestCase {
   public function testMissing(): void {
     // Recommended and optional properties: the node ships without them.
     // No description: the summary, which defaults to it, is left out too.
-    $result = self::build(['type' => 'Article', 'props' => ['author_url' => '{field.field_link}']], [
+    $result = self::build(['type' => 'Article', 'props' => ['author_url' => self::link('field_link')]], [
       'title' => 'Hello',
-      'field.field_link' => 'not a url',
       'modified' => 'yesterday',
-    ], [], ['description' => '']);
+    ], [], ['description' => ''], ['ℹ︎␜entity:node:page␝field_link␞␟value' => 'not a url']);
     self::assertFalse($result['withheld']);
     self::assertSame([], $result['missing_required']);
     self::assertSame(['image', 'datePublished', 'dateModified', 'author_name'], $result['missing_recommended']);
@@ -213,8 +279,8 @@ final class SchemaGraphTest extends UnitTestCase {
     // A required property that does not resolve withholds the primary node.
     $result = self::build([
       'type' => 'Event',
-      'props' => ['startDate' => '{field.field_when}', 'location_name' => 'Example Hall'],
-    ], ['title' => 'Launch', 'field.field_when' => ''], [], ['description' => '']);
+      'props' => ['startDate' => self::link('field_when'), 'location_name' => self::typed('Example Hall')],
+    ], ['title' => 'Launch'], [], ['description' => ''], ['ℹ︎␜entity:node:page␝field_when␞␟value' => '']);
     self::assertTrue($result['withheld']);
     self::assertSame(['startDate', 'location_address_streetAddress'], $result['missing_required']);
     self::assertSame(['endDate', 'description', 'image'], $result['missing_recommended']);
@@ -234,7 +300,10 @@ final class SchemaGraphTest extends UnitTestCase {
    */
   public function testEmission(): void {
     $event = static fn (array $props, string $timezone = 'Europe/Helsinki'): array => self::build(
-      ['type' => 'Event', 'props' => $props + ['location_address_streetAddress' => '1 Example Street']],
+      [
+        'type' => 'Event',
+        'props' => array_map(static fn (string $v): array => Uuid::isValid($v) ? ['media' => $v] : self::typed($v), $props + ['location_address_streetAddress' => '1 Example Street']),
+      ],
       ['title' => 'Launch'],
       [self::UUID => self::IMAGE],
       ['timezone' => $timezone],
@@ -288,7 +357,7 @@ final class SchemaGraphTest extends UnitTestCase {
     // An image without stored dimensions (an SVG, a migrated file) claims
     // none: no width or height of 0.
     $unmeasured = ['width' => 0, 'height' => 0] + self::IMAGE;
-    $graph = self::build(['type' => 'Article', 'props' => ['image' => self::UUID]], [], [self::UUID => $unmeasured], [
+    $graph = self::build(['type' => 'Article', 'props' => ['image' => ['media' => self::UUID]]], [], [self::UUID => $unmeasured], [
       'logo' => ['url' => 'https://cms.example.com/logo.svg', 'width' => 0, 'height' => 0],
       'image' => $unmeasured,
     ])['graph']['@graph'];
@@ -342,8 +411,8 @@ final class SchemaGraphTest extends UnitTestCase {
     yield 'pattern lower case' => ['Product', 'offers_priceCurrency', 'eur', FALSE];
     yield 'pattern trailing newline' => ['Product', 'offers_priceCurrency', "EUR\n", FALSE];
     yield 'pattern no space' => ['Product', 'sku', 'A 1', FALSE];
-    yield 'image UUID' => ['Article', 'image', self::UUID, TRUE];
-    yield 'image token' => ['Article', 'image', '{image}', TRUE];
+    // An image is a media item, a fact or a link, never text.
+    yield 'image UUID' => ['Article', 'image', self::UUID, FALSE];
     yield 'image file name' => ['Article', 'image', 'hello.jpg', FALSE];
   }
 
@@ -352,11 +421,12 @@ final class SchemaGraphTest extends UnitTestCase {
    */
   public function testCustom(): void {
     $custom = [
-      // Appended; a known token is filled, other brace text stays.
+      // Appended; a fixed name is filled, other brace text stays, field
+      // names included.
       [
         '@type' => 'WebSite',
         '@id' => '#search',
-        'name' => '{site} search',
+        'name' => '{site} search by {field.field_byline}',
         'potentialAction' => [
           '@type' => 'SearchAction',
           'target' => ['urlTemplate' => '{url}?q={search_term_string}'],
@@ -392,7 +462,7 @@ final class SchemaGraphTest extends UnitTestCase {
       [
         '@type' => 'WebSite',
         '@id' => self::URL . '#search',
-        'name' => 'Example search',
+        'name' => 'Example search by {field.field_byline}',
         'potentialAction' => [
           '@type' => 'SearchAction',
           'target' => ['urlTemplate' => self::URL . '?q={search_term_string}'],
@@ -434,7 +504,7 @@ final class SchemaGraphTest extends UnitTestCase {
     $result = self::build(
       [
         'type' => 'Article',
-        'props' => ['headline' => '{title}'],
+        'props' => ['headline' => ['fact' => 'title']],
         'custom' => (string) json_encode(['@type' => 'Thing', 'name' => $hostile]),
       ],
       ['title' => $hostile],

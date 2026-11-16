@@ -16,9 +16,7 @@ import {
   aiError,
   article,
   dateText,
-  inherited,
   meter,
-  seedTitle,
   texts,
 } from '../model';
 import type {
@@ -103,12 +101,15 @@ export function SuggestButton(props: {
 /** What a request describes: the page as Checks already read it. */
 function usePage() {
   const { state, view } = useApp();
+  const end = view?.texts.title_end ?? '';
   return {
     langcode: state.server!.langcode,
     page: {
-      title: view?.values.title ?? '',
-      site: view?.values.site ?? '',
+      title: view?.facts.title?.value ?? '',
+      site: view?.facts.site?.value ?? '',
       text: (state.facts?.text ?? '').slice(0, 12000),
+      // What is added after the title's main part: its length counts.
+      ending: end ? `${state.server!.separator} ${end}` : '',
     },
   };
 }
@@ -238,29 +239,30 @@ export function TextSuggest(props: {
   const [refining, setRefining] = useState(false);
   const calls = useRef(0);
   const list = useRef<HTMLDivElement>(null);
-  const pattern = String(inherited(server, 'target', 'title') ?? '');
-
   /** The four texts as they would read with a variant applied. */
   const applied = (variant: Partial<Record<SuggestField, string>>): Texts =>
     texts(
       {
         ...view.effective,
-        ...(variant.title !== undefined
-          ? { title: seedTitle(pattern, variant.title) }
-          : {}),
+        // A title variant is the main part: the ending stays.
+        ...(variant.title !== undefined ? { title: { text: variant.title } } : {}),
         social: {
           ...view.effective.social,
           ...(variant['social.title'] !== undefined
-            ? { title: variant['social.title'] }
+            ? { title: { text: variant['social.title'] } }
             : {}),
           ...(variant['social.description'] !== undefined
-            ? { description: variant['social.description'] }
+            ? { description: { text: variant['social.description'] } }
             : {}),
         },
       },
-      variant.description !== undefined
-        ? { ...view.values, description: variant.description }
-        : view.values,
+      // A page's description is Canvas's own: its Description fact.
+      (value) =>
+        variant.description !== undefined && 'fact' in value && value.fact === 'description'
+          ? variant.description
+          : view.text(value),
+      server.separator,
+      server.site.values.title_end,
     );
 
   const ask = () => {
@@ -276,7 +278,11 @@ export function TextSuggest(props: {
         current: Object.fromEntries(
           props.fields.map((field) => [
             field,
-            view.texts[field.replace('.', '_') as keyof Texts],
+            // The title's ending is sent on its own (page.ending): the
+            // current title is its main part.
+            field === 'title'
+              ? view.texts.title_main
+              : view.texts[field.replace('.', '_') as keyof Texts],
           ]),
         ),
         hint: hint.trim(),
@@ -567,7 +573,7 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
         props: {
           ...kept,
           ...Object.fromEntries(
-            ticked.map((key) => [key, proposal.props[key]]),
+            ticked.map((key) => [key, { text: proposal.props[key] }]),
           ),
         },
       },

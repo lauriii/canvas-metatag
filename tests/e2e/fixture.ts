@@ -342,8 +342,8 @@ export interface SeoState {
   can: { target: boolean; site: boolean };
   site: { identity: { name: string; same_as: string[] } };
   capabilities: { ai: { available: boolean; reason: string | null } | null };
-  target: { values: { title?: string } & Record<string, unknown>; has_draft: boolean } | null;
-  tokens: Record<string, { label: string; type: string; value: string }>;
+  target: { values: { title?: { text: string } | Record<string, unknown> } & Record<string, unknown>; has_draft: boolean } | null;
+  facts: Record<string, { label: string; kind: string; value: string }>;
   resolved: { head: ApiHead } | null;
 }
 
@@ -356,9 +356,11 @@ export async function seoState(page: Page, query: string): Promise<SeoState> {
   return (await response.json()) as SeoState;
 }
 
-/** The stored-or-draft SEO title of a page, for polling. */
-export const draftTitle = async (page: Page, id: number): Promise<string | undefined> =>
-  (await seoState(page, pageQuery(id))).target?.values.title;
+/** The stored-or-draft typed title of a page (its main part), for polling. */
+export const draftTitle = async (page: Page, id: number): Promise<string | undefined> => {
+  const title = (await seoState(page, pageQuery(id))).target?.values.title;
+  return title && typeof title.text === 'string' ? title.text : undefined;
+};
 
 /**
  * Writes SEO values into a Canvas draft as another editor session would: with

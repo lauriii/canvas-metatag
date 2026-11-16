@@ -9,13 +9,12 @@ use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Values;
+use Drupal\field\Entity\FieldConfig;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\file\Entity\File;
 use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
-use Drupal\taxonomy\Entity\Term;
-use Drupal\taxonomy\Entity\Vocabulary;
 use Drupal\Tests\canvas\Kernel\CanvasKernelTestBase;
 use Drupal\Tests\canvas\Traits\GenerateComponentConfigTrait;
 use Drupal\Tests\content_translation\Traits\ContentTranslationTestTrait;
@@ -27,7 +26,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 // cspell:ignore Tarifs tarifs ville amet Canvasville Preise Accueil
 // cspell:ignore مرحبا عنوان शीर्षक
 /**
- * Tests ownership, layers, tokens, URLs, the head and its cacheability.
+ * Tests ownership, layers, facts, links, URLs, the head and its cacheability.
  */
 #[RunTestsInSeparateProcesses]
 #[CoversClass(Resolver::class)]
@@ -47,8 +46,10 @@ final class ResolverTest extends CanvasKernelTestBase {
     'node',
     'field',
     'taxonomy',
-    'telephone',
-    'datetime_range',
+    'text',
+    'datetime',
+    'link',
+    'options',
     'language',
     'content_translation',
     // Refuses `view` on a field named field_no_view_access.
@@ -78,7 +79,7 @@ final class ResolverTest extends CanvasKernelTestBase {
    */
   public function testOwnershipAndLayers(): void {
     $resolver = $this->resolver();
-    $page = $this->createPage(['canvas_metatag' => '{"title":"Plans {sep} {site}","robots":{"noindex":true},"bogus":1,"canonical":"no-slash"}']);
+    $page = $this->createPage(['canvas_metatag' => '{"title":{"text":"Plans"},"robots":{"noindex":true},"bogus":1,"canonical":"no-slash"}']);
     $node = Node::create(['type' => 'article', 'title' => 'Hello']);
     $node->save();
     NodeType::create(['type' => 'note', 'name' => 'Note'])->save();
@@ -95,7 +96,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertContains('config:content_template_list', $cacheability->getCacheTags());
 
     // A template that was never published counts only for a draft preview.
-    $template = $this->createTemplate(FALSE, ['title' => '{title} {sep} Blog', 'robots' => ['nofollow' => TRUE]]);
+    $template = $this->createTemplate(FALSE, ['title_end' => ['text' => 'Blog'], 'robots' => ['nofollow' => TRUE]]);
     self::assertFalse($resolver->owns($node));
     self::assertTrue($resolver->owns($node, TRUE));
     self::assertFalse($resolver->owns($note, TRUE));
@@ -106,32 +107,32 @@ final class ResolverTest extends CanvasKernelTestBase {
     // Page over site. What any other write path stored is cleaned on read.
     $cacheability = new CacheableMetadata();
     $layers = $resolver->layers($page, FALSE, $cacheability);
-    self::assertSame(['robots' => ['noindex' => TRUE], 'title' => 'Plans {sep} {site}'], $layers['target']);
-    self::assertSame(['robots' => ['max_image_preview' => 'large'], 'title' => '{title} {sep} {site}'], $layers['site']);
+    self::assertSame(['robots' => ['noindex' => TRUE], 'title' => ['text' => 'Plans']], $layers['target']);
+    self::assertSame(['robots' => ['max_image_preview' => 'large']], $layers['site']);
     self::assertSame('|', $layers['identity']['separator']);
     self::assertSame([], $layers['from_default']);
     self::assertContains('config:canvas_metatag.site', $cacheability->getCacheTags());
     self::assertSame(
-      ['robots' => ['noindex' => TRUE, 'max_image_preview' => 'large'], 'title' => 'Plans {sep} {site}'],
+      ['robots' => ['noindex' => TRUE, 'max_image_preview' => 'large'], 'title' => ['text' => 'Plans']],
       Values::cascade($layers['target'], $layers['site']),
     );
 
     // Template over site, and the template's draft only when asked for.
     $cacheability = new CacheableMetadata();
     $layers = $resolver->layers($node, FALSE, $cacheability);
-    self::assertSame(['robots' => ['nofollow' => TRUE], 'title' => '{title} {sep} Blog'], $layers['target']);
+    self::assertSame(['robots' => ['nofollow' => TRUE], 'title_end' => ['text' => 'Blog']], $layers['target']);
     self::assertContains('config:canvas.content_template.node.article.full', $cacheability->getCacheTags());
     self::assertNotContains(AutoSaveManager::CACHE_TAG, $cacheability->getCacheTags());
     $draft = clone $template;
-    $draft->setThirdPartySetting('canvas_metatag', 'values', ['title' => 'Draft pattern']);
+    $draft->setThirdPartySetting('canvas_metatag', 'values', ['title_end' => ['text' => 'Draft ending']]);
     $this->container->get(AutoSaveManager::class)->saveEntity($draft);
-    self::assertSame('{title} {sep} Blog', $resolver->layers($node, FALSE, new CacheableMetadata())['target']['title']);
+    self::assertSame(['text' => 'Blog'], $resolver->layers($node, FALSE, new CacheableMetadata())['target']['title_end']);
     $cacheability = new CacheableMetadata();
-    self::assertSame(['title' => 'Draft pattern'], $resolver->layers($node, TRUE, $cacheability)['target']);
+    self::assertSame(['title_end' => ['text' => 'Draft ending']], $resolver->layers($node, TRUE, $cacheability)['target']);
     self::assertContains(AutoSaveManager::CACHE_TAG, $cacheability->getCacheTags());
     self::assertSame('Hello | Blog', $resolver->resolve($node)['head']['title']);
     $node = Node::load($node->id());
-    self::assertSame('Draft pattern', $resolver->resolve($node, TRUE)['head']['title']);
+    self::assertSame('Hello | Draft ending', $resolver->resolve($node, TRUE)['head']['title']);
 
     // A translation that is not the default one inherits three settings of
     // the default one, and nothing else.
@@ -141,26 +142,26 @@ final class ResolverTest extends CanvasKernelTestBase {
       'canvas_metatag' => Values::encode([
         'canonical' => '/elsewhere',
         'robots' => ['noindex' => TRUE, 'max_snippet' => 50],
-        'schema' => ['type' => 'Article', 'props' => ['headline' => 'English headline']],
-        'social' => ['image' => $image->uuid(), 'title' => 'English social title'],
-        'title' => 'English title',
+        'schema' => ['type' => 'Article', 'props' => ['headline' => ['text' => 'English headline']]],
+        'social' => ['image' => ['media' => $image->uuid()], 'title' => ['text' => 'English social title']],
+        'title' => ['text' => 'English title'],
       ]),
     ]);
     $french = $page->addTranslation('fr', ['title' => 'Tarifs', 'status' => TRUE, 'path' => ['alias' => '/tarifs']]);
     // The details of the inherited type are stored without a type.
-    $french->set('canvas_metatag', '{"robots":{"max_snippet":-1},"schema":{"props":{"headline":"Titre"}},"social":{"title":"Titre social"}}');
+    $french->set('canvas_metatag', '{"robots":{"max_snippet":-1},"schema":{"props":{"headline":{"text":"Titre"}}},"social":{"title":{"text":"Titre social"}}}');
     $page->save();
     $french = Page::load($page->id())->getTranslation('fr');
     $layers = $resolver->layers($french, FALSE, new CacheableMetadata());
     self::assertSame([
       'robots' => ['max_snippet' => 50, 'noindex' => TRUE],
       'schema' => ['type' => 'Article'],
-      'social' => ['image' => $image->uuid()],
+      'social' => ['image' => ['media' => $image->uuid()]],
     ], $layers['from_default']);
     self::assertSame([
       'robots' => ['max_snippet' => -1],
-      'schema' => ['props' => ['headline' => 'Titre']],
-      'social' => ['title' => 'Titre social'],
+      'schema' => ['props' => ['headline' => ['text' => 'Titre']]],
+      'social' => ['title' => ['text' => 'Titre social']],
     ], $layers['target']);
     self::assertSame([], $resolver->layers($page, FALSE, new CacheableMetadata())['from_default']);
 
@@ -178,88 +179,54 @@ final class ResolverTest extends CanvasKernelTestBase {
   }
 
   /**
-   * The tokens of a page (stored and draft) and of a node, per field type.
+   * The facts of a page (stored and draft) and of a node.
    */
-  public function testTokens(): void {
+  public function testFacts(): void {
     $resolver = $this->resolver();
     $hero = $this->createImage('Pricing hero', ['alt' => 'Pricing table']);
     $page = $this->createPage(['image' => $hero->id()]);
     $cacheability = new CacheableMetadata();
-    $tokens = $resolver->tokens($page, 'canvas_page', 'canvas_page', $cacheability);
     self::assertSame([
-      'title' => ['label' => 'Page title', 'type' => 'text', 'value' => 'Pricing'],
-      'description' => ['label' => 'Description', 'type' => 'text', 'value' => 'Plans and prices for Example.'],
-      'site' => ['label' => 'Site name', 'type' => 'text', 'value' => 'Example'],
-      'sep' => ['label' => 'Separator', 'type' => 'text', 'value' => '|'],
-      'url' => ['label' => 'Page address', 'type' => 'url', 'value' => 'http://localhost/pricing'],
-      'author' => ['label' => 'Author', 'type' => 'text', 'value' => 'Ada Writer'],
-      'published' => ['label' => 'First published', 'type' => 'datetime', 'value' => self::PUBLISHED],
-      'modified' => ['label' => 'Last updated', 'type' => 'datetime', 'value' => self::MODIFIED],
-      'image' => ['label' => 'Page image', 'type' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
-    ], $tokens);
-    self::assertSame(array_map(static fn (array $token): string => $token['type'], $tokens), $resolver->tokenTypes('canvas_page', 'canvas_page'));
+      'title' => ['label' => 'Title', 'kind' => 'text', 'value' => 'Pricing'],
+      'description' => ['label' => 'Description', 'kind' => 'text', 'value' => 'Plans and prices for Example.'],
+      'site' => ['label' => 'Site name', 'kind' => 'text', 'value' => 'Example'],
+      'url' => ['label' => 'Page address', 'kind' => 'address', 'value' => 'http://localhost/pricing'],
+      'author' => ['label' => 'Author', 'kind' => 'text', 'value' => 'Ada Writer'],
+      'published' => ['label' => 'First published', 'kind' => 'date', 'value' => self::PUBLISHED],
+      'modified' => ['label' => 'Last updated', 'kind' => 'date', 'value' => self::MODIFIED],
+      'image' => ['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
+    ], $resolver->facts($page, $cacheability));
+    self::assertSame('|', $resolver->separator(new CacheableMetadata()));
     // The author's name is public although profiles are not: anonymous
     // visitors have no permission to view them here.
     self::assertFalse(Role::load('anonymous')?->hasPermission('access user profiles'));
     self::assertContains('user:' . $this->author->id(), $cacheability->getCacheTags());
 
-    // The identity name wins over the site name. With no entity the map
-    // holds labels and types only.
+    // The identity name wins over the site name. Without an entity, only
+    // the site name has a value.
     $this->config('canvas_metatag.site')->set('identity.name', 'Example Ltd')->set('identity.separator', '·')->save();
     $draft = clone $page;
     $draft->set('title', 'Draft title')->set('description', 'Draft description.');
-    $tokens = $resolver->tokens($draft, 'canvas_page', 'canvas_page', new CacheableMetadata());
-    self::assertSame(
-      ['Draft title', 'Draft description.', 'Example Ltd', '·'],
-      [$tokens['title']['value'], $tokens['description']['value'], $tokens['site']['value'], $tokens['sep']['value']],
-    );
-    $empty = $resolver->tokens(NULL, 'canvas_page', 'canvas_page', new CacheableMetadata());
-    self::assertSame(array_keys($tokens), array_keys($empty));
-    self::assertSame([''], array_values(array_unique(array_column($empty, 'value'))));
+    $facts = $resolver->facts($draft, new CacheableMetadata());
+    self::assertSame([
+      'Draft title',
+      'Draft description.',
+      'Example Ltd',
+    ], [$facts['title']['value'], $facts['description']['value'], $facts['site']['value']]);
+    self::assertSame('·', $resolver->separator(new CacheableMetadata()));
+    $empty = $resolver->facts(NULL, new CacheableMetadata());
+    self::assertSame(array_keys($facts), array_keys($empty));
+    self::assertSame(['', 'Example Ltd'], array_values(array_unique(array_column($empty, 'value'))));
     self::assertNull($empty['image']['image']);
 
-    // One field of every supported type on the Article type.
-    Vocabulary::create(['vid' => 'topics', 'name' => 'Topics'])->save();
-    $this->createField('field_secret', 'string', 'Secret');
-    $this->createField('field_no_view_access', 'string', 'Hidden');
-    $this->createField('field_byline', 'string', 'Byline', cardinality: 2);
-    $this->createField('field_note', 'string_long', 'Note');
-    $this->createField('field_email', 'email', 'Email');
-    $this->createField('field_phone', 'telephone', 'Phone');
-    $this->createField('field_level', 'list_string', 'Level', [
-      'allowed_values' => ['pro' => 'Professional', 'free' => 'Free'],
-    ]);
-    $this->createField('field_teaser', 'text', 'Teaser');
-    $this->createField('field_notes', 'text_long', 'Notes');
+    // A node: the first formatted text with a summary, and the first image
+    // that resolves, in the order of the form.
     $this->createField('field_body', 'text_with_summary', 'Body');
-    $this->createField('field_count', 'integer', 'Count');
-    $this->createField('field_price', 'decimal', 'Price', ['precision' => 10, 'scale' => 2]);
-    $this->createField('field_ratio', 'float', 'Ratio');
-    $this->createField('field_starts', 'datetime', 'Starts', ['datetime_type' => 'datetime']);
-    $this->createField('field_day', 'datetime', 'Day', ['datetime_type' => 'date']);
-    $this->createField('field_period', 'daterange', 'Period', ['datetime_type' => 'datetime']);
-    $this->createField('field_stamp', 'timestamp', 'Stamp');
-    $this->createField('field_link', 'link', 'Link');
-    $this->createField('field_inside', 'link', 'Inside link');
     $this->createField('field_photo', 'image', 'Photo');
     $this->createField('field_hero', 'entity_reference', 'Hero image', ['target_type' => 'media'], [
       'handler' => 'default:media',
       'handler_settings' => ['target_bundles' => ['image' => 'image']],
     ]);
-    $this->createField('field_topic', 'entity_reference', 'Topic', ['target_type' => 'taxonomy_term'], [
-      'handler' => 'default:taxonomy_term',
-      'handler_settings' => ['target_bundles' => ['topics' => 'topics']],
-    ]);
-    $this->createField('field_old_topic', 'entity_reference', 'Old topic', ['target_type' => 'taxonomy_term'], [
-      'handler' => 'default:taxonomy_term',
-      'handler_settings' => ['target_bundles' => ['topics' => 'topics']],
-    ]);
-    $this->createField('field_flag', 'boolean', 'Flag');
-
-    $topic = Term::create(['vid' => 'topics', 'name' => 'Releases']);
-    $topic->save();
-    $old_topic = Term::create(['vid' => 'topics', 'name' => 'Retired', 'status' => FALSE]);
-    $old_topic->save();
     $photo = File::load($this->createImage('Photo')->get('field_media_image')->first()?->get('target_id')->getValue());
     self::assertInstanceOf(File::class, $photo);
     $article_hero = $this->createImage('Article hero', ['alt' => 'A waving hand', 'width' => 800, 'height' => 400]);
@@ -269,181 +236,64 @@ final class ResolverTest extends CanvasKernelTestBase {
       'uid' => $this->author->id(),
       'created' => strtotime(self::CREATED),
       'changed' => strtotime(self::CHANGED),
-      'field_secret' => 'I <3 Canvas',
-      'field_no_view_access' => 'Not for visitors',
-      'field_byline' => ['First byline', 'Second byline'],
-      'field_note' => "Line one\nline two",
-      'field_email' => 'ada@example.com',
-      'field_phone' => '+358 40 1234567',
-      'field_level' => 'pro',
-      'field_teaser' => ['value' => '<em>Short</em> &amp; sweet'],
-      'field_notes' => ['value' => "<p>One</p><p>Two&nbsp;three</p>\n<script>alert(1)</script><ul><li>H<sub>2</sub>O in <em>Canvas</em>ville</li><li>Two</li></ul>"],
       'field_body' => ['value' => '<p>' . str_repeat('Lorem ipsum dolor sit amet. ', 10) . '</p>', 'summary' => ''],
-      'field_count' => 42,
-      'field_price' => '49.90',
-      'field_ratio' => 1.5,
-      'field_starts' => '2026-03-02T07:00:00',
-      'field_day' => '2026-03-02',
-      'field_period' => ['value' => '2026-03-02T07:00:00', 'end_value' => '2026-03-03T07:00:00'],
-      'field_stamp' => strtotime(self::CHANGED),
-      'field_link' => ['uri' => 'https://www.example.org/more?x=1'],
-      'field_inside' => ['uri' => 'internal:/pricing'],
       'field_photo' => ['target_id' => $photo->id(), 'alt' => 'A photo', 'width' => 640, 'height' => 480],
       'field_hero' => $article_hero->id(),
-      'field_topic' => $topic->id(),
-      'field_old_topic' => $old_topic->id(),
-      'field_flag' => TRUE,
     ]);
     $node->save();
-
     $cacheability = new CacheableMetadata();
-    $tokens = $resolver->tokens($node, 'node', 'article', $cacheability);
-    self::assertSame(array_map(static fn (array $token): string => $token['type'], $tokens), $resolver->tokenTypes('node', 'article'));
-    self::assertArrayNotHasKey('field.field_flag', $tokens);
-    self::assertArrayNotHasKey('field.title', $tokens);
-    self::assertSame([
-      'label' => 'Hero image',
-      'type' => 'image',
-      'value' => '',
-      'image' => $this->imageOf($article_hero),
-    ], $tokens['field.field_hero']);
-    $values = array_map(static fn (array $token): string => $token['value'], $tokens);
-    $long = trim(str_repeat('Lorem ipsum dolor sit amet. ', 10));
-    // Compared without regard to order: without a form, fields come by name.
-    self::assertEquals([
-      'title' => 'Hello',
-      // The formatted text with a summary: no summary, so its text, cut at a
-      // word boundary within 160 characters.
-      'description' => str_repeat('Lorem ipsum dolor sit amet. ', 5) . 'Lorem ipsum dolor',
-      'site' => 'Example Ltd',
-      'sep' => '·',
-      'url' => 'http://localhost/node/' . $node->id(),
-      'author' => 'Ada Writer',
-      'published' => self::PUBLISHED,
-      'modified' => self::MODIFIED,
-      'image' => '',
-      // Text a person typed into a plain field is never stripped.
-      'field.field_secret' => 'I <3 Canvas',
-      // A field the visitor may not view.
-      'field.field_no_view_access' => '',
-      // Only the first value.
-      'field.field_byline' => 'First byline',
-      'field.field_note' => "Line one\nline two",
-      'field.field_email' => 'ada@example.com',
-      'field.field_phone' => '+358 40 1234567',
-      'field.field_level' => 'Professional',
-      'field.field_teaser' => 'Short & sweet',
-      // Blocks are apart, inline markup keeps its words whole.
-      // A script's content never displays.
-      'field.field_notes' => 'One Two three. H2O in Canvasville. Two.',
-      'field.field_body' => $long,
-      'field.field_count' => '42',
-      'field.field_price' => '49.90',
-      'field.field_ratio' => '1.5',
-      'field.field_starts' => self::PUBLISHED,
-      'field.field_day' => '2026-03-02',
-      'field.field_period' => self::PUBLISHED,
-      'field.field_stamp' => self::MODIFIED,
-      'field.field_link' => 'https://www.example.org/more?x=1',
-      'field.field_inside' => 'http://localhost/pricing',
-      'field.field_photo' => '',
-      'field.field_hero' => '',
-      'field.field_topic' => 'Releases',
-      // A referenced entity the visitor may not see.
-      'field.field_old_topic' => '',
-    ], $values);
-    self::assertLessThanOrEqual(160, mb_strlen($values['description']));
-    // A plain image field is named by its alt text (else after its file).
-    self::assertSame(
-      ['width' => 640, 'height' => 480, 'alt' => 'A photo', 'name' => 'A photo'],
-      array_intersect_key($tokens['field.field_photo']['image'], ['name' => 1, 'alt' => 1, 'width' => 1, 'height' => 1]),
-    );
-    // {image} is the first image; without a form, by name.
-    self::assertSame($tokens['field.field_hero']['image'], $tokens['image']['image']);
-    self::assertSame('Byline', $tokens['field.field_byline']['label']);
+    $facts = $resolver->facts($node, $cacheability);
+    // No summary: the text, cut at a word boundary within 160 characters.
+    self::assertSame(str_repeat('Lorem ipsum dolor sit amet. ', 5) . 'Lorem ipsum dolor', $facts['description']['value']);
+    self::assertSame('Body', $facts['description']['via']);
+    // Without a form, the first image by name.
+    self::assertSame($this->imageOf($article_hero), $facts['image']['image']);
+    self::assertSame('Hero image', $facts['image']['via']);
+    self::assertSame('http://localhost/node/' . $node->id(), $facts['url']['value']);
     foreach ([
-      'taxonomy_term:' . $topic->id(),
-      'taxonomy_term:' . $old_topic->id(),
       'media:' . $article_hero->id(),
-      'file:' . $photo->id(),
       'config:user.role.anonymous',
+      'entity_field_info',
+      'config:media_type_list',
     ] as $tag) {
       self::assertContains($tag, $cacheability->getCacheTags());
     }
     self::assertSame([], array_filter($cacheability->getCacheContexts(), static fn (string $context): bool => str_starts_with($context, 'user')));
 
-    // A summary wins. When the first image is not usable, {image} is the
-    // next one; an unpublished image media and a file that is not public are
-    // no image.
-    // The file object is the one the node's field item loads, so it is
-    // changed only when it is saved as well.
+    // A summary wins. When the first image is not usable, the next one; an
+    // unpublished image media and a file that is not public are no image.
     $node->set('field_body', ['value' => '<p>Text</p>', 'summary' => 'A <i>short</i> summary.'])->save();
     $article_hero->setUnpublished()->save();
     $this->forgetAccess();
-    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
-    self::assertSame('A short summary.', $tokens['description']['value']);
-    self::assertSame('A short summary.', $tokens['field.field_body']['value']);
-    self::assertNull($tokens['field.field_hero']['image']);
-    self::assertSame($tokens['field.field_photo']['image'], $tokens['image']['image']);
-    self::assertNotNull($tokens['image']['image']);
+    $facts = $resolver->facts(Node::load($node->id()), new CacheableMetadata());
+    self::assertSame('A short summary.', $facts['description']['value']);
+    self::assertSame([
+      'width' => 640,
+      'height' => 480,
+      'alt' => 'A photo',
+      'name' => 'A photo',
+    ], array_intersect_key($facts['image']['image'], ['name' => 1, 'alt' => 1, 'width' => 1, 'height' => 1]));
+    self::assertSame('Photo', $facts['image']['via']);
     $photo->setFileUri('temporary://photo.png');
     $photo->save();
     $this->forgetAccess();
-    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
-    self::assertNull($tokens['field.field_photo']['image']);
-    self::assertNull($tokens['image']['image']);
+    self::assertNull($resolver->facts(Node::load($node->id()), new CacheableMetadata())['image']['image']);
 
     // The content of script, style and template elements never displays.
-    $hidden = '<script>alert(1)</script><style>p{color:red}</style><template><p>Later</p></template>';
-    $node->set('field_body', ['value' => '<p>Ask us</p>' . $hidden, 'summary' => ''])->save();
-    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
-    self::assertSame('Ask us', $tokens['field.field_body']['value']);
-    self::assertSame('Ask us', $tokens['description']['value']);
-    // Also with ">" in a quoted attribute, and a template inside another.
-    $hidden = '<script data-x="a>b">alert(1)</script><template><template>Inner</template>Outer</template>';
-    $node->set('field_body', ['value' => '<p>Ask us</p>' . $hidden . '<p>today</p>', 'summary' => ''])->save();
-    $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
-    self::assertSame('Ask us today', $tokens['field.field_body']['value']);
+    $node->set('field_body', [
+      'value' => '<p>Ask us</p><script>alert(1)</script><style>p{color:red}</style><template><p>Later</p></template>',
+      'summary' => '',
+    ])->save();
+    self::assertSame('Ask us', $resolver->facts(Node::load($node->id()), new CacheableMetadata())['description']['value']);
 
-    // A heading, list item, definition, table row or caption ends a
-    // sentence, as does the text before a list; paragraphs are spaced.
-    foreach ([
-      '<h2>Made to last</h2><p>Solid oak.</p><ul><li>Dimmable</li><li>Fabric cable, 3 m.</li></ul>' => 'Made to last. Solid oak. Dimmable. Fabric cable, 3 m.',
-      '<p>One</p><p>Two &amp; <b>three</b></p>' => 'One Two & three',
-      '<h2>Questions?</h2>' => 'Questions?',
-      '<ul><li><a href="/x">Oak.</a></li></ul>' => 'Oak.',
-      '<ul><li><h3>Nested</h3></li></ul><dl><dt>Term</dt><dd>Its meaning</dd></dl>' => 'Nested. Term Its meaning.',
-      '<ul><li>Features<ul><li>Dimmable</li></ul></li></ul>' => 'Features. Dimmable.',
-      '<table><caption>Sizes</caption><tr><th>Height</th><td>45 cm</td></tr><tr><th>Weight</th><td>1.2 kg</td></tr></table>' => 'Sizes. Height 45 cm. Weight 1.2 kg.',
-      // Only a sentence or clause mark ends one: a closing bracket does not.
-      '<h2>Price (USD)</h2><p>From 49</p>' => 'Price (USD). From 49',
-      '<h2>"Made to last."</h2><h2>Oak, ash,</h2>' => '"Made to last." Oak, ash,',
-      "<h2>Marked\x01</h2><p>\x01Text</p>" => 'Marked. Text',
-      // The text before a heading ends too.
-      '<p>Buy now</p><h2>Specs</h2>' => 'Buy now. Specs.',
-      // Marks of other scripts, full-width forms included, spare it.
-      '<h2>見出し：</h2><p>本文</p><h2>見出し。</h2>' => '見出し： 本文. 見出し。',
-      '<h2>مرحبا،</h2><p>x</p><h2>عنوان؟</h2><ul><li>نص،</li></ul>' => 'مرحبا، x. عنوان؟ نص،',
-      '<h2>शीर्षक॥</h2><h2>a؛</h2><h2>b；</h2><h2>c．</h2>' => 'शीर्षक॥ a؛ b； c．',
-      // A custom element is not a list; its words join as written.
-      '<p>Hello <ul-thing>world</ul-thing></p>' => 'Hello world',
-      // Text that is not valid UTF-8 gives nothing, never a mark.
-      "<p>Ask us</p><h2>\xff bad</h2><p>x</p>" => '',
-    ] as $html => $text) {
-      $node->set('field_body', ['value' => $html, 'summary' => ''])->save();
-      $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
-      self::assertSame($text, $tokens['field.field_body']['value'], $html);
-    }
-
-    // The cut {description} never ends inside a character drawn as one.
+    // The cut never ends inside a character drawn as one.
     $family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
     foreach ([
       [str_repeat('a', 157) . $family . ' tail', str_repeat('a', 157)],
       [str_repeat('a', 159) . "e\u{301} tail", str_repeat('a', 159)],
     ] as [$body, $description]) {
       $node->set('field_body', ['value' => "<p>$body</p>", 'summary' => ''])->save();
-      $tokens = $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata());
-      self::assertSame($description, $tokens['description']['value']);
+      self::assertSame($description, $resolver->facts(Node::load($node->id()), new CacheableMetadata())['description']['value']);
     }
   }
 
@@ -465,29 +315,200 @@ final class ResolverTest extends CanvasKernelTestBase {
       'field_avatar' => $avatar->id(),
     ]);
     $node->save();
-    $image = fn (): ?array => $resolver->tokens(Node::load($node->id()), 'node', 'article', new CacheableMetadata())['image']['image'];
+    $image = fn (): ?array => $resolver->facts(Node::load($node->id()), new CacheableMetadata())['image']['image'];
 
     // Without a form, by name; the head waits for a form to be created.
     self::assertSame($this->imageOf($avatar), $image());
     $head = fn (): array => $resolver->resolve($this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id()))['cacheability']->getCacheTags();
     self::assertContains('config:entity_form_display_list', $head());
-    self::assertSame(['field.field_avatar', 'field.field_note', 'field.field_photo'], array_keys(array_filter($resolver->tokenTypes('node', 'article'), static fn (string $name): bool => str_starts_with($name, 'field.'), ARRAY_FILTER_USE_KEY)));
 
-    // The form puts the photo first; a field not on the form comes last.
+    // The form puts the photo first.
     $display = $this->container->get('entity_display.repository')->getFormDisplay('node', 'article')
       ->setComponent('field_photo', ['weight' => 1])
       ->setComponent('field_avatar', ['weight' => 2])
       ->removeComponent('field_note');
     $display->save();
     self::assertSame($this->imageOf($photo), $image());
-    self::assertSame(['field.field_photo', 'field.field_avatar', 'field.field_note'], array_keys(array_filter($resolver->tokenTypes('node', 'article'), static fn (string $name): bool => str_starts_with($name, 'field.'), ARRAY_FILTER_USE_KEY)));
 
     // The head depends on the form.
     self::assertContains('config:core.entity_form_display.node.article.default', $head());
 
-    // Moving the photo below the avatar changes {image}.
+    // Moving the photo below the avatar changes the Image fact.
     $display->setComponent('field_photo', ['weight' => 3])->save();
     self::assertSame($this->imageOf($avatar), $image());
+  }
+
+  /**
+   * Values linked to fields: their value, else the default.
+   */
+  public function testLinkedValues(): void {
+    $resolver = $this->resolver();
+    $this->createArticleFields();
+    $writer = Node::create(['type' => 'person', 'title' => 'Ada', 'status' => 1]);
+    $writer->save();
+    $hero = $this->createImage('Hero', ['alt' => 'A waving hand', 'width' => 800, 'height' => 400]);
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Hello',
+      'uid' => $this->author->id(),
+      'field_summary' => 'How teams turn output into stories.',
+      'field_byline' => '{site}',
+      'field_body' => ['value' => '<p>The body.</p>', 'summary' => 'The body summary.'],
+      'field_writer' => $writer->id(),
+      'field_hero' => $hero->id(),
+      'field_no_view_access' => 'Not for visitors',
+    ]);
+    $node->save();
+    $this->createTemplate(TRUE, [
+      'title' => $this->linkTo('Byline'),
+      'description' => $this->linkTo('Summary'),
+      'social' => ['image' => $this->linkTo('Hero › Image', 'image')],
+      'schema' => ['type' => 'Article', 'props' => ['author_name' => $this->linkTo('Writer › Title')]],
+    ]);
+    $head = fn (): array => $resolver->resolve($this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id()));
+
+    // A translation reads its own values, a reference in its language, and
+    // an address inside the site in its language.
+    $this->enableContentTranslation('node', 'article');
+    $this->enableContentTranslation('node', 'person');
+    // The objects loaded before have no translation fields yet.
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+    $nodes = $this->container->get('entity_type.manager')->getStorage('node');
+    $nodes->resetCache();
+    $writer = $nodes->load($writer->id());
+    $node = $nodes->load($node->id());
+    $writer->addTranslation('fr', ['title' => 'Ada (fr)', 'status' => 1])->save();
+    $node->addTranslation('fr', [
+      'title' => 'Bonjour',
+      'status' => 1,
+      'field_summary' => 'Comment les équipes racontent.',
+      'field_writer' => $writer->id(),
+      'field_more' => ['uri' => 'internal:/node/' . $node->id()],
+    ])->save();
+    $french = $this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id())->getTranslation('fr');
+    $resolved = $resolver->resolve($french);
+    self::assertSame('Comment les équipes racontent.', self::meta($resolved['head'])['description']);
+    self::assertSame('Ada (fr)', self::graph($resolved['head'])['primary']['author']['name']);
+    self::assertSame(['ok', 'http://localhost/fr/node/' . $node->id()], $resolver->link($this->linkTo('More', 'address')['source'], $french, 'address', new CacheableMetadata()));
+
+    $resolved = $head();
+    $meta = self::meta($resolved['head']);
+    // A value that looks like a name is literal text.
+    self::assertSame('{site} | Example', $resolved['head']['title']);
+    self::assertSame('How teams turn output into stories.', $meta['description']);
+    self::assertSame($this->imageOf($hero)['url'], $meta['og:image']);
+    self::assertSame([
+      '800',
+      '400',
+      'A waving hand',
+    ], [$meta['og:image:width'], $meta['og:image:height'], $meta['og:image:alt']]);
+    self::assertSame('entity', $resolved['image']['source']);
+    self::assertSame('Ada', self::graph($resolved['head'])['primary']['author']['name']);
+    // A published head never varies by user: the same cached head for all.
+    self::assertSame([], array_filter($resolved['cacheability']->getCacheContexts(), static fn (string $context): bool => str_starts_with($context, 'user')));
+    foreach (['config:user.role.anonymous', 'node:' . $writer->id(), 'entity_field_info', 'config:media_type_list'] as $tag) {
+      self::assertContains($tag, $resolved['cacheability']->getCacheTags());
+    }
+
+    // Empty for this item: the default.
+    $node->set('field_summary', NULL)->set('field_byline', NULL)->save();
+    $resolved = $head();
+    self::assertSame('The body summary.', self::meta($resolved['head'])['description']);
+    self::assertSame('Hello | Example', $resolved['head']['title']);
+    // Hidden from visitors: the default too.
+    $writer->setUnpublished()->save();
+    $this->forgetAccess();
+    self::assertSame('Ada Writer', self::graph($head()['head'])['primary']['author']['name']);
+    self::assertSame(['hidden', NULL], $resolver->link($this->linkTo('Notes')['source'], $node, 'text', new CacheableMetadata()));
+
+    // A linked image that is empty for the item: the item's Image fact, here
+    // from another image field, before the site's default.
+    $this->createField('field_photo', 'entity_reference', 'Photo', ['target_type' => 'media'], [
+      'handler' => 'default:media',
+      'handler_settings' => ['target_bundles' => ['image' => 'image']],
+    ]);
+    $photo = $this->createImage('Photo', ['alt' => 'A photo', 'width' => 640, 'height' => 480]);
+    $nodes->resetCache();
+    $node = $nodes->load($node->id());
+    $node->set('field_hero', NULL)->set('field_photo', $photo->id())->save();
+    $meta = self::meta($head()['head']);
+    self::assertSame([$this->imageOf($photo)['url'], 'A photo'], [$meta['og:image'], $meta['og:image:alt']]);
+    // A linked image whose file is not public gives none: the head falls
+    // back the same way.
+    $node->set('field_hero', $hero->id())->save();
+    $file = $hero->get('field_media_image')->entity;
+    \assert($file instanceof File);
+    $file->setFileUri('temporary://hero.png');
+    $file->save();
+    $this->forgetAccess();
+    [, $value] = $resolver->link($this->linkTo('Hero › Image', 'image')['source'], Node::load($node->id()), 'image', new CacheableMetadata());
+    self::assertNull($value);
+    self::assertSame($this->imageOf($photo)['url'], self::meta($head()['head'])['og:image']);
+    $file->setFileUri('public://hero.png');
+    $file->save();
+    $node->set('field_photo', NULL)->save();
+    $this->forgetAccess();
+
+    // A deleted field: the template keeps the link, each item its default;
+    // recreating the field heals it.
+    $link = $this->linkTo('Summary');
+    $node->set('field_summary', 'Back again.')->save();
+    FieldConfig::loadByName('node', 'article', 'field_summary')?->delete();
+    // Canvas keeps its matches for the rest of a request.
+    $this->container->get('cache.static')->deleteAll();
+    self::assertSame('The body summary.', self::meta($head()['head'])['description']);
+    self::assertSame($link, ContentTemplate::load('node.article.full')?->getThirdPartySetting('canvas_metatag', 'values')['description']);
+    self::assertSame(['broken', NULL], $resolver->link($link['source'], $node, 'text', new CacheableMetadata()));
+    $this->createField('field_summary', 'string_long', 'Summary');
+    $this->container->get('cache.static')->deleteAll();
+    $nodes->resetCache();
+    $node = $nodes->load($node->id());
+    $node->set('field_summary', 'Healed.')->save();
+    self::assertSame('Healed.', self::meta($head()['head'])['description']);
+    self::assertSame(['ok', 'Healed.'], $resolver->link($link['source'], $node, 'text', new CacheableMetadata()));
+
+    // A value linked to formatted text reads it as sentences, and its start.
+    $body = $this->linkTo('Body')['source'];
+    foreach ([
+      '<h2>Made to last</h2><p>Solid oak.</p><ul><li>Dimmable</li><li>Fabric cable, 3 m.</li></ul>' => 'Made to last. Solid oak. Dimmable. Fabric cable, 3 m.',
+      '<p>One</p><p>Two &amp; <b>three</b></p>' => 'One Two & three',
+      '<h2>Questions?</h2>' => 'Questions?',
+      '<ul><li><a href="/x">Oak.</a></li></ul>' => 'Oak.',
+      '<ul><li><h3>Nested</h3></li></ul><dl><dt>Term</dt><dd>Its meaning</dd></dl>' => 'Nested. Term Its meaning.',
+      '<ul><li>Features<ul><li>Dimmable</li></ul></li></ul>' => 'Features. Dimmable.',
+      '<table><caption>Sizes</caption><tr><th>Height</th><td>45 cm</td></tr><tr><th>Weight</th><td>1.2 kg</td></tr></table>' => 'Sizes. Height 45 cm. Weight 1.2 kg.',
+      // Only a sentence or clause mark ends one: a closing bracket does not.
+      '<h2>Price (USD)</h2><p>From 49</p>' => 'Price (USD). From 49',
+      '<h2>"Made to last."</h2><h2>Oak, ash,</h2>' => '"Made to last." Oak, ash,',
+      "<h2>Marked\x01</h2><p>\x01Text</p>" => 'Marked. Text',
+      // The text before a heading ends too.
+      '<p>Buy now</p><h2>Specs</h2>' => 'Buy now. Specs.',
+      // Marks of other scripts, full-width forms included, spare it.
+      '<h2>見出し：</h2><p>本文</p><h2>見出し。</h2>' => '見出し： 本文. 見出し。',
+      '<h2>مرحبا،</h2><p>x</p><h2>عنوان؟</h2><ul><li>نص،</li></ul>' => 'مرحبا، x. عنوان؟ نص،',
+      '<h2>शीर्षक॥</h2><h2>a؛</h2><h2>b；</h2><h2>c．</h2>' => 'शीर्षक॥ a؛ b； c．',
+      // A custom element is not a list; its words join as written.
+      '<p>Hello <ul-thing>world</ul-thing></p>' => 'Hello world',
+      // Script and style never display, also with ">" in an attribute.
+      '<p>Ask us</p><script data-x="a>b">alert(1)</script><template><template>Inner</template>Outer</template><p>today</p>' => 'Ask us today',
+      // Text that is not valid UTF-8 gives nothing, never a mark.
+      "<p>Ask us</p><h2>\xff bad</h2><p>x</p>" => '',
+    ] as $html => $text) {
+      $node->set('field_body', ['value' => $html, 'summary' => ''])->save();
+      [$status, $value] = $resolver->link($body, Node::load($node->id()), 'text', new CacheableMetadata());
+      self::assertSame($text, (string) $value, $html);
+      self::assertSame($text === '' ? 'empty' : 'ok', $status);
+    }
+    // A long formatted text gives its start, cut at a word within 160.
+    $node->set('field_body', [
+      'value' => '<p>' . str_repeat('Lorem ipsum dolor sit amet. ', 40) . '</p>',
+      'summary' => '',
+    ])->save();
+    self::assertSame(str_repeat('Lorem ipsum dolor sit amet. ', 5) . 'Lorem ipsum dolor', $resolver->link($body, Node::load($node->id()), 'text', new CacheableMetadata())[1]);
+
+    // An address: a link inside the site is put on the public base.
+    $node->set('field_more', ['uri' => 'internal:/pricing'])->save();
+    self::assertSame(['ok', 'http://localhost/pricing'], $resolver->link($this->linkTo('More', 'address')['source'], Node::load($node->id()), 'address', new CacheableMetadata()));
   }
 
   /**
@@ -602,14 +623,17 @@ final class ResolverTest extends CanvasKernelTestBase {
           'max_image_preview' => 'none',
         ],
         'schema' => ['type' => 'Article'],
-        'social' => ['title' => '{title}: compare', 'description' => 'See every plan.', 'image' => $small->uuid()],
-        'title' => '{sep} {title} {sep} {sep} {field.gone} {site} {sep}',
+        'social' => [
+          'title' => ['text' => 'Compare plans'],
+          'description' => ['text' => 'See every plan.'],
+          'image' => ['media' => $small->uuid()],
+        ],
       ]),
     ]));
     $meta = self::meta($resolved['head']);
     self::assertSame('I <3 Canvas &amp; more | Example', $resolved['head']['title']);
     self::assertSame('noindex, nosnippet, max-image-preview:none', $meta['robots']);
-    self::assertSame('I <3 Canvas &amp; more: compare', $meta['og:title']);
+    self::assertSame('Compare plans', $meta['og:title']);
     self::assertSame('See every plan.', $meta['og:description']);
     self::assertSame('Plans and prices for Example.', $meta['description']);
     self::assertSame('http://localhost/plans?ref=1', $meta['og:url']);
@@ -625,7 +649,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     $cards = [];
     foreach ([[400, 400], [600, 315], [1200, 630], [1200, 150], [599, 630], [600, 157]] as [$width, $height]) {
       $image = $this->createImage("Card $width x $height", ['width' => $width, 'height' => $height]);
-      $page = $this->createPage(['canvas_metatag' => Values::encode(['social' => ['image' => $image->uuid()]])]);
+      $page = $this->createPage(['canvas_metatag' => Values::encode(['social' => ['image' => ['media' => $image->uuid()]]])]);
       $cards["$width x $height"] = self::meta($resolver->resolve($page)['head'])['twitter:card'];
     }
     self::assertSame([
@@ -662,7 +686,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     foreach ([$private, $unpublished] as $unusable) {
       $resolved = $resolver->resolve($this->createPage([
         'image' => $hero->id(),
-        'canvas_metatag' => Values::encode(['social' => ['image' => $unusable->uuid()]]),
+        'canvas_metatag' => Values::encode(['social' => ['image' => ['media' => $unusable->uuid()]]]),
       ]));
       self::assertSame($this->imageOf($hero) + ['source' => 'entity'], $resolved['image']);
     }
@@ -757,7 +781,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame(-1, $cacheability->getCacheMaxAge());
 
     // A template-rendered node depends on its template as well.
-    $this->createTemplate(TRUE, ['title' => '{title} {sep} Blog']);
+    $this->createTemplate(TRUE, ['title_end' => ['text' => 'Blog']]);
     $node = Node::create(['type' => 'article', 'title' => 'Hello', 'uid' => $this->author->id()]);
     $node->save();
     $resolved = $resolver->resolve($node);
@@ -778,7 +802,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     // A configuration override of the site settings (a staging site that
     // forces noindex in settings.php) reaches the output.
     $GLOBALS['config']['canvas_metatag.site']['values']['robots']['noindex'] = TRUE;
-    $GLOBALS['config']['canvas_metatag.site']['values']['title'] = '{title} {sep} Staging';
+    $GLOBALS['config']['canvas_metatag.site']['values']['title_end'] = ['text' => 'Staging'];
     $this->container->get('config.factory')->clearStaticCache();
     $page = Page::load($page->id());
     $resolved = $resolver->resolve($this->createPage(['path' => ['alias' => '/other']]));
@@ -790,7 +814,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     // A stored page and its draft share id, langcode and revision id; they
     // are two results in one request.
     $draft = clone $page;
-    $draft->set('title', 'Draft title')->set('canvas_metatag', '{"title":"{title} draft"}');
+    $draft->set('title', 'Draft title')->set('canvas_metatag', '{"title":{"text":"Draft words"}}');
     $this->container->get(AutoSaveManager::class)->saveEntity($draft);
     $draft = $this->container->get(AutoSaveManager::class)->getAutoSaveEntityForPreview($page)->entity;
     self::assertInstanceOf(Page::class, $draft);
@@ -798,7 +822,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     $stored = $resolver->resolve($page);
     $drafted = $resolver->resolve($draft);
     self::assertSame('Pricing | Example', $stored['head']['title']);
-    self::assertSame('Draft title draft', $drafted['head']['title']);
+    self::assertSame('Draft words | Example', $drafted['head']['title']);
     self::assertSame($stored, $resolver->resolve($page));
     self::assertSame($drafted, $resolver->resolve($draft));
 
@@ -806,12 +830,12 @@ final class ResolverTest extends CanvasKernelTestBase {
     $template = ContentTemplate::load('node.article.full');
     self::assertInstanceOf(ContentTemplate::class, $template);
     $template_draft = clone $template;
-    $template_draft->setThirdPartySetting('canvas_metatag', 'values', ['title' => 'Draft pattern']);
+    $template_draft->setThirdPartySetting('canvas_metatag', 'values', ['title_end' => ['text' => 'Draft ending']]);
     $this->container->get(AutoSaveManager::class)->saveEntity($template_draft);
     $node = Node::load($node->id());
     self::assertSame('Hello | Blog', $resolver->resolve($node)['head']['title']);
     $drafted = $resolver->resolve($node, TRUE);
-    self::assertSame('Draft pattern', $drafted['head']['title']);
+    self::assertSame('Hello | Draft ending', $drafted['head']['title']);
     self::assertContains(AutoSaveManager::CACHE_TAG, $drafted['cacheability']->getCacheTags());
     self::assertSame('Hello | Blog', $resolver->resolve($node)['head']['title']);
   }
@@ -856,6 +880,16 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame(['url' => 'https://www.example.com/shop', 'source' => 'frontend'], $this->resolver()->origin($cacheability));
     self::assertSame(['config:canvas_headless.settings'], $cacheability->getCacheTags());
     self::assertSame([], $cacheability->getCacheContexts());
+    // A link field pointing at a page of the site gives its frontend address.
+    $this->createArticleFields();
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Linked',
+      'status' => 1,
+      'field_more' => ['uri' => 'entity:canvas_page/' . $page->id()],
+    ]);
+    $node->save();
+    self::assertSame(['ok', 'https://www.example.com/shop/pricing'], $this->resolver()->link($this->linkTo('More', 'address')['source'], $node, 'address', new CacheableMetadata()));
     // The canonical, og:url and every @id are on the frontend.
     $resolved = $this->resolver()->resolve(Page::load($page->id()));
     self::assertSame('https://www.example.com/shop/plans', $resolved['head']['link'][0]['href']);

@@ -1,6 +1,6 @@
 import type { FrameLocator, Locator } from '@playwright/test';
 
-import { PAGES, UI, USERS } from './constants';
+import { PAGES, SITE_NAME, UI, USERS } from './constants';
 import {
   button,
   draftTitle,
@@ -54,10 +54,17 @@ test.beforeEach(async ({ drupal, page }) => {
   await expect(textbox(frame, UI.field.title)).toBeEnabled();
 });
 
-test('a title suggestion changes nothing until it is used, and keeps the site suffix', async ({ page }) => {
+test('a title suggestion changes nothing until it is used, and keeps the ending', async ({ page }) => {
   const control = button(frame, UI.ai.suggest).first();
   await expect(control).toHaveAccessibleDescription(UI.ai.sends);
+  // The request says the ending on its own; the current title is its main
+  // part.
+  const request = page.waitForRequest((sent) => sent.url().includes('/canvas-metatag/api/ai/suggest') && sent.method() === 'POST');
   const first = await suggest(control);
+  const body = (await request).postDataJSON();
+  expect(body.page.ending).toBe(`| ${SITE_NAME}`);
+  expect(body.current.title).not.toContain(`| ${SITE_NAME}`);
+  await page.screenshot({ path: test.info().outputPath('title-suggestions.png') });
   // The count is said after the text, not read as part of it.
   await expect(first).toHaveAccessibleDescription(/^\d+ characters?$/);
   await expect(first).not.toHaveAccessibleName(/\d\s*$/);
@@ -66,13 +73,14 @@ test('a title suggestion changes nothing until it is used, and keeps the site su
   await expect(status(frame)).toContainText(UI.footer.matchesPage);
   expect(await draftTitle(page, pricing.id)).toBeUndefined();
 
-  // Used, it replaces the page's part of the pattern, as typing does.
+  // Used, it is the title's own words, as typing is; the ending stays.
   await first.click();
   await button(frame, UI.ai.use).click();
-  await expect(textbox(frame, UI.field.title)).toHaveValue(/^.+ \{Separator\} \{Site name\}$/);
+  await expect(textbox(frame, UI.field.title)).toHaveValue(/\S/);
+  await expect(button(frame, UI.field.titleEnding)).toHaveAccessibleName(`Title ending: ${SITE_NAME}`);
   await expect
     .poll(async () => (await draftTitle(page, pricing.id)) ?? '', { timeout: 30_000 })
-    .toMatch(/^.+ \{sep\} \{site\}$/);
+    .toMatch(/\S/);
 });
 
 test('"Refine" reaches the provider, and its failures are explained in the tray', async ({ page }) => {
@@ -108,7 +116,7 @@ test('the social suggestion fills title and description together', async ({ page
   await button(frame, UI.ai.use).click();
   await expect
     .poll(async () => (await seoState(page, pageQuery(pricing.id))).target?.values.social, { timeout: 30_000 })
-    .toEqual({ title: expect.stringMatching(/\S/), description: expect.stringMatching(/\S/) });
+    .toEqual({ title: { text: expect.stringMatching(/\S/) }, description: { text: expect.stringMatching(/\S/) } });
 });
 
 test('a structured-data proposal leaves what it could not verify unchecked', async ({ page }) => {

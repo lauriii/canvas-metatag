@@ -17,20 +17,42 @@
     "schema": {
         "type": "Event",
         "props": {
-            "startDate": "{field.field_when}",
-            "endDate": "2026-07-02",
-            "location_name": "Example Hall",
-            "location_address_streetAddress": "1 Example Street",
-            "location_address_addressLocality": "{field.field_city}",
-            "location_address_addressCountry": "FI",
-            "eventStatus": "EventScheduled"
+            "startDate": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:page␝field_when␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "endDate": {
+                "text": "2026-07-02"
+            },
+            "location_name": {
+                "text": "Example Hall"
+            },
+            "location_address_streetAddress": {
+                "text": "1 Example Street"
+            },
+            "location_address_addressLocality": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:page␝field_city␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "location_address_addressCountry": {
+                "text": "FI"
+            },
+            "eventStatus": {
+                "text": "EventScheduled"
+            }
         }
     },
-    "tokens": {
+    "facts": {
         "title": "Launch party",
-        "description": "Doors open at six.",
-        "field.field_when": "2026-07-01T18:00",
-        "field.field_city": "Helsinki"
+        "description": "Doors open at six."
+    },
+    "links": {
+        "ℹ︎␜entity:node:page␝field_when␞␟value": "2026-07-01T18:00",
+        "ℹ︎␜entity:node:page␝field_city␞␟value": "Helsinki"
     },
     "images": [],
     "report": {

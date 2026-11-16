@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { Page } from '@playwright/test';
 
-import { PAGES, SITE_NAME, TEST_ID, UI, USERS } from './constants';
+import { NODES, PAGES, SITE_NAME, TEST_ID, UI, USERS } from './constants';
 import {
   SEO_IFRAME,
   button,
@@ -10,6 +10,7 @@ import {
   isLayoutSave,
   openPage,
   openSeo,
+  openTemplate,
   pageQuery,
   scope,
   seoState,
@@ -64,17 +65,17 @@ test('with "edit" only, site settings can be read and not changed', async ({ dru
 test('someone who may view a page but not edit it never receives its draft', async ({ drupal, page }) => {
   const { id, seoTitle } = PAGES.stored;
   await drupal.login(USERS.editor);
-  await writeDraft(page, `canvas_page/${id}`, `layout/canvas_page/${id}`, { title: 'Draft title {sep} {site}' });
+  await writeDraft(page, `canvas_page/${id}`, `layout/canvas_page/${id}`, { title: { text: 'Draft title' } });
   expect(await seoState(page, pageQuery(id))).toMatchObject({
     can: { target: true },
-    target: { has_draft: true, values: { title: 'Draft title {sep} {site}' } },
+    target: { has_draft: true, values: { title: { text: 'Draft title' } } },
   });
 
   await drupal.logout();
   await drupal.login(USERS.viewer);
   const state = await seoState(page, pageQuery(id));
   expect(state.can).toEqual({ target: false, site: false });
-  expect(state.target).toMatchObject({ has_draft: false, values: { title: seoTitle } });
+  expect(state.target).toMatchObject({ has_draft: false, values: { title: { text: seoTitle } } });
   expect(state.resolved?.head.title).toBe(`Published title | ${SITE_NAME}`);
 });
 
@@ -103,6 +104,32 @@ test('when the editor cannot be read the page is read-only, and the site still s
     .poll(async () => (await seoState(page, '')).site.identity.same_as, { timeout: 30_000 })
     .toEqual(['https://social.example/example']);
   await expect(status(frame)).toContainText(UI.footer.siteLive, { timeout: 30_000 });
+});
+
+test('a read-only template shows its links, and their menus link nothing', async ({ drupal, page }) => {
+  await drupal.login(USERS.admin);
+  await openTemplate(page, NODES.article.id);
+  await page.evaluate(() => {
+    delete window.drupalSettings.canvas.store;
+  });
+  const frame = await openSeo(page);
+  await expect(frame.getByRole('alert').filter({ hasText: "SEO can't save to this template right now." })).toBeVisible();
+
+  // The description's box stays focusable and says its source; no ×.
+  const description = frame.getByRole('combobox', { name: UI.field.description, exact: true });
+  await expect(description).toHaveAccessibleDescription(/^(Linked to |Follows the default: )/);
+  await expect(button(frame, `Unlink ${UI.field.description}`)).toHaveCount(0);
+  // Enter opens its menu with every entry disabled; nothing is written.
+  await description.focus();
+  await page.keyboard.press('Enter');
+  const menu = frame.getByRole('dialog', { name: `Link ${UI.field.description}` });
+  await expect(menu.getByRole('option', { name: /^Summary, / })).toHaveAttribute('aria-disabled', 'true');
+  await expect(menu.getByRole('option', { name: /^Title, / })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(description).toBeFocused();
+  await expect(status(frame)).toContainText(UI.footer.readOnly);
 });
 
 /**
@@ -157,10 +184,10 @@ test('a change typed before the editor has stored the draft is saved once it has
   // For 2 s the missing draft is taken for one on its way: the field is
   // writable. After that it is shown, and the change waits, said so.
   await expect(title).toBeEnabled();
-  await title.fill('Stored late {Separator} {Site name}');
+  await title.fill('Stored late');
   await expect(frame.getByRole('alert').filter({ hasText: UI.strip.cannotSave })).toBeVisible({ timeout: 10_000 });
   await expect(status(frame)).toContainText(UI.footer.unstored);
-  await expect(title).toHaveValue('Stored late {Separator} {Site name}');
+  await expect(title).toHaveValue('Stored late');
 
   // Once the editor has stored it, the change goes out by itself.
   const sent = page.waitForRequest(
@@ -169,7 +196,7 @@ test('a change typed before the editor has stored the draft is saved once it has
   await release();
   await sent;
   await expect(frame.getByRole('alert').filter({ hasText: UI.strip.cannotSave })).toHaveCount(0);
-  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Stored late {sep} {site}');
+  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Stored late');
   await expect(status(frame)).toContainText(UI.footer.draftPage, { timeout: 30_000 });
 });
 
@@ -182,7 +209,7 @@ test('a change left behind while the draft was missing is restored once the edit
   const release = await hideDraft(page, pricing.id);
   const frame = await openSeo(page);
   const title = textbox(frame, UI.field.title);
-  await title.fill('Left behind {Separator} {Site name}');
+  await title.fill('Left behind');
   await expect(status(frame)).toContainText(UI.footer.unstored, { timeout: 10_000 });
 
   // Away and back while the draft is still missing: the change is kept in
@@ -191,13 +218,13 @@ test('a change left behind while the draft was missing is restored once the edit
   await expect(status(frame)).toContainText(`Now editing ${PAGES.about.title}`);
   await switchPage(page, pricing.id);
   await expect(status(frame)).toContainText(`Now editing ${pricing.title}`);
-  await expect(title).not.toHaveValue('Left behind {Separator} {Site name}');
+  await expect(title).not.toHaveValue('Left behind');
 
   // Once the editor has stored it, the change comes back and goes out.
   await release();
-  await expect(title).toHaveValue('Left behind {Separator} {Site name}', { timeout: 10_000 });
+  await expect(title).toHaveValue('Left behind', { timeout: 10_000 });
   await expect(status(frame)).toContainText(UI.footer.restored);
-  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Left behind {sep} {site}');
+  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Left behind');
 });
 
 test('a save from another session is shown as a conflict, not written over', async ({ drupal, page }) => {

@@ -65,10 +65,10 @@ layer (head-output), with nothing from any content type template.
 A translation that is not the default one MUST inherit the robots directives,
 the social image and the structured data type of the default-language version
 until it sets its own; its own directives MUST win one by one. A draft-only
-translation MUST inherit from the stored default version. Canonical, both
-title parts, social text and structured data details MUST NOT be inherited.
-The details of an inherited type MUST be
-the translation's own, validated against that type.
+translation MUST inherit from the stored default version. Canonical, both title
+parts, social text and structured data details MUST NOT be inherited. The
+details of an inherited type MUST be the translation's own, validated against
+that type.
 
 #### Scenario: Inherited visibility and type
 
@@ -89,3 +89,19 @@ the translation's own, validated against that type.
 
 - **WHEN** the English version sets the title ending "Docs" and the French translation sets none
 - **THEN** the French title MUST end with the site's ending, not "Docs"
+
+### Requirement: A new translation publishes its own values
+
+When a translation that exists only as a Canvas draft is published, its SEO
+value MUST be stored with it, also when that value equals the default
+version's.
+
+#### Scenario: The same value as the default version
+
+- **WHEN** the English version stores the title `{"title":{"text":"Pricing"}}` and nothing else, and a Spanish draft-only translation stores the same title and is published
+- **THEN** the stored Spanish translation MUST hold the title `{"title":{"text":"Pricing"}}`
+
+#### Scenario: A different value
+
+- **WHEN** the Spanish draft-only translation stores `{"robots":{"noindex":true}}` and is published
+- **THEN** the stored Spanish translation MUST hold that value

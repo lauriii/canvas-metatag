@@ -47,12 +47,16 @@ export interface FieldOptions {
   source?: ReactNode;
   /** What Reset returns to, for its tooltip: "Back to …". */
   resetTip?: string;
+  /** What Reset clears, when not the field: "title ending". */
+  resetWhat?: string;
   /** Replaces the plain reset of `path`. */
   onReset?(): void;
   /** A message of the dialog's own, shown like the server's. */
   error?: string;
   /** The aside's action while nothing is set: "Use the site pattern". */
   action?: ReactNode;
+  /** No Reset in the aside: the control has its own way back (a box's ×). */
+  noReset?: boolean;
 }
 
 export interface FieldParts {
@@ -193,7 +197,8 @@ export function useField(options: FieldOptions): FieldParts {
 
   let action: ReactNode = null;
   if (justReset) {
-    word = 'Reset ·';
+    // Where the value now comes from, beside its Undo.
+    word = word ? <>Reset · {word} ·</> : 'Reset ·';
     action = (
       <Btn
         variant="ghost"
@@ -207,7 +212,7 @@ export function useField(options: FieldOptions): FieldParts {
         Undo
       </Btn>
     );
-  } else if (set && !disabled) {
+  } else if (set && !disabled && !options.noReset) {
     const back =
       options.resetTip ??
       (below === 'site'
@@ -220,7 +225,7 @@ export function useField(options: FieldOptions): FieldParts {
         <Btn
           variant="ghost"
           size={24}
-          aria-label={`Reset ${label}`}
+          aria-label={`Reset ${options.resetWhat ?? label}`}
           onClick={() => {
             if (options.onReset) {
               options.onReset();
@@ -235,6 +240,8 @@ export function useField(options: FieldOptions): FieldParts {
         </Btn>
       </Tooltip>
     );
+  } else if (set) {
+    action = null;
   } else if (shown === 'site' && server.can.site && !disabled) {
     action = (
       <Btn
@@ -242,7 +249,12 @@ export function useField(options: FieldOptions): FieldParts {
         size={24}
         aria-label={`Edit the site default for ${label}`}
         onClick={() =>
-          goTo({ scope: 'site', tab: 'defaults', field: `values.${path}` })
+          // The part that comes from the site: the title's ending.
+          goTo({
+            scope: 'site',
+            tab: 'defaults',
+            field: `values.${paths[from.indexOf('site')] ?? path}`,
+          })
         }
       >
         Edit
@@ -292,7 +304,9 @@ function useIssue(scope: Scope, path: string): Issue | undefined {
           issue.severity !== 'info' &&
           issue.jump?.scope === 'target' &&
           issue.jump.field === path &&
-          !issue.id.startsWith('schema-required:'),
+          !issue.id.startsWith('schema-required:') &&
+          // A link says what it gives under its own field.
+          !issue.id.startsWith('link-'),
       )
     : undefined;
 }
@@ -387,13 +401,17 @@ export function Field(
     inline?: boolean;
     /** An ⓘ beside the label. */
     info?: ReactNode;
+    /** Right after the label: the link button of a value that can be linked. */
+    link?: ReactNode;
     meter?: Meter;
-    /** Chip fields: what the value becomes, shown on focus when no preview shows it. */
+    /** What a linked value gives, shown on focus when no preview shows it. */
     resolved?: string;
     /** The field has no preview of its own (Schema, Site). */
     noStage?: boolean;
     /** A line that stays: the title pattern's example. */
     note?: ReactNode;
+    /** Why a linked value gives nothing for the item: before any issue, which it explains. */
+    explain?: ReactNode;
     /** Opens this field's suggestions, for an issue whose fix is a suggestion. */
     onSuggest?(): void;
     /** Under the guidance line: the suggestions tray. */
@@ -425,6 +443,8 @@ export function Field(
         {field.message}
       </Guide>
     );
+  } else if (props.explain) {
+    guide = <Guide id={guideId}>{props.explain}</Guide>;
   } else if (issue) {
     guide = (
       <Guide
@@ -515,10 +535,11 @@ export function Field(
     <div
       className={props.labelHidden ? 'seo-visually-hidden' : 'seo-label-row'}
     >
-      {props.info ? (
+      {props.info || props.link ? (
         <span className="seo-label">
           {label}
           {props.info}
+          {props.link}
         </span>
       ) : (
         label

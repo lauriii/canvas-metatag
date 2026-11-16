@@ -34,8 +34,9 @@ or type only. A page translation's inherited settings are in page-seo.
 The title MUST be the main part and the ending joined by a space, the site's
 separator and a space. The main part MUST be the target's value, else the
 entity's Title fact. An empty part MUST be left out together with its
-separator. When both parts are empty, the title MUST be the Site name. The
-title MUST be cut at 255 characters.
+separator. When both parts are empty, the title MUST be the Site name. Over
+255 characters, the main part MUST be shortened, at a word near the limit and
+never inside a character, so that the separator and the ending stay whole.
 
 #### Scenario: Separators without neighbours
 
@@ -141,3 +142,41 @@ because it cannot know the title's ending.
 
 - **WHEN** an editor opens a Canvas page's Page data form
 - **THEN** the Metatag input and the built-in search preview MUST be hidden, and Canvas's description and image inputs MUST stay
+
+### Requirement: A cut head text ends at a word
+
+The title, the description and the social texts MUST be cut at the last space
+within the limit when the cut would fall inside a word and that space is
+within the last tenth of the limit. A title's main part is cut so that its
+ending stays whole.
+
+#### Scenario: A very long event title
+
+- **WHEN** "Every Event" links the main part to the Title fact with the ending "Events", and an event's title is 247 characters ending in "rehearsed and first performed"
+- **THEN** the event's title MUST end with "… first | Events": the main part cut at a word, then the separator and the whole ending
+
+#### Scenario: A text without spaces
+
+- **WHEN** a title is 300 characters of text written without spaces
+- **THEN** the title MUST be cut at 255 code points, never inside a character that is drawn as one
+
+### Requirement: A cut never breaks a character
+
+A text cut to its limit MUST NOT end inside a character that is drawn as one:
+an emoji sequence, a flag, or a letter with its marks. Such a character MUST be
+left out whole. The limit MUST stay a number of code points.
+
+#### Scenario: An emoji sequence at the limit
+
+- **WHEN** a title is 254 code points of text without spaces followed by a five-code-point emoji sequence
+- **THEN** the title MUST be the 254 code points of text without any part of the sequence
+
+#### Scenario: A flag at the limit
+
+- **WHEN** the 1000th code point of a description of 1200 code points is the first half of a flag
+- **THEN** the description MUST end before the flag
+
+#### Scenario: A content's description cut from its text
+
+- **WHEN** a content's formatted text has no summary and an emoji sequence spans its 160th code point
+- **THEN** its Description fact MUST end before the sequence

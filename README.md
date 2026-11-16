@@ -44,7 +44,7 @@ form of a node whose type has an enabled Full template. It keeps working
 everywhere else. For such a page or node Metatag stays silent on every route,
 including the revision, latest-version and preview routes of a node, where this
 module emits no head either: those show the title only. Canvas's own search
-preview in Page data is hidden too, because it cannot know the title pattern;
+preview in Page data is hidden too, because it cannot know the title's ending;
 the dialog has its own.
 
 If building the head fails (an invalid site timezone, an incompatible Canvas
@@ -61,18 +61,42 @@ version), the page is served with core's head and the error is logged under
 
 A page setting wins over the site's, and a content type's setting wins over the
 site's. Site holds what is safe as a site-wide value: who runs the site, the
-title pattern and separator, a default social image and the search visibility
-defaults. There is no site-wide description: a page's own text is the default.
+title's ending and separator, a default social image and the search visibility
+defaults. There is no site-wide title or description: a page's own text is the
+default.
+
+A title is two parts: the page's own words and an ending, joined by the
+separator ("Plans and prices | Example"). The ending is the site name unless a
+content type or a page chooses another one, or "No ending". When a title is
+too long, its words are cut and the ending stays whole.
 
 Because page and template settings live in Canvas drafts, they show in "Review
 changes", can be discarded there, and publish together with everything else in
 the draft. Publishing a template also enables it.
 
-Values can contain dynamic values such as the page title, the site name, or, in
-a template, the content type's own fields. `{author}` publishes the display
-name of the content's author, which is the account's login name unless
-something changes it. To publish another name, install a module that changes
-display names, or bind "Author name" to a byline field in the template.
+A value is either typed text or linked: to a fact such as the page title, the
+site name or the author, or, in a template, to one of the content type's
+fields, as Canvas offers them for a component in that template (references
+included, such as "Venue › Street address"). Typed text is used as it is:
+braces are text. The Author fact publishes the display name of the content's
+author, which is the account's login name unless something changes it. To
+publish another name, install a module that changes display names, or link
+"Author name" to a byline field in the template.
+
+A link reads what an anonymous visitor may see. A field or a referenced item
+visitors may not view gives nothing, and the value falls back to its default;
+Checks says so. A few things work differently from what you might expect:
+
+- A text list gives its stored key (`EventScheduled`), not its label, which is
+  what structured data needs.
+- A multi-value field gives its first item. A multi-value media field, such as
+  a gallery, cannot be linked as an image; the Image fact uses its first
+  image. A multi-value formatted text field, such as recipe steps, is not
+  offered.
+- While you preview an item visitors cannot see yet, its links are read with
+  your access.
+- A field deleted after it was linked leaves the link in place; each item uses
+  its default until the field is back, and the dialog marks the link.
 
 Where a value is "the first" field of a kind (the description of a content
 item is its first formatted text with a summary, its page image the first
@@ -113,7 +137,8 @@ cleaned again before it is rendered.
   own, and never inherits its canonical address or its text. The details of an
   inherited page type (a product's price) are the translation's own.
 - Its title and description are the translated page title and description.
-- Title patterns of templates and of the site are shared by all languages.
+- Title endings and other values of templates and of the site are shared by
+  all languages.
 - Published translations get reciprocal hreflang links and an `x-default`.
 
 ## AI suggestions (optional)
@@ -274,7 +299,7 @@ data; repeating structured data such as FAQs or recipe steps (use custom
 JSON-LD); robots rules for single crawlers and AI-training opt-outs (those
 belong in `robots.txt`); `og:locale`; image upload or image styles; a site-wide
 default description or social text; a UI for translating template or site
-patterns; editing a translation's own SEO text where the Canvas editor cannot
+values; editing a translation's own SEO text where the Canvas editor cannot
 open that translation; a frontend npm package; dark mode. Site settings are not
 locked while someone edits them: the last save wins.
 

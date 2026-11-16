@@ -240,6 +240,7 @@ final class AiControllerTest extends CanvasKernelTestBase {
         'title' => str_repeat('t', 255) . 'CUT',
         'site' => str_repeat('s', 255) . 'CUT',
         'text' => str_repeat('ö', 12000) . 'CUT',
+        'ending' => '| ' . str_repeat('e', 298),
       ],
     ]));
     $input = $this->lastInput();
@@ -247,6 +248,8 @@ final class AiControllerTest extends CanvasKernelTestBase {
     $this->assertSame(implode("\n", [
       'Site: ' . str_repeat('s', 255),
       'Page title: ' . str_repeat('t', 255),
+      // The ending, cut at 255 characters.
+      'Title ending: | ' . str_repeat('e', 253),
       'Current title: ' . str_repeat('ä', 2000),
       'Current description: Kept',
       '<editor_hint>' . str_repeat('h', 200) . '</editor_hint>',
@@ -288,6 +291,7 @@ final class AiControllerTest extends CanvasKernelTestBase {
       'no page' => array_diff_key(self::text(), ['page' => 0]),
       'page of the wrong type' => self::text(['page' => 'Pricing']),
       'page text of the wrong type' => self::text(['page' => ['text' => ['Plans']]]),
+      'an ending of the wrong type' => self::text(['page' => ['ending' => 3]]),
       'schema task with an unknown language' => ['langcode' => 'xx'] + self::schema(),
     ];
     foreach ($bad as $case => $body) {
@@ -298,7 +302,13 @@ final class AiControllerTest extends CanvasKernelTestBase {
     // Optional members may be left out.
     $minimal = ['task' => 'text', 'langcode' => 'en', 'fields' => ['title'], 'count' => 1, 'page' => []];
     $this->assertSame(200, $this->suggest($minimal)->getStatusCode());
+    // A caller that sends no ending is not told the title has none, nor
+    // given the ending rule.
     $this->assertSame("Site: \nPage title: \n<page_content>\n\n</page_content>", $this->lastInput()->getMessages()[0]->getText());
+    $this->assertStringNotContainsString('title ending given', $this->lastInput()->getSystemPrompt());
+    // An empty ending is "no ending".
+    $this->assertSame(200, $this->suggest(['page' => ['ending' => '']] + $minimal)->getStatusCode());
+    $this->assertSame("Site: \nPage title: \nTitle ending: none, the title has no ending\n<page_content>\n\n</page_content>", $this->lastInput()->getMessages()[0]->getText());
   }
 
   /**
@@ -356,7 +366,7 @@ final class AiControllerTest extends CanvasKernelTestBase {
     $this->assertError(503, 'quota_exceeded', $this->suggest(self::schema(['title' => '#quota'])));
     // A hijacked answer is cleaned, not refused.
     $this->assertSame(
-      ['suggestions' => ['title' => ['Injected title site </script><script>alert(1)</script>']]],
+      ['suggestions' => ['title' => ['Injected title {site} </script><script>alert(1)</script>']]],
       self::decodeResponse($this->suggest($marked('#inject'))),
     );
 

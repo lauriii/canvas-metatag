@@ -85,6 +85,26 @@ build-assets:
       }
 
 ################
+# The Canvas contract against Canvas's development branch (custom job).
+#
+# src/Sources.php is the only caller of Canvas internals (its prop source
+# suggester, labeler and expressions). Their pinning tests, the group
+# canvas_metatag_canvas_contract, also run against drupal/canvas:1.x-dev, so a
+# change there fails here before a release. composer.json keeps the released
+# constraint. Not allowed to fail.
+################
+'phpunit (canvas dev)':
+  extends: phpunit
+  allow_failure: false
+  variables:
+    # Plain PHPUnit, so that --group applies.
+    _PHPUNIT_CONCURRENT: '0'
+    _PHPUNIT_EXTRA: --group canvas_metatag_canvas_contract
+  script:
+    - composer require --no-interaction --with-all-dependencies 'drupal/canvas:1.x-dev'
+    - !reference [.phpunit-base, script]
+
+################
 # Playwright end-to-end tests (custom job; not part of the template above).
 #
 # The template runs PHPUnit/PHPCS/PHPStan/cspell. Playwright additionally needs

@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Drupal\canvas_metatag;
 
-use Drupal\Component\Uuid\Uuid;
-
 /**
  * The JSON-LD type registry, literal validation and @graph assembly.
  *
@@ -52,7 +50,7 @@ final class SchemaGraph {
       'date' => preg_match(self::DATE, $value, $m) && checkdate((int) $m[2], (int) $m[3], (int) $m[1]),
       'number' => (bool) preg_match('/^\d+(\.\d+)?$/D', $value),
       'enum' => in_array($value, $prop['options'] ?? [], TRUE),
-      'image' => Uuid::isValid($value) || (preg_match(Values::TOKEN, $value, $m) && $m[0] === $value),
+      // An image is a media item, a fact or a link, never text.
       default => FALSE,
     };
     return $valid && (!isset($prop['pattern']) || preg_match('~' . $prop['pattern'] . '~uD', $value));
@@ -64,20 +62,19 @@ final class SchemaGraph {
    * @param array $ctx
    *   The keys home, url, langcode, title, description, published, modified,
    *   timezone, identity{kind, name, same_as[]}, logo?{url, width, height}
-   *   and image?{url, width, height, alt}. `url` is the entity's own public
+   *   image?{url, width, height, alt} and facts (name => text, the fixed
+   *   names custom JSON-LD strings may use). `url` is the entity's own public
    *   URL, never a canonical override.
    * @param array $schema
    *   The effective `schema` value, cleaned.
-   * @param callable(string, bool=): string $fill
-   *   Template substitution for this entity; TRUE as the second argument keeps
-   *   brace text that names no known token.
-   * @param callable(string): ?array $image
-   *   Media UUID or image token => image array, or NULL.
+   * @param callable(array, string): (string|array|null) $value
+   *   What a value gives for this entity, by kind: text, or for the image
+   *   kind an image array; '' or NULL for nothing.
    *
    * @return array{graph: array{'@context': string, '@graph': list<array>}, withheld: bool, missing_required: list<string>, missing_recommended: list<string>}
    *   The graph and the report the Checks tab reads.
    */
-  public static function build(array $ctx, array $schema, callable $fill, callable $image): array {
+  public static function build(array $ctx, array $schema, callable $value): array {
     $types = self::types();
     $type_id = isset($types[$schema['type'] ?? '']) ? $schema['type'] : 'WebPage';
     $type = $types[$type_id];
@@ -104,13 +101,20 @@ final class SchemaGraph {
       }
       foreach ($type['props'] ?? [] as $prop) {
         $stored = $schema['props'][$prop['key']] ?? NULL;
-        // A summary left at its default is the page's own description, as
-        // search shows it, not the raw text it may have been cut from.
-        $own = $stored === NULL && ($prop['default'] ?? '') === '{description}'
-          ? static fn (): string => (string) ($ctx['description'] ?? '')
-          : $fill;
-        $value = self::value($type_id, $prop, $stored ?? $prop['default'] ?? '', $ctx, $own, $image);
-        if ($value === NULL) {
+        $default = $prop['default'] ?? NULL;
+        // The Description fact is the page's own description, as search shows
+        // it, not the raw text it may have been cut from. A link that gives
+        // nothing gives the default; one that gives a value that does not
+        // fit leaves the detail out.
+        $resolve = static fn (?array $v): string|array|null => $v === NULL ? NULL : (
+          $v === ['fact' => 'description'] ? (string) ($ctx['description'] ?? '') : $value($v, Values::KINDS[$prop['kind']])
+        );
+        $raw = $resolve($stored);
+        if ($raw === NULL || $raw === '') {
+          $raw = $resolve($default);
+        }
+        $found = self::value($type_id, $prop, $raw, $ctx);
+        if ($found === NULL) {
           if (isset($prop['level'])) {
             $missing[$prop['level']][] = $prop['key'];
           }
@@ -127,7 +131,7 @@ final class SchemaGraph {
           $at[$segment] ??= ['@type' => $type['nested'][$prefix] ?? 'Thing'];
           $at = &$at[$segment];
         }
-        $at[$leaf] = $value;
+        $at[$leaf] = $found;
         unset($at);
       }
     }
@@ -183,7 +187,7 @@ final class SchemaGraph {
       if (!is_array($node) || !is_string($node['@type'] ?? NULL)) {
         continue;
       }
-      $node = self::custom($node, TRUE, $ctx['url'], $ours, $present, $fill);
+      $node = self::custom($node, TRUE, $ctx['url'], $ours, $present, $ctx['facts'] ?? []);
       if (isset($node['@id'])) {
         if (isset($taken[$node['@id']])) {
           continue;
@@ -204,18 +208,17 @@ final class SchemaGraph {
   /**
    * Resolves one property; NULL when it is empty or not valid for its kind.
    */
-  private static function value(string $type, array $prop, string $template, array $ctx, callable $fill, callable $image): string|array|null {
+  private static function value(string $type, array $prop, string|array|null $resolved, array $ctx): string|array|null {
     if ($prop['kind'] === 'image') {
-      $resolved = $template === '' ? NULL : $image($template);
       // A dimension that was never measured (0) is left out, not claimed.
-      return $resolved ? self::node([
+      return is_array($resolved) ? self::node([
         '@type' => 'ImageObject',
         'url' => $resolved['url'],
         'width' => $resolved['width'] ?: NULL,
         'height' => $resolved['height'] ?: NULL,
       ]) : NULL;
     }
-    $value = Values::plain($fill($template), 2000);
+    $value = Values::plain(is_string($resolved) ? $resolved : '', 2000);
     if ($value === '' || !self::validLiteral($type, $prop['key'], $value)) {
       return NULL;
     }
@@ -242,16 +245,16 @@ final class SchemaGraph {
    *   The ids of our own nodes.
    * @param array<string, true> $present
    *   The ids of our nodes that are in this graph.
-   * @param callable $fill
-   *   Template substitution.
+   * @param array<string, string> $facts
+   *   The fixed names and their values (Values::fillFacts()).
    *
    * @return mixed
    *   The value to emit; NULL for a reference to a node of ours that is not
    *   in this graph, which the caller leaves out.
    */
-  private static function custom(mixed $value, bool $top, string $url, array $ours, array $present, callable $fill): mixed {
+  private static function custom(mixed $value, bool $top, string $url, array $ours, array $present, array $facts): mixed {
     if (is_string($value)) {
-      return $fill($value, TRUE);
+      return Values::fillFacts($value, $facts);
     }
     if (!is_array($value)) {
       return $value;
@@ -264,7 +267,7 @@ final class SchemaGraph {
     }
     $result = [];
     foreach ($value as $key => $item) {
-      $item = str_starts_with((string) $key, '@') ? $item : self::custom($item, FALSE, $url, $ours, $present, $fill);
+      $item = str_starts_with((string) $key, '@') ? $item : self::custom($item, FALSE, $url, $ours, $present, $facts);
       if ($item !== NULL) {
         $result[$key] = $item;
       }

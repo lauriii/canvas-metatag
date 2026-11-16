@@ -24,7 +24,7 @@ import { type Api, ApiError, createApi } from './api';
 import { checks } from './checks';
 import { CHECKS_NOTE, ChecksSheet } from './components/ChecksSheet';
 import { Header, Sheet } from './components/Header';
-import { type ImageRequest, ImageSheet } from './components/MediaPicker';
+import { type ImageRequest, ImageSheet, PICKED } from './components/MediaPicker';
 import { OutputSheet, originNote } from './components/Output';
 import { SearchSkeleton } from './components/Previews';
 import { CustomJson, SchemaTab } from './components/SchemaTab';
@@ -101,12 +101,12 @@ export interface AppContext {
   /** A scope whose controls are disabled: values stay readable. */
   locked: Record<Scope, boolean>;
   /** The last jump: fields compare `field` and `seq` to take focus. */
-  jump: (Jump & { seq: number; suggest: boolean }) | null;
+  jump: (Jump & { seq: number; suggest: boolean; link?: boolean }) | null;
   /**
    * Closes any sheet, switches scope and tab, then names the field.
-   * `suggest`: open its suggestions.
+   * `suggest`: open its suggestions; `link`: open its link menu.
    */
-  goTo(jump: Jump, how?: { suggest?: boolean }): void;
+  goTo(jump: Jump, how?: { suggest?: boolean; link?: boolean }): void;
   /** The texts a suggestion is trying out: the previews show them. */
   trial: (Texts & { index?: number }) | null;
   setTrial(trial: (Texts & { index?: number }) | null): void;
@@ -815,7 +815,7 @@ export default function App() {
 
   // Derived, never stored.
   const shownView = useMemo(
-    () => view(state),
+    () => view(state, PICKED),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.server, state.edits.target, state.live, state.sent],
   );
@@ -830,7 +830,8 @@ export default function App() {
       effective: shownView.effective,
       sources: shownView.source,
       texts: shownView.texts,
-      tokens: shownView.tokens,
+      lookup: shownView.lookup,
+      separator: server.separator,
       resolved: server.resolved,
       site: server.site,
       registry: REGISTRY,
@@ -878,6 +879,7 @@ export default function App() {
         setJump((last) => ({
           ...to,
           suggest: how.suggest ?? false,
+          link: how.link ?? false,
           seq: (last?.seq ?? 0) + 1,
         }));
       },

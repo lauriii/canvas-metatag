@@ -69,6 +69,36 @@ test('with no page in context the dialog is the site settings, and a save applie
   await pick(frame, 'default image', IMAGES.hero);
   await expect(status(frame)).toContainText(UI.footer.siteUnsaved);
 
+  // The site sets the title's ending, a control as wide as the others, with
+  // an example in words. Nothing in Site links to a field.
+  await expect(frame.getByText('Page title', { exact: true })).toHaveCount(0);
+  const endingField = frame.locator('.seo-field[data-path="values.title_end"]');
+  await expect(endingField.locator('.seo-label', { hasText: 'Title ending' })).toBeVisible();
+  const [fieldWidth, buttonWidth] = await endingField.evaluate((field) => [
+    field.getBoundingClientRect().width,
+    field.querySelector('.seo-ending-btn')!.getBoundingClientRect().width,
+  ]);
+  expect(buttonWidth).toBeGreaterThanOrEqual(fieldWidth - 1);
+  const example = frame.locator('.seo-field[data-path="values.title_end"] .seo-guide');
+  await expect(example).toHaveText(/^For .+: .+ · Example Co$/);
+  await expect(frame.locator('[data-link]')).toHaveCount(0);
+  // The ending's menu: typed endings and its options, no fields; what
+  // matches comes before typing it as an ending.
+  const ending = button(frame, UI.field.titleEnding);
+  await ending.click();
+  const menu = frame.getByRole('dialog', { name: 'Title ending' });
+  await expect(menu.getByRole('textbox', { name: 'Type an ending' })).toBeFocused();
+  await page.keyboard.type('no end');
+  await expect(menu.getByRole('option')).toHaveText([/^No ending/, /^Use “no end” as the ending/]);
+  await page.keyboard.press('Enter');
+  await expect(ending).toBeFocused();
+  await expect(ending).toHaveAccessibleName("Title ending: No ending");
+  await expect(example).toHaveText(/^For .+: [^·]+$/);
+  // Back to the site name.
+  await ending.click();
+  await menu.getByRole('option', { name: /^Site name/ }).click();
+  await expect(ending).toHaveAccessibleName("Title ending: Example Co");
+
   await button(frame, UI.action.save).click();
   // "Saved · live now" shows for two seconds, then the footer settles.
   await expect(status(frame)).toContainText(new RegExp(`${UI.footer.siteSaved}|${UI.footer.siteLive}`), {

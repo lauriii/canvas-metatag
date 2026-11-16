@@ -100,8 +100,8 @@ final class ComplexContentTest extends CanvasKernelTestBase {
     self::assertSame(ComplexContent::CLIENT_ID, $draft->clientId);
     $draft_template = $draft->entity;
     self::assertInstanceOf(ContentTemplate::class, $draft_template);
-    self::assertSame('{title} {sep} Tickets', $draft_template->getThirdPartySetting('canvas_metatag', 'values')['title']);
-    self::assertSame('{title} {sep} Events', $templates['node.event.full']->getThirdPartySetting('canvas_metatag', 'values')['title']);
+    self::assertSame(['text' => 'Tickets'], $draft_template->getThirdPartySetting('canvas_metatag', 'values')['title_end']);
+    self::assertSame(['text' => 'Events'], $templates['node.event.full']->getThirdPartySetting('canvas_metatag', 'values')['title_end']);
     self::assertCount(count($templates['node.event.full']->getComponentTree()) + 1, $draft_template->getComponentTree());
 
     // The unpublished preview node, hidden references and empty fields.
@@ -131,23 +131,24 @@ final class ComplexContentTest extends CanvasKernelTestBase {
     // A template that was never published counts for previews only.
     self::assertTrue($resolver->owns($node('recipe_bread'), TRUE));
 
-    // The baseline the scenario matrix starts from, with values in braces: a
-    // text list gives its label, so no currency passes; an address on the
-    // venue cannot be reached, so no event ships; a hidden first performer or
+    // The baseline the scenario matrix starts from, with linked values: a
+    // text list gives its key, so the currency passes; the street address is
+    // read through the venue, so the event ships; a hidden first performer or
     // venue gives nothing.
     $lamp = $resolver->resolve($node('product_lamp'));
-    self::assertTrue($lamp['schema']['withheld']);
-    self::assertSame(['offers_priceCurrency'], $lamp['schema']['missing_required']);
+    self::assertFalse($lamp['schema']['withheld']);
+    self::assertSame([], $lamp['schema']['missing_required']);
     $event = $resolver->resolve($node('event_full'));
-    self::assertSame(['location_address_streetAddress'], $event['schema']['missing_required']);
+    self::assertFalse($event['schema']['withheld']);
+    self::assertSame([], $event['schema']['missing_required']);
     self::assertSame('Midsummer Night Concert | Events', $event['head']['title']);
-    self::assertSame('Lakeside Concert Hall', $this->tokenValue($node('event_full'), 'field.field_venue'));
-    self::assertSame('On as planned', $this->tokenValue($node('event_full'), 'field.field_event_status'));
-    self::assertSame('', $this->tokenValue($node('event_hidden_refs'), 'field.field_venue'));
-    self::assertSame('', $this->tokenValue($node('event_hidden_refs'), 'field.field_performers'));
-    self::assertSame('2027-06-19T19:00:00+03:00', $this->tokenValue($node('event_full'), 'field.field_starts'));
-    self::assertSame('2027-01-31', $this->tokenValue($node('job_developer'), 'field.field_valid_through'));
-    self::assertSame('', $this->tokenValue($node('job_developer'), 'field.field_no_view_access'));
+    self::assertSame('Lakeside Concert Hall', $this->linked($node('event_full'), 'field_venue␞␟entity␜␜entity:node␝title␞␟value'));
+    self::assertSame('EventScheduled', $this->linked($node('event_full'), 'field_event_status␞␟value'));
+    self::assertSame('', $this->linked($node('event_hidden_refs'), 'field_venue␞␟entity␜␜entity:node␝title␞␟value'));
+    self::assertSame('', $this->linked($node('event_hidden_refs'), 'field_performers␞␟entity␜␜entity:node␝title␞␟value'));
+    self::assertSame('2027-06-19T19:00:00+03:00', $this->linked($node('event_full'), 'field_starts␞␟value', 'date'));
+    self::assertSame('2027-01-31', $this->linked($node('job_developer'), 'field_valid_through␞␟value', 'date'));
+    self::assertSame('', $this->linked($node('job_developer'), 'field_no_view_access␞␟value'));
 
     // The field that visitors cannot view is hidden here.
     self::assertFalse($node('job_developer')->get('field_no_view_access')->access('view', new AnonymousUserSession()));
@@ -183,10 +184,11 @@ final class ComplexContentTest extends CanvasKernelTestBase {
   }
 
   /**
-   * The value of one dynamic value for a node.
+   * What a value linked to a field of the node's type gives.
    */
-  private function tokenValue(NodeInterface $node, string $name): string {
-    return $this->resolver()->tokens($node, 'node', $node->bundle(), new CacheableMetadata())[$name]['value'];
+  private function linked(NodeInterface $node, string $path, string $kind = 'text'): string {
+    $source = ['expression' => 'ℹ︎␜entity:node:' . $node->bundle() . '␝' . $path, 'sourceType' => 'entity-field'];
+    return (string) $this->resolver()->link($source, $node, $kind, new CacheableMetadata())[1];
   }
 
   /**

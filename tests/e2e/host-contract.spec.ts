@@ -239,9 +239,8 @@ test('inside the frame: Enter, links, the clipboard and a typed date', async ({ 
   await tab(frame, UI.tab.schema).click();
   await frame.getByRole('combobox', { name: 'Type', exact: true }).click();
   await frame.getByRole('option', { name: /^Event/ }).click();
-  await frame.getByRole('combobox', { name: /^Starts/ }).click();
-  await frame.getByRole('option', { name: 'A fixed date…' }).click();
-  const date = frame.locator('input[type="date"]').first();
+  // A page's Starts has no default to follow: its date input shows at once.
+  const date = frame.locator('.seo-field[data-path="schema.props.startDate"] input[type="date"]');
   await date.focus();
   // Day and month are the same number: the field's order of day and month
   // follows the operating system's region, which the browser locale does not

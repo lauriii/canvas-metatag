@@ -108,7 +108,16 @@ export function ChecksSheet() {
             Suggest
           </Btn>
         )}
-        {jump && (
+        {fix && 'link' in fix && jump && (
+          <Btn
+            variant="soft"
+            aria-describedby={titleId}
+            onClick={() => goTo(jump, { link: true })}
+          >
+            {fix.label}
+          </Btn>
+        )}
+        {jump && !(fix && 'link' in fix) && (
           <Btn
             variant="ghost"
             // Named for its field, described by its issue: several issues

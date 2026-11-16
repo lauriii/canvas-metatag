@@ -63,13 +63,13 @@ test('a preview token sees the page draft and the template draft; visitors do no
 }) => {
   await drupal.login(USERS.editor);
   await writeDraft(page, `canvas_page/${pricing.id}`, `layout/canvas_page/${pricing.id}`, {
-    title: 'Draft pricing {sep} {site}',
+    title: { text: 'Draft pricing' },
   });
   await writeDraft(
     page,
     `content_template/${TEMPLATE_ID}`,
     `layout-content-template/${TEMPLATE_ID}/${article.id}`,
-    { title: '{title} by {field.field_byline}' },
+    { title_end: { text: 'Drafts' } },
   );
 
   // The editor's session mints an assertion; a frontend redeems it for a
@@ -93,7 +93,7 @@ test('a preview token sees the page draft and the template draft; visitors do no
 
   expect((await contentHead(visitor.request, uri(pricing.path), token)).title).toBe(`Draft pricing | ${SITE_NAME}`);
   expect((await contentHead(visitor.request, uri(article.path), token)).title).toBe(
-    `${article.title} by ${article.byline}`,
+    `${article.title} | Drafts`,
   );
   expect((await contentHead(visitor.request, uri(pricing.path))).title).toBe(`${pricing.title} | ${SITE_NAME}`);
   expect((await contentHead(visitor.request, uri(article.path))).title).toBe(`${article.title} | ${SITE_NAME}`);

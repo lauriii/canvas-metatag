@@ -32,7 +32,7 @@ entity-field prop sources) to replace the module's field tokens.
 - **Full plan (recommended): fields are Canvas sources.** A template's field
   link is stored as a Canvas entity-field prop source. The link menu offers
   the fields Canvas offers when linking a component prop, with Canvas's labels
-  and order, and can follow references ("Writer › Name"). A CI job runs the
+  and order, and can follow references ("Writer › Title"). A CI job runs the
   module's Canvas contract tests against Canvas's development branch.
 - **Stored values are converted by an update.** Titles are split into main
   part and ending, whole dynamic values become links, and anything that cannot
@@ -52,7 +52,46 @@ entity-field prop sources) to replace the module's field tokens.
   will be added. AI text is stored as typed text, so braces in it stay
   literal.
 
-## Open decisions (product owner)
+## Decisions taken
+
+- **Full plan** (product owner, 2026-11-13, recorded in the implementation
+  run's decisions: "just do it all and make sure quality is high";
+  "experience needs to be clean even though we're making this more
+  powerful"). Fields are Canvas entity-field prop sources at template scope,
+  contained in one class (`src/Sources.php`), pinned by `SourcesTest` and run
+  against Canvas's development branch by the `phpunit (canvas dev)` CI job.
+  The fallback stopping point (tasks group 5) was not built; its migration
+  step folded into the one post_update.
+- Decisions 2 and 3 below were taken as recommended: an empty, hidden or
+  broken link gives the value's default, and a multi-value field gives its
+  first item.
+- Test providers only: the AI tests use the module's echo and test
+  providers.
+- Review round 1, under the product owner's "experience needs to be clean":
+  the link menu lists what fits first and folds the rest into one last row
+  (the spec's "shown disabled with a reason" kept behind it); a choice detail
+  fits only a list field; a structured data detail that follows the
+  Description fact shows the description as search shows it, as the head
+  already emits it, rather than renaming the fact; two fields of one type
+  with one label keep their machine names; length stays guidance on focus,
+  not at rest (seo-dialog "Title and description lengths are guidance"); a
+  page may no longer link its social image to its own default, the Image
+  fact.
+- Review round 2, under the same words: an entry through a reference that
+  only the previewed item hides (an unpublished venue) stays pickable and
+  says so, since every other item gives it; a field visitors may never view
+  stays disabled. What does not fit inside a level waits in the menu's one
+  last row. A linked box beside another detail keeps two lines, cut at their
+  ends. A linked box offers its × and no Reset beside it. Site sets the title
+  ending as a field of its own, without the "Page title" pill. A page's
+  details whose only fact is their default get no link button. Galleries
+  (several images) stay unlinkable (README, Known limitations); the hidden
+  image scenario uses an unpublished poster instead. A Canvas computed address
+  (`␞␟url`) is no longer offered: it keeps what the first account to read it
+  saw. A linked ending that gives nothing for the item falls back to the
+  site's ending, as an unset one does.
+
+## Open decisions (product owner), as they were put
 
 1. **Full plan or fallback.** Recommended: the full plan above.
    - *Full plan:* fields become Canvas prop sources, stored in the module's
@@ -91,6 +130,18 @@ entity-field prop sources) to replace the module's field tokens.
   in a separate frame and cannot use them.
 
 No README non-goal is reopened.
+
+## Follow-ups
+
+- **The `phpunit (canvas dev)` job has not run in a pipeline yet** (tasks 6.4
+  and 8.1). The job is in `.gitlab-ci.yml`, but the implementation run could
+  not start a pipeline: the branch is not pushed, and gitlab-ci-local's
+  images do not fit beside the sites on the shared development machine. What
+  the job runs was run instead: the `canvas_metatag_canvas_contract` group
+  (`SourcesTest`, `PostUpdateTest`) against Canvas's development branch
+  (`1.x-dev`), green. The first pipeline of this branch must show the job
+  green; if `composer require drupal/canvas:1.x-dev` does not resolve on the
+  runner, fix the job before the next release.
 
 ## Dependencies
 

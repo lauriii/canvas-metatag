@@ -83,4 +83,4 @@ Text that is not a usable node MUST add nothing.
 #### Scenario: The fixed names
 
 - **WHEN** a custom node's strings use `{title}`, `{description}`, `{site}`, `{sep}`, `{url}`, `{author}`, `{published}`, `{modified}` and `{image}`
-- **THEN** each MUST be filled with the page's value, as before this change
+- **THEN** each MUST be filled with the page's value

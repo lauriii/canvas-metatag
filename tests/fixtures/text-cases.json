@@ -1,88 +1,598 @@
 {
-  "tokens": { "title": "Pricing", "description": "Plans and prices.", "site": "Example", "sep": "|" },
-  "site": { "title": "{title} {sep} {site}" },
+  "facts": {
+    "title": "Pricing",
+    "description": "Plans and prices.",
+    "site": "Example"
+  },
+  "separator": "|",
+  "site": {},
   "cases": [
-    { "name": "nothing set",
-      "expect": { "title": "Pricing | Example", "description": "Plans and prices.", "social_title": "Pricing", "social_description": "Plans and prices." } },
-    { "name": "target title overrides the site pattern",
-      "target": { "title": "Plans for every team {sep} {site}" },
-      "expect": { "title": "Plans for every team | Example", "social_title": "Pricing" } },
-    { "name": "unknown token is blanked",
-      "target": { "title": "{title} {field.gone} {sep} {site}" },
-      "expect": { "title": "Pricing | Example" } },
-    { "name": "brace text outside the grammar is literal",
-      "target": { "title": "{Title} {a b} {} { title } {sep} {site}" },
-      "expect": { "title": "{Title} {a b} {} { title } | Example" } },
-    { "name": "a token value is not expanded again",
-      "tokens": { "title": "{site}" },
-      "expect": { "title": "{site} | Example" } },
-    { "name": "empty first part leaves no leading separator",
-      "tokens": { "title": "" },
-      "expect": { "title": "Example", "social_title": "" } },
-    { "name": "empty last part leaves no trailing separator",
-      "tokens": { "site": "" },
-      "expect": { "title": "Pricing" } },
-    { "name": "adjacent separators collapse",
-      "target": { "title": "{title} {sep} {field.section} {sep} {site}" },
-      "tokens": { "field.section": "" },
-      "expect": { "title": "Pricing | Example" } },
-    { "name": "separator inside a word is text",
-      "target": { "title": "Pay-as-you-go {sep} {site}" },
-      "tokens": { "sep": "-" },
-      "expect": { "title": "Pay-as-you-go - Example" } },
-    { "name": "empty result falls back to the page title",
-      "target": { "title": "{field.gone}" },
-      "expect": { "title": "Pricing" } },
-    { "name": "empty page title falls back to the site name",
-      "target": { "title": "{title}" },
-      "tokens": { "title": "" },
-      "expect": { "title": "Example" } },
-    { "name": "less-than and ampersand are text",
-      "target": { "title": "I <3 Canvas & more" },
-      "expect": { "title": "I <3 Canvas & more" } },
-    { "name": "whitespace collapses and control characters go",
-      "target": { "title": "  Pricing \n plans\u0007  " },
-      "expect": { "title": "Pricing plans" } },
-    { "name": "bidi override is removed",
-      "target": { "title": "Pricing‮ {sep} {site}" },
-      "expect": { "title": "Pricing | Example" } },
-    { "name": "joined emoji survive",
-      "target": { "title": "Team 👨‍👩 {sep} {site}" },
-      "expect": { "title": "Team 👨‍👩 | Example" } },
-    { "name": "template description bound to a field",
-      "target": { "description": "{field.field_summary}" },
-      "tokens": { "field.field_summary": "A short summary." },
-      "expect": { "description": "A short summary.", "social_description": "A short summary." } },
-    { "name": "empty bound field falls back to the content's own description",
-      "target": { "description": "{field.field_summary}" },
-      "tokens": { "field.field_summary": "" },
-      "expect": { "description": "Plans and prices." } },
-    { "name": "the site layer cannot supply a description",
-      "site": { "title": "{title} {sep} {site}", "description": "Ignored" },
-      "expect": { "description": "Plans and prices." } },
-    { "name": "social overrides",
-      "target": { "social": { "title": "{title}: compare plans", "description": "See every plan." } },
-      "expect": { "social_title": "Pricing: compare plans", "social_description": "See every plan." } },
-    { "name": "no description anywhere",
-      "tokens": { "description": "" },
-      "expect": { "description": "", "social_description": "" } },
-    { "name": "a DEL character is removed",
-      "target": { "title": "Pri\u007fcing {sep} {site}" },
-      "expect": { "title": "Pricing | Example" } },
-    { "name": "two empty parts leave no separator at the start",
-      "target": { "title": "{title} {sep} {field.section} {sep} {site}" },
-      "tokens": { "title": "", "field.section": "" },
-      "expect": { "title": "Example" } },
-    { "name": "two empty parts leave no separator at the end",
-      "target": { "title": "{title} {sep} {field.section} {sep} {site}" },
-      "tokens": { "site": "", "field.section": "" },
-      "expect": { "title": "Pricing" } },
-    {"name": "an emoji sequence at the limit is left out whole", "target": {"title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123👨‍👩‍👧"}, "expect": {"title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123"}},
-    {"name": "a flag at the limit is left out whole", "target": {"description": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678🇫🇮0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678", "social": {"title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123🇫🇮0123456789012345678901234567890123456789", "description": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678🇫🇮0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"}}, "expect": {"description": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678", "social_title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123", "social_description": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"}},
-    {"name": "a letter with its marks at the limit is left out whole", "target": {"title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123é"}, "expect": {"title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123"}},
-    {"name": "a cut inside a word ends at the last space", "target": {"social": {"title": "Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts "}}, "expect": {"social_title": "Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts"}},
-    {"name": "a cut that leaves a separator ends before it", "target": {"title": "{title} {sep} Events"}, "tokens": {"title": "An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first performed"}, "expect": {"title": "An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first performed"}},
-    {"name": "a text without spaces is cut at the limit", "target": {"title": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"}, "expect": {"title": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234"}},
-    {"name": "a space far from the limit is not used", "target": {"title": "Pricing 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"}, "expect": {"title": "Pricing 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456"}}
+    {
+      "name": "nothing set",
+      "expect": {
+        "title": "Pricing | Example",
+        "description": "Plans and prices.",
+        "social_title": "Pricing",
+        "social_description": "Plans and prices."
+      }
+    },
+    {
+      "name": "the main part is the target's own",
+      "target": {
+        "title": {
+          "text": "Plans for every team"
+        }
+      },
+      "expect": {
+        "title": "Plans for every team | Example",
+        "social_title": "Pricing"
+      }
+    },
+    {
+      "name": "braces in typed text are literal",
+      "target": {
+        "title": {
+          "text": "{Title} {a b} {} { title } {site}"
+        }
+      },
+      "expect": {
+        "title": "{Title} {a b} {} { title } {site} | Example"
+      }
+    },
+    {
+      "name": "a linked value is never filled",
+      "target": {
+        "title": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_byline␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_byline␞␟value": "{site}"
+      },
+      "expect": {
+        "title": "{site} | Example"
+      }
+    },
+    {
+      "name": "an empty main part leaves no separator",
+      "facts": {
+        "title": ""
+      },
+      "expect": {
+        "title": "Example",
+        "social_title": "",
+        "title_main": "",
+        "title_end": "Example"
+      }
+    },
+    {
+      "name": "an empty ending leaves no separator",
+      "facts": {
+        "site": ""
+      },
+      "expect": {
+        "title": "Pricing",
+        "title_main": "Pricing",
+        "title_end": ""
+      }
+    },
+    {
+      "name": "no ending",
+      "target": {
+        "title_end": {
+          "text": ""
+        }
+      },
+      "expect": {
+        "title": "Pricing",
+        "title_end": ""
+      }
+    },
+    {
+      "name": "the site sets the ending",
+      "site": {
+        "title_end": {
+          "text": "Example Co"
+        }
+      },
+      "expect": {
+        "title": "Pricing | Example Co"
+      }
+    },
+    {
+      "name": "the site sets no ending",
+      "site": {
+        "title_end": {
+          "text": ""
+        }
+      },
+      "expect": {
+        "title": "Pricing"
+      }
+    },
+    {
+      "name": "the target's ending wins",
+      "site": {
+        "title_end": {
+          "text": "Example Co"
+        }
+      },
+      "target": {
+        "title_end": {
+          "text": "Journal"
+        }
+      },
+      "expect": {
+        "title": "Pricing | Journal",
+        "title_end": "Journal"
+      }
+    },
+    {
+      "name": "a linked ending",
+      "target": {
+        "title_end": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_section␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_section␞␟value": "Guides"
+      },
+      "expect": {
+        "title": "Pricing | Guides"
+      }
+    },
+    {
+      "name": "an empty linked ending gives the site name",
+      "target": {
+        "title_end": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_section␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_section␞␟value": ""
+      },
+      "expect": {
+        "title": "Pricing | Example"
+      }
+    },
+    {
+      "name": "an empty linked ending gives the site's ending",
+      "site": {
+        "title_end": {
+          "text": "Example Co"
+        }
+      },
+      "target": {
+        "title_end": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_section␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_section␞␟value": ""
+      },
+      "expect": {
+        "title": "Pricing | Example Co",
+        "title_end": "Example Co"
+      }
+    },
+    {
+      "name": "an empty linked ending and the site's No ending give no ending",
+      "site": {
+        "title_end": {
+          "text": ""
+        }
+      },
+      "target": {
+        "title_end": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_section␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_section␞␟value": ""
+      },
+      "expect": {
+        "title": "Pricing",
+        "title_end": ""
+      }
+    },
+    {
+      "name": "a hidden or broken linked ending gives the site's ending",
+      "site": {
+        "title_end": {
+          "text": "Example Co"
+        }
+      },
+      "target": {
+        "title_end": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_section␞␟value"
+          }
+        }
+      },
+      "expect": {
+        "title": "Pricing | Example Co"
+      }
+    },
+    {
+      "name": "a hidden or broken linked ending and the site's No ending give no ending",
+      "site": {
+        "title_end": {
+          "text": ""
+        }
+      },
+      "target": {
+        "title_end": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_section␞␟value"
+          }
+        }
+      },
+      "expect": {
+        "title": "Pricing"
+      }
+    },
+    {
+      "name": "a linked ending that gives text wins over the site's",
+      "site": {
+        "title_end": {
+          "text": "Example Co"
+        }
+      },
+      "target": {
+        "title_end": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_section␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_section␞␟value": "Guides"
+      },
+      "expect": {
+        "title": "Pricing | Guides"
+      }
+    },
+    {
+      "name": "the separator is the identity's",
+      "separator": "-",
+      "target": {
+        "title": {
+          "text": "Pay-as-you-go"
+        }
+      },
+      "expect": {
+        "title": "Pay-as-you-go - Example"
+      }
+    },
+    {
+      "name": "an empty link gives the Title fact",
+      "target": {
+        "title": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_byline␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_byline␞␟value": ""
+      },
+      "expect": {
+        "title": "Pricing | Example"
+      }
+    },
+    {
+      "name": "a broken link gives the Title fact",
+      "target": {
+        "title": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_byline␞␟value"
+          }
+        }
+      },
+      "expect": {
+        "title": "Pricing | Example"
+      }
+    },
+    {
+      "name": "both parts empty give the site name",
+      "facts": {
+        "title": ""
+      },
+      "target": {
+        "title_end": {
+          "text": ""
+        }
+      },
+      "expect": {
+        "title": "Example",
+        "social_title": ""
+      }
+    },
+    {
+      "name": "less-than and ampersand are text",
+      "target": {
+        "title": {
+          "text": "I <3 Canvas & more"
+        }
+      },
+      "expect": {
+        "title": "I <3 Canvas & more | Example"
+      }
+    },
+    {
+      "name": "whitespace collapses and control characters go",
+      "target": {
+        "title": {
+          "text": "  Pricing \n plans\u0007  "
+        }
+      },
+      "expect": {
+        "title": "Pricing plans | Example"
+      }
+    },
+    {
+      "name": "bidi override is removed",
+      "target": {
+        "title": {
+          "text": "Pricing‮"
+        }
+      },
+      "expect": {
+        "title": "Pricing | Example"
+      }
+    },
+    {
+      "name": "joined emoji survive",
+      "target": {
+        "title": {
+          "text": "Team 👨‍👩"
+        }
+      },
+      "expect": {
+        "title": "Team 👨‍👩 | Example"
+      }
+    },
+    {
+      "name": "a description linked to a field",
+      "target": {
+        "description": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_summary␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_summary␞␟value": "A short summary."
+      },
+      "expect": {
+        "description": "A short summary.",
+        "social_description": "A short summary."
+      }
+    },
+    {
+      "name": "an empty linked description gives the Description fact",
+      "target": {
+        "description": {
+          "source": {
+            "sourceType": "entity-field",
+            "expression": "ℹ︎␜entity:node:article␝field_summary␞␟value"
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_summary␞␟value": ""
+      },
+      "expect": {
+        "description": "Plans and prices."
+      }
+    },
+    {
+      "name": "the site layer cannot supply a description",
+      "site": {
+        "description": {
+          "text": "Ignored"
+        }
+      },
+      "expect": {
+        "description": "Plans and prices."
+      }
+    },
+    {
+      "name": "social overrides",
+      "target": {
+        "social": {
+          "title": {
+            "text": "Pricing: compare plans"
+          },
+          "description": {
+            "text": "See every plan."
+          }
+        }
+      },
+      "expect": {
+        "social_title": "Pricing: compare plans",
+        "social_description": "See every plan."
+      }
+    },
+    {
+      "name": "a linked social title that is empty gives the Title fact",
+      "target": {
+        "social": {
+          "title": {
+            "source": {
+              "sourceType": "entity-field",
+              "expression": "ℹ︎␜entity:node:article␝field_byline␞␟value"
+            }
+          }
+        }
+      },
+      "links": {
+        "ℹ︎␜entity:node:article␝field_byline␞␟value": ""
+      },
+      "expect": {
+        "social_title": "Pricing"
+      }
+    },
+    {
+      "name": "no description anywhere",
+      "facts": {
+        "description": ""
+      },
+      "expect": {
+        "description": "",
+        "social_description": ""
+      }
+    },
+    {
+      "name": "a DEL character is removed",
+      "target": {
+        "title": {
+          "text": "Pricing"
+        }
+      },
+      "expect": {
+        "title": "Pricing | Example"
+      }
+    },
+    {
+      "name": "an emoji sequence at the limit is left out whole",
+      "target": {
+        "title": {
+          "text": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123👨‍👩‍👧"
+        },
+        "title_end": {
+          "text": ""
+        }
+      },
+      "expect": {
+        "title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123"
+      }
+    },
+    {
+      "name": "a letter with its marks at the limit is left out whole",
+      "target": {
+        "title": {
+          "text": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123é"
+        },
+        "title_end": {
+          "text": ""
+        }
+      },
+      "expect": {
+        "title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123"
+      }
+    },
+    {
+      "name": "a text without spaces is cut at the limit",
+      "target": {
+        "title": {
+          "text": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        },
+        "title_end": {
+          "text": ""
+        }
+      },
+      "expect": {
+        "title": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234"
+      }
+    },
+    {
+      "name": "a space far from the limit is not used",
+      "target": {
+        "title": {
+          "text": "Pricing 012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"
+        },
+        "title_end": {
+          "text": ""
+        }
+      },
+      "expect": {
+        "title": "Pricing 0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456"
+      }
+    },
+    {
+      "name": "a flag at the limit is left out whole",
+      "target": {
+        "description": {
+          "text": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678🇫🇮0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+        },
+        "social": {
+          "title": {
+            "text": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123🇫🇮0123456789012345678901234567890123456789"
+          },
+          "description": {
+            "text": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678🇫🇮0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+          }
+        }
+      },
+      "expect": {
+        "description": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678",
+        "social_title": "01234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123",
+        "social_description": "012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+      }
+    },
+    {
+      "name": "a cut inside a word ends at the last space",
+      "target": {
+        "social": {
+          "title": {
+            "text": "Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts "
+          }
+        }
+      },
+      "expect": {
+        "social_title": "Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts Concerts"
+      }
+    },
+    {
+      "name": "a long title keeps its ending and loses words of its main part",
+      "facts": {
+        "title": "An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first performed"
+      },
+      "target": {
+        "title_end": {
+          "text": "Events"
+        }
+      },
+      "expect": {
+        "title": "An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first | Events",
+        "title_end": "Events"
+      }
+    },
+    {
+      "name": "a long ending stays whole",
+      "target": {
+        "title": {
+          "text": "Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring "
+        },
+        "title_end": {
+          "text": "A very long ending that a site may set"
+        }
+      },
+      "expect": {
+        "title": "Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring | A very long ending that a site may set"
+      }
+    }
   ]
 }

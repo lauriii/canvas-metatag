@@ -4,12 +4,9 @@ import type { PageFacts } from './host';
 import {
   dimensions,
   fileSize,
-  fill,
   inSentence,
   largeCardNeeds,
   meter,
-  tokensIn,
-  trimSeparators,
 } from './model';
 import type {
   Issue,
@@ -22,15 +19,18 @@ import type {
   Source,
   Tab,
   Texts,
-  TokenInfo,
+  Value,
 } from './types';
+import { type Lookup, PROP_KINDS, brokenWhy, kindOf, resolve, rowOf, tagOf } from './values';
 
 export interface ChecksInput {
   effective: SeoValues;
   sources(path: string): Source;
   texts: Texts;
-  /** With Canvas's live title and description laid over the server's. */
-  tokens: Record<string, TokenInfo>;
+  /** The facts (Canvas's live title and description laid over the server's) and the links. */
+  lookup: Lookup;
+  /** The separator between the title's parts. */
+  separator: string;
   resolved: Resolved | null;
   site: SiteSettings;
   registry: Registry;
@@ -68,7 +68,17 @@ function withoutSite(title: string, site: string, sep: string): string {
   const rest = site
     ? title.replace(new RegExp(escape(site), 'gi'), ' ')
     : title;
-  return trimSeparators(rest.replace(/ +/g, ' ').trim(), sep);
+  // A separator left with nothing on one side goes.
+  const kept: string[] = [];
+  for (const word of rest.split(' ').filter(Boolean)) {
+    if (word !== sep || (kept.length > 0 && kept.at(-1) !== sep)) {
+      kept.push(word);
+    }
+  }
+  while (sep !== '' && kept.at(-1) === sep) {
+    kept.pop();
+  }
+  return kept.join(' ');
 }
 
 /** Words that carry meaning: 4 or more letters in Latin script, 2 or more characters otherwise. */
@@ -84,11 +94,11 @@ function words(a: string, b: string): [string[], string[]] {
 /** What is missing from the site identity, in words. Empty when complete. */
 export function identityGaps(
   site: SiteSettings,
-  tokens: Record<string, TokenInfo>,
+  siteName: string,
 ): { field: string; text: string }[] {
   const { identity } = site;
   return [
-    !identity.name.trim() && !tokens.site?.value.trim()
+    !identity.name.trim() && !siteName.trim()
       ? { field: 'identity.name', text: 'no name' }
       : null,
     !identity.logo ? { field: 'identity.logo', text: 'no logo' } : null,
@@ -109,12 +119,8 @@ export const countIssues = (issues: Issue[]) =>
   issues.filter((issue) => issue.severity !== 'info').length;
 
 export function checks(input: ChecksInput): Issue[] {
-  const { effective, texts, tokens, resolved, facts, registry } = input;
+  const { effective, texts, lookup, resolved, facts, registry } = input;
   const issues: Issue[] = [];
-  const value = (name: string) => tokens[name]?.value ?? '';
-  const flat = Object.fromEntries(
-    Object.entries(tokens).map(([name, token]) => [name, token.value]),
-  );
   const onPage = input.scope === 'page';
   // At template scope the previewed node is "this article": the sheet names
   // it once, above the issues.
@@ -136,8 +142,8 @@ export function checks(input: ChecksInput): Issue[] {
   };
 
   // Title.
-  const site = value('site');
-  const sep = value('sep');
+  const site = lookup.facts.site?.value ?? '';
+  const sep = input.separator;
   const bare = withoutSite(texts.title, site, sep);
   if (texts.title === '') {
     issues.push({
@@ -160,94 +166,115 @@ export function checks(input: ChecksInput): Issue[] {
     });
   }
 
-  const templates: [string, Tab, string | undefined][] = [
-    ['title', 'search', effective.title],
-    ['description', 'search', effective.description],
-    ['social.title', 'social', effective.social?.title],
-    ['social.description', 'social', effective.social?.description],
+  // Links that cannot work for any item: broken ones to fix, hidden ones to
+  // improve. A link that is only empty for this item says so at its field.
+  const paths: [string, Tab][] = [
+    ['title', 'search'],
+    ['title_end', 'search'],
+    ['description', 'search'],
+    ['social.title', 'social'],
+    ['social.description', 'social'],
+    ['social.image', 'social'],
+    ...Object.keys(effective.schema?.props ?? {}).map(
+      (key) => [`schema.props.${key}`, 'schema'] as [string, Tab],
+    ),
   ];
-  const reported = new Set<string>();
-  const leftOut = `It is left out for ${page}, and filled in wherever another ${inSentence(input.typeLabel)} has one.`;
-  /** A value the previewed node has none of: a fact at template scope. */
-  const emptyHere = (name: string) =>
-    !!tokens[name] && !tokens[name].value.trim() && !tokens[name].image;
-  for (const [field, tab, template] of templates) {
-    for (const name of tokensIn(template ?? '')) {
-      const token = tokens[name];
-      // A name that is not in the vocabulary (a deleted field) is blanked, not reported.
-      if (
-        !token ||
-        token.type === 'image' ||
-        token.value.trim() ||
-        reported.has(name)
-      ) {
-        continue;
-      }
-      reported.add(name);
-      issues.push({
-        id: `token-empty:${name}`,
-        // A template cannot fill in one event's field: there it is a fact,
-        // good to know, not counted.
-        ...(onPage
-          ? {
-              severity: 'improve' as const,
-              message: `Fill in ${token.label} or remove it`,
-              detail: `"${token.label}" is empty for ${page}, so it is left out.`,
-            }
-          : {
-              severity: 'info' as const,
-              message: `${token.label} is empty for ${page}`,
-              detail: leftOut,
-            }),
-        jump: jump(tab, field),
-      });
+  const fieldName = (path: string) =>
+    path === 'title_end'
+      ? 'title ending'
+      : path.startsWith('schema.props.')
+        ? (registry[effective.schema?.type ?? 'WebPage']?.props?.find((one) => `schema.props.${one.key}` === path)?.label ?? 'detail').toLowerCase()
+        : path.replace('social.', 'social ');
+  // Whether a value has a default to fall back on, or is left out.
+  const fallsBack = (path: string) =>
+    !path.startsWith('schema.props.') ||
+    !!registry[effective.schema?.type ?? 'WebPage']?.props?.find((one) => `schema.props.${one.key}` === path)?.default;
+  // "title, street address and 2 more"
+  const listed = (names: string[]) =>
+    names.length <= 3
+      ? names.join(', ').replace(/, ([^,]*)$/, ' and $1')
+      : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
+  const broken: string[] = [];
+  const hidden: string[] = [];
+  // Hidden links, by what hides them: a reference whose item visitors may
+  // not see for this item, or a field visitors may never see.
+  const hiddenBy = new Map<string, { paths: string[]; tab: Tab; reference: boolean }>();
+  for (const [path, tab] of onPage ? [] : paths) {
+    const value = path.split('.').reduce<unknown>((at, key) => (at as Record<string, unknown> | undefined)?.[key], effective) as Value | undefined;
+    if (!value || !('source' in value)) {
+      continue;
     }
+    const kind = kindOf(path, registry[effective.schema?.type ?? 'WebPage']?.props);
+    const shown = resolve(value, kind, lookup);
+    const what = fieldName(path);
+    if (shown.status === 'broken') {
+      broken.push(path);
+      issues.push({
+        id: `link-broken:${path}`,
+        severity: 'fix',
+        message: `Link the ${what} again`,
+        detail: `It was linked to ${tagOf(value, lookup, path)}, which ${brokenWhy(lookup.broken?.[path]?.reason, kind)}. Each ${inSentence(input.typeLabel)} uses its default until another field is linked.`,
+        jump: jump(tab, path),
+        fix: { label: 'Link another field', link: true },
+      });
+    } else if (shown.status === 'hidden' && rowOf(lookup, value)) {
+      hidden.push(path);
+      const row = rowOf(lookup, value)!;
+      const by = row.hop ? row.path[0] : row.label;
+      const group = hiddenBy.get(by) ?? { paths: [], tab, reference: row.hop };
+      group.paths.push(path);
+      hiddenBy.set(by, group);
+    }
+  }
+  const required = new Set(resolved?.schema.missing_required.map((key) => `schema.props.${key}`) ?? []);
+  for (const [by, group] of hiddenBy) {
+    const left = group.paths.filter((path) => !fallsBack(path)).map(fieldName);
+    const kept = group.paths.filter(fallsBack).map(fieldName);
+    const withheld = group.paths.some((path) => required.has(path));
+    // What is left out, said once: the whole type's details when a required
+    // one is among them.
+    const what = [
+      withheld
+        ? `${registry[effective.schema?.type ?? 'WebPage']?.label ?? 'Structured data'} details are left out for ${page}${
+            group.reference ? `, because visitors can't see its ${by.toLowerCase()}` : ''
+          }`
+        : left.length && `${listed(left)} ${left.length === 1 ? 'is' : 'are'} left out`,
+      kept.length && `${listed(kept)} ${kept.length === 1 ? 'uses its default' : 'use their defaults'}`,
+    ].filter(Boolean).join('; ');
+    issues.push({
+      id: `link-hidden:${group.paths[0]}`,
+      severity: 'improve',
+      // A reference: only this item's is hidden; a field: every item's.
+      message: group.reference ? `${by} is hidden from visitors for ${page}` : `${by} is hidden from visitors`,
+      detail: `${what[0].toUpperCase()}${what.slice(1)}. ${
+        group.reference
+          ? `Publish the ${by.toLowerCase()} or preview another ${inSentence(input.typeLabel)}.`
+          : 'Link a field visitors can see.'
+      }`,
+      jump: jump(group.tab, group.paths[0]),
+    });
   }
 
   if (site && texts.title.toLowerCase().split(site.toLowerCase()).length > 2) {
-    const own =
-      input.sources('title') === 'target' ? (effective.title ?? '') : '';
-    const literal = new RegExp(escape(site), 'i');
-    // The {sep} token, or its value typed as a word.
-    const separates = (word: string | undefined) =>
-      word === '{sep}' || (sep !== '' && word === sep);
+    // The certain fix: the target's own typed main part names the site, and
+    // the ending is the site name: no ending. A main part linked to a field
+    // would apply one item's text to every item, so it gets none.
+    const main = input.sources('title') === 'target' ? effective.title : undefined;
+    const typed = !!main && 'text' in main && new RegExp(escape(site), 'i').test(main.text);
+    const endsWithSite = normal(texts.title_end) === normal(site);
     issues.push({
       id: 'title-site-twice',
       severity: 'improve',
       message: 'Remove the repeated site name',
       detail: 'The site name appears twice in the title.',
       jump: jump('search', 'title'),
-      // Only a literal site name can be taken out; a token is the pattern's own.
-      fix: literal.test(own.replace(/\{[^{}]*\}/g, ' '))
-        ? {
-            label: 'Remove the repeat',
-            apply: (values) => {
-              // Odd parts are the tokens.
-              const parts = (values.title ?? '').split(/(\{[^{}]*\})/);
-              const at = parts.findIndex(
-                (part, index) => index % 2 === 0 && literal.test(part),
-              );
-              if (at < 0) {
-                return values;
-              }
-              parts[at] = parts[at].replace(literal, ' ');
-              // Then the separators the removal left with nothing to separate.
-              const kept: string[] = [];
-              for (const word of parts.join('').split(/\s+/).filter(Boolean)) {
-                if (
-                  !separates(word) ||
-                  (kept.length > 0 && !separates(kept.at(-1)))
-                ) {
-                  kept.push(word);
-                }
-              }
-              while (separates(kept.at(-1))) {
-                kept.pop();
-              }
-              return { ...values, title: kept.join(' ') };
-            },
-          }
-        : undefined,
+      fix:
+        typed && endsWithSite
+          ? {
+              label: 'Remove the repeat',
+              apply: (values) => ({ ...values, title_end: { text: '' } }),
+            }
+          : undefined,
     });
   }
 
@@ -282,11 +309,18 @@ export function checks(input: ChecksInput): Issue[] {
   };
   const titleCut = cut('title', texts.title);
   if (titleCut) {
+    // Cut after the main part, inside its ending: the ending is what is lost.
+    const lost =
+      texts.title_main !== '' &&
+      texts.title_end !== '' &&
+      meter('title', texts.title, input.measurer).shown >= texts.title_main.length;
     issues.push({
       id: 'title-long',
       severity: 'info',
       message: 'Shorten the title',
-      detail: titleCut,
+      detail: lost
+        ? `${titleCut} The ending “${texts.title_end}” is the part that gets lost.`
+        : titleCut,
       jump: jump('search', 'title'),
     });
   }
@@ -373,7 +407,8 @@ export function checks(input: ChecksInput): Issue[] {
     });
   }
   const canonical = head?.link.find((row) => row.rel === 'canonical')?.href;
-  if (canonical && value('url') && canonical !== value('url')) {
+  const own = lookup.facts.url?.value ?? '';
+  if (canonical && own && canonical !== own) {
     issues.push({
       id: 'canonical-elsewhere',
       severity: 'info',
@@ -545,23 +580,32 @@ export function checks(input: ChecksInput): Issue[] {
   const prop = (key: string) => jump('schema', `schema.props.${key}`);
   if (type && resolved) {
     for (const key of resolved.schema.missing_required) {
+      const path = `schema.props.${key}`;
+      const stored = schema.props?.[key];
+      // Linked: hidden for this item is said with its reference, empty is
+      // said for this item. Nothing is missing from the template.
+      if (hidden.includes(path)) {
+        continue;
+      }
+      const empty = !onPage && !!stored && 'source' in stored && !broken.includes(path);
       issues.push({
         id: `schema-required:${key}`,
         severity: 'fix',
-        message: `Add ${label(key)}`,
-        detail: `${type.label} details are left out until it is filled in.`,
+        message: empty ? `${label(key)} is empty for ${page}` : `Add ${label(key)}`,
+        detail: empty
+          ? `${type.label} details are left out for ${page}.`
+          : `${type.label} details are left out until it is filled in.`,
         jump: prop(key),
       });
     }
-    // At template scope a property linked to fields the previewed node has
-    // no value in is a fact, as an empty value in the texts is.
+    // At template scope a detail linked to a field the previewed item has no
+    // value in, or that is listed as broken or hidden, is said at its field.
     const linked = (key: string) => {
-      const names = tokensIn(
-        schema.props?.[key] ??
-          props.find((item) => item.key === key)?.default ??
-          '',
-      );
-      return !onPage && names.length > 0 && names.every(emptyHere) && names;
+      const stored = schema.props?.[key];
+      const path = `schema.props.${key}`;
+      return !onPage && !!stored && 'source' in stored && !broken.includes(path) && !hidden.includes(path)
+        ? resolve(stored, PROP_KINDS[props.find((item) => item.key === key)?.kind ?? 'text'], lookup).status !== 'ok'
+        : broken.includes(path) || hidden.includes(path);
     };
     const recommended = resolved.schema.missing_recommended;
     const asked = recommended.filter((key) => !linked(key));
@@ -573,24 +617,24 @@ export function checks(input: ChecksInput): Issue[] {
         jump: prop(asked[0]),
       });
     }
-    for (const key of recommended) {
-      const names = linked(key);
-      // Said once: a value the texts use is already listed.
-      if (names && !names.every((name) => reported.has(name))) {
+    for (const key of recommended.filter(linked)) {
+      if (!broken.includes(`schema.props.${key}`) && !hidden.includes(`schema.props.${key}`)) {
         issues.push({
           id: `schema-empty:${key}`,
           severity: 'info',
           message: `${label(key)} is empty for ${page}`,
-          detail: leftOut,
+          detail: `It is left out for ${page}, and filled in wherever another ${inSentence(input.typeLabel)} has one.`,
           jump: prop(key),
         });
       }
     }
   }
+  // Dates as linked values give them for this item, else their defaults.
   const date = (key: string) => {
-    const template =
-      schema.props?.[key] ?? props.find((item) => item.key === key)?.default;
-    return template === undefined ? NaN : Date.parse(fill(template, flat));
+    const own = resolve(schema.props?.[key], 'date', lookup);
+    const fallback = props.find((item) => item.key === key)?.default;
+    const value = own.status === 'ok' ? own.value : fallback ? resolve(fallback, 'date', lookup).value : '';
+    return value === '' ? NaN : Date.parse(value);
   };
   for (const [later, earlier] of [
     ['dateModified', 'datePublished'],
@@ -609,15 +653,15 @@ export function checks(input: ChecksInput): Issue[] {
     const text = normal(facts.text);
     for (const item of props) {
       const stored = schema.props?.[item.key];
-      // Only a literal can be compared: a bound value is the page's own data.
-      // A code (a currency, a SKU) is rarely printed as written.
+      // Only typed text can be compared: a linked value is the page's own
+      // data. A code (a currency, a SKU) is rarely printed as written.
       if (
         item.kind === 'text' &&
         !item.pattern &&
         stored !== undefined &&
-        tokensIn(stored).length === 0 &&
-        normal(stored) &&
-        !text.includes(normal(stored))
+        'text' in stored &&
+        normal(stored.text) &&
+        !text.includes(normal(stored.text))
       ) {
         issues.push({
           id: `schema-not-on-page:${item.key}`,
@@ -631,7 +675,7 @@ export function checks(input: ChecksInput): Issue[] {
   }
 
   // Who runs the site: never counted, and only for people who can fix it.
-  const gaps = input.can.site ? identityGaps(input.site, tokens) : [];
+  const gaps = input.can.site ? identityGaps(input.site, site) : [];
   if (gaps.length) {
     issues.push({
       id: 'identity-incomplete',

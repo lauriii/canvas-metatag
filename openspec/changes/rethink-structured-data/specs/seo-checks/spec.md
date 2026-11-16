@@ -3,7 +3,8 @@
 ### Requirement: Structured data rules
 
 The checks MUST judge the page's structured data with the verdicts' own words
-(search-features): a withheld main node, a feature that needs a fact, dates in
+(search-features): a withheld main node (also when a required detail is linked
+to a field the previewed item has empty), a feature that needs a fact, dates in
 the wrong order, facts that are not on the page, an unknown stored type, and
 a product or service named after the page title. "Doesn't fit", "Only if
 people buy it here", retired features and "No search feature" MUST be good to
@@ -13,6 +14,11 @@ know and never counted.
 
 - **WHEN** an Event has no start date
 - **THEN** "Add a start date" MUST be listed to fix, saying the event is left out until it is filled in, and leading to that detail in the Schema tab
+
+#### Scenario: A required detail linked to a field this item has empty
+
+- **WHEN** "Every Event" links Starts to a field and the previewed event has no start
+- **THEN** "Starts is empty for this event" MUST be listed to fix, saying the event is left out for this event, not "Add a start date"
 
 #### Scenario: A feature needs a fact
 

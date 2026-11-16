@@ -52,8 +52,15 @@ final class TemplateDraftTest extends CanvasKernelTestBase {
   private const ID = 'node.article.full';
   private const KEY = 'content_template:node.article.full';
   private const VALUES = [
-    'schema' => ['props' => ['author_name' => '{field.field_byline}'], 'type' => 'BlogPosting'],
-    'title' => '{title} {sep} Blog',
+    'schema' => [
+      'props' => [
+        'author_name' => [
+          'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'],
+        ],
+      ],
+      'type' => 'BlogPosting',
+    ],
+    'title_end' => ['text' => 'Blog'],
   ];
 
   /**
@@ -126,15 +133,20 @@ final class TemplateDraftTest extends CanvasKernelTestBase {
     $layout = $this->getLayout();
     self::assertSame([self::KEY], array_keys($layout['autoSaves']));
 
-    // A field of the bundle is a token here; an unknown one is refused.
-    $response = $this->put(['title' => '{field.field_nope}'], self::EDITOR);
+    // A field of the bundle may be linked here; one the menu does not offer
+    // is refused.
+    $response = $this->put([
+      'title' => [
+        'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_nope␞␟value', 'sourceType' => 'entity-field'],
+      ],
+    ], self::EDITOR);
     self::assertSame(Response::HTTP_UNPROCESSABLE_ENTITY, $response->getStatusCode());
     self::assertSame(['title'], array_keys(self::decodeResponse($response)['error']['fields']));
     self::assertNull($this->draft());
 
     $response = $this->put(array_reverse(self::VALUES, TRUE), self::EDITOR, $layout['autoSaves']);
     self::assertSame(Response::HTTP_OK, $response->getStatusCode());
-    self::assertSame('{"values":{"schema":{"props":{"author_name":"{field.field_byline}"},"type":"BlogPosting"},"title":"{title} {sep} Blog"}}', $response->getContent());
+    self::assertSame(['values' => self::VALUES], json_decode((string) $response->getContent(), TRUE));
     self::assertSame(self::VALUES, $this->draft()?->getThirdPartySetting('canvas_metatag', 'values'));
     self::assertSame(self::EDITOR, $this->autoSave()->getAutoSaveEntity($this->template(), TRUE)->clientId);
     // The stored template is never saved by us.
@@ -162,7 +174,7 @@ final class TemplateDraftTest extends CanvasKernelTestBase {
 
     // Another client is in conflict, as for any draft.
     $this->assertRequestAutoSaveConflict($this->layoutRequest('PATCH', $patch, $layout['autoSaves'], self::OTHER));
-    $response = $this->put(['title' => 'Mine'], self::OTHER, $layout['autoSaves']);
+    $response = $this->put(['title' => ['text' => 'Mine']], self::OTHER, $layout['autoSaves']);
     self::assertSame(Response::HTTP_CONFLICT, $response->getStatusCode());
     self::assertSame('conflict', self::decodeResponse($response)['error']['code']);
     self::assertSame(self::VALUES, $this->draft()?->getThirdPartySetting('canvas_metatag', 'values'));
@@ -181,15 +193,20 @@ final class TemplateDraftTest extends CanvasKernelTestBase {
     // `text` config types refuse these, and a Canvas publish is all or
     // nothing. Our keys are plain strings.
     $values = [
-      'description' => "می\u{200C}خواهم \u{200F}{field.field_byline}",
+      'description' => ['text' => "می\u{200C}خواهم \u{200F}{field.field_byline}"],
       'robots' => ['max_snippet' => -1, 'noindex' => FALSE],
       'schema' => [
         'custom' => '{"@type":"Thing","name":"👨‍👩"}',
-        'props' => ['author_name' => '{field.field_byline}'],
+        'props' => [
+          'author_name' => [
+            'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'],
+          ],
+        ],
         'type' => 'BlogPosting',
       ],
-      'social' => ['image' => '{image}'],
-      'title' => "Team 👨\u{200D}👩 {sep} {site}",
+      'social' => ['image' => ['fact' => 'image']],
+      'title' => ['text' => "Team 👨\u{200D}👩"],
+      'title_end' => ['text' => ''],
     ];
     self::assertSame(Response::HTTP_OK, $this->put($values, self::EDITOR)->getStatusCode());
     $response = $this->makePublishAllRequest();
@@ -208,7 +225,7 @@ final class TemplateDraftTest extends CanvasKernelTestBase {
     self::assertSame(-1, $raw['third_party_settings']['canvas_metatag']['values']['robots']['max_snippet']);
 
     // A change, then the stored value back: Canvas deletes the draft.
-    self::assertSame(Response::HTTP_OK, $this->put(['title' => 'Other'], self::EDITOR)->getStatusCode());
+    self::assertSame(Response::HTTP_OK, $this->put(['title' => ['text' => 'Other']], self::EDITOR)->getStatusCode());
     self::assertNotNull($this->draft());
     self::assertSame(Response::HTTP_OK, $this->put(array_reverse($values, TRUE), self::EDITOR)->getStatusCode());
     self::assertNull($this->draft());

@@ -51,7 +51,7 @@ text, through the dialog's own draft save and its validation.
 #### Scenario: Using a title variant
 
 - **WHEN** the editor uses a title variant
-- **THEN** the variant MUST replace the page's part of the title pattern, the inherited separator and site name MUST stay, and the value MUST be saved into the page's draft
+- **THEN** the variant MUST become the page's title main part as typed text, the page's title ending MUST be unchanged, and the value MUST be saved into the page's draft
 
 #### Scenario: A proposal on screen
 
@@ -265,8 +265,9 @@ page members) MAY be left out.
 ### Requirement: Request text is capped
 
 The server MUST cut, in characters, the hint to 200, each current value to
-2000, the page title and site name to 255 and the page text to 12,000. Current
-values of fields that were not requested MUST NOT be sent.
+2000, the page title, the title ending and the site name to 255 and the page
+text to 12,000. Current values of fields that were not requested MUST NOT be
+sent.
 
 #### Scenario: Multibyte text
 
@@ -277,6 +278,11 @@ values of fields that were not requested MUST NOT be sent.
 
 - **WHEN** a title request carries a current social title
 - **THEN** the social title MUST NOT reach the provider
+
+#### Scenario: A long ending
+
+- **WHEN** a title request carries an ending of 300 characters
+- **THEN** exactly 255 characters of it MUST reach the provider
 
 ### Requirement: Calls are rate limited per user
 
@@ -420,15 +426,15 @@ control characters), repeatedly, so that a removal cannot assemble a new tag.
 ### Requirement: Model output is untrusted
 
 Only requested fields, and for a proposal only allowed keys, MUST survive.
-Braces MUST be removed from every value so that a model cannot plant a dynamic
-value. Values MUST be reduced to plain text and cut (300 characters for text,
-2000 for a detail). Text variants that contain a web address MUST be dropped.
-Markup MUST be kept as plain text; every output escapes it.
+Values MUST be reduced to plain text and cut (300 characters for text, 2000
+for a detail). Text variants that contain a web address MUST be dropped.
+Markup and braces MUST be kept as plain text: a used suggestion is stored as
+typed text, which is never scanned for values, and every output escapes it.
 
 #### Scenario: A hijacked answer
 
 - **WHEN** the model returns an unrequested `canonical` row and a title with `{site}` and a script tag
-- **THEN** the `canonical` row MUST be dropped, the braces removed, and the script tag returned as plain text
+- **THEN** the `canonical` row MUST be dropped, and the title MUST be returned as plain text with `{site}` and the script tag as typed, which the head emits as text and never fills
 
 #### Scenario: A web address in a variant
 
@@ -742,3 +748,27 @@ label when it is gone. Building it MUST NOT call the provider's service.
 
 - **WHEN** a prompt type of the submodule is removed through configuration, and its default prompt is missing or empty
 - **THEN** the entry MUST say that the Prompt Library cannot add its prompt, and link to the uninstall page to reinstall the submodule
+
+### Requirement: Title suggestions leave room for the ending
+
+A text request MAY carry the page's title ending, with its separator, as a page
+member. The user message MUST carry it on its own line. For a title request,
+the fixed text the server adds after the configured prompt MUST say that the
+ending in the request is added to the title automatically, that it counts
+toward the title's length, and that the title must not include it or the site
+name. The shipped prompts MUST NOT contain this sentence.
+
+#### Scenario: A page with the site's ending
+
+- **WHEN** a title request carries the ending " | Example"
+- **THEN** the user message MUST contain "| Example" as the title ending, and the system prompt MUST NOT contain "Example"
+
+#### Scenario: No ending
+
+- **WHEN** a title request carries no ending, or an empty one
+- **THEN** the request MUST be accepted, and the user message MUST say that the title has no ending
+
+#### Scenario: An edited search prompt
+
+- **WHEN** the search result prompt is set to "Say hello." and an editor asks for title suggestions
+- **THEN** the system prompt MUST still say that the ending is added automatically and counts toward the length

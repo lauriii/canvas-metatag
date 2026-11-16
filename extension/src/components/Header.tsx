@@ -97,7 +97,7 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
   const translation =
     !!target.default_langcode && target.default_langcode !== server.langcode;
   const siteName =
-    state.edits.site.identity.name.trim() || server.tokens.site?.value || '';
+    state.edits.site.identity.name.trim() || server.facts.site?.value || '';
   const unsavedSite = state.siteDirty && state.scope !== 'site';
 
   return (

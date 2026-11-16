@@ -90,7 +90,8 @@ Allowed keys per scope (`Values::KEYS`):
 
 | Key | Page | Template | Site |
 |---|---|---|---|
-| `title` (pattern) | yes | yes | yes |
+| `title` (main part) | yes | yes | no: each page's own title |
+| `title_end` (ending) | yes | yes | yes |
 | `description` | no: Canvas's own Page data field | yes | no |
 | `canonical` | yes | no | no |
 | `social{title,description,image}` | yes | yes | no |
@@ -124,15 +125,20 @@ not change when nothing changed.
   "robots": { "max_snippet": -1, "noindex": true },
   "schema": {
     "custom": "{\"@type\":\"FAQPage\",\"mainEntity\":[...]}",
-    "props": { "offers_price": "25", "offers_priceCurrency": "EUR" },
+    "props": { "offers_price": { "text": "25" }, "offers_priceCurrency": { "text": "EUR" } },
     "type": "Product"
   },
-  "social": { "image": "<media uuid> or {image}" },
-  "title": "{title} {sep} {site}"
+  "social": { "image": { "media": "<media uuid>" } },
+  "title": { "text": "Plans and prices" },
+  "title_end": { "text": "" }
 }
 ```
 
-- Texts are templates with tokens (section 5). Lengths: title 255,
+- Every value (title, title ending, description, social title, description
+  and image, each `schema.props` entry) is a map with exactly one key
+  (section 5): `{"text": ...}`, `{"fact": ...}`, `{"media": uuid}` or
+  `{"source": {"expression", "sourceType"}}`. `{"text": ""}` is stored only as
+  `title_end`, where it means "No ending". Lengths of typed text: title 255,
   description 1000, social title 255, social description 1000, a schema
   property 2000.
 - `canonical` is a path on the public base (one leading slash, RFC 3986
@@ -143,69 +149,120 @@ not change when nothing changed.
 - `schema.type` is a key of `data/schema-types.json`; `schema.props` are that
   type's property keys; `schema.custom` is custom JSON-LD text, re-encoded on
   write (section 7).
-- Images are a media UUID or exactly one image token.
 
-`Values::clean($input, $scope, $tokens, $inheritedType)` is the one validator.
+`Values::clean($input, $scope, $accepts, $inheritedType)` is the one
+validator. `$accepts($source, $kind)` says whether a field link is offered
+(`Sources::accepts()` for a template, never for a page or the site).
 
-- Write mode (`$tokens` given) reports every problem as
-  `dotted.path => sentence`; the API answers 422 with that map.
-- Read mode (`$tokens` NULL) drops what is invalid silently and keeps unknown
-  tokens, which output later blanks. Everything stored is cleaned again in read
-  mode when it is read, so a value that bypassed the API (config import,
-  JSON:API, custom code) still comes out safe.
+- Write mode (`$accepts` given) reports every problem as
+  `dotted.path => sentence`; the API answers 422 with that map. A value with
+  two keys, a fact a place does not offer, or a link the menu does not offer
+  is refused. A stored link whose field is gone is kept as it is, so the other
+  values stay savable.
+- Read mode (`$accepts` NULL) drops what is invalid silently and keeps links,
+  which output reads later (a link that reads nothing gives the default).
+  Everything stored is cleaned again in read mode when it is read, so a value
+  that bypassed the API (config import, JSON:API, custom code) still comes out
+  safe.
+- Scope rules: a page may link only `title_end` (to Site name),
+  `social.image` (to Image) and schema details that are not text; the site
+  may link only `title_end` to Site name. A template may link every value.
 - Control, C1 and bidi override characters are stripped; typed text is never
-  trimmed or rewritten otherwise.
+  trimmed, scanned or rewritten otherwise. Braces in typed text are text.
 
 The registry `data/schema-types.json` describes ten types (`WebPage`,
 `AboutPage`, `ContactPage`, `CollectionPage`, `Article`, `BlogPosting`,
 `NewsArticle`, `Event`, `Product`, `ProfilePage`). An entry has a label, a
 `page_type`, optionally a `primary_type`, `og_type`, `refs` to our own nodes,
 `nested` types, and `props` with `key`, `kind` (text, url, date, number, enum,
-image), `default`, `level` (required or recommended), `options` and
-`pattern`. One level of `extends`. `SchemaGraph::validLiteral()` is the only
-check of a literal against its property; the cleaner, the graph builder and the
-AI submodule all call it.
+image), `default` (a value, usually `{"fact": ...}`), `level` (required or
+recommended), `options` and `pattern`. One level of `extends`.
+`SchemaGraph::validLiteral()` is the only check of a literal against its
+property; the cleaner, the graph builder and the AI submodule all call it.
 
-## 5. Dynamic values (tokens)
+`canvas_metatag_post_update_values_as_parts()` converted the token strings of
+earlier releases (`Legacy::convert()`): a title split at its last `{sep}`
+into its main part and ending, a single token into a fact or a link, a
+composite into its first piece, with one log line per loss. Site and
+templates first, then their drafts, then page revisions 50 at a time and
+page drafts.
 
-Grammar: `{name}` or `{field.NAME}` (`Values::TOKEN`); brace text that does not
-match is literal. `Values::fill()` substitutes in one pass and never scans a
-substituted value again, so a field value cannot inject a token.
+## 5. Dynamic values (facts and links)
 
-| Token | Value | Type |
+A value is typed text, a fact, a chosen image or a link to a field. Typed
+text is never scanned: `{site}` typed into a title is the six characters.
+
+| Fact | Value | Kind |
 |---|---|---|
-| `{title}` | the entity label | text |
-| `{description}` | page: Canvas's description field; node: the first `text_with_summary` field's summary, else its text cut at 160 | text |
-| `{site}` | identity name, else `system.site:name` | text |
-| `{sep}` | identity separator | text |
-| `{url}` | the entity's own public URL | url |
-| `{author}` | owner's label (`view label` access) | text |
-| `{published}`, `{modified}` | `created`, `changed` as ISO 8601 in the site timezone | datetime |
-| `{image}` | page: its `image` media; node: the first image field that resolves | image |
-| `{field.NAME}` | node templates: each configurable field of a supported type, delta 0 | by field type |
+| `title` (Title) | the entity label | text |
+| `description` (Description) | page: Canvas's description field; node: the first `text_with_summary` field's summary, else its text cut at 160 | text |
+| `site` (Site name) | identity name, else `system.site:name` | text |
+| `url` (Page address) | the entity's own public URL | address |
+| `author` (Author) | owner's label (`view label` access) | text |
+| `published`, `modified` (First published, Last updated) | `created`, `changed` as ISO 8601 in the site timezone | date |
+| `image` (Image) | page: its `image` media; node: the first image field that resolves | image |
 
-The vocabulary of a bundle is `Resolver::tokenTypes()`; write mode refuses an
-unknown token, and an image token in text. Its fields, and so "first" above,
-follow the order of the bundle's `default` form display; fields not on the
-form come last, by machine name. The head carries that form display's cache
-tag (section 13). Every token value is what an
-anonymous visitor may see: field, media, file and label access run for the
-anonymous account (`Resolver::allowed()`), images must be public files.
-Formatted text is reduced to plain text in `Resolver::text()`: the content of
-`script`, `style` and `template` elements is removed first (also when the
+`Resolver::facts()` lists them with their labels, kinds and, for a node,
+which field Description and Image come from. Which facts a place offers is
+`Values::FACTS` and the registry's kinds.
+
+A link (templates only) is a Canvas entity-field prop source,
+`{"expression": "ℹ︎␜entity:node:article␝field_summary␞␟value", "sourceType":
+"entity-field"}`, stored as Canvas stores it in a component input.
+`src/Sources.php` is the only file that calls Canvas's prop source code
+(`BoundaryTest` enforces it):
+
+- `vocabulary($bundle)`: what Canvas's `PropSourceSuggester` offers for a
+  synthetic component with one prop per kind (text, address, date, number,
+  image), labelled by Canvas's `Labeler`, in the order of the bundle's form.
+  Adapters, the title, created, changed and owner fields, the module's own
+  field, comment fields, any path through an account, file URIs, Canvas's
+  computed addresses (`␞␟url`: a reference's URL, a link's resolved URL,
+  which keep the value and access of the first account that read them; a
+  link is read through its `uri`) and image objects other than the standard
+  one are left out. A reference's own name (its `title` or `name`) is marked
+  `names`: a filter for the reference finds it first. Formatted text is read as
+  stored (`value`, `summary`), never as `processed`; a text list gives its
+  stored key (its label is shown); a decimal, which Canvas never matches, is
+  added with its scale. The standard image object is rewritten to read the
+  file's URI. Cached per bundle and language with `entity_field_info`,
+  `config:media_type_list` and the form display's tag, and for the rest of
+  the request in `cache.memory` with the same tags (typed as any backend:
+  while updates run, every bin is an update backend that keeps nothing). A
+  build that throws is logged once and gives no rows for five minutes, and a
+  head built meanwhile is cached only until the next try; with `$strict` (the
+  post_update) it throws, so that the update fails and can run again.
+- `evaluate($source, $host, $kind, $cacheability)`: `[status, value]` with
+  status `ok`, `empty`, `hidden` (Canvas denied `view` access on a hop) or
+  `broken` (not offered any more, another kind, another bundle, malformed,
+  or anything Canvas throws). Never an exception.
+- Account rule: when anonymous visitors may view the host, the link is read
+  as anonymous (account switcher) and only tags and max-age are kept, plus
+  `config:user.role.anonymous`; so a published head never varies by user.
+  Otherwise (an unpublished preview node) it is read as the current user with
+  full cacheability.
+- A multi-value field gives its first non-empty item. Dates become ISO 8601 in
+  the site timezone (a date-only value stays a date); formatted text becomes
+  sentences and, for a description, an excerpt of at most 160 code points
+  (`Values::excerpt()`).
+
+`Resolver::link()` finishes a value: an address on the public base, an image
+through its file (public files only). `Resolver::sourceRows()` gives the
+dialog every row with the previewed node's value and status.
+
+Formatted text is reduced to plain text in `Values::fromHtml()`: the content
+of `script`, `style` and `template` elements is removed first (also when the
 element is not closed), then tags. The end of each heading, list item,
 definition, table row and caption, and the start of each list and heading, is
 marked before tags go; after entities are decoded a mark becomes a full stop,
 unless it follows a sentence or clause mark (Latin, CJK in full- and
 half-width forms, Arabic, Urdu or Devanagari; closing quotes and brackets
 after it included) or nothing, so "Made to last", a nested list and a table
-read as sentences, not as one run-on line. The stored value is read, never
-the format's output: filters could render embedded entities for the current
-user into a cached, shared head.
+read as sentences, not as one run-on line.
 
-The dialog shows tokens as labelled chips (`{Page title}`); `model.ts`
-converts labels to stored names on commit (`toStored()`), also inside custom
-JSON-LD strings.
+The dialog shows a link or a default as a box that names its source and the
+previewed value; the link button and the box open a menu of the type's fields
+(levels for references) and the page's facts (`LinkMenu.tsx`, `Value.tsx`).
 
 ## 6. Inheritance and output
 
@@ -221,19 +278,26 @@ JSON-LD strings.
   default translation's `robots`, `social.image` and `schema.type`. The
   translation's own `schema.props` are cleaned against that inherited type.
 
-`Values::cascade()` then takes `title` from the target, else the site, merges
-`robots` per directive (target wins), and takes everything else from the
-target only. There is no site-wide description or social text by design.
+`Values::cascade()` then takes `title_end` from the target, else the site,
+merges `robots` per directive (target wins), and takes everything else from
+the target only. There is no site-wide title, description or social text by
+design.
 
 ### Text outputs (`Values::texts()`)
 
 ```
-title              = fill(title pattern), separators with nothing to
-                     separate removed  -> else {title} -> else {site}
-description        = fill(description)          -> else {description}
-social_title       = fill(social.title)         -> else {title}
-social_description = fill(social.description)   -> else description
+title_main         = title value                -> else Title fact
+title_end          = title_end value            -> else Site name fact
+                     ({text: ""}: no ending)
+title              = title_main + " " + separator + " " + title_end
+                     (either part alone when the other is empty)
+description        = description value          -> else Description fact
+social_title       = social.title value         -> else title_main
+social_description = social.description value   -> else description
 ```
+
+Over 255 characters the title's main part is cut at a word and the ending
+stays whole.
 
 Each is cut by `Values::cut()`: `Values::plain()` removes controls,
 collapses whitespace, trims and cuts to the limit in code points, never inside
@@ -252,9 +316,10 @@ is plain text; the consumer escapes it.
   entity's own URL (`Resolver::url()`).
 - Robots: fixed directive names in a fixed order; free text never reaches it.
   `max-snippet` is left out under `nosnippet`.
-- Image chain: `social.image` (UUID or token), then `{image}`, then the site
-  default image. Each must resolve for the anonymous visitor, else the next is
-  tried. The result carries `source`: override, entity or site.
+- Image chain: `social.image` (a chosen image, the Image fact or a link),
+  then the Image fact, then the site default image. Each must resolve for the
+  anonymous visitor, else the next is tried. The result carries `source`:
+  override, entity or site.
 - Hreflang: one alternate per published translation plus `x-default` (the
   default translation), only when there are two or more.
 - `og:type` is the registry's `og_type` (`article` for the Article family),
@@ -292,7 +357,8 @@ nodes each with `@type`, depth at most 8, only `@type` and `@id` may start with
 `@`, an `@id` is http(s) or `#name`, and no string may start with a
 `javascript:`, `vbscript:`, `data:` or `file:` scheme. It is stored re-encoded
 with sorted keys, never as typed. On output, `#name` ids are put on `{url}`,
-tokens in strings are filled (unknown brace text kept), a top-level node whose
+`{name}` fact names in strings are filled (`Values::fillFacts()`; fields are
+not, and other brace text is kept), a top-level node whose
 `@id` is one of ours is dropped, and a nested reference to one of ours becomes
 a bare `{"@id": ...}`, or is removed when that node is not in the graph.
 Custom nodes can point at ours; they can never replace or extend them.
@@ -465,7 +531,7 @@ an upstream API could close it (section 11).
 - If `owns()` throws there, Metatag stays the fallback.
 - The Metatag widget is hidden in Canvas's Page data form and in the node form
   of an owned node; Canvas's own search preview (`seo_settings.serp_preview`)
-  is hidden, because it cannot know the title pattern.
+  is hidden, because it cannot know the title's ending.
 - Without Metatag none of this runs: the hook is never invoked and the form
   alters are `isset()`-guarded.
 
@@ -491,7 +557,15 @@ loudly.
 | An entity's translation drafts are published and discarded together, from the default translation's entry (`includeSiblingTranslationAutoSaves()`, `getTranslationGroupAutoSaves()`) | `putPage()` keeping a translation's details of the published type | a translation published alone, while the default's type change is a draft, would keep details the dialog cannot show (no loss) | `PageDraftTest::testTranslationKeepsDetailsOfThePublishedType` |
 | `onCanvasConfigEntitySave()` drops a template draft when the stored template changes | `canvas_metatag_uninstall()` writes drafts back | uninstall loses or keeps template drafts | `InstallTest::testUninstallAndReinstall` |
 | `Entity\ContentTemplate::loadForEntity($entity, 'full')`, `getTargetEntityTypeId()`, `getMode()`, `getTargetBundle()`; config name `canvas.content_template.*.*.*` (schema) | `Resolver::owns()/layers()`, hooks, `ApiController`, config schema | node ownership; failures are caught and logged (head lost, page served) | `ResolverTest::testOwnershipAndLayers`, `CoupledHeadTest::testNodeAndOtherRoutes` |
-| `Entity\Page`: base fields `description`, `image`, `created`, `changed`, owner; route `entity.canvas_page.canonical` | `Resolver::tokens()`, hooks | tokens and the coupled head | `ResolverTest::testTokens`, `CoupledHeadTest::testPage` |
+| `Entity\Page`: base fields `description`, `image`, `created`, `changed`, owner; route `entity.canvas_page.canonical` | `Resolver::facts()`, hooks | facts and the coupled head | `ResolverTest::testFacts`, `CoupledHeadTest::testPage` |
+| Stored shape `{expression, sourceType: 'entity-field'}` and the expression grammar | template values and their drafts | a stored link reads nothing (broken, each node its default) | `SourcesTest::testEvaluate` (round trip per field type), the `phpunit (canvas dev)` CI job |
+| `PropSource::parse()`, `EntityFieldPropSource::evaluate($host, FALSE)`, `EvaluationResult` | `Sources::evaluate()` | links read nothing | `SourcesTest::testEvaluate` |
+| Evaluator behavior: `view` access per hop for the current user, `CacheableAccessDeniedHttpException`; other exceptions | statuses hidden and broken | caught as broken (`\Throwable`) | `SourcesTest::testEvaluate` (statuses) |
+| `PropSourceSuggester::suggest()` with a synthetic `ComponentMetadata`; its matches kept in `cache.static` for the request | `Sources::vocabulary()` | no fields to link (logged once, kept five minutes, empty menu); the post_update stops instead | `SourcesTest::testVocabulary`, `testSuggesterFailure` |
+| `PropSourceSuggester`'s constructor parameter `entityDisplayRepository`, and properties named as its parameters | `SourcesTest::testSuggesterFailure` only | that test cannot build its failing suggester | the test itself |
+| `getAllAutoSaveList(FALSE, TRUE)` and its `conflict_id` key (`AUTO_SAVE_CONFLICT_KEY`); `resolveConflict()`; the key-value store `AUTO_SAVE_STORE` and its entry keys `owner` and `updated` | `canvas_metatag_post_update_values_as_parts()` | after the update, drafts of converted pages report a conflict, or name the update as their editor | `PostUpdateTest::testValuesAsParts` |
+| `Labeler::label()`, `Labeler::flatten()` and its separators | row labels and paths | labels change | `SourcesTest::testVocabulary` (paths) |
+| JSON schema ref `json-schema-definitions://canvas.module/image` and the standard image object expression | image rows and their file rewrite | image rows vanish | `SourcesTest::testVocabulary` (the rewrite byte for byte), `SourcesTest::testEvaluate` (a media image) |
 | Page form `canvas_page_form`: `seo_settings.serp_preview`, `metatags` | `formCanvasPageFormAlter()` | the alter does nothing (guarded) | `MetatagCoexistenceTest` |
 | Route option `_canvas_use_template_draft`, set by `CanvasContentController::get()` | `HeadlessContentController` | drafts not shown in headless previews (fails closed to published) | `HeadlessHeadTest::testDrafts` |
 | `canvas_headless\Controller\CanvasContentController` (final) reached through `CanvasContentRouteEnhancer`'s `_controller` string and the class resolver | `canvas_metatag.services.yml` decorator | headless heads silently lose our tags (and Metatag's); the status report shows an error | `HeadlessHeadTest` (incl. the runtime requirement), `InstallTest::testContainerBuildsWithoutHeadless` |
@@ -603,8 +677,9 @@ account; both page caches stay effective.
 | the entity (and the stored default translation of a draft-only translation) | its tags | `resolve()`, `layers()` |
 | the content language | context `languages:language_content` | `resolve()` |
 | site settings, with overrides | `config:canvas_metatag.site` | `site()` |
-| site name, front page, timezone | `config:system.site`, `config:system.date` | `tokens()`, `url()` |
-| node field definitions, media type sources, the order of the form | `entity_field_info`, `config:media_type_list`, the bundle's default form display (its list tag while it does not exist: creating it invalidates only that) | `tokens()` (non-page bundles) |
+| site name, front page, timezone | `config:system.site`, `config:system.date` | `facts()`, `url()` |
+| node field definitions, media type sources, the order of the form | `entity_field_info`, `config:media_type_list`, the bundle's default form display (its list tag while it does not exist: creating it invalidates only that) | `facts()`, `formFields()`, `Sources::vocabulary()` |
+| a link's value | the tags and max-age of what Canvas read, `config:user.role.anonymous` (all of it, with contexts, for a node anonymous may not view) | `Sources::evaluate()` |
 | the template | its tags; without one the `content_template` list tag | `layers()`; coupled node pages that are not owned also get the list tag (`pageAttachments()`) |
 | a draft (previews only) | the auto-save entry (`canvas__auto_save`) | `layers()`, decorator |
 | media, files, referenced labels | their tags | `mediaImage()`, `usable()`, `label()` |
@@ -636,8 +711,8 @@ key would mix them).
 - A translation that exists only as a draft is published with its own value,
   also when it equals the default translation's (`pagePresave()`, section 11).
 - Hreflang lists published translations only, with `x-default`.
-- Site and template patterns and the identity name are config `string`, the
-  same in every language (non-goal).
+- Site and template values and the identity name are config, the same in
+  every language (non-goal).
 
 ## 15. Security model
 
@@ -663,9 +738,9 @@ to the Prompt Library's delete form, which otherwise checks only the
 permission.
 
 - Input: `Values::clean()` in write mode is the gate; bodies over 128 KiB are
-  refused. Output: everything is cleaned again in read mode, every token
-  value is what anonymous may see, attributes are escaped by the render
-  system, JSON-LD is hex-escaped.
+  refused. Output: everything is cleaned again in read mode, every fact and
+  link of a published node is read as anonymous, attributes are escaped by the
+  render system, JSON-LD is hex-escaped.
 - The stored field is the dialog's working data: `hook_entity_field_access`
   denies `view` of `canvas_metatag` without one of the two permissions (for
   JSON:API and similar). Edit access stays open, because Canvas refuses to
@@ -721,8 +796,11 @@ besides the three prompts it installs.
   gone; a translation would make the instructions depend on who asks), fills
   `{language}`, `{count}`, `{types}`, `{properties}`, also spelled
   `{{ name }}` as the Prompt Library's editor inserts them, with one `strtr()`
-  pass from server values only, does not replace tokens, and appends `FENCE`
-  and `SHAPE`, which a site builder cannot edit. A request whose prompt is
+  pass from server values only, does not replace tokens, and appends `FENCE`,
+  for a title request `ENDING` (the ending is added after the title and counts
+  toward its length), and `SHAPE`, which a site builder cannot edit. The user
+  message says the title ending ("Title ending: none, the title has no
+  ending" for none). A request whose prompt is
   missing or blank is `not_configured`; the dialog offers no suggestion while
   any of the three is.
   Text requests use the social prompt when every field is a social one
@@ -746,8 +824,9 @@ besides the three prompts it installs.
   only tries text that starts like `{"` or holds a code fence; the structured
   output schema is passed as an array (the `StructuredOutputSchema` object
   makes the AI module 1.5 call its own deprecated method); capability flags
-  are not trusted. Answers are checked against the requested shape, braces are
-  removed (no planted tokens), values reduced to plain text, text suggestions
+  are not trusted. Answers are checked against the requested shape (braces are
+  kept: a used suggestion is typed text, never scanned), values reduced to
+  plain text, text suggestions
   with a URL dropped, and schema properties checked with
   `SchemaGraph::validLiteral()`. A schema value is marked unverified unless
   the page text contains it (dates never verify).
@@ -776,21 +855,24 @@ each row names the test that fails when it changes.
 | Suite | Proves | Run |
 |---|---|---|
 | `tests/src/Unit/ValuesTest`, `SchemaGraphTest` | validation (refused and accepted cases), encoding, cascade, text outputs, separators; registry, ids, withheld nodes, custom JSON-LD, encoder safety; the shared fixtures `tests/fixtures/text-cases.json` and `graphs/*.json` | PHPUnit |
-| `ResolverTest` | ownership, layers, tokens and access, the form's order, the head, cacheability and drafts, the public base | PHPUnit (kernel) |
+| `ResolverTest` | ownership, layers, facts and access, the form's order, linked values (empty, hidden, deleted field, formatted text), the head, cacheability and drafts, the public base | PHPUnit (kernel) |
+| `SourcesTest` (group `canvas_metatag_canvas_contract`) | the Canvas contract of `src/Sources.php`: vocabulary, exclusions, labels, the image rewrite, a round trip and value per field type, every status and the account rule, `accepts()` | PHPUnit (kernel); also against Canvas 1.x-dev in CI |
+| `BoundaryTest` | only `src/Sources.php` uses Canvas's prop source code | PHPUnit (unit) |
+| `LegacyTest`, `PostUpdateTest` | the conversion of token strings, each loss logged; the post_update on site, templates, drafts, page revisions and page drafts | PHPUnit (unit, kernel) |
 | `PageDraftTest`, `TemplateDraftTest` | the draft transport against real Canvas: editor saves carry our value, the conflict rule, publish, translations (incl. draft-only, the details of a published type, a new translation equal to the default), refusals, duplicate | PHPUnit (kernel) |
 | `CoupledHeadTest` | the HTML head an anonymous visitor gets, with both page caches; non-owned routes untouched; a failing build serves core's head | PHPUnit (kernel) |
 | `HeadlessHeadTest` | the content API head, preview drafts, routes left alone, the runtime requirement | PHPUnit (kernel) |
 | `MetatagCoexistenceTest` | Metatag silent where the head is ours, widgets hidden | PHPUnit (kernel) |
-| `ApiTest` | route requirements, state (incl. a template without a node to preview), site (incl. a stored value carried forward), media, writes follow shown values | PHPUnit (kernel) |
+| `ApiTest` | route requirements, state (facts, separator, sources, broken links; incl. a template without a node to preview), site (stored links ignored), media, writes follow shown values, refused links | PHPUnit (kernel) |
 | `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node (headings, list items and table rows as sentences), heads and structured data (a square logo's small card), hidden references published and deleted (coupled and headless), drafts, headless | PHPUnit (kernel) |
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
 | `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
 | `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks, API client, host adapter parsing | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
-| Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates bound to fields, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
+| Playwright `coupled` (`page`, `template`, `site`, `access`) | the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates linked to fields, title endings, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
 | Playwright `headless`, `ai` | content API heads and preview tokens; suggestions with a test provider, an edited prompt, and a site guardrail that blocks | |
-| Playwright `complex` | template scope on the complex fixture: type fields and their values, value menus in windows 350 and 420 px tall, by keyboard and to assistive technology, previews that follow the editor (at the view's top, without a message or a status change), Checks against a long title, an unpublished preview node and its information button (click, hover then click, click elsewhere), a square small card for a square logo, a header whose Checks text gives way to a long type name, a type without content, text direction | |
+| Playwright `complex` | template scope on the complex fixture: type fields and their values, levels and hidden references, link menus in windows 350 and 420 px tall, by keyboard and to assistive technology, previews that follow the editor (at the view's top, without a message or a status change), Checks against a long title, an unpublished preview node and its information button (click, hover then click, click elsewhere), a square small card for a square logo, a header whose Checks text gives way to a long type name, a type without content, text direction | |
 
 Commands are in the README ("Development"). Kernel tests use Canvas's
 `phpunit.xml.dist`. The Playwright suite installs a seeded sandbox per spec
@@ -799,7 +881,8 @@ variables are listed at the top of `tests/e2e/fixture.ts`. CI
 (`.gitlab-ci.yml`) runs the drupal.org template jobs (PHPUnit, PHPCS, PHPStan,
 cspell) plus `frontend` (`npm ci && npm run verify`), `build-assets` (fails
 when the committed `extension/dist` differs from a fresh build) and
-`playwright` (all projects, one worker).
+`playwright` (all projects, one worker), and `phpunit (canvas dev)` (the
+`canvas_metatag_canvas_contract` group against `drupal/canvas:1.x-dev`).
 
 ## 18. Known limitations and non-goals
 
@@ -812,7 +895,7 @@ limitations of the implementation:
   decodes and re-encodes each uncached owned response.
 - Metatag is silent on revision, latest-version and preview routes of owned
   nodes, where this module emits nothing.
-- `{image}` by media UUID uses the media's default translation, so a
+- The Image fact by media UUID uses the media's default translation, so a
   translated alt text is not used (`ponytail:` in `Resolver::image()`).
 - With language domains and a headless frontend, URLs stay on the Drupal
   domain; nothing maps a language to a frontend host.
@@ -837,8 +920,13 @@ limitations of the implementation:
   status, and `getAutoSaveEntityForPreview()` reads the site's auto-save list).
   Fine at today's sizes.
 - The settings-file public base needs a cache rebuild when changed.
-- Dialog: one offer of an unsaved change at a time; text composed by an input
-  method inside a chip, and a paste, are not steps of the browser's undo.
+- Dialog: one offer of an unsaved change at a time.
+- Links: a text list gives its stored key, not its label; a reference is read
+  only when visitors may view it (else each node uses its default); an
+  unpublished preview node is read with the editor's access; a multi-value
+  media field (a gallery) is not offered as an image, the Image fact covers
+  it; a multi-value formatted text field is not offered; a multi-value field
+  gives its first item.
 - Not exercised in a browser: a multilingual site, screen readers, Firefox and
   Safari.
 
@@ -853,7 +941,8 @@ data/schema-types.json            structured data types and properties
 src/Values.php                    validation, cascade, text outputs
                                   (change model.ts and the fixtures too)
 src/SchemaGraph.php               registry, literal checks, @graph, @ids
-src/Resolver.php                  ownership, layers, tokens, images,
+src/Sources.php                   EVERY Canvas prop source dependency (PHP)
+src/Resolver.php                  ownership, layers, facts, links, images,
                                   public base, URLs, the head, cacheability
 src/Controller/ApiController.php  state, draft writes, site, media
 src/Controller/
@@ -875,13 +964,13 @@ tests/fixtures/                   cases shared by PHP and TypeScript
 tests/e2e/host-contract.spec.ts   update first when Canvas changes
 ```
 
-- New token: `Resolver::TOKENS`, `LABELS`, `tokens()`; the dialog picks it up
-  from the state.
+- New fact: `Values::FACTS`, `Resolver::facts()`, the config schema's
+  choice; the dialog picks it up from the state.
 - New structured data type or property: `data/schema-types.json` and a
   fixture in `tests/fixtures/graphs/`. The AI prompt follows the registry
   (text and date properties, unless a property says `"ai": false`).
 - New stored key: `Values::KEYS` and its cleaner, the config schema,
   `model.ts`, `text-cases.json`.
-- A Canvas upgrade: run `host-contract`, then `PageDraftTest`,
+- A Canvas upgrade: run `host-contract` and `SourcesTest`, then `PageDraftTest`,
   `TemplateDraftTest`, `HeadlessHeadTest`, `InstallTest`; walk the table in
   section 11.

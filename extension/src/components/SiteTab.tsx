@@ -8,7 +8,7 @@ import { Field, useHeld } from './Field';
 import { ImageRow, PICKED, Thumb } from './MediaPicker';
 import { Stage } from './Previews';
 import { Visibility } from './SearchTab';
-import { TemplateInput } from './TemplateInput';
+import { TitleField } from './Value';
 import { InfoTip } from './ui';
 
 const SEPARATORS = ['|', '·', '–', '—'];
@@ -54,13 +54,13 @@ const breakable = (text: string) =>
 export function SiteView() {
   const { state, dispatch, view } = useApp();
   const server = state.server!;
-  const { identity, values } = state.edits.site;
+  const { identity } = state.edits.site;
   const edit = (path: string, value: unknown) =>
     dispatch({ type: 'edit', scope: 'site', path, value });
   const image = (uuid: string) => PICKED[uuid] ?? server.media[uuid] ?? null;
-  const gaps = identityGaps(state.edits.site, view?.tokens ?? {});
+  const gaps = identityGaps(state.edits.site, view?.facts.site?.value ?? '');
   const ai = server.capabilities.ai;
-  const name = identity.name.trim() || view?.tokens.site?.value || '';
+  const name = identity.name.trim() || view?.facts.site?.value || '';
   const profiles = useHeld(
     identity.same_as.join('\n'),
     (text) =>
@@ -72,12 +72,6 @@ export function SiteView() {
           .filter(Boolean),
       ),
     true,
-  );
-  // Everything an entity has; a content type's fields do not exist site-wide.
-  const tokens = Object.fromEntries(
-    Object.entries(view?.tokens ?? {}).filter(
-      ([token]) => !token.startsWith('field.'),
-    ),
   );
   const separators = SEPARATORS.includes(identity.separator)
     ? SEPARATORS
@@ -148,7 +142,7 @@ export function SiteView() {
             className="seo-input"
             dir="auto"
             value={identity.name}
-            placeholder={view?.tokens.site?.value}
+            placeholder={view?.facts.site?.value}
             disabled={field.disabled}
             aria-invalid={field.invalid || undefined}
             aria-describedby={field.describedBy}
@@ -164,8 +158,8 @@ export function SiteView() {
             noun="logo"
             disabled={field.disabled}
             minWidth={112}
-            chosen={identity.logo}
-            onPick={(uuid) => edit('identity.logo', uuid)}
+            chosen={identity.logo ? { media: identity.logo } : undefined}
+            onPick={(picked) => 'media' in picked && edit('identity.logo', picked.media)}
             onClear={() => edit('identity.logo', '')}
           />
         )}
@@ -187,42 +181,17 @@ export function SiteView() {
       </Field>
 
       <h3 className="seo-group-title">Titles</h3>
-      <Field
+      <TitleField
         scope="site"
-        path="values.title"
-        label="Title pattern"
         note={
           view && (
             <>
-              For {view.values.title ?? ''}:{' '}
+              For {view.facts.title?.value || 'About us'}:{' '}
               <span className="seo-guide-example">{example}</span>
             </>
           )
         }
-      >
-        {(field) => (
-          <TemplateInput
-            id={field.id}
-            describedBy={field.describedBy}
-            invalid={field.invalid}
-            disabled={field.disabled}
-            lang={server.langcode}
-            value={values.title ?? ''}
-            onChange={(value) => edit('values.title', value)}
-            tokens={{
-              ...tokens,
-              // The chips show the working copy's own separator and name.
-              ...(tokens.sep
-                ? { sep: { ...tokens.sep, value: identity.separator } }
-                : {}),
-              ...(tokens.site && identity.name.trim()
-                ? { site: { ...tokens.site, value: identity.name } }
-                : {}),
-            }}
-            insert="always"
-          />
-        )}
-      </Field>
+      />
       <Field
         scope="site"
         path="identity.separator"
@@ -270,8 +239,8 @@ export function SiteView() {
             noun="default image"
             disabled={field.disabled}
             minWidth={600}
-            chosen={identity.default_image}
-            onPick={(uuid) => edit('identity.default_image', uuid)}
+            chosen={identity.default_image ? { media: identity.default_image } : undefined}
+            onPick={(picked) => 'media' in picked && edit('identity.default_image', picked.media)}
             onClear={() => edit('identity.default_image', '')}
           />
         )}
