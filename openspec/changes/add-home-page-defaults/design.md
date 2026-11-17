@@ -231,13 +231,17 @@ rules"). A front page named "Home" shared as "Home" in every chat bubble, and
 the title-link guidance names "Home" as a vague title to avoid.
 
 - **Rule:** when the owned front page's main title part would be its name
-  (no title of its own) and that name is empty, the Site name, an alternate
+  (no title of its own, or a template main part that is the Title fact alone,
+  by default or linked) and that name is empty, the Site name, an alternate
   name, or a vague word of the translation's language (the D7 word list), the
   main part is the Site name and the ending is Drupal's slogan when set, else
   there is no ending ("Humanify Studio", or "Humanify Studio | Human expertise
   for AI-made work"). `og:title`, when no social title is set, is the same
   text. A real name ("Industrial pumps for breweries") is kept as typed and
-  takes the site's ending like every page.
+  takes the site's ending like every page. A composed main part
+  (`compose-values-from-fields`, which lands first) is the builder's choice
+  and is kept ("Home in Helsinki"); "Make the title specific" and "Say what
+  the site offers" still judge the resolved text.
 - **Image:** when the chain of `strengthen-zero-config-defaults` would make a
   card for such a front page, it makes the site card instead (logo, Site name,
   Drupal's slogan as its line when set).

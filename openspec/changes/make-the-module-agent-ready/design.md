@@ -229,7 +229,11 @@ unchanged is kept (draft-writes, "A write is validated as a whole").
   `requiredKey: false` for optional members.
 - A `CanvasMetatagValues` constraint (option: `scope`) on those types, on the
   identity and on the `component_mapping` entity delegates to the cleaners in
-  write mode, with decision 7's reference checks off. For a template, the
+  write mode, with decision 7's reference checks off. It builds on the value
+  constraint `compose-values-from-fields` puts on `canvas_metatag.value` and
+  `canvas_metatag.value_part` (a composition's shape), which it keeps rather
+  than repeats; a composition on a page or in the title ending is refused by
+  scope here. For a template, the
   bundle comes from the parent template.
 - The page base field gets the same constraint (scope page), so content
   import, entity APIs and Canvas's publish validate it.
@@ -286,16 +290,22 @@ At the write boundaries (`set`, the config action):
   reference (`field_writer.name`). `{"field": "<handle>"}` becomes the row's
   `{"source": …}`. A handle the template cannot link is refused with code
   `field` and the handles of that kind in `allowed`.
+- **Compositions** (`compose-values-from-fields`, which lands first):
+  `{"parts": [ … ]}` is accepted where the place composes, and each part may
+  be `{"text": …}`, `{"fact": …}` or the `{"field": "<handle>"}` shorthand,
+  resolved in that change's `words` form. A composition of one field and no
+  text folds to the link, as the dialog stores it.
 - **Media** by id or UUID (`{"media": 12}`) becomes the stored UUID form.
 - **Hand-added JSON-LD** (`schema.custom`, each `schema.extend` value) is
   accepted as a JSON object or list as well as text, and stored as two-space
   pretty-printed text; one `@graph` wrapper is unwrapped.
 - **A page's description** is Canvas's field (decision 5).
 
-`inspect` prints a handle for every source the vocabulary lists, media as
-`{"media": "<uuid>"}`, and JSON-LD decoded; only a source the vocabulary no
-longer lists (stale, and reported by `check`) prints as `{"source": …}`. A
-contract test round-trips every fixture: what `inspect` prints, `set` accepts
+`inspect` prints a handle for every source the vocabulary lists, inside
+`parts` too, media as `{"media": "<uuid>"}`, and JSON-LD decoded; only a
+source the vocabulary no longer lists (stale, and reported by `check`) prints
+as `{"source": …}`. A contract test round-trips every fixture, a composed
+title included: what `inspect` prints, `set` accepts
 with `changed: false`. The field shorthand does not apply inside hand-added
 JSON-LD, which keeps its own `{field.name}` placeholders; the README shows the
 three forms in one table, and notes that `config:export` shows the stored
@@ -576,6 +586,10 @@ remove the module version; nothing was stored in a new shape.
   `check --all` is for scripts. They share the report cache.
 - `extend-structured-data-by-id`'s vocabulary command adopts the envelope and
   exit codes; its download behaviour does not change.
+- `compose-values-from-fields` adds compositions and their value constraint;
+  `set`, `inspect`, `describe` (an example composition on the rows that
+  compose) and the import refusal cover them. Its template-seo block is the
+  base this change's block is rebuilt on (task 3.6).
 
 ## Review decisions
 

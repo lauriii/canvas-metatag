@@ -1,7 +1,7 @@
 # Tasks
 
-Needs `rethink-structured-data`, `read-page-components` and
-`link-values-to-fields` groups 6–7.
+Needs `rethink-structured-data`, `read-page-components`,
+`link-values-to-fields` groups 6–7 and `compose-values-from-fields`.
 
 ## 1. What the template shows
 
@@ -16,7 +16,9 @@ Needs `rethink-structured-data`, `read-page-components` and
 
 - [ ] 3.1 Route `GET /canvas-metatag/api/reach` with seo-access rules; batched `resolve()` over published items with the template's draft values; per-item and whole-answer caches with their tags; sampling above 2,000. Verify with a new kernel `ReachTest` (exact counts with a node grant hiding two items and an invalid currency on three; a hand-added employer rating whose score is linked counted on the items that have a score; cache hit and invalidation on a node save; sample flag at 2,001 items) and `ApiTest::testReachAccess` (403 without update access to the template).
 - [ ] 3.2 Budget. Verify with a kernel `ReachBudgetTest` at 10,000 nodes within the time agreed with the product owner.
-- [ ] 3.3 Reach lines, Also helps rows (gray), "Complete on ‹n› of ‹m›", per-item degradation, Preview one with Back; reach fetched on mount and on the template's own value changes only. Verify with `checks.test.ts` (per-item rule) and Playwright `template.spec.ts` ("Also helps · Author on 175"; Preview one caption; a Canvas round trip without a value change does not call the reach route).
+- [ ] 3.3 Reach lines, Also helps rows (gray), "Complete on ‹n› of ‹m›", per-item degradation, Preview one with Back; reach fetched on mount and on the template's own value changes only. Verify with `checks.test.ts` (per-item rule, with template-seo "A composed name" counted per item) and Playwright `template.spec.ts` ("Also helps · Author on 175"; Preview one caption; a Canvas round trip without a value change does not call the reach route).
+
+- [ ] 3.4 The spread of a composed title's length: the reach answer carries the minimum and maximum full title length over the counted items when the main part is a composition holding a field, and the title's length guidance adds "‹min›–‹max› characters on other ‹type plural›". Verify with `ReachTest` (a composed title over three events of 38, 52 and 71 characters gives 38 and 71; a title following its default gives none) and a `checks.test.ts` case for template-seo "Titles that vary".
 
 ## 4. Parity and dropped values
 

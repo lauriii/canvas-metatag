@@ -149,6 +149,16 @@ are written on their text.
   an unowned front page is the same product question as below.
 - **Depends on `strengthen-zero-config-defaults`** (the site card, the image
   chain's end, the Site name on cards), which archives before this change.
+- **Depends on `compose-values-from-fields`** (lands right after
+  `extend-structured-data-by-id`, decisions.md item 17; amendment recorded
+  there on 2026-11-17). Its MODIFIED seo-checks "Checks describe the page or
+  template being edited" replaces the brace-era scenario "A value empty for
+  the previewed node" (`{Performers}`) and adds "a field of a composition", so
+  this change's block of that requirement is rebuilt on its archived text
+  (task 6.7). The vague-title rule for the front page applies when the main
+  part is the Title fact alone, by default or linked; a composed main part is
+  the builder's choice and is kept, and "Make the title specific" and "Say
+  what the site offers" still judge the resolved text.
 - **Followed by `describe-the-publisher`** (formerly "structured-data design,
   in progress"), which runs and archives after this change. It plans an
   identity alternate name among other identity fields; this change adds only
