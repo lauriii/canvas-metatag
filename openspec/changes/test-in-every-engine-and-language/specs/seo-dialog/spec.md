@@ -58,3 +58,8 @@ motion only the spinner MAY animate.
 
 - **WHEN** a screen reader reaches an ⓘ button, in a WebKit browser with its platform's screen reader or in Firefox with an open-source one
 - **THEN** it MUST read the button's name, then its sentence
+
+#### Scenario: A screen reader reads a composed title
+
+- **WHEN** a screen reader reaches a template's composed title, in a WebKit browser with its platform's screen reader, or in Firefox or a Chromium browser with an open-source one
+- **THEN** it MUST read one textbox named by the field, its fields as words, and its description starting with the result, and MUST step over a field in one press

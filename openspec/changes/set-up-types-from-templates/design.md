@@ -57,6 +57,12 @@ every item, so reach previews the draft. Hand-added items and added details
 the previewed item only) are part of each item's graph, so their features
 are counted too, with their whole-value field links filled per item.
 
+Because reach resolves every item, it can also show the spread of a
+composed title's length across items, which the dialog's guidance cannot
+measure from one previewed item (`compose-values-from-fields` D11): "38–71
+characters on other events", beside the length guidance of a composed
+title, from the same cached per-item results.
+
 *Alternatives:* entity queries (rejected: they cannot express validity
 rules, multi-hop sources or node grants); counting inside `/state`
 (rejected: recomputed after every round trip).
@@ -69,6 +75,16 @@ with the reason `per_item`, and the reach line shows no count. Its field
 line uses the words `extend-structured-data-by-id` already shows for typed
 values in hand-added items: "The same ‹label› on every ‹Type›. Link it to a
 field instead."
+
+A composition (`compose-values-from-fields`, which lands earlier) that holds
+at least one field or a per-item fact counts as set per item, never as the
+same text on every item, whatever typed words it also holds ("‹Title› ·
+‹Starts›" is per item). Only a value of typed text alone is "the same on
+every ‹Type›".
+
+Self-setup proposes single links only in this change. It may propose
+compositions later (for example "‹Title› · ‹Starts›" for an event's name);
+that needs its own decision and is not built here.
 
 ### 5. Authors
 

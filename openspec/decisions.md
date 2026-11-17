@@ -196,4 +196,35 @@ The SEO dialog's visual rules (tokens, components, review checklist) are in
       site; plain http on a public host is only reported.
     - The README names no JSON-LD library; the module's graph is complete.
     - The frontend recipe is proved by a contract test plus a manual check.
-    - Runs first after the JSON-LD form pause.
+    - Runs first after the JSON-LD form pause. Superseded by item 17:
+      it now lands right after compose-values-from-fields.
+17. compose-values-from-fields (owner: "connect multiple fields or add hard
+    coded text"; accepted 2026-11-17, recommended option of every open
+    decision taken)
+    - A field with several values gives, in text, every item visitors may
+      see, joined with the language's list separator; title-like places
+      give at most two plus a translatable, plural-aware "and ‹n› more".
+      Release note names the changed output; the archived "Ada" scenario is
+      reversed.
+    - Empty fields: the fixed join rule (design D4), made visible by the
+      tint and the "Without ‹Field›" line. No per-chip choice, no fallback
+      text.
+    - `{` opens the field menu at the caret; `{{` types a brace.
+    - No composition inside hand-added JSON-LD; whole-value names only.
+    - Editor library: lexical first, then ProseMirror. If neither passes
+      the spike's automated criteria, stop and report. Never hand-write a
+      contenteditable editor.
+    - Screen readers: none on the farm. Phase 3 starts on the automated
+      criteria (keys, caret, input-method composition in Chromium, axe,
+      accessibility tree snapshots, live-region log). The screen reader
+      steps go in the PR body as the owner's merge check; a failure is a
+      blocking follow-up before merge.
+    - Typed words are shared by all languages, with a good-to-know check
+      on multilingual sites.
+    - Lands right after extend-structured-data-by-id and before
+      complete-the-headless-frontend, superseding item 16's "Runs first
+      after the JSON-LD form pause". The amendments to
+      complete-the-headless-frontend, strengthen-zero-config-defaults,
+      add-advanced-meta-tags, add-home-page-defaults,
+      make-the-module-agent-ready, set-up-types-from-templates and
+      test-in-every-engine-and-language are in those changes.

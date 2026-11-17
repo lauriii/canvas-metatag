@@ -29,7 +29,7 @@ go on the merge request.
 
 - [ ] 4.1 Add `expectAccessible(page, view)` to `fixture.ts` and replace the axe copies in `access.spec.ts` and `template-complex.spec.ts`. Prove it with one `AxeBuilder` use left in `tests/e2e/`, and both suites green.
 - [ ] 4.2 Scan every view (seo-dialog "An automated scan"): in `access.spec.ts` each tab of each scope, each sheet, the scope menu, read-only Site, each notice and a field error; the suggestions tray in `ai.spec.ts`; the Arabic page in M3. Prove it with the smoke set green in all three engines, and a negative control recorded in the merge request: a temporarily unnamed button fails the scan, naming its view.
-- [ ] 4.3 Add one `toMatchAriaSnapshot()` per page-scope and site-scope view, and one of an open template link menu with its named groups (complete-the-headless-frontend), stored once under `tests/e2e/__aria__/`, dynamic text as regular expressions, Chromium only with the reason in each skip. Prove it with a second run of `--update-snapshots=changed` that changes nothing, and the snapshots reviewed in the merge request.
+- [ ] 4.3 Add one `toMatchAriaSnapshot()` per page-scope and site-scope view, one of an open template link menu with its named groups (complete-the-headless-frontend), taken once in link mode and once in add mode, and the composed title of `compose-values-from-fields` with every part present and with one part empty, stored once under `tests/e2e/__aria__/`, dynamic text as regular expressions, Chromium only with the reason in each skip. Prove it with a second run of `--update-snapshots=changed` that changes nothing, and the snapshots reviewed in the merge request.
 - [ ] 4.4 Add the forced-colours and reduced-motion test to `access.spec.ts` (seo-dialog "Forced colours" and "Reduced motion"). Prove it green in Chromium, with a negative control recorded: without the forced-colours rules, it fails.
 
 ## 5. Triage
@@ -38,8 +38,8 @@ go on the merge request.
 
 ## 6. Screen readers
 
-- [ ] 6.1 Write `tests/e2e/SCREEN-READERS.md`: the 12 steps of design D6, the two pairs named neutrally, and the record to fill in. Link it from the README's Development section. Prove it with a person's review in the merge request.
-- [ ] 6.2 Run the first pass with a person at the screen, with both pairs. Prove it with the filled-in record in the merge request (date, module commit, Canvas version, each pair with versions, keyboard setting, each step's result). A failed step 4 is fixed before merging, with `aria-describedby` and a vitest render case, and that step is run again.
+- [ ] 6.1 Write `tests/e2e/SCREEN-READERS.md`: the 14 steps of design D6 (13 and 14 for the composer of `compose-values-from-fields`), the two pairs named neutrally and the third pair for steps 13 and 14, and the record to fill in. Link it from the README's Development section. Prove it with a person's review in the merge request.
+- [ ] 6.2 Run the first pass with a person at the screen, with both pairs. Prove it with the filled-in record in the merge request (date, module commit, Canvas version, each pair with versions, keyboard setting, each step's result). A failed step 4 is fixed before merging, with `aria-describedby` and a vitest render case, and that step is run again. A failed step 13 or 14 is a blocking follow-up on the composer, as `compose-values-from-fields` D10 says for its own merge check.
 
 ## 7. Docs
 

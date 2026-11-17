@@ -31,7 +31,7 @@ The title MUST be the main part and the ending joined by a space, the site's sep
 
 ### Requirement: A cut head text ends at a word
 
-The description and the social texts MUST be cut at the last space within the limit when the cut would fall inside a word and that space is within the last tenth of the limit. A title over 255 characters MUST lose whole words from the end of its main part, which then ends in "…", until the main part, the separator and the ending fit. The ending MUST be cut only when it alone is too long.
+The description and the social texts MUST be cut at the last space within the limit when the cut would fall inside a word and that space is within the last tenth of the limit. A title over 255 characters MUST lose from the end of its main part whole fields of a composition with their words, then whole words, and end in "…", until the main part, the separator and the ending fit. The ending MUST be cut only when it alone is too long.
 
 #### Scenario: A very long event title
 
@@ -42,6 +42,11 @@ The description and the social texts MUST be cut at the last space within the li
 
 - **WHEN** a title is 300 characters of text written without spaces
 - **THEN** the title MUST be cut at 255 code points, never inside a character that is drawn as one
+
+#### Scenario: A cut composed title
+
+- **WHEN** "Every Event"'s main part is Title, " in ", Venue › City, " · ", Starts, its ending is "Events", and an event's title is 240 characters
+- **THEN** the title MUST leave out " · ‹date›" and then " in ‹city›" before it loses any word of the event's title, MUST end its main part with a whole word and "…" only if it still does not fit, and MUST NOT hold " in …" or " · …"
 
 ### Requirement: The social image follows a chain
 
