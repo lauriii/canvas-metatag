@@ -122,7 +122,7 @@ test('a product reads back from what ships, and a fact leads to where it is set'
   const outline = output.getByRole('list', { name: 'Structured data' }).getByRole('listitem');
   await expect(outline.first()).toContainText('Product');
   await expect(outline.first()).toContainText('Main');
-  await expect(outline.first()).toContainText(/#primary$/);
+  await expect(outline.first().locator('code')).toHaveText(/#primary$/);
   // Copy structured data: the head's JSON-LD, and it says so.
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await output.getByRole('button', { name: 'Copy structured data', exact: true }).click();
@@ -371,8 +371,8 @@ test('your own JSON-LD lives behind Code, read back and checked item by item', a
   await expect(frame.getByText(UI.schema.moved)).toBeVisible();
   await button(frame, 'Open it').click();
   await expect(sheet(frame, UI.schema.ownJsonLd)).toBeVisible();
-  // The items by the names the stage reads back, never "Item 1".
-  await expect(sheet(frame, UI.schema.ownJsonLd).locator('.seo-hand-name').first()).toHaveText(/^FAQ/);
+  // The items as sentences, never "Item 1".
+  await expect(sheet(frame, UI.schema.ownJsonLd).locator('.seo-clist-sentence').first()).toHaveText(/FAQ/);
   await page.keyboard.press('Escape');
   // Followed, the notice goes; the way back is Code, where it lives now.
   await expect(frame.getByText(UI.schema.moved)).toHaveCount(0);
@@ -404,9 +404,12 @@ test('your own JSON-LD lives behind Code, read back and checked item by item', a
   await expect(frame.getByText('Gave the item the id #faqpage so it can be left out.').first()).toBeVisible();
   // The row goes, the item says why, and so does Output.
   await expect(own.getByText("Couldn't find the question “Is the shade dimmable?” on this page")).toHaveCount(0, { timeout: 30_000 });
-  await expect(own.getByText("Left out until it's on the page")).toBeVisible();
+  await expect(own.getByText('Left out', { exact: true })).toBeVisible();
+  // Opened from Output: back to Output, then to what opened it.
   await page.keyboard.press('Escape');
-  // Back to what opened the first sheet.
+  await expect(sheet(frame, 'Output').getByRole('button', { name: UI.schema.ownJsonLd, exact: true })).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(sheet(frame, 'Output')).toHaveCount(0);
   await expect(button(frame, UI.schema.code)).toBeFocused();
   await button(frame, UI.schema.code).click();
   const left = sheet(frame, 'Output').getByRole('list', { name: 'Structured data' }).getByRole('listitem').filter({ hasText: 'FAQPage' });

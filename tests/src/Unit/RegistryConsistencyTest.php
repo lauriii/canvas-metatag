@@ -108,7 +108,9 @@ final class RegistryConsistencyTest extends UnitTestCase {
     $rules = SchemaGraph::searchFeatures();
     $by = self::byType();
     foreach ($rules['features'] as $name => $feature) {
-      if ($feature['status'] !== 'shown') {
+      // A feature of hand-added items, or of a type added to the page, is
+      // set by hand.
+      if ($feature['status'] !== 'shown' || isset($feature['only'])) {
         continue;
       }
       $types = array_keys(array_filter($by, static fn (array $features): bool => isset($features[$name])));

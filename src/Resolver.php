@@ -22,6 +22,7 @@ use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\File\FileUrlGeneratorInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\Core\Site\Settings;
@@ -89,6 +90,7 @@ final class Resolver {
     private readonly FileUrlGeneratorInterface $fileUrlGenerator,
     private readonly AliasManagerInterface $aliasManager,
     private readonly Sources $sources,
+    private readonly LoggerChannelFactoryInterface $loggers,
   ) {
     $this->resolved = new \WeakMap();
     $this->anonymous = new AnonymousUserSession();
@@ -617,7 +619,8 @@ final class Resolver {
       'image' => $image,
       'facts' => ['sep' => $identity['separator'], 'image' => $facts['image']['image']['url'] ?? '']
       + array_map(static fn (array $fact): string => $fact['value'], array_diff_key($facts, ['image' => TRUE])),
-    ], $effective['schema'] ?? [], $value);
+      'fill' => $entity->getEntityTypeId() === 'node' ? fn (string $name, string $expects): array => $this->fill($name, $expects, $entity, $cacheability) : NULL,
+    ], ['extend' => ($effective['schema']['extend'] ?? []) + ($layers['site']['schema']['extend'] ?? [])] + ($effective['schema'] ?? []), $value);
     $og_type = SchemaGraph::types()[$effective['schema']['type'] ?? 'WebPage']['og_type'] ?? 'website';
     // Where the front page's identity and website nodes are judged, and the
     // addresses report() judges them with.
@@ -665,13 +668,23 @@ final class Resolver {
       }
     }
 
+    $script = self::script($report['graph'], $error);
+    if ($error !== NULL) {
+      $report['unencodable'] = TRUE;
+      $this->loggers->get('canvas_metatag')->error('The structured data of @type @id was left out: @message', [
+        '@type' => $entity->getEntityTypeId(),
+        '@id' => $entity->id(),
+        '@message' => $error,
+      ]);
+    }
+
     $result = [
       'head' => [
         'title' => $texts['title'],
         // Rows with an empty value are omitted; a URL is absolute or dropped.
         'meta' => array_values(array_filter($meta, static fn (array $row): bool => $row['content'] !== '')),
         'link' => array_values(array_filter($link, static fn (array $row): bool => Values::isHttpUrl($row['href']))),
-        'script' => [['type' => 'application/ld+json', 'textContent' => $report['graph']]],
+        'script' => $script,
       ],
       'image' => $image,
       'schema' => array_diff_key($report, ['graph' => TRUE]),
@@ -679,6 +692,118 @@ final class Resolver {
     ];
     $this->resolved[$entity] = ['request' => $request, 'draft' => $draft, 'result' => $result];
     return $result;
+  }
+
+  /**
+   * The head's JSON-LD script, or none when it cannot be written out.
+   *
+   * Structured data that cannot be encoded (a number that is not finite)
+   * leaves the head without its script, never without its other tags.
+   *
+   * @param array $graph
+   *   The graph.
+   * @param string|null $error
+   *   Set to why it cannot be written out, or NULL.
+   *
+   * @return list<array{type: string, textContent: array}>
+   *   One script, or none.
+   */
+  public static function script(array $graph, ?string &$error = NULL): array {
+    $error = NULL;
+    try {
+      json_encode($graph, Values::OUTPUT_FLAGS);
+      return [['type' => 'application/ld+json', 'textContent' => $graph]];
+    }
+    catch (\JsonException $e) {
+      $error = $e->getMessage();
+      return [];
+    }
+  }
+
+  /**
+   * The structured data a head carries: an empty graph when it was left out.
+   *
+   * @param array $head
+   *   The head resolve() built.
+   *
+   * @return array
+   *   The graph, with its @context.
+   */
+  public static function graphOf(array $head): array {
+    return $head['script'][0]['textContent'] ?? ['@context' => 'https://schema.org', '@graph' => []];
+  }
+
+  /**
+   * A whole-value field link in hand-added JSON-LD, read for a node.
+   *
+   * "field_score" is the field's own value; "field_venue.title" one value of
+   * what it references (one hop). Read through the same sources as every
+   * other link: a date and time in the site's zone with its offset, a
+   * date-only field as YYYY-MM-DD, an image as its public address,
+   * formatted text as plain text. A field of several values gives its first.
+   * Where an address is expected, only an absolute http(s) one is given.
+   *
+   * @param string $name
+   *   The name inside "{field.…}".
+   * @param string $expects
+   *   What the name expects (SchemaGraph::expects()): a number field gives a
+   *   number where one is expected, and a link field its absolute address.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $node
+   *   The item being output.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the value depends on.
+   *
+   * @return array{0: string, 1: mixed}
+   *   The status (ok, empty, hidden, broken) and the value.
+   */
+  private function fill(string $name, string $expects, ContentEntityInterface $node, CacheableMetadata $cacheability): array {
+    [$field, $next] = array_pad(explode('.', $name, 2), 2, NULL);
+    $number = $expects === 'number' || str_starts_with($expects, 'number|');
+    $url = $expects === 'url';
+    // The field's row that gives the richest kind: a number where one is
+    // expected, a date, an image (an image field reached through its media
+    // item), formatted text, else text; one on the field itself first.
+    $best = NULL;
+    foreach ($this->sources->vocabulary($node->bundle(), FALSE, $cacheability) as $expression => $row) {
+      if ($row['field'] !== $field || ($next !== NULL && (!$row['hop'] || !str_contains($expression, "\u{241D}$next\u{241E}")))) {
+        continue;
+      }
+      $kinds = $row['kinds'];
+      $kind = match (TRUE) {
+        $url && in_array('address', $kinds, TRUE) => 'address',
+        $number && in_array('number', $kinds, TRUE) => 'number',
+        in_array('date', $kinds, TRUE) => 'date',
+        in_array('image', $kinds, TRUE) => 'image',
+        isset($row['html']) && in_array('html', $kinds, TRUE) => 'html',
+        // A number field read as text keeps its digits.
+        in_array('text', $kinds, TRUE) => 'text',
+        default => $kinds[0] ?? 'text',
+      };
+      // A number where none is expected comes last: it is a width or a
+      // count, read as its digits.
+      $order = ['address' => 0, 'number' => $number ? 0 : 5, 'date' => 1, 'image' => 2, 'html' => 3, 'text' => 4];
+      $rank = ($order[$kind] ?? 6) * 2 + ($row['hop'] && $next === NULL ? 1 : 0);
+      if ($best === NULL || $rank < $best[0]) {
+        $best = [$rank, $expression, $kind];
+      }
+    }
+    if ($best !== NULL) {
+      [, $expression, $kind] = $best;
+      [$status, $value] = $this->link(['sourceType' => 'entity-field', 'expression' => $expression], $node, $kind, $cacheability);
+      $value = match (TRUE) {
+        $status !== 'ok' => NULL,
+        $kind === 'image' => is_array($value) ? $value['url'] ?? NULL : NULL,
+        $kind === 'html' => Values::fromHtml((string) $value),
+        $kind === 'number' && $number && is_numeric($value) => str_contains((string) $value, '.') ? (float) $value : (int) $value,
+        default => $value,
+      };
+      // Text where an address is expected: an absolute one, or broken.
+      if ($url && $kind !== 'address' && is_string($value) && $value !== '' && !Values::isHttpUrl($value)) {
+        return ['broken', NULL];
+      }
+      return [$status === 'ok' && ($value === NULL || $value === '') ? 'empty' : $status, $value];
+    }
+    return ['broken', NULL];
   }
 
   /**
@@ -693,7 +818,7 @@ final class Resolver {
    */
   public function report(ContentEntityInterface $entity, bool $draft = FALSE): array {
     $result = $this->resolve($entity, $draft);
-    $graph = $result['head']['script'][0]['textContent'];
+    $graph = self::graphOf($result['head']);
     $schema = $result['schema'];
     $home = $schema['home'];
     $result['schema']['features'] = SchemaGraph::features($graph, [
@@ -710,6 +835,7 @@ final class Resolver {
       'incomplete' => $schema['incomplete'],
       'items' => $schema['items'],
       'today' => $schema['today'],
+      'hand' => array_column(array_filter($schema['nodes'], static fn (array $node): bool => $node['origin'] === 'hand' && isset($node['at'])), 'at'),
     ]);
     $result['schema']['rules'] = SchemaGraph::rules($graph, ['home' => $home], $schema['nodes']);
     return $result;

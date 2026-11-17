@@ -133,7 +133,7 @@ describe('readback()', () => {
       { '@type': 'Thing' },
     ];
     const nodes: GraphNode[] = extra.map((node, item) => ({ id: null, type: node['@type'], origin: 'hand', item, at: 3 + item }));
-    expect(read('WebPage', graph(null, {}, extra), 'en', nodes).hand).toEqual(['a review', 'a rating', 'an employer rating', 'an organization', 'an item']);
+    expect(read('WebPage', graph(null, {}, extra), 'en', nodes).hand).toEqual(['a review', 'an overall rating', 'an employer rating', 'an organization', 'an item']);
   });
 
   it('says what a hand-added item is, apart from its own name', () => {

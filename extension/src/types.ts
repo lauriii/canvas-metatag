@@ -54,6 +54,10 @@ export interface SeoValues {
     custom?: string;
     /** Hand-added items left out, by their `@id` as written. */
     skip?: string[];
+    /** Details added to the module's own items, by short id: JSON text as written. */
+    extend?: Partial<Record<'#primary' | '#webpage' | '#identity', string>>;
+    /** The hand-added item the page is mainly about, by `@id` as written. */
+    main?: string;
   };
 }
 
@@ -83,6 +87,8 @@ export interface SiteSettings {
   currency: string;
   /** The site's default country (ISO 3166-1), which a country picker suggests; '' = none. State only. */
   country?: string;
+  /** The site's default time zone, as an IANA name. State only. */
+  timezone?: string;
 }
 
 // The JSON-LD type registry (data/schema-types.json), in the dialog's language.
@@ -222,7 +228,16 @@ export interface FeatureFact {
   site?: string;
   /** The index of the rule it fails. */
   rule?: number;
+  /** A value of another shape: the shape it must have. */
+  expects?: ExpectsSpec;
 }
+
+/**
+ * What a value must look like: "text", "number|text", "date|datetime",
+ * "url|item:ImageObject", "enum:InStock|OutOfStock", or an item with the
+ * names it must carry.
+ */
+export type ExpectsSpec = string | { is: string; needs?: string[] };
 
 export type VerdictName =
   | 'needs'
@@ -258,6 +273,14 @@ export interface SearchFeatures {
   props: Record<string, string>;
   site: Record<string, string>;
   facts: Record<string, { label: string; need: string }>;
+  /** What each documented name's value must look like. */
+  expects?: Record<string, ExpectsSpec>;
+  /** Types that count as another without the downloaded vocabulary; "*" is any. */
+  subtypes?: Record<string, string[]>;
+  /** One line about each documented type, in the module's own words. */
+  about?: Record<string, string>;
+  /** A plain label for types whose name in words is not one. */
+  labels?: Record<string, string>;
   features: Record<
     string,
     {
@@ -276,13 +299,19 @@ export interface SearchFeatures {
       required?: (string | string[])[];
       complete?: string[];
       recommended?: string[];
-      rules?: { path: string; need?: string }[];
+      rules?: { path: string; need?: string; gt?: number; is?: string; when?: string }[];
+      /** Judged only on hand-added items, or only on the page node. */
+      only?: 'hand' | 'page';
+      expects?: Record<string, ExpectsSpec>;
+      /** The item list's sentence: clauses of variants, each dropped when its values are missing. */
+      say?: string[][] | null;
+      names?: string[];
       /** A list feature: what it lists, and how many at least. */
       list?: { of: string; min: number };
       /** What a thing it lists needs: "a list page with at least 3 courses". */
       elsewhere?: string;
       accepts?: Record<string, string[]>;
-      not_for?: { id: string; reason: string; why: string; suggest?: string; seller?: string }[];
+      not_for?: { id: string; reason: string; why: string; suggest?: string; seller?: string; ours?: string }[];
       confirm?: string[];
     }
   >;
@@ -297,7 +326,9 @@ export interface GraphNode {
   item?: number;
   /** Its index in `@graph`, when emitted. */
   at?: number;
-  left_out?: 'withheld' | 'skip' | 'reserved' | 'duplicate';
+  left_out?: 'withheld' | 'skip' | 'reserved' | 'duplicate' | 'empty' | 'over';
+  /** A module node details were added to. */
+  extended?: true;
 }
 
 /** A rule a hand-added item breaks. */
@@ -417,6 +448,24 @@ export interface Resolved {
     front: boolean;
     features: Verdict[];
     rules: GraphRule[];
+    /** Added details the module's own values win over, by node and path. */
+    clashes?: { node: string; path: string; prop?: string }[];
+    /** Added details that merged. */
+    added?: { node: string; path: string }[];
+    /** List selectors that named no item, or a node the page has not. */
+    unmatched?: { node: string; path: string }[];
+    /** Nodes a type was added to. */
+    type_added?: string[];
+    /** Hand-added values left out because their link gave nothing. */
+    empty?: { path: string; item?: number; extend?: string; name: string; status: string }[];
+    /** Linked text cut at 5,000 characters. */
+    cut?: { path: string; item?: number; extend?: string }[];
+    /** The hand-added main thing, and why it is ignored. */
+    main?: { id: string; ignored: 'kind' | 'absent' | null } | null;
+    /** Hand-added JSON-LD left out: the structured data would be over 256 KB. */
+    over?: boolean;
+    /** The structured data could not be written out: the head has no script. */
+    unencodable?: boolean;
   };
 }
 
@@ -433,6 +482,10 @@ export interface Target {
   has_draft: boolean;
   values: SeoValues;
   from_default: SeoValues;
+  /** Hand-added JSON-LD stored before a rule: the items read mode leaves out, as written. */
+  refused?: { text: string; message: string; item: number; path: string } | null;
+  /** A page translation: its default translation's hand-added JSON-LD, to copy. */
+  source?: { langcode: string; custom: string; count: number } | null;
 }
 
 /** Why AI suggestions are off, from `capabilities.ai.reason`. */
@@ -455,6 +508,12 @@ export interface StatePayload {
   registry: Registry;
   /** The code lists of enums that have one: "country" => ISO 3166-1 codes. */
   codes?: Record<string, string[]>;
+  /** The ids the module emits, by name, with what each is anchored on. */
+  module_ids?: Record<string, 'home' | 'url'>;
+  /** The type an added @type list must keep, by node (Values::nodeTypes()). */
+  extend_types?: Record<'#primary' | '#webpage' | '#identity', string[]>;
+  /** The schema.org vocabulary the site downloaded, or null. */
+  vocabulary?: { release: string } | null;
   search_features: SearchFeatures;
   target: Target | null;
   preview: {
@@ -576,6 +635,8 @@ export interface State {
   save: Record<Scope, SaveStatus>;
   /** Dotted path => the server's sentence, per scope. */
   errors: Record<Scope, Record<string, string>>;
+  /** Where in a hand-added text a refusal is, by the same dotted path (target and site paths never meet). */
+  places?: Record<string, { item: number; path: string }>;
   live: { title?: string; description?: string; alias?: string };
   facts: PageFacts | null;
   /** `empty`: a template whose type has no content to preview. */
@@ -614,13 +675,15 @@ export type Action =
       path?: string;
     }
   | { type: 'undo' }
+  /** The Undo of a sheet that was left, or of a change edited since: it goes. */
+  | { type: 'forgetUndo'; text: string }
   | { type: 'discard' }
   /** `sent`: canon() of the site settings that were saved. */
   | { type: 'siteSaved'; payload: StatePayload; sent: string }
   | { type: 'scope'; scope: Scope }
   | { type: 'tab'; tab: Tab }
   | { type: 'save'; scope: Scope; save: SaveStatus }
-  | { type: 'errors'; scope: Scope; fields: Record<string, string> }
+  | { type: 'errors'; scope: Scope; fields: Record<string, string>; places?: Record<string, { item: number; path: string }> }
   | { type: 'live'; live: State['live'] }
   | { type: 'facts'; facts: PageFacts | null }
   | { type: 'readonly'; readonly: State['readonly'] }
@@ -635,6 +698,8 @@ export interface Jump {
   tab: Tab;
   /** The field's dotted path within its scope. */
   field: string;
+  /** Inside hand-added JSON-LD or added details: the item and its value's dotted path. */
+  at?: { item: number; path: string };
 }
 
 export interface Issue {

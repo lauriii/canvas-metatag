@@ -6,12 +6,19 @@ A page or template MAY add JSON details to its main node or page node, and
 the site to its identity, matched by `@id`. Added details MUST be validated
 like custom JSON-LD, share its 32 KB limit, and merge into the node at any
 depth. They MUST NOT change the node's `@id` or `@type`, except to add a type
-to a list that keeps the node's own type.
+to a list that keeps the type the node is output with: the kind of place
+chosen for a local business, the registry's type otherwise, and the
+identity's kind for the site's identity.
 
 #### Scenario: Details inside an offer
 
 - **WHEN** a product adds `{"sku": "OAK-DL-01", "offers": {"itemCondition": "https://schema.org/NewCondition"}}`
 - **THEN** the Product node MUST carry the SKU and its offer the item condition, next to the price it already had
+
+#### Scenario: A restaurant
+
+- **WHEN** a local business page's kind of place is Restaurant and its added details set `"@type": ["Restaurant", "Store"]`
+- **THEN** the save MUST be accepted, and `["LocalBusiness", "Store"]` MUST be refused
 
 #### Scenario: Changing the type
 
@@ -182,7 +189,7 @@ and `@id` is left. Each MUST be reported with its path.
 #### Scenario: A review without a score
 
 - **WHEN** a Book review template's `reviewRating` holds `"{field.field_score}"` and `"bestRating": 5`, and a review has no Score
-- **THEN** that review's output MUST keep the review without `reviewRating`, and the report MUST name `reviewRating`
+- **THEN** that review's output MUST keep the review without `reviewRating`, and the report MUST name `reviewRating.ratingValue`
 
 #### Scenario: One of two profiles empty
 
@@ -227,15 +234,22 @@ Custom JSON-LD MUST be refused when it is not valid JSON, is not one object
 or a list of up to 10 objects each with a `@type`, nests deeper than 8
 levels, contains `null` or a number that can't be output, has a key other
 than `@type`, `@id` and `@context` starting with `@`, has an `@id` that is
-neither an absolute http(s) URL nor a `#name`, or has a string that starts
-with a script scheme, or with a data or file scheme followed by more text.
-It MUST be checked again when read.
+neither an absolute http(s) URL nor a `#name`, or has a string (an `@type`
+too) that starts with a script scheme, or with a data or file scheme
+followed by more text; tabs and line breaks before the colon don't hide a
+scheme. It MUST be checked again when read; a stored item it refuses MUST
+be left out of the output and the others kept.
 
 #### Scenario: A script address
 
 - **WHEN** an editor saves custom JSON-LD with `"sameAs": ["javascript:alert(5)"]`
 - **THEN** the save MUST be refused with "sameAs: text can't start with “javascript:”."
 - **AND** the same MUST hold for `vbscript:`, `data:text/html,x` and `file:///etc`
+
+#### Scenario: A scheme split by a tab
+
+- **WHEN** a value is `"java\tscript:alert(1)"` or an `@type` is `"javascript:alert(1)"`
+- **THEN** the save MUST be refused with the scheme named
 
 #### Scenario: A scheme mentioned in text
 
@@ -255,7 +269,14 @@ items. In strings, the module's fixed names MUST be filled and other brace
 text kept, except whole-value field and media names. A nested object with
 one of the module's `@id`s MUST become a bare reference, or be removed when
 that node is not in the graph. Text that is not a usable node MUST add
-nothing.
+nothing. When read, a top-level item with one of the module's ids, or a
+second item with an id already used, MUST be left out, behind the save's
+refusal and the update's rename.
+
+#### Scenario: A stored item that takes the identity's id
+
+- **WHEN** a value stored before ids were reserved holds a top-level item with the `@id` `#identity`, and two items with the `@id` `#x`
+- **THEN** the item MUST be left out, the module's identity MUST be unchanged, and only the first `#x` MUST be output
 
 #### Scenario: A search action
 

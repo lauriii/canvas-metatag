@@ -80,8 +80,6 @@ final class ValuesTest extends UnitTestCase {
     $here = 'This setting is not available here.';
     $list = 'Choose a value from the list.';
     $field = 'Choose a field from the list.';
-    $shape = 'Use one object, or a list of up to 10 objects, each with "@type".';
-    $id = 'An "@id" must be a full address, or a name that starts with #.';
     $t = self::typed(...);
 
     // Shape and scope.
@@ -91,7 +89,8 @@ final class ValuesTest extends UnitTestCase {
     yield 'page description' => ['page', ['description' => $t('Text')], 'description'];
     yield 'template canonical' => ['template', ['canonical' => '/a'], 'canonical'];
     yield 'site social' => ['site', ['social' => ['title' => $t('A')]], 'social'];
-    yield 'site schema' => ['site', ['schema' => ['type' => 'Article']], 'schema'];
+    // The site only adds details to its identity.
+    yield 'site schema type' => ['site', ['schema' => ['type' => 'Article']], 'schema.type'];
     yield 'unknown social key' => ['page', ['social' => ['card' => $t('x')]], 'social.card'];
     yield 'unknown robots key' => ['page', ['robots' => ['noarchive' => TRUE]], 'robots.noarchive'];
     yield 'unknown schema key' => ['page', ['schema' => ['context' => 'x']], 'schema.context'];
@@ -381,78 +380,41 @@ final class ValuesTest extends UnitTestCase {
       TRUE,
     ];
 
-    // Custom JSON-LD.
+    // Custom JSON-LD: the shared fixtures (testSharedFixtures()) hold the
+    // rest; these pin the field each error is on.
     yield 'custom not JSON' => [
       'page',
       ['schema' => ['custom' => '{"@type": ']],
       'schema.custom',
       'This is not valid JSON.',
     ];
-    yield 'custom scalar' => ['page', ['schema' => ['custom' => '"FAQPage"']], 'schema.custom', $shape];
-    yield 'custom without @type' => ['page', ['schema' => ['custom' => '{"name": "A"}']], 'schema.custom', $shape];
-    yield 'custom @type list' => ['page', ['schema' => ['custom' => '{"@type": ["A", "B"]}']], 'schema.custom', $shape];
-    yield 'custom list of scalars' => ['page', ['schema' => ['custom' => '["FAQPage"]']], 'schema.custom', $shape];
-    yield 'custom eleven nodes' => [
+    yield 'custom as written over 64 KB' => [
       'page',
-      ['schema' => ['custom' => '[' . implode(',', array_fill(0, 11, '{"@type": "Thing"}')) . ']']],
+      ['schema' => ['custom' => '{"@type": "Thing", "name": "' . str_repeat('a', 65536) . '"}']],
       'schema.custom',
-      $shape,
+      '65 KB as written. Keep under 64 KB.',
     ];
-    yield 'custom null value' => [
+    yield 'added details changing the type' => [
       'page',
-      ['schema' => ['custom' => '{"@type": "Thing", "name": null}']],
-      'schema.custom',
-      $shape,
+      ['schema' => ['type' => 'Product', 'extend' => ['#primary' => '{"@type": "Service"}']]],
+      'schema.extend.#primary',
+      '@type: a type can only be added to “Product”, in a list that keeps it.',
     ];
-    yield 'custom too deep' => [
+    yield 'added details on a node the scope has not' => [
       'page',
-      ['schema' => ['custom' => '{"@type": "Thing", "a": ' . str_repeat('{"b": ', 8) . '1' . str_repeat('}', 8) . '}']],
-      'schema.custom',
-      $shape,
+      ['schema' => ['extend' => ['#identity' => '{"slogan": "x"}']]],
+      'schema.extend.#identity',
     ];
-    yield 'custom @context' => [
+    yield 'a main thing that is not a hand-added item' => [
       'page',
-      ['schema' => ['custom' => '{"@context": "https://example.com", "@type": "Thing"}']],
-      'schema.custom',
-      'Only "@type" and "@id" may start with @.',
+      ['schema' => ['custom' => '{"@type": "Recipe", "@id": "#x-recipe"}', 'main' => '#other']],
+      'schema.main',
+      'Choose one of your own items.',
     ];
-    yield 'custom nested @graph' => [
-      'page',
-      ['schema' => ['custom' => '{"@type": "Thing", "about": {"@graph": []}}']],
+    yield 'the site has no hand-added items' => [
+      'site',
+      ['schema' => ['custom' => '{"@type": "Thing"}']],
       'schema.custom',
-      'Only "@type" and "@id" may start with @.',
-    ];
-    yield 'custom relative @id' => [
-      'page',
-      ['schema' => ['custom' => '{"@type": "Thing", "@id": "/thing"}']],
-      'schema.custom',
-      $id,
-    ];
-    yield 'custom nested @id' => [
-      'page',
-      ['schema' => ['custom' => '{"@type": "Thing", "about": {"@id": "javascript:alert(1)"}}']],
-      'schema.custom',
-      $id,
-    ];
-    foreach ([
-      'javascript:alert(5)',
-      ' JavaScript :x',
-      'data:text/html,x',
-      'vbscript:x',
-      'file:///etc/passwd',
-    ] as $url) {
-      yield 'custom script address ' . $url => [
-        'page',
-        ['schema' => ['custom' => (string) json_encode(['@type' => 'Thing', 'about' => ['sameAs' => [$url]]])]],
-        'schema.custom',
-        'Addresses must start with https:// or http://.',
-      ];
-    }
-    yield 'custom too large' => [
-      'page',
-      ['schema' => ['custom' => '{"@type": "Thing", "name": "' . str_repeat('a', 32768) . '"}']],
-      'schema.custom',
-      'Custom JSON-LD is too large. Keep it under 32 KB.',
     ];
   }
 
@@ -558,23 +520,206 @@ final class ValuesTest extends UnitTestCase {
         "url": "https://example.com/a", "empty": {}, "list": [],
         "potentialAction": {"urlTemplate": "/s?q={search_term_string}"} }
       JSON;
-    $stored = '{"@id":"#faq","@type":"FAQPage","empty":{},"list":[],"name":"Q&A <b>",'
-      . '"potentialAction":{"urlTemplate":"/s?q={search_term_string}"},"url":"https://example.com/a"}';
-    yield 'custom is re-encoded' => ['page', ['schema' => ['custom' => $typed]], ['schema' => ['custom' => $stored]]];
-    yield 'custom list with an absolute @id' => [
+    yield 'custom is stored as written, trimmed' => [
       'page',
-      ['schema' => ['custom' => '[{"@type":"Thing","@id":"https://example.com/#thing","about":{"@id":"#primary"}}]']],
-      ['schema' => ['custom' => '[{"@id":"https://example.com/#thing","@type":"Thing","about":{"@id":"#primary"}}]']],
-    ];
-    yield 'custom at the depth limit' => [
-      'page',
-      ['schema' => ['custom' => '{"@type":"Thing","a":' . str_repeat('{"b":', 7) . '1' . str_repeat('}', 7) . '}']],
+      ['schema' => ['custom' => "\n$typed\n "]],
+      ['schema' => ['custom' => trim($typed)]],
     ];
     yield 'custom empty list is nothing' => ['page', ['schema' => ['custom' => '[]']], []];
-    yield 'custom text that only mentions a scheme' => [
+    yield 'added details and a main thing' => [
       'page',
-      ['schema' => ['custom' => '{"@type":"Thing","name":"Learn javascript: the basics"}']],
+      [
+        'schema' => [
+          'custom' => '{"@type": "Recipe", "@id": "#x-recipe"}',
+          'extend' => ['#webpage' => '{"@type": ["WebPage", "QAPage"]}'],
+          'main' => '#x-recipe',
+        ],
+      ],
     ];
+    yield 'list selectors in added details' => [
+      'page',
+      [
+        'schema' => [
+          'extend' => ['#primary' => '{"offers[*]": {"itemCondition": "NewCondition"}, "offers[name=Growth]": {"eligibleQuantity": 5}}'],
+          'type' => 'Service',
+        ],
+      ],
+    ];
+    yield 'the site adds details to its identity' => [
+      'site',
+      ['schema' => ['extend' => ['#identity' => '{"slogan": "Moving things since 1990", "foundingDate": "1990"}']]],
+    ];
+  }
+
+  /**
+   * The dialog's red problems are exactly the server's (validate.test.ts).
+   *
+   * @param array{input: string, accepted: bool, stored?: bool, message?: string, item?: int, path?: string, mode?: array} $case
+   *   One case of tests/fixtures/custom/.
+   */
+  #[DataProvider('providerSharedFixtures')]
+  public function testSharedFixtures(array $case): void {
+    $checked = Values::checkCustom($case['input'], $case['mode'] ?? []);
+    if ($case['accepted']) {
+      self::assertNull($checked['error'], $checked['error']['message'] ?? '');
+      self::assertSame(($case['stored'] ?? TRUE) ? $case['text'] ?? trim($case['input']) : NULL, $checked['text']);
+      return;
+    }
+    self::assertSame(['message' => $case['message'], 'item' => $case['item'], 'path' => $case['path']], $checked['error']);
+  }
+
+  /**
+   * Data provider for testSharedFixtures().
+   */
+  public static function providerSharedFixtures(): \Generator {
+    foreach (glob(dirname(__DIR__, 3) . '/tests/fixtures/custom/*.json') as $file) {
+      foreach (json_decode((string) file_get_contents($file), TRUE, 64, JSON_THROW_ON_ERROR) as $case) {
+        yield basename($file, '.json') . ': ' . $case['name'] => [$case];
+      }
+    }
+  }
+
+  /**
+   * Hand-added JSON-LD is stored byte for byte; its limits count minified.
+   */
+  public function testCustomStoredAsWritten(): void {
+    $text = "{\n  \"@type\": \"Rating\",\n  \"ratingValue\": 4.5,\n  \"bestRating\": 5\n}";
+    self::assertSame($text, Values::clean(['schema' => ['custom' => $text]], 'page', self::accepts())[0]['schema']['custom']);
+
+    // About 31 KB minified, 40 KB formatted: accepted.
+    $items = array_map(static fn (int $n): array => ['@type' => 'Thing', 'name' => str_repeat('x', 3100), 'n' => $n], range(1, 10));
+    $formatted = str_replace('"n"', str_repeat(' ', 900) . '"n"', json_encode($items, JSON_PRETTY_PRINT));
+    self::assertGreaterThan(40000, strlen($formatted));
+    self::assertLessThan(32768, strlen(json_encode($items)));
+    [$clean, $errors] = Values::clean(['schema' => ['custom' => $formatted]], 'page', self::accepts());
+    self::assertSame([], $errors);
+    self::assertSame($formatted, $clean['schema']['custom']);
+
+    // 32 KB across hand-added items and added details together: refused.
+    $half = json_encode(['@type' => 'Thing', 'name' => str_repeat('x', 17000)]);
+    [, $errors] = Values::clean([
+      'schema' => [
+        'type' => 'Product',
+        'custom' => $half,
+        'extend' => ['#primary' => json_encode(['description' => str_repeat('y', 17000)])],
+      ],
+    ], 'page', self::accepts(), 'WebPage', NULL, $paths);
+    // Said on every text: the one sent back as stored is carried, the one
+    // that grew is still refused (ApiTest::testCustomJsonLdErrorPath()).
+    $over = '34 KB. Keep under 32 KB, including added details.';
+    self::assertSame(['schema.custom' => $over, 'schema.extend.#primary' => $over], $errors);
+    $whole = ['item' => 0, 'path' => ''];
+    self::assertSame(['schema.custom' => $whole, 'schema.extend.#primary' => $whole], $paths);
+
+    // Where in the text a refusal is.
+    [, $errors] = Values::clean(['schema' => ['custom' => '[{"@type": "Thing"}, {"@type": "Rating", "ratingValue": 1e400}]']], 'page', self::accepts(), 'WebPage', NULL, $paths);
+    self::assertSame('ratingValue: this number is too large to use.', $errors['schema.custom']);
+    self::assertSame(['item' => 1, 'path' => '/ratingValue'], $paths['schema.custom']);
+  }
+
+  /**
+   * An absolute address of the site's own items is the site's too.
+   */
+  public function testOriginReservesAbsoluteIds(): void {
+    $custom = '{"@type": "Organization", "@id": "https://example.com/#identity"}';
+    $errors = Values::clean(['schema' => ['custom' => $custom]], 'page', self::accepts(), 'WebPage', 'https://example.com')[1];
+    self::assertSame('“https://example.com/#identity” is made by this page. Use Add details, or give the item another @id.', $errors['schema.custom']);
+    // Whichever scheme it is written with.
+    $http = '{"@type": "Organization", "@id": "http://example.com/#identity"}';
+    self::assertArrayHasKey('schema.custom', Values::clean(['schema' => ['custom' => $http]], 'page', self::accepts(), 'WebPage', 'https://example.com')[1]);
+    // Another site's identity is just an organization.
+    self::assertSame([], Values::clean(['schema' => ['custom' => $custom]], 'page', self::accepts(), 'WebPage', 'https://other.example')[1]);
+  }
+
+  /**
+   * An added type keeps the type the node is output with.
+   */
+  public function testAddedTypeKeepsTheEmittedType(): void {
+    $place = static fn (string $kind, string $types): array => Values::clean([
+      'schema' => [
+        'type' => 'LocalBusiness',
+        'props' => ['placeKind' => self::typed($kind)],
+        'extend' => ['#primary' => '{"@type": ' . $types . '}'],
+      ],
+    ], 'page', self::accepts())[1];
+    // A restaurant is output as Restaurant: a list keeps that.
+    self::assertSame([], $place('Restaurant', '["Restaurant", "Store"]'));
+    self::assertSame('@type: a type can only be added to “Restaurant”, in a list that keeps it.', $place('Restaurant', '["LocalBusiness", "Store"]')['schema.extend.#primary']);
+    // Without a kind, the default is the registry's.
+    $default = ['type' => 'LocalBusiness', 'extend' => ['#primary' => '{"@type": ["LocalBusiness", "Store"]}']];
+    self::assertSame([], Values::clean(['schema' => $default], 'page', self::accepts())[1]);
+    self::assertSame(['#primary' => ['Restaurant'], '#webpage' => ['WebPage'], '#identity' => ['Person']], Values::nodeTypes('LocalBusiness', ['placeKind' => self::typed('Restaurant')], 'person'));
+
+    // The identity keeps its own kind when the site saves.
+    $site = static fn (string $kind, string $types): array => Values::clean(['schema' => ['extend' => ['#identity' => '{"@type": ' . $types . '}']]], 'site', self::accepts(), 'WebPage', NULL, $paths, ['identity' => $kind])[1];
+    self::assertSame([], $site('organization', '["Organization", "Corporation"]'));
+    self::assertArrayHasKey('schema.extend.#identity', $site('organization', '["Person", "Corporation"]'));
+    self::assertSame([], $site('person', '["Person", "Patient"]'));
+    self::assertSame('@type: a type can only be added to “Person”, in a list that keeps it.', $site('person', '["Organization", "Corporation"]')['schema.extend.#identity']);
+
+    // The page's type changed since: read mode keeps the other details and
+    // leaves out only the type that no longer fits.
+    $text = "{\n  \"@type\": [\"Product\", \"IndividualProduct\"],\n  \"color\": \"Oak\"\n}";
+    $stored = ['schema' => ['type' => 'Event', 'extend' => ['#primary' => $text]]];
+    [$clean, $errors] = Values::clean($stored, 'page', NULL);
+    self::assertSame([], $errors);
+    self::assertSame("{\n  \"color\": \"Oak\"\n}", $clean['schema']['extend']['#primary']);
+    // Only a type: nothing is left.
+    $stored['schema']['extend']['#primary'] = '{"@type": ["Product", "IndividualProduct"]}';
+    self::assertArrayNotHasKey('extend', Values::clean($stored, 'page', NULL)[0]['schema']);
+    // Write mode still refuses it, so the dialog says so before it goes.
+    $written = ['type' => 'Event', 'extend' => ['#primary' => $text]];
+    self::assertArrayHasKey('schema.extend.#primary', Values::clean(['schema' => $written], 'page', self::accepts())[1]);
+  }
+
+  /**
+   * A stored item that read mode refuses is left out; the others are kept.
+   */
+  public function testReadLeavesOutOnlyTheRefusedItem(): void {
+    $stored = '[{"@type": "Thing", "name": "Kept"}, {"@type": "Rating", "ratingValue": 1e400}, {"@type": "Thing", "name": "Also kept"}]';
+    [$clean, $errors] = Values::clean(['schema' => ['custom' => $stored]], 'page', NULL, 'WebPage', NULL, $paths);
+    self::assertSame(['Kept', 'Also kept'], array_column(json_decode($clean['schema']['custom'], TRUE), 'name'));
+    self::assertSame('ratingValue: this number is too large to use.', $errors['schema.custom']);
+    self::assertSame(['item' => 1, 'path' => '/ratingValue'], $paths['schema.custom']);
+    // The only item refused: nothing is left.
+    self::assertArrayNotHasKey('schema', Values::clean(['schema' => ['custom' => '{"@type":"Rating","ratingValue":1e400}']], 'page', NULL)[0]);
+    // A dense value the module rewrites stays under 64 KB as written.
+    $dense = json_decode(json_encode(['@type' => 'Thing', 'a' => [[array_fill(0, 15000, 1)]]]));
+    self::assertGreaterThan(Values::CUSTOM_RAW_MAX, strlen(Values::pretty($dense)));
+    self::assertLessThanOrEqual(Values::CUSTOM_RAW_MAX, strlen(Values::written($dense)));
+  }
+
+  /**
+   * Ids stored before they were reserved are renamed when read.
+   */
+  public function testReadRenamesLegacyIds(): void {
+    $stored = '[{"@id":"#identity","@type":"Organization","name":"Acme Logistics"},'
+      . '{"@id":"#review","@type":"Review","author":{"@id":"#identity"},"itemReviewed":{"@id":"#webpage"}},'
+      . '{"@id":"#webpage","@type":"Thing"},{"@id":"#review","@type":"Thing"}]';
+    $clean = Values::clean(['schema' => ['custom' => $stored]], 'page', NULL)[0]['schema'];
+    $items = json_decode($clean['custom'], TRUE);
+    self::assertSame(['#identity-2', '#review', '#webpage-2', '#review-2'], array_column($items, '@id'));
+    // A site id on a page was the item itself; the page's id was its node.
+    self::assertSame(['@id' => '#identity-2'], $items[1]['author']);
+    self::assertSame(['@id' => '#webpage'], $items[1]['itemReviewed']);
+    // What was left out before stays out.
+    self::assertSame(['#webpage-2', '#review-2'], $clean['skip']);
+    // Written by the module: two spaces, in stored key order.
+    self::assertStringStartsWith("[\n  {\n    \"@id\": \"#identity-2\",\n    \"@type\"", $clean['custom']);
+    // Write mode refuses them.
+    self::assertArrayHasKey('schema.custom', Values::clean(['schema' => ['custom' => $stored]], 'page', self::accepts())[1]);
+    // An id with the components' prefix was the item: it keeps its output
+    // under a name that is not reserved, and references follow it.
+    $suite = '[{"@id":"#c-suite","@type":"Thing","name":"Suite"},{"@type":"Review","itemReviewed":{"@id":"#c-suite"}},{"@id":"#c-suite","@type":"Thing"}]';
+    $clean = Values::clean(['schema' => ['custom' => $suite]], 'template', NULL)[0]['schema'];
+    $items = json_decode($clean['custom'], TRUE);
+    self::assertSame('#item-c-suite', $items[0]['@id']);
+    self::assertSame(['@id' => '#item-c-suite'], $items[1]['itemReviewed']);
+    self::assertSame('#item-c-suite-2', $items[2]['@id']);
+    self::assertSame(['#item-c-suite-2'], $clean['skip']);
+    [$data, $renames] = Values::renameReserved(json_decode('{"@type":"Thing","@id":"#c-suite"}'));
+    self::assertSame('#item-c-suite', $data->{'@id'});
+    self::assertSame([['from' => '#c-suite', 'to' => '#item-c-suite', 'skip' => FALSE]], $renames);
   }
 
   /**

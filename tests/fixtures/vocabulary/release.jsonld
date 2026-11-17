@@ -1,0 +1,33 @@
+{
+  "@context": {
+    "rdf": "http://www.w3.org/1999/02/22-rdf-syntax-ns#",
+    "rdfs": "http://www.w3.org/2000/01/rdf-schema#",
+    "schema": "https://schema.org/"
+  },
+  "@graph": [
+    {"@id": "schema:Thing", "@type": "rdfs:Class", "rdfs:label": "Thing", "rdfs:comment": "The most generic type of item."},
+    {"@id": "schema:Intangible", "@type": "rdfs:Class", "rdfs:label": "Intangible", "rdfs:comment": "A utility class that serves as the umbrella for a number of 'intangible' things such as quantities.", "rdfs:subClassOf": {"@id": "schema:Thing"}},
+    {"@id": "schema:Rating", "@type": "rdfs:Class", "rdfs:label": "Rating", "rdfs:comment": "A rating is an evaluation on a numeric scale, such as 1 to 5 stars.", "rdfs:subClassOf": {"@id": "schema:Intangible"}},
+    {"@id": "schema:AggregateRating", "@type": "rdfs:Class", "rdfs:label": "AggregateRating", "rdfs:comment": "The average rating based on multiple ratings or reviews.", "rdfs:subClassOf": {"@id": "schema:Rating"}},
+    {"@id": "schema:EmployerAggregateRating", "@type": "rdfs:Class", "rdfs:label": "EmployerAggregateRating", "rdfs:comment": "An aggregate rating of an Organization related to its role as an employer.", "rdfs:subClassOf": {"@id": "schema:AggregateRating"}},
+    {"@id": "schema:EndorsementRating", "@type": "rdfs:Class", "rdfs:label": "EndorsementRating", "rdfs:comment": "An EndorsementRating is a rating that expresses some level of endorsement, for example inclusion in a \"critic's pick\" blog. More text here.", "rdfs:subClassOf": {"@id": "schema:Rating"}, "schema:isPartOf": {"@id": "https://pending.schema.org"}},
+    {"@id": "schema:Organization", "@type": "rdfs:Class", "rdfs:label": "Organization", "rdfs:comment": "An organization such as a school, NGO, corporation, club, etc.", "rdfs:subClassOf": {"@id": "schema:Thing"}},
+    {"@id": "schema:DataType", "@type": "rdfs:Class", "rdfs:label": "DataType", "rdfs:comment": "The basic data types such as Integers, Strings, etc.", "rdfs:subClassOf": {"@id": "rdfs:Class"}},
+    {"@id": "schema:Text", "@type": ["schema:DataType", "rdfs:Class"], "rdfs:label": "Text", "rdfs:comment": "Data type: Text."},
+    {"@id": "schema:URL", "@type": "rdfs:Class", "rdfs:label": "URL", "rdfs:comment": "Data type: URL.", "rdfs:subClassOf": {"@id": "schema:Text"}},
+    {"@id": "schema:Number", "@type": ["schema:DataType", "rdfs:Class"], "rdfs:label": "Number", "rdfs:comment": "Data type: Number."},
+    {"@id": "schema:Integer", "@type": "rdfs:Class", "rdfs:label": "Integer", "rdfs:comment": "Data type: Integer.", "rdfs:subClassOf": {"@id": "schema:Number"}},
+    {"@id": "schema:Enumeration", "@type": "rdfs:Class", "rdfs:label": "Enumeration", "rdfs:comment": "Lists or enumerations.", "rdfs:subClassOf": {"@id": "schema:Intangible"}},
+    {"@id": "schema:ItemAvailability", "@type": "rdfs:Class", "rdfs:label": "ItemAvailability", "rdfs:comment": "A list of possible product availability options.", "rdfs:subClassOf": {"@id": "schema:Enumeration"}},
+    {"@id": "schema:InStock", "@type": "schema:ItemAvailability", "rdfs:label": "InStock", "rdfs:comment": "Indicates that the item is in stock."},
+    {"@id": "schema:OutOfStock", "@type": "schema:ItemAvailability", "rdfs:label": "OutOfStock", "rdfs:comment": "Indicates that the item is out of stock."},
+    {"@id": "schema:DataFeed", "@type": "rdfs:Class", "rdfs:label": "DataFeed", "rdfs:comment": "A single feed.", "rdfs:subClassOf": {"@id": "schema:Thing"}, "schema:isPartOf": {"@id": "https://attic.schema.org"}},
+    {"@id": "schema:name", "@type": "rdf:Property", "rdfs:label": "name", "rdfs:comment": "The name of the item.", "schema:domainIncludes": {"@id": "schema:Thing"}, "schema:rangeIncludes": {"@id": "schema:Text"}},
+    {"@id": "schema:ratingCount", "@type": "rdf:Property", "rdfs:label": "ratingCount", "rdfs:comment": "The count of total number of ratings.", "schema:domainIncludes": {"@id": "schema:AggregateRating"}, "schema:rangeIncludes": {"@id": "schema:Integer"}},
+    {"@id": "schema:ratingValue", "@type": "rdf:Property", "rdfs:label": "ratingValue", "rdfs:comment": "The rating for the content.\\n\\nUsage guidelines:\\n\\n* Use values from 0123456789.", "schema:domainIncludes": {"@id": "schema:Rating"}, "schema:rangeIncludes": [{"@id": "schema:Number"}, {"@id": "schema:Text"}]},
+    {"@id": "schema:itemReviewed", "@type": "rdf:Property", "rdfs:label": "itemReviewed", "rdfs:comment": "The item that is being reviewed/rated.", "schema:domainIncludes": [{"@id": "schema:AggregateRating"}], "schema:rangeIncludes": {"@id": "schema:Thing"}},
+    {"@id": "schema:review", "@type": "rdf:Property", "rdfs:label": "review", "rdfs:comment": "A review of the item.", "schema:domainIncludes": {"@id": "schema:Organization"}, "schema:rangeIncludes": {"@id": "schema:Review"}},
+    {"@id": "schema:reviews", "@type": "rdf:Property", "rdfs:label": "reviews", "rdfs:comment": "Review of the item.", "schema:domainIncludes": {"@id": "schema:Organization"}, "schema:rangeIncludes": {"@id": "schema:Review"}, "schema:supersededBy": {"@id": "schema:review"}},
+    {"@id": "schema:feed", "@type": "rdf:Property", "rdfs:label": "feed", "rdfs:comment": "A feed.", "schema:domainIncludes": {"@id": "schema:Thing"}, "schema:rangeIncludes": {"@id": "schema:DataFeed"}, "schema:isPartOf": {"@id": "https://attic.schema.org"}}
+  ]
+}

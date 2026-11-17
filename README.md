@@ -126,9 +126,45 @@ is offered only where that holds (a contract test pins it):
   multi-value reference field holds, in order; three complete courses make a
   course list.
 
-Your own JSON-LD is under **Code › Add your own JSON-LD**. Each item gets its
-verdicts and checks: text that is not on the page can be left out until it
-is, without changing the JSON-LD.
+Your own JSON-LD is under **Code › Add your own JSON-LD**, as a **Form** or
+as **JSON** over the same text: switching never changes a byte, and the text
+is stored exactly as written. A type opens with only what its search features
+need ("Rating count or review count" is one group), then every value already
+set, then what also helps, and one search over every other detail. A detail
+that is an item points at the site, the page or another item before it is
+described in place. Paste works in either tab: a script tag, a schema.org
+`@context`, an `@graph`, a list of items and empty values are cleaned up and
+reported in one line, with **Undo clean-up**; a paste that copies what the
+page already makes is reviewed item by item. Each problem names its line, its
+path and at most one fix; red is what the server refuses and is never saved
+(the text is kept for the next visit), amber is advice. Each item gets its
+verdicts, live while typing, and its checks: text that is not on the page can
+be left out until it is. On a plain web page one item can be what the page is
+mainly about.
+
+For experts, **Output › Add details** adds JSON to the module's own items: the
+page's main thing, the page itself, or (at Site scope) the site's identity.
+Details merge at any depth; the page's own values always win, per value, and
+each clash is named by its path ("“offers.price” comes from the Price field").
+A list the module makes takes `offers[*]` (every item) or
+`offers[name=Growth]` (one item). The `@id` never changes, and a type can only
+be added to. In hand-added items `#identity`, `#logo`, `#website` and
+`#return-policy` point at the site's own items from any page; a hand-added item
+can never take one of the module's ids. On a content template a whole value
+`"{field.field_score}"` (or one reference hop, `"{field.field_venue.title}"`)
+is filled from the item's field, and `"{media.‹uuid›}"` from a media item; a
+value whose link gives nothing, or text that could not be typed there (such as
+an address starting with `javascript:`), is left out. Inside other text these names stay
+as written.
+
+The form knows the types and details search features document. To offer every
+schema.org type, a site administrator downloads schema.org's vocabulary:
+`drush canvas-metatag:vocabulary`. It is fetched over https from schema.org,
+trimmed and kept in the site's private files (public ones without a private
+path) with its licence: schema.org's definitions are CC BY-SA 3.0, so the
+module never ships them. The status report names the installed release. The
+dialog reads it through an access-checked route; on a site without private
+files the file itself is public, like schema.org's own release.
 
 ## The three scopes
 

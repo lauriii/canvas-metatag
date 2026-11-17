@@ -3,7 +3,9 @@ import { Fragment } from 'react';
 
 import { useApp } from '../App';
 import { identityGaps } from '../checks';
-import { aiOffText, currencyChoices, placesText, siteTexts } from '../model';
+import { aiOffText, andList, currencyChoices, placesText, siteTexts } from '../model';
+import { detailLabel } from '../custom/project';
+import type { SearchFeatures } from '../types';
 import { Field, useHeld } from './Field';
 import { ImageRow, PICKED, Thumb } from './MediaPicker';
 import { Stage } from './Previews';
@@ -52,9 +54,18 @@ const breakable = (text: string) =>
 
 /** Who runs the site, and what every page starts from. One calm scroll. */
 export function SiteView() {
-  const { state, dispatch, view } = useApp();
+  const { state, dispatch, view, openSheet } = useApp();
   const server = state.server!;
   const { identity } = state.edits.site;
+  // Details added to the organization by hand (Output › Add details): found here too.
+  const added = (() => {
+    try {
+      const data: unknown = JSON.parse(state.edits.site.values.schema?.extend?.['#identity'] ?? '');
+      return data !== null && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data).filter((key) => !key.startsWith('@')) : [];
+    } catch {
+      return [];
+    }
+  })();
   const edit = (path: string, value: unknown) =>
     dispatch({ type: 'edit', scope: 'site', path, value });
   const image = (uuid: string) => PICKED[uuid] ?? server.media[uuid] ?? null;
@@ -180,6 +191,14 @@ export function SiteView() {
           />
         )}
       </Field>
+      {added.length > 0 && (
+        <p className="seo-site-added">
+          <button type="button" className="seo-link-btn" onClick={() => openSheet({ kind: 'custom', node: '#identity' })}>
+            Added details
+          </button>
+          : {andList(added.map((key) => detailLabel(key, server.search_features as SearchFeatures)))}
+        </p>
+      )}
 
       <h3 className="seo-group-title">Titles</h3>
       <TitleField

@@ -457,6 +457,31 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A hand-added value stored before validation never costs the other tags.
+   *
+   * A number that cannot be written out ("1e400") was storable before; read
+   * mode now leaves that JSON-LD out, and the head keeps everything else.
+   */
+  public function testRobotsSurviveBadCustomValue(): void {
+    $page = $this->createPage([
+      'canvas_metatag' => Values::encode([
+        'robots' => ['noindex' => TRUE],
+        'schema' => ['custom' => '[{"@type":"Thing","@id":"#ok","name":"Kept"},{"@type":"Rating","@id":"#r","ratingValue":1e400}]'],
+      ]),
+    ]);
+    $head = self::readHead($this->get('/pricing'));
+    self::assertSame(['Pricing | Example'], $head['titles']);
+    self::assertSame('Plans and prices for Example.', self::meta($head)['description']);
+    self::assertSame('noindex, max-image-preview:large', self::meta($head)['robots']);
+    self::assertSame('canonical', $head['links'][0]['rel']);
+    self::assertCount(1, $head['json_ld']);
+    self::assertNotContains('Rating', array_column($head['json_ld'][0]['@graph'], '@type'));
+    // Only the refused item is left out.
+    self::assertContains('Kept', array_column($head['json_ld'][0]['@graph'], 'name'));
+    self::assertNotNull(Page::load($page->id()));
+  }
+
+  /**
    * The canonical and shortlink relations of a parsed head, sorted.
    *
    * @return list<string>

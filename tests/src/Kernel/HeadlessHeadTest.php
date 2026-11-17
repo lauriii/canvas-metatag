@@ -172,6 +172,29 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A hand-added value stored before validation never costs the other tags.
+   */
+  public function testBadCustomValue(): void {
+    $this->createPage([
+      'canvas_metatag' => Values::encode([
+        'robots' => ['noindex' => TRUE],
+        'schema' => ['custom' => '[{"@type":"Thing","@id":"#ok","name":"Kept"},{"@type":"Rating","@id":"#r","ratingValue":1e400}]'],
+      ]),
+      'components' => [
+        ['uuid' => '2c6e91ae-23ac-433d-9bb8-687144464b34', 'component_id' => 'js.canvas_headless_test', 'inputs' => []],
+      ],
+    ]);
+    $head = self::decodeResponse($this->content('/pricing'))['head'];
+    self::assertSame('Pricing | Example', $head['title']);
+    self::assertSame('Plans and prices for Example.', self::meta($head)['description']);
+    self::assertStringStartsWith('noindex', self::meta($head)['robots']);
+    self::assertSame('canonical', $head['link'][0]['rel']);
+    self::assertNotContains('Rating', array_column($head['script'][0]['textContent']['@graph'], '@type'));
+    // Only the refused item is left out.
+    self::assertContains('Kept', array_column($head['script'][0]['textContent']['@graph'], 'name'));
+  }
+
+  /**
    * A published page: our head on the frontend base, cached, invalidated.
    */
   public function testPublishedPage(): void {

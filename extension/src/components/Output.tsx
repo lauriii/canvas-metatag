@@ -1,17 +1,19 @@
 import { CheckIcon, CopyIcon } from '@radix-ui/react-icons';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { Tooltip } from '@radix-ui/themes';
 
 import { useApp } from '../App';
 import { retiredText } from '../checks';
 import { andList, catchingUp, unsent } from '../model';
 import type { GraphNode, Head, StatePayload } from '../types';
+import type { CustomNode } from '../custom/CustomSheet';
 import { Btn, reveal } from './ui';
 
 /** The structured data test: it reads a published address, or pasted code. */
 const TEST = 'https://validator.schema.org/';
 
 /** Text to the clipboard; the frame may not hold the clipboard permission. */
-async function copy(text: string): Promise<boolean> {
+export async function copy(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -34,7 +36,7 @@ async function copy(text: string): Promise<boolean> {
   }
 }
 
-function CopyButton(props: { text: string; label: string }) {
+export function CopyButton(props: { text: string; label: string; hint?: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) {
@@ -43,16 +45,18 @@ function CopyButton(props: { text: string; label: string }) {
     const timer = setTimeout(() => setCopied(false), 2000);
     return () => clearTimeout(timer);
   }, [copied]);
-  return (
+  const button = (
     <Btn
       variant="ghost"
       aria-label={props.label}
+      aria-description={props.hint}
       onClick={async () => setCopied(await copy(props.text))}
     >
       {copied ? <CheckIcon aria-hidden /> : <CopyIcon aria-hidden />}
       <span aria-live="polite">{copied ? 'Copied' : 'Copy'}</span>
     </Btn>
   );
+  return props.hint ? <Tooltip content={props.hint}>{button}</Tooltip> : button;
 }
 
 /** The JSON-LD of a head as text, or '' when there is none. */
@@ -152,6 +156,10 @@ function leftOut(server: StatePayload, node: GraphNode): string | null {
       return 'Left out: it uses an id of the site’s own';
     case 'duplicate':
       return 'Left out: another item has the same id';
+    case 'empty':
+      return 'Left out: its links give nothing for this page';
+    case 'over':
+      return 'Left out: the structured data would be over 256 KB';
     default: {
       const retired = schema.features.find((verdict) => verdict.verdict === 'retired' && verdict.node === node.id);
       return retired ? retiredText(server.search_features.features[retired.feature!]?.since, server.ui) : null;
@@ -168,7 +176,7 @@ const ORIGIN: Record<GraphNode['origin'], string> = {
 
 /** The graph as an outline: the main node first, each with where it comes from. */
 function Outline() {
-  const { state } = useApp();
+  const { state, dispatch, openSheet } = useApp();
   const server = state.server!;
   const schema = server.resolved!.schema;
   const list = (server.resolved!.head.script.find((script) => script.type === 'application/ld+json')?.textContent as { '@graph'?: Record<string, unknown>[] } | undefined)?.['@graph'] ?? [];
@@ -187,13 +195,43 @@ function Outline() {
               {name && <span className="seo-outline-name" dir="auto"> · {name}</span>}
             </span>
             <span className="seo-chip">{ORIGIN[node.origin]}</span>
+            {node.origin === 'hand' && !!node.id && schema.main?.id === node.id && !schema.main.ignored && <span className="seo-chip">Main</span>}
+            {node.extended && <span className="seo-chip">Added details</span>}
             {node.id && <code className="seo-outline-id">{node.id}</code>}
             {reason && <span className="seo-outline-reason">{reason}</span>}
+            {extendable(state, node) && (() => {
+              // On a template the details are every item's: named as the sheet is.
+              const each = server.target?.scope === 'template' && node.origin === 'main' ? `each ${(server.target.label || 'item').toLowerCase()}` : null;
+              const label = node.origin === 'page' ? 'Add details to this page' : `Add details to ${each ?? (name || node.type)}`;
+              return (
+                <Btn
+                  variant="ghost"
+                  size={24}
+                  aria-label={label}
+                  onClick={() => {
+                    const short = `#${node.id!.split('#').pop()}` as CustomNode;
+                    // The site's identity is a site setting: saved with Site.
+                    if (short === '#identity') dispatch({ type: 'scope', scope: 'site' });
+                    openSheet({ kind: 'custom', node: short, from: label });
+                  }}
+                >
+                  Add details
+                </Btn>
+              );
+            })()}
           </li>
         );
       })}
     </ul>
   );
+}
+
+/** Whether details can be added to a node: the main thing, the page, the site's identity. */
+function extendable(state: ReturnType<typeof useApp>['state'], node: GraphNode): boolean {
+  if (node.left_out || !node.id) return false;
+  const name = node.id.split('#').pop();
+  if (name === 'identity') return !!state.server?.can.site;
+  return (name === 'primary' || name === 'webpage') && state.readonly === 'no' && (node.origin === 'main' || node.origin === 'page');
 }
 
 /** Hands the page to a structured data test: by address, or as copied code. */
@@ -227,7 +265,7 @@ function TestButton(props: { graph: string }) {
 }
 
 /** The exact tags for the page: what the server resolved, drafts included. */
-export function OutputSheet(props: { section?: 'schema' }) {
+export function OutputSheet(props: { section?: 'schema'; focus?: string }) {
   const { state, openSheet } = useApp();
   const [json, setJson] = useState(false);
   const server = state.server!;
@@ -241,7 +279,13 @@ export function OutputSheet(props: { section?: 'schema' }) {
     if (props.section === 'schema') {
       reveal(schema.current, 'start');
     }
-  }, [props.section]);
+    // Back from a sheet it opened: the button that opened it.
+    const button = props.focus ? [...(schema.current?.querySelectorAll<HTMLElement>('button[aria-label]') ?? [])].find((one) => one.getAttribute('aria-label') === props.focus) : undefined;
+    if (button) {
+      button.focus();
+      button.scrollIntoView({ block: 'nearest' });
+    }
+  }, [props.section, props.focus]);
   const what =
     server.target?.scope === 'page'
       ? server.target.label
@@ -286,7 +330,7 @@ export function OutputSheet(props: { section?: 'schema' }) {
                 </Btn>
                 <TestButton graph={graph} />
                 {state.readonly === 'no' && (
-                  <Btn variant="ghost" onClick={() => openSheet({ kind: 'custom' })}>
+                  <Btn variant="ghost" aria-label="Add your own JSON-LD" onClick={() => openSheet({ kind: 'custom', from: 'Add your own JSON-LD' })}>
                     Add your own JSON-LD
                   </Btn>
                 )}

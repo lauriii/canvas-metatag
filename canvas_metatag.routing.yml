@@ -62,6 +62,17 @@ canvas_metatag.api.site:
     # CSRF check, which core applies to cookie sessions only.
     _auth: ['cookie']
 
+canvas_metatag.api.vocabulary:
+  path: '/canvas-metatag/api/vocabulary'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::vocabulary'
+  methods: [GET]
+  requirements:
+    _permission: 'edit canvas metatag+administer canvas metatag'
+  options:
+    # Cached by the browser only: the address carries the release.
+    _auth: ['cookie']
+
 canvas_metatag.api.media:
   path: '/canvas-metatag/api/media'
   defaults:

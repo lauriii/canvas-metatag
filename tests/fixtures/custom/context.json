@@ -1,0 +1,62 @@
+[
+  {
+    "name": "schema.org over https",
+    "input": "{\"@context\": \"https://schema.org\", \"@type\": \"Organization\", \"name\": \"Acme Logistics\"}",
+    "accepted": true
+  },
+  {
+    "name": "schema.org over http with a slash",
+    "input": "{\"@context\": \"http://schema.org/\", \"@type\": \"Thing\"}",
+    "accepted": true
+  },
+  {
+    "name": "schema.org as a vocabulary",
+    "input": "{\"@context\": {\"@vocab\": \"https://schema.org/\"}, \"@type\": \"Thing\"}",
+    "accepted": true
+  },
+  {
+    "name": "schema.org in a list",
+    "input": "{\"@context\": [\"https://schema.org\"], \"@type\": \"Thing\"}",
+    "accepted": true
+  },
+  {
+    "name": "another vocabulary",
+    "input": "{\"@context\": {\"@vocab\": \"https://example.org/terms/\"}, \"@type\": \"Thing\"}",
+    "accepted": false,
+    "message": "Only “@type”, “@id” and a schema.org “@context” may start with @.",
+    "item": 0,
+    "path": "/@context"
+  },
+  {
+    "name": "another context",
+    "input": "{\"@context\": \"https://example.com\", \"@type\": \"Thing\"}",
+    "accepted": false,
+    "message": "Only “@type”, “@id” and a schema.org “@context” may start with @.",
+    "item": 0,
+    "path": "/@context"
+  },
+  {
+    "name": "a context inside",
+    "input": "{\"@type\": \"Thing\", \"about\": {\"@context\": \"https://schema.org\", \"@type\": \"Thing\"}}",
+    "accepted": false,
+    "message": "about: only “@type”, “@id” and a schema.org “@context” may start with @.",
+    "item": 0,
+    "path": "/about/@context"
+  },
+  {
+    "name": "a graph inside",
+    "input": "{\"@type\": \"Thing\", \"about\": {\"@graph\": []}}",
+    "accepted": false,
+    "message": "about: only “@type”, “@id” and a schema.org “@context” may start with @.",
+    "item": 0,
+    "path": "/about/@graph"
+  },
+  {
+    "name": "a graph",
+    "input": "{\"@context\": \"https://schema.org\", \"@graph\": [{\"@type\": \"Thing\"}]}",
+    "accepted": false,
+    "message": "“@type” is missing.",
+    "item": 0,
+    "path": ""
+  }
+]

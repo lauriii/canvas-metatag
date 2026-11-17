@@ -2,6 +2,7 @@
 // Test files are not shipped and are skipped.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 
 // [pattern, why, files that may contain it]
 const RULES = [
@@ -45,8 +46,17 @@ readFileSync('index.html', 'utf8')
       found.push(`index.html:${index + 1}: loads from another origin`);
   });
 
+// The bundle's budget: its gzipped size after extend-structured-data-by-id
+// and its review rounds (243,711 bytes) plus 5 KB. Raise it on purpose, never
+// by accident.
+const BUDGET = 243711 + 5 * 1024;
+const gzipped = gzipSync(readFileSync('dist/main.global.js'), { level: 9 }).length;
+if (gzipped > BUDGET) {
+  found.push(`dist/main.global.js: ${gzipped} bytes gzipped, over the budget of ${BUDGET}`);
+}
+
 if (found.length) {
   console.error(`Forbidden patterns:\n${found.join('\n')}`);
   process.exit(1);
 }
-console.log('No forbidden patterns.');
+console.log(`No forbidden patterns. The bundle is ${gzipped} bytes gzipped (budget ${BUDGET}).`);

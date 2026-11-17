@@ -1,0 +1,94 @@
+[
+  {
+    "name": "details inside an offer",
+    "input": "{\"sku\": \"OAK-DL-01\", \"offers\": {\"itemCondition\": \"https://schema.org/NewCondition\"}}",
+    "accepted": true,
+    "mode": {
+      "extend": [
+        "Product"
+      ]
+    }
+  },
+  {
+    "name": "every offer",
+    "input": "{\"offers[*]\": {\"itemCondition\": \"https://schema.org/NewCondition\"}}",
+    "accepted": true,
+    "mode": {
+      "extend": [
+        "Service"
+      ]
+    }
+  },
+  {
+    "name": "one plan",
+    "input": "{\"offers[name=Growth]\": {\"eligibleQuantity\": 5}}",
+    "accepted": true,
+    "mode": {
+      "extend": [
+        "Service"
+      ]
+    }
+  },
+  {
+    "name": "a type added",
+    "input": "{\"@type\": [\"Product\", \"Vehicle\"]}",
+    "accepted": true,
+    "mode": {
+      "extend": [
+        "Product"
+      ]
+    }
+  },
+  {
+    "name": "the type changed",
+    "input": "{\"@type\": \"Service\"}",
+    "accepted": false,
+    "message": "@type: a type can only be added to “Product”, in a list that keeps it.",
+    "item": 0,
+    "path": "/@type",
+    "mode": {
+      "extend": [
+        "Product"
+      ]
+    }
+  },
+  {
+    "name": "the id changed",
+    "input": "{\"@id\": \"#other\"}",
+    "accepted": false,
+    "message": "@id: the id of this item can’t change. Leave @id out.",
+    "item": 0,
+    "path": "/@id",
+    "mode": {
+      "extend": [
+        "Product"
+      ]
+    }
+  },
+  {
+    "name": "a list",
+    "input": "[{\"sku\": \"A\"}]",
+    "accepted": false,
+    "message": "Use one object of details, like {\"sku\": \"…\"}.",
+    "item": 0,
+    "path": "",
+    "mode": {
+      "extend": [
+        "Product"
+      ]
+    }
+  },
+  {
+    "name": "a broken selector",
+    "input": "{\"offers[name=]\": {\"price\": 1}}",
+    "accepted": false,
+    "message": "“offers[name=]”: name one item with [name=…], or every item with [*].",
+    "item": 0,
+    "path": "/offers[name=]",
+    "mode": {
+      "extend": [
+        "Product"
+      ]
+    }
+  }
+]

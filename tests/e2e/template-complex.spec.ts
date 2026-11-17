@@ -1219,3 +1219,40 @@ test('a link to a field that no longer exists says so in its box, under it and i
   await expect(status(frame)).toContainText('Matches the published template', { timeout: 30_000 });
   expect(await frame.locator('body').evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith('canvas_metatag:pending:')))).toEqual([]);
 });
+
+test('a hand-added review on the Product template: its name linked to a field, and no advice without a fitting field', async ({ drupal, page }) => {
+  await drupal.login(USERS.editor);
+  await openTemplate(page, product.id, 'product');
+  const frame = await openSeo(page);
+  await tab(frame, UI.tab.schema).click();
+  await button(frame, UI.schema.code).click();
+  await sheet(frame, 'Output').getByRole('button', { name: UI.schema.ownJsonLd, exact: true }).click();
+  const own = sheet(frame, UI.schema.ownJsonLd);
+  await tab(frame, 'JSON').click();
+  await own.getByRole('textbox', { name: 'JSON-LD' }).fill(
+    JSON.stringify({ '@type': 'Review', '@id': '#lamp-review', name: 'Lamp review', itemReviewed: { '@id': '#primary' }, reviewRating: { '@type': 'Rating', ratingValue: 4 } }, null, 2),
+  );
+  await tab(frame, 'Form').click();
+  // A typed name is the same on every product: linked to a field, it is each one's.
+  await expect(own.getByText('The same name on every Product. Link it to a field instead.')).toBeVisible();
+  await own.getByRole('button', { name: 'Link name to a field', exact: true }).click();
+  await expect(frame.getByRole('menu').getByText(`For ${product.title}`)).toBeVisible();
+  await frame.getByRole('menuitem', { name: /^SKU/ }).click();
+  await expect(own.getByText('· LAMP-OAK-01', { exact: true })).toBeVisible();
+  await expect(own.getByText('The same name on every Product. Link it to a field instead.')).toHaveCount(0);
+  const template = `entity_type=content_template&id=node.product.full&preview=${product.id}`;
+  await expect.poll(async () => JSON.parse(((await seoState(page, template)).target?.values.schema as { custom?: string } | undefined)?.custom ?? '{}').name).toBe('{field.field_sku}');
+  // A rating value: Price is the only number field and fits no rating, so no
+  // advice, and the menu lists it under Other fields, in the same menu.
+  await expect(own.getByText(/The same rating value on every/)).toHaveCount(0);
+  await own.getByRole('button', { name: 'Link rating value to a field', exact: true }).click();
+  const menu = frame.getByRole('menu');
+  await expect(menu.getByText('Other fields', { exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /^Price/ })).toBeVisible();
+  await expect(frame.getByRole('menuitem', { name: 'Other fields' })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  // Left as it was found.
+  await own.getByRole('button', { name: 'More for your JSON-LD', exact: true }).click();
+  await frame.getByRole('menuitem', { name: 'Remove all' }).click();
+  await expect.poll(async () => ((await seoState(page, template)).target?.values.schema as { custom?: string } | undefined)?.custom).toBeUndefined();
+});

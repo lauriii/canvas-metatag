@@ -105,6 +105,24 @@ registry-strings:
       }
 
 ################
+# Vocabulary lint (custom job): the module's data against schema.org.
+#
+# Downloads the schema.org release the module pins (Vocabulary::RELEASE),
+# trims it as the site's download is (Vocabulary::build) and fails on a type
+# or name that isn't schema.org's: in the registry, the rules file (its
+# `expects` types too) and the shared graph fixtures.
+################
+vocabulary-lint:
+  extends: .custom-job
+  stage: validate
+  needs: []
+  script:
+    - cd $CI_PROJECT_DIR
+    - RELEASE=$(php -r 'require "src/Vocabulary.php"; echo Drupal\canvas_metatag\Vocabulary::RELEASE;')
+    - curl -fsSL --max-time 60 -o /tmp/release.jsonld "https://schema.org/version/$RELEASE/schemaorg-current-https.jsonld"
+    - php scripts/vocabulary-lint.php /tmp/release.jsonld
+
+################
 # Search features review (custom job): a warning, never a failure.
 #
 # The verdicts follow the search features' documentation, which changes.

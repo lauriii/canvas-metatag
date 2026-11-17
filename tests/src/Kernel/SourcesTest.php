@@ -346,6 +346,81 @@ final class SourcesTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A whole value in hand-added JSON-LD is read through the same sources.
+   */
+  public function testWholeValueFieldInCustomJsonLd(): void {
+    $this->createField('field_day', 'datetime', 'Day', ['datetime_type' => 'date']);
+    $writer = Node::create(['type' => 'person', 'title' => 'Ada', 'status' => 1]);
+    $writer->save();
+    $hero = $this->createImage('Hero', ['alt' => 'A waving hand', 'width' => 800, 'height' => 400]);
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Hello',
+      'status' => 1,
+      'uid' => $this->author->id(),
+      'field_byline' => 'Mia Virtanen',
+      'field_body' => ['value' => '<h2>Made to last</h2><p>Solid oak.</p>', 'format' => 'plain_text'],
+      'field_writer' => $writer->id(),
+      'field_hero' => $hero->id(),
+      'field_when' => '2026-07-10T06:30:00',
+      'field_price' => '4.50',
+      'field_no_view_access' => 'Not for visitors',
+      'field_day' => '2026-07-10',
+      'field_more' => ['uri' => 'internal:/about'],
+      'field_summary' => 'javascript:alert(1)',
+    ]);
+    $node->save();
+    $this->createTemplate(TRUE, [
+      'schema' => [
+        'custom' => (string) json_encode([
+          '@type' => 'Event',
+          '@id' => '#event',
+          'name' => '{field.field_byline}',
+          'alternateName' => 'By {field.field_byline}',
+          'startDate' => '{field.field_when}',
+          'description' => '{field.field_body}',
+          'image' => '{field.field_hero}',
+          'performer' => ['@type' => 'Person', 'name' => '{field.field_writer.title}'],
+          'offers' => ['@type' => 'Offer', 'price' => '{field.field_price}', 'description' => '{field.field_price}'],
+          'about' => '{field.field_no_view_access}',
+          'endDate' => '{field.field_day}',
+          'thumbnailUrl' => '{media.' . $hero->uuid() . '}',
+          'url' => '{field.field_more}',
+          'sameAs' => '{field.field_summary}',
+        ]),
+      ],
+    ]);
+    $resolved = $this->resolver()->resolve($node);
+    $event = end($resolved['head']['script'][0]['textContent']['@graph']);
+    self::assertSame('Mia Virtanen', $event['name']);
+    // Inside other text a field name stays as written.
+    self::assertSame('By {field.field_byline}', $event['alternateName']);
+    // In the site's zone, with its offset.
+    self::assertSame('2026-07-10T09:30:00+03:00', $event['startDate']);
+    self::assertSame('Made to last. Solid oak.', $event['description']);
+    self::assertMatchesRegularExpression('~^https?://\S+\.(png|jpe?g|gif|webp)$~', $event['image']);
+    self::assertSame(['@type' => 'Person', 'name' => 'Ada'], $event['performer']);
+    // A number where the name expects one; the same field as text elsewhere.
+    self::assertSame(4.5, $event['offers']['price']);
+    self::assertSame('4.5', $event['offers']['description']);
+    // Hidden from visitors: left out, and said.
+    self::assertArrayNotHasKey('about', $event);
+    // A date-only field gives the date.
+    self::assertSame('2026-07-10', $event['endDate']);
+    // A library image by its media item: the published image's absolute
+    // public address.
+    self::assertSame($event['image'], $event['thumbnailUrl']);
+    // A link field where an address is expected: its absolute address.
+    self::assertMatchesRegularExpression('~^https?://[^/]+/about$~', $event['url']);
+    // Text that is not an address where one is expected is left out.
+    self::assertArrayNotHasKey('sameAs', $event);
+    self::assertSame([
+      ['path' => 'about', 'item' => 0, 'name' => 'field.field_no_view_access', 'status' => 'hidden'],
+      ['path' => 'sameAs', 'item' => 0, 'name' => 'field.field_summary', 'status' => 'broken'],
+    ], $resolved['schema']['empty']);
+  }
+
+  /**
    * Writes take only what the menu offers, of the value's kind.
    */
   public function testAccepts(): void {

@@ -1,0 +1,144 @@
+[
+  {
+    "name": "key order and spacing kept",
+    "input": "{\n  \"@type\": \"Rating\",\n  \"ratingValue\": 4.5,\n  \"bestRating\": 5\n}",
+    "accepted": true
+  },
+  {
+    "name": "two types",
+    "input": "{\"@type\": [\"Restaurant\", \"Store\"], \"name\": \"Kala\"}",
+    "accepted": true
+  },
+  {
+    "name": "an empty list stores nothing",
+    "input": "[]",
+    "accepted": true,
+    "stored": false
+  },
+  {
+    "name": "blank stores nothing",
+    "input": "  \n ",
+    "accepted": true,
+    "stored": false
+  },
+  {
+    "name": "at the depth limit",
+    "input": "{\"@type\":\"Thing\",\"a\":{\"b\":{\"b\":{\"b\":{\"b\":{\"b\":{\"b\":{\"b\":1}}}}}}}}",
+    "accepted": true
+  },
+  {
+    "name": "duplicate keys: the last wins",
+    "input": "{\"@type\": \"Thing\", \"name\": \"A\", \"name\": \"B\"}",
+    "accepted": true
+  },
+  {
+    "name": "not JSON",
+    "input": "{\"@type\": ",
+    "accepted": false,
+    "message": "This is not valid JSON.",
+    "item": 0,
+    "path": ""
+  },
+  {
+    "name": "a scalar",
+    "input": "\"FAQPage\"",
+    "accepted": false,
+    "message": "Use one object, or a list of up to 10 objects, each with \"@type\".",
+    "item": 0,
+    "path": ""
+  },
+  {
+    "name": "a list of scalars",
+    "input": "[\"FAQPage\"]",
+    "accepted": false,
+    "message": "Use one object, or a list of up to 10 objects, each with \"@type\".",
+    "item": 0,
+    "path": ""
+  },
+  {
+    "name": "no type",
+    "input": "{\"name\": \"A\"}",
+    "accepted": false,
+    "message": "“@type” is missing.",
+    "item": 0,
+    "path": ""
+  },
+  {
+    "name": "no type on the second item",
+    "input": "[{\"@type\": \"Thing\"}, {\"name\": \"A\"}]",
+    "accepted": false,
+    "message": "“@type” is missing.",
+    "item": 1,
+    "path": ""
+  },
+  {
+    "name": "five types",
+    "input": "{\"@type\": [\"A\", \"B\", \"C\", \"D\", \"E\"]}",
+    "accepted": false,
+    "message": "@type: use one type, or a list of up to 4 types.",
+    "item": 0,
+    "path": "/@type"
+  },
+  {
+    "name": "an empty type",
+    "input": "{\"@type\": \"\"}",
+    "accepted": false,
+    "message": "@type: use one type, or a list of up to 4 types.",
+    "item": 0,
+    "path": "/@type"
+  },
+  {
+    "name": "eleven items",
+    "input": "[{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"},{\"@type\": \"Thing\"}]",
+    "accepted": false,
+    "message": "11 items. Keep up to 10.",
+    "item": 10,
+    "path": ""
+  },
+  {
+    "name": "null",
+    "input": "{\"@type\": \"Thing\", \"name\": null}",
+    "accepted": false,
+    "message": "name is empty (null). Remove it or give it a value.",
+    "item": 0,
+    "path": "/name"
+  },
+  {
+    "name": "null inside an offer",
+    "input": "{\"@type\": \"Product\", \"offers\": {\"@type\": \"Offer\", \"price\": null}}",
+    "accepted": false,
+    "message": "offers › price is empty (null). Remove it or give it a value.",
+    "item": 0,
+    "path": "/offers/price"
+  },
+  {
+    "name": "too deep",
+    "input": "{\"@type\":\"Thing\",\"a\":{\"b\":{\"b\":{\"b\":{\"b\":{\"b\":{\"b\":{\"b\":{\"b\":1}}}}}}}}}",
+    "accepted": false,
+    "message": "a › b › b › b › b › b › b › b: too deeply nested (items and lists count). Keep to 8.",
+    "item": 0,
+    "path": "/a/b/b/b/b/b/b/b"
+  },
+  {
+    "name": "a broken character",
+    "input": "{\"@type\": \"Thing\", \"name\": \"\\ud800\"}",
+    "accepted": false,
+    "message": "This text has a broken character.",
+    "item": 0,
+    "path": ""
+  },
+  {
+    "name": "a byte order mark before the text",
+    "input": "﻿{\"@type\": \"Organization\", \"name\": \"Acme Logistics\"}",
+    "accepted": true,
+    "text": "{\"@type\": \"Organization\", \"name\": \"Acme Logistics\"}"
+  },
+  {
+    "name": "a no-break space before the text",
+    "input": " {\"@type\": \"Organization\"}",
+    "accepted": false,
+    "message": "This is not valid JSON.",
+    "item": 0,
+    "path": ""
+  }
+]
