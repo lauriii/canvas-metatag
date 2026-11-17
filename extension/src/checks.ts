@@ -2,6 +2,7 @@
 // No score. Rules fed by `resolved` describe the saved draft.
 import type { PageFacts } from './host';
 import {
+  andList,
   dimensions,
   fileSize,
   inSentence,
@@ -9,8 +10,10 @@ import {
   largeCardNeeds,
   leaveOut,
   meter,
+  offered,
   typeOf,
 } from './model';
+import { durationText, partNoun, plainText } from './controls';
 import { dateWords, itemName } from './readback';
 import type {
   FeatureFact,
@@ -19,15 +22,59 @@ import type {
   Measurer,
   Registry,
   Resolved,
+  SchemaType,
   SearchFeatures,
   SeoValues,
   SiteSettings,
+  StatePayload,
   Source,
   Tab,
   Texts,
   Value,
+  Verdict,
 } from './types';
 import { type Lookup, PROP_KINDS, brokenWhy, kindOf, resolve, rowOf, tagOf } from './values';
+
+/**
+ * What a group misses, said one way under its box, in its sheet and in
+ * Checks: the parts the server left it and its nested groups out for (its
+ * `incomplete` entries; without a report, `local`), then the parts a search
+ * feature asks of it, in the type's order. `fors`: what the features need
+ * them for ("event listings"), when they ask for more than the group needs
+ * to be used.
+ */
+export function groupGap(
+  type: SchemaType,
+  key: string,
+  report: Resolved['schema'] | null | undefined,
+  rules: SearchFeatures,
+  local: string[] = [],
+): { missing: string[]; fors: string[] } {
+  const props = type.props ?? [];
+  // A nested group's own group.
+  const ownerOf = (one: string) => {
+    const { parent: owner } = type.groups?.[one] ?? {};
+    return owner;
+  };
+  // A part of the group, at any depth, or one of its nested groups; never
+  // its page reference.
+  const within = (one: string) => {
+    const prop = props.find((item) => item.key === one);
+    return one !== key && (prop ? prop.group === key || prop.part === key : ownerOf(one) === key || one.startsWith(`${key}_`));
+  };
+  const left = report ? (report.incomplete ?? []).filter((one) => one.group === key || ownerOf(one.group) === key).flatMap((one) => one.missing) : local;
+  const asked = (report?.type ? report.features ?? [] : [])
+    .filter((verdict) => verdict.verdict === 'needs')
+    .flatMap((verdict) => (verdict.missing ?? []).filter((fact) => fact.prop && within(fact.prop)).map((fact) => ({ key: fact.prop!, verdict })));
+  const order = props.map((prop) => prop.key);
+  const at = (one: string) => (order.includes(one) ? order.indexOf(one) : order.findIndex((other) => other.startsWith(`${one}_`)));
+  const missing = [...new Set([...left, ...asked.map((one) => one.key)])].sort((a, b) => at(a) - at(b));
+  const more = asked.filter((one) => !left.includes(one.key));
+  const fors = more.length
+    ? [...new Set(more.map((one) => rules.features[one.verdict.feature ?? '']?.for ?? '').filter(Boolean))]
+    : [];
+  return { missing, fors };
+}
 
 export interface ChecksInput {
   effective: SeoValues;
@@ -631,8 +678,39 @@ const isNode = (value: unknown): value is Node =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /** "an image", or the label in lower case when the rules have no words for it. */
-const needOf = (rules: SearchFeatures, path: string, label: string) =>
-  rules.facts[path]?.need ?? label.toLowerCase();
+/**
+ * What a missing fact is asked for as: "a country". A detail whose label
+ * on this type differs from the fact's (a job's Description, not a
+ * Summary) is asked for by its own label: "a description".
+ */
+export const needOf = (rules: SearchFeatures, path: string, label: string, own?: string) => {
+  // A group is asked for by its name: the employer, the venue.
+  const fact = rules.facts[path] ?? rules.facts[`${path}.name`] ?? rules.facts[path.split('.').pop()!];
+  const a = (words: string) => (/s$/i.test(words) ? words.toLowerCase() : `${/^[aeiou]/i.test(words) ? 'an' : 'a'} ${words.toLowerCase()}`);
+  if (own && fact && fact.label.toLowerCase() !== own.toLowerCase()) {
+    return a(own);
+  }
+  return fact?.need ?? a(label);
+};
+
+/**
+ * The sentence's last words while a kind chosen is withheld, asking for what
+ * Checks asks for: "Not a job posting yet: it needs a description and an
+ * employer."
+ */
+export function notYetText(registry: Registry, rules: SearchFeatures, typeId: string, keys: string[]): string {
+  if (!keys.length) {
+    return '';
+  }
+  const type = typeOf(registry, typeId);
+  const own = (key: string) => type.props?.find((one) => one.key === key)?.label;
+  const label = (key: string) => type.groups?.[key]?.label ?? own(key) ?? key;
+  const name = registry[kindOfType(registry, typeId)]?.kind?.name ?? 'that';
+  return `Not ${name} yet: it needs ${andList(keys.map((key) => needOf(rules, pathOf(rules, key), label(key), own(key))))}.`;
+}
+
+/** The words of a verdict the dialog shows in gray: it asks nothing of the editor here. */
+export const QUIET = ['not_fit', 'not_here', 'retired', 'none', 'closed', 'elsewhere'];
 
 /** The path a registry detail has in a node: "offers_price" is offers.price. */
 const pathOf = (rules: SearchFeatures, key: string) =>
@@ -772,7 +850,8 @@ function structured(
   const type = typeOf(registry, schema.type);
   const typeId = schema.type && registry[schema.type] ? schema.type : 'WebPage';
   const props = type.props ?? [];
-  const label = (key: string) => props.find((prop) => prop.key === key)?.label ?? key;
+  // A group is named by its label ("Venue"), a detail by its own.
+  const label = (key: string) => type.groups?.[key]?.label ?? props.find((prop) => prop.key === key)?.label ?? type.groups?.[key]?.shape ?? key;
   const prop = (key: string) => at.jump('schema', `schema.props.${key}`);
   const custom = at.jump('schema', 'schema.custom');
   const kind = registry[kindOfType(registry, typeId)].kind;
@@ -801,6 +880,133 @@ function structured(
     });
   }
 
+  // Groups left out: what they miss, with what a feature asks of them, in
+  // one row. A part asked for here is not asked for again by a verdict; a
+  // part whose value does not fit is said where it is dropped.
+  const droppedKeys = new Set((report?.dropped ?? []).map((one) => one.key));
+  for (const { group, missing: left } of report?.incomplete ?? []) {
+    const whole = type.groups?.[group];
+    // An address in another group is that group's: "the venue's address".
+    const { parent: owner } = whole ?? {};
+    const gap = groupGap(type, group, { ...report!, incomplete: [{ group, missing: left }] }, rules);
+    gap.missing.forEach((key) => said.add(key));
+    const missing = gap.missing.filter((key) => !droppedKeys.has(key));
+    if (!missing.length) {
+      continue;
+    }
+    const to = missing.every((key) => !partNoun(props.find((one) => one.key === key), '').startsWith('the ')) ? '' : ` to the ${owner ? `${label(owner).toLowerCase()}'s address` : label(group).toLowerCase()}`;
+    issues.push({
+      id: `schema-incomplete:${group}`,
+      severity: 'improve',
+      message: `Add ${andList(missing.map((key) => partNoun(props.find((one) => one.key === key), label(key))))}${to}`,
+      detail: gap.fors.length
+        ? `Needed for ${andList(gap.fors)}.`
+        : whole?.shape === 'address'
+          ? 'An address needs a street or city, and a country.'
+          : `${label(group)} is left out until then.`,
+      jump: prop(missing[0]),
+    });
+  }
+  // List items left out.
+  for (const { key, count, reason } of report?.dropped_items ?? []) {
+    const items = `${count} ${count === 1 ? 'item' : 'items'}`;
+    issues.push({
+      id: `schema-items:${key}:${reason}`,
+      severity: reason === 'max' ? 'info' : 'improve',
+      message:
+        reason === 'max'
+          ? `${label(key)}: ${items} over the limit left out`
+          : reason === 'private'
+            ? `${label(key)}: ${items} in private files left out`
+            : reason === 'hidden'
+              ? `${label(key)}: ${items} visitors may not see left out`
+              : `${label(key)}: ${items} that ${count === 1 ? 'does' : 'do'} not fit left out`,
+      detail: reason === 'hidden' ? 'A page visitors may not see is never named.' : 'The rest are used, in order.',
+      jump: prop(key),
+    });
+  }
+  // References that name a page instead of pointing at it.
+  for (const { key, name } of report?.refs_inline ?? []) {
+    issues.push({
+      id: `schema-ref-name:${key}:${name}`,
+      severity: 'info',
+      message: `${label(key)}: “${name}” is named, not linked`,
+      detail: `Its page is not described as one the ${label(key).toLowerCase()} can be. Describe it in its own SEO settings to link it.`,
+      jump: prop(key),
+    });
+  }
+  // The publisher by a Canvas page's default.
+  for (const key of report?.defaults ?? []) {
+    issues.push({
+      id: `schema-default-site:${key}`,
+      severity: 'info',
+      message: `The ${label(key).toLowerCase()} is ${input.site.identity.name ? `${input.site.identity.name} (this site)` : 'this site'}`,
+      detail: 'Nobody set it, so it is the site. Change it if someone else is.',
+      jump: prop(key),
+    });
+  }
+  // A time without its pair.
+  for (const key of report?.unpaired ?? []) {
+    const other = props.find((one) => one.key === key)?.pair;
+    issues.push({
+      id: `schema-unpaired:${key}`,
+      severity: 'improve',
+      message: `Add the ${label(other ?? key).toLowerCase()}, or give a total time instead`,
+      detail: `${label(key)} is used only with the ${label(other ?? key).toLowerCase()}.`,
+      jump: prop(other ?? key),
+    });
+  }
+  // A linked time read as more than a day: its field may count in the
+  // other unit.
+  for (const one of props.filter((item) => item.unit && (item.units?.length ?? 0) > 1)) {
+    const stored = schema.props?.[one.key];
+    if (!stored || !('source' in stored)) {
+      continue;
+    }
+    const found = resolve(stored, 'number', lookup);
+    const unit = stored.unit ?? one.unit!;
+    const minutes = Number(found.text) * (unit === 'hour' ? 60 : 1);
+    const other = one.units!.find((item) => item !== unit);
+    if (found.status === 'ok' && minutes > 24 * 60 && other) {
+      issues.push({
+        id: `schema-unit:${one.key}`,
+        severity: 'improve',
+        message: `Is ${one.label} in hours or minutes?`,
+        detail: `It reads as ${durationText(String(Math.round(minutes)))}, more than a day.`,
+        jump: prop(one.key),
+        fix: {
+          label: 'Change the unit',
+          apply: (values) => ({
+            ...values,
+            schema: { ...values.schema, props: { ...values.schema?.props, [one.key]: { ...stored, unit: other } } },
+          }),
+          undo: () => `${one.label} in ${other}s`,
+        },
+      });
+    }
+  }
+  if (report?.pay_order) {
+    issues.push({
+      id: 'schema-pay-order',
+      severity: 'fix',
+      message: 'Pay: From is more than Up to',
+      detail: 'The pay is left out until From is no more than Up to.',
+      jump: prop('baseSalary'),
+    });
+  }
+  // A byline that may name several people.
+  const author = schema.props?.author_name ?? schema.props?.author;
+  const byline = author ? resolve(author, 'text', lookup) : null;
+  if (byline?.status === 'ok' && author && 'source' in author && /\s(and|&)\s|,/.test(byline.text)) {
+    issues.push({
+      id: 'schema-byline',
+      severity: 'info',
+      message: 'The author may be several people',
+      detail: 'If this names several people, link a field with one person per value.',
+      jump: prop('author'),
+    });
+  }
+
   // Values that do not fit their kind: the field says why.
   for (const dropped of report?.dropped ?? []) {
     const item = props.find((one) => one.key === dropped.key);
@@ -811,7 +1017,7 @@ function structured(
     issues.push({
       id: `schema-dropped:${dropped.key}`,
       severity: withholds ? 'fix' : 'improve',
-      message: `${FITS[dropped.kind] ?? 'Use another value'}: ${field ? `the ${field} field` : label(dropped.key)} gives “${dropped.value}”.`,
+      message: `${item?.codes === 'country' ? 'Choose the country from the list' : (FITS[dropped.kind] ?? 'Use another value')}: ${field ? `the ${field} field` : label(dropped.key)} gives “${dropped.value}”.`,
       detail: withholds ? `${The} is left out until it is fixed.` : `${item?.label ?? dropped.key} is left out until then.`,
       jump: prop(dropped.key),
     });
@@ -831,11 +1037,21 @@ function structured(
     issues.push({
       id: `schema-required:${key}`,
       severity: 'fix',
-      message: empty ? `${label(key)} is empty for ${page}` : `Add ${needOf(rules, pathOf(rules, key), label(key))}`,
+      message: empty ? `${label(key)} is empty for ${page}` : `Add ${needOf(rules, pathOf(rules, key), label(key), props.find((one) => one.key === key)?.label)}`,
       detail: empty ? `${The} is left out for ${page}.` : `${The} is left out until it is filled in.`,
       jump: prop(key),
     });
   }
+
+  // Asked for by a row above: itself, or the group it is part of.
+  const groupOf = (key: string) => props.find((one) => one.key === key)?.group;
+  const asked = (key: string) => said.has(key) || said.has(groupOf(key) ?? '') || (report?.incomplete ?? []).some((one) => one.group === groupOf(key));
+  // A part of a group that is set, by its own name: "the venue's name".
+  const helpName = (key: string) => {
+    const part = props.find((one) => one.key === key);
+    const set = !!part?.group && part.key !== part.group && Object.keys(schema.props ?? {}).some((one) => one === part.group || one.startsWith(`${part.group}_`));
+    return set && part?.short ? `the ${label(part.group!).toLowerCase()}'s ${part.short.toLowerCase()}` : label(key);
+  };
 
   // The verdicts.
   const verdicts = report?.features ?? [];
@@ -848,10 +1064,12 @@ function structured(
     const order = [...(type.main ?? []), ...props.map((one) => one.key)];
     const at = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
     const helps = (verdict.helps ?? [])
-      .filter((fact) => fact.prop && !linkedEmpty(fact.prop))
+      // Only what this scope can fill, and never what a row above asks for
+      // (an incomplete group's part).
+      .filter((fact) => fact.prop && !linkedEmpty(fact.prop) && !asked(fact.prop) && offered(registry, typeId, fact.prop, input.scope) !== false)
       .sort((a, b) => at(a.prop!) - at(b.prop!));
     if (helps.length) {
-      const named = helps.map((fact) => label(fact.prop!));
+      const named = helps.map((fact) => helpName(fact.prop!));
       issues.push({
         id: `feature-helps:${verdict.feature}`,
         severity: 'info',
@@ -860,7 +1078,17 @@ function structured(
         jump: prop(helps[0].prop!),
       });
     }
-    if (verdict.verdict === 'needs') {
+    if (feature?.list && verdict.verdict === 'needs') {
+      // A list page: what counts is how many of its pages are complete.
+      const noun = registry[feature.list.of]?.label.toLowerCase() ?? 'item';
+      issues.push({
+        id: `feature-list:${verdict.feature}`,
+        severity: 'improve',
+        message: `${name}: ${verdict.count ?? 0} of the ${verdict.of ?? 0} linked pages ${verdict.count === 1 ? 'is a complete' : 'are complete'} ${verdict.count === 1 ? noun : `${noun}s`}`,
+        detail: `It needs at least ${feature.list.min}: pages described as ${registry[feature.list.of]?.kind?.name ?? noun}, each with a summary.`,
+        jump: prop(type.props?.find((one) => one.item === 'ListItem')?.key ?? 'items'),
+      });
+    } else if (verdict.verdict === 'needs') {
       for (const fact of verdict.missing ?? []) {
         const key = fact.prop ?? fact.site ?? `${verdict.node}:${fact.path}`;
         const entry = needs.get(key) ?? { fact, fors: [], feature: verdict.feature };
@@ -870,6 +1098,16 @@ function structured(
     } else if (verdict.verdict === 'not_fit') {
       const not = feature?.not_for?.find((one) => one.id === verdict.reason);
       issues.push({ id: `feature-not-fit:${verdict.feature}`, severity: 'info', message: `${name} doesn't fit: ${not?.reason ?? verdict.reason}`, detail: not?.why });
+    } else if (verdict.verdict === 'closed') {
+      // Still shipped; said once, where the date is changed.
+      const not = feature?.not_for?.find((one) => one.id === 'closed');
+      issues.push({
+        id: `feature-closed:${verdict.feature}`,
+        severity: 'info',
+        message: `${name}: not shown, ${not?.reason ?? 'closed'} ${dateWords(verdict.date ?? '', input.ui) ?? verdict.date}`,
+        detail: not?.why,
+        jump: prop('validThrough'),
+      });
     } else if (verdict.verdict === 'unanswered') {
       issues.push({
         id: `feature-unanswered:${verdict.feature}`,
@@ -891,7 +1129,8 @@ function structured(
     }
   }
   for (const [key, { fact, fors, feature }] of needs) {
-    if (fact.prop && (said.has(fact.prop) || linkedEmpty(fact.prop) || hidden.includes(`schema.props.${fact.prop}`) || broken.includes(`schema.props.${fact.prop}`))) {
+    // A part of a group withheld or incomplete is asked for by that row.
+    if (fact.prop && (asked(fact.prop) || linkedEmpty(fact.prop) || hidden.includes(`schema.props.${fact.prop}`) || broken.includes(`schema.props.${fact.prop}`))) {
       continue;
     }
     // A site setting is for those who may change it.
@@ -900,7 +1139,7 @@ function structured(
     }
     // The rule's index is within its own feature's rules.
     const rule = fact.rule === undefined || feature === null ? undefined : rules.features[feature]?.rules?.[fact.rule];
-    const need = rule?.need ?? needOf(rules, fact.path, fact.prop ? label(fact.prop) : fact.path);
+    const need = rule?.need ?? needOf(rules, fact.path, fact.prop ? label(fact.prop) : fact.path, props.find((one) => one.key === fact.prop)?.label);
     const image = fact.prop && props.find((one) => one.key === fact.prop)?.kind === 'image';
     issues.push({
       id: `feature-needs:${key}`,
@@ -1013,8 +1252,11 @@ function structured(
       detail: `${linked ? `It comes from ${linked}. ` : ''}Structured data should describe what visitors see.`,
       jump: prop(item.key),
     });
-    if (item.kind === 'text' && !item.pattern && normal(shown.value) && !onThePage(shown.value)) {
-      issues.push(notFound(`“${shown.value}”`));
+    // Formatted text is compared, and quoted, as its words; a long value is
+    // quoted by its start.
+    const words = item.html ? plainText(shown.value) : shown.value;
+    if (item.kind === 'text' && !item.pattern && normal(words) && !onThePage(words)) {
+      issues.push(notFound(`“${words.length > 60 ? `${words.slice(0, 60).trimEnd()}…` : words}”`));
     } else if (item.kind === 'date' && !dateForms(shown.value, input.langcode).some(onThePage)) {
       // Said as the dialog writes every date.
       issues.push(notFound(`the date ${dateWords(shown.value, input.ui) ?? shown.value}`));
@@ -1106,3 +1348,61 @@ export const stageMatch = (issues: Issue[]) => {
   const found = issues.filter((issue) => /^(schema-not-on-page|hand-hidden|hand-rating):/.test(issue.id));
   return found.find((issue) => issue.severity === 'fix') ?? found[0];
 };
+
+/** The words of a verdict: "Needs an image", "Doesn't fit: a recurring price". */
+export function verdictText(server: StatePayload, verdict: Verdict, emptyFor?: (prop: string) => string | null): string {
+  const rules = server.search_features;
+  const feature = verdict.feature ? rules.features[verdict.feature] : undefined;
+  switch (verdict.verdict) {
+    case 'ready':
+      return feature?.list && verdict.count !== undefined ? `Can show: ${verdict.count} ${server.registry[feature.list.of]?.label.toLowerCase() ?? 'item'}${verdict.count === 1 ? '' : 's'}` : 'Can show';
+    case 'complete':
+      return 'Complete';
+    case 'unanswered':
+      return 'Only if people buy it here';
+    case 'not_fit':
+      return `Doesn't fit: ${feature?.not_for?.find((one) => one.id === verdict.reason)?.reason ?? verdict.reason}`;
+    case 'not_here':
+      return 'Not shown here';
+    case 'retired':
+      return retiredText(feature?.since, server.ui);
+    case 'none':
+      return 'No search feature';
+    case 'closed':
+      // Still shipped: shown again once the closing date moves.
+      return `Not shown: ${feature?.not_for?.find((one) => one.id === 'closed')?.reason ?? 'closed'} ${dateWords(verdict.date ?? '', server.ui) ?? verdict.date}`;
+    case 'elsewhere':
+      // Shown only from a list page: nothing to add here.
+      return `Needs ${feature?.elsewhere ?? 'a list page'}`;
+    default: {
+      const first = verdict.missing?.[0];
+      // A list: how many of the pages it links count.
+      if (feature?.list && verdict.count !== undefined) {
+        const noun = server.registry[feature.list.of]?.label.toLowerCase() ?? 'item';
+        const many = (count: number) => `${count} ${noun}${count === 1 ? '' : 's'}`;
+        return `Needs at least ${many(feature.list.min)}: ${verdict.count} of the ${verdict.of ?? 0} linked pages ${verdict.count === 1 ? 'is a complete' : 'are complete'} ${verdict.count === 1 ? noun : `${noun}s`}`;
+      }
+      if (!first) {
+        return 'Needs more';
+      }
+      // A linked detail the previewed item has empty: said for the item.
+      const empty = first.prop ? emptyFor?.(first.prop) : null;
+      if (empty) {
+        return `Needs ${empty}`;
+      }
+      const rule = first.rule === undefined ? undefined : feature?.rules?.[first.rule];
+      // A part of a group is worded by its own name: "a country"; a detail
+      // by its label on this type: "a description".
+      const own = first.prop ? server.registry[server.resolved?.schema.type ?? '']?.props?.find((one) => one.key === first.prop)?.label : undefined;
+      const need = rule?.need ?? needOf(rules, first.path, first.path, own);
+      const more = (verdict.missing?.length ?? 1) - 1;
+      // Set, but not one of the list's ("Finland" for a country): chosen.
+      const listed = !!first.prop && !!server.resolved?.schema.dropped?.some((one) => one.key === first.prop);
+      return `Needs ${need}${listed ? ' from the list' : ''}${more ? ` and ${more} more` : ''}`;
+    }
+  }
+}
+
+/** A feature line in words: "Merchant listing doesn't fit: a recurring price". */
+export const lineName = (label: string, words: string) =>
+  words.startsWith("Doesn't fit") ? `${label} doesn't fit${words.slice(11)}` : `${label}: ${words}`;

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { type ChecksInput, checks, countIssues, identityGaps, rankImages } from './checks';
+import { type ChecksInput, QUIET, checks, countIssues, identityGaps, notYetText, rankImages, verdictText } from './checks';
 import { EMPTY_SCHEMA, REGISTRY, RULES } from './data.test-helper';
 import { cascade, merge, source, texts as textsOf } from './model';
 import type {
@@ -13,6 +13,7 @@ import type {
   Resolved,
   SeoValues,
   SourceRow,
+  StatePayload,
 } from './types';
 import { FACT_KINDS, type Lookup, textOf } from './values';
 
@@ -45,6 +46,7 @@ const FACTS: Record<Fact, string> = {
   published: '2026-03-02T09:00:00+02:00',
   modified: '2026-03-04T11:30:00+02:00',
   image: '',
+  identity: 'Example',
 };
 
 /** A field of the type, linked as a source. */
@@ -994,9 +996,9 @@ describe('rules that need the page preview', () => {
         resolved: { head: { title: '', meta: [], link: [], script: [{ type: 'application/ld+json', textContent: { '@graph': graph } }] }, image: null, schema: { ...EMPTY_SCHEMA, ...over } },
         input: more,
       }));
-    const unknown = schema({ unknown_type: 'Recipe' }, { schema: { type: 'Recipe' } }).find((issue) => issue.id === 'schema-unknown');
+    const unknown = schema({ unknown_type: 'Movie' }, { schema: { type: 'Movie' } }).find((issue) => issue.id === 'schema-unknown');
     expect(unknown).toMatchObject({ severity: 'improve', message: 'Choose what this page is', jump: { field: 'schema.type' } });
-    expect(unknown?.detail).toContain('“Recipe”');
+    expect(unknown?.detail).toContain('“Movie”');
 
     // A product named after its page title: on a page, to improve.
     const product = (name: string, more: Partial<ChecksInput> = {}) =>
@@ -1012,6 +1014,168 @@ describe('rules that need the page preview', () => {
     expect(countIssues(none)).toBe(0);
     // A web page says nothing about it.
     expect(ids(schema({ features: [{ feature: null, node: null, verdict: 'none' }] }, {}))).not.toContain('feature-none');
+  });
+
+  it('asks once for what withholds a node or a group, with an article', () => {
+    const schema = (type: string, over: Partial<Resolved['schema']>, values: Omit<NonNullable<SeoValues['schema']>, 'type'> = {}) =>
+      checks(input({
+        target: { schema: { type, ...values } },
+        resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, type, ...over } },
+      }));
+    const main = 'https://www.example.com/pricing#primary';
+    // A job with no employer: one row, to fix, never again to improve.
+    const job = schema('JobPosting', {
+      withheld: { missing: ['hiringOrganization'], dropped: [], node: {} },
+      features: [{ feature: 'job-posting', node: main, verdict: 'needs', missing: [{ path: 'hiringOrganization.name', prop: 'hiringOrganization_name' }] }],
+    });
+    expect(job.filter((issue) => /employer/i.test(issue.message))).toMatchObject([{ id: 'schema-required:hiringOrganization', severity: 'fix', message: 'Add an employer' }]);
+    // The sentence asks for what Checks asks for, in the same words.
+    expect(notYetText(REGISTRY, RULES, 'JobPosting', ['description', 'hiringOrganization'])).toBe('Not a job posting yet: it needs a description and an employer.');
+    // Someone else without a name: asked by its group's row, not again in
+    // Also helps.
+    const organizer = schema('Event', {
+      incomplete: [{ group: 'organizer', missing: ['organizer_name'] }],
+      features: [{ feature: 'event', node: main, verdict: 'ready', helps: [{ path: 'organizer.name', prop: 'organizer_name' }, { path: 'endDate', prop: 'endDate' }] }],
+    }, { props: { organizer_url: { text: 'https://hall.example.org/' } } });
+    expect(organizer.filter((issue) => /organizer/i.test(issue.message)).map((issue) => issue.id)).toEqual(['schema-incomplete:organizer']);
+    expect(organizer.find((issue) => issue.id === 'feature-helps:event')?.message).toBe('Also helps the event result: Ends.');
+    // A venue that is set, without its name: the part, by its own name.
+    const venue = schema('Event', {
+      features: [{ feature: 'event', node: main, verdict: 'ready', helps: [{ path: 'location.name', prop: 'location_name' }] }],
+    }, { props: { location_address_addressLocality: { text: 'Helsinki' } } });
+    expect(venue.find((issue) => issue.id === 'feature-helps:event')?.message).toBe("Also helps the event result: the venue's name.");
+  });
+
+  it('says what was left out of a node: groups, items, names, defaults, pairs and pay', () => {
+    const schema = (type: string, over: Partial<Resolved['schema']>, values: SeoValues = {}) =>
+      checks(input({
+        target: { schema: { type, ...values } },
+        resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, type, ...over } },
+      }));
+    const find = (issues: ReturnType<typeof checks>, id: string) => issues.find((issue) => issue.id === id);
+    // A venue without a country: to improve, with why.
+    const venue = schema('Event', { incomplete: [{ group: 'location_address', missing: ['location_address_addressCountry'] }] });
+    expect(find(venue, 'schema-incomplete:location_address')).toMatchObject({
+      severity: 'improve',
+      message: "Add the country to the venue's address",
+      detail: 'An address needs a street or city, and a country.',
+      jump: { field: 'schema.props.location_address_addressCountry' },
+    });
+    // Items left out: private and hidden ones to improve, over the limit good to know.
+    const items = schema('Product', { dropped_items: [{ key: 'image', count: 2, reason: 'private' }, { key: 'image', count: 1, reason: 'max' }] });
+    expect(find(items, 'schema-items:image:private')).toMatchObject({ severity: 'improve', message: 'Image: 2 items in private files left out' });
+    expect(find(items, 'schema-items:image:max')).toMatchObject({ severity: 'info' });
+    // A reference that fell back to a name: good to know.
+    expect(find(schema('Event', { refs_inline: [{ key: 'location', name: 'Hall', reason: 'kind' }] }), 'schema-ref-name:location:Hall')).toMatchObject({ severity: 'info', message: 'Venue: “Hall” is named, not linked' });
+    // The organizer nobody set: the site, good to know.
+    expect(find(schema('Event', { defaults: ['organizer'] }), 'schema-default-site:organizer')).toMatchObject({ severity: 'info', message: 'The organizer is Example Inc (this site)' });
+    // Prep time without cook time.
+    expect(find(schema('Recipe', { unpaired: ['prepTime'] }), 'schema-unpaired:prepTime')).toMatchObject({
+      severity: 'improve',
+      message: 'Add the cook time, or give a total time instead',
+      jump: { field: 'schema.props.cookTime' },
+    });
+    // Pay from more than it is up to: to fix, shown at the pay.
+    expect(find(schema('JobPosting', { pay_order: true }), 'schema-pay-order')).toMatchObject({ severity: 'fix', message: 'Pay: From is more than Up to', jump: { field: 'schema.props.baseSalary' } });
+    // A group's name part by its own name; the pay's unit by what it asks.
+    expect(find(schema('Event', { incomplete: [{ group: 'location', missing: ['location_name'] }] }), 'schema-incomplete:location')?.message).toBe('Add the name to the venue');
+    expect(find(schema('Event', { incomplete: [{ group: 'organizer', missing: ['organizer_name'] }] }), 'schema-incomplete:organizer')?.message).toBe('Add the name to the organizer');
+    expect(find(schema('JobPosting', { incomplete: [{ group: 'baseSalary', missing: ['baseSalary_value_unitText'] }] }), 'schema-incomplete:baseSalary')?.message).toBe('Add how often it is paid');
+    // A part a group asks for is not asked for again by the verdict.
+    const twice = schema('Event', {
+      incomplete: [{ group: 'location_address', missing: ['location_address_addressCountry'] }],
+      features: [{ feature: 'event', node: `${PAGE}#primary`, verdict: 'needs', missing: [{ path: 'location.address.addressCountry', prop: 'location_address_addressCountry' }] }],
+    });
+    expect(ids(twice).filter((id) => id.includes('addressCountry') || id.startsWith('schema-incomplete'))).toEqual(['schema-incomplete:location_address']);
+    // What a feature asks more of the group is said in the same row, with
+    // what it is needed for: one story for the address.
+    const both = schema('Event', {
+      incomplete: [{ group: 'location_address', missing: ['location_address_addressCountry'] }],
+      features: [{
+        feature: 'event',
+        node: `${PAGE}#primary`,
+        verdict: 'needs',
+        missing: [
+          { path: 'location.address.addressLocality', prop: 'location_address_addressLocality' },
+          { path: 'location.address.addressCountry', prop: 'location_address_addressCountry' },
+        ],
+      }],
+    });
+    expect(find(both, 'schema-incomplete:location_address')).toMatchObject({ message: "Add the city and the country to the venue's address", detail: 'Needed for event listings.' });
+    expect(ids(both).filter((id) => id.startsWith('feature-needs:'))).toEqual([]);
+    // A country stored as a name is asked for once: from the list.
+    const legacy = schema('Event', {
+      incomplete: [{ group: 'location_address', missing: ['location_address_addressCountry'] }],
+      dropped: [{ key: 'location_address_addressCountry', value: 'Finland', kind: 'enum' }],
+    });
+    expect(ids(legacy).filter((id) => id.includes('addressCountry') || id.startsWith('schema-incomplete'))).toEqual(['schema-dropped:location_address_addressCountry']);
+    expect(find(legacy, 'schema-dropped:location_address_addressCountry')?.message).toMatch(/^Choose the country from the list/);
+  });
+
+  it('words every verdict the server sends: closed, elsewhere, a list and its count', () => {
+    const server = (type: string) => ({ search_features: RULES, registry: REGISTRY, ui: 'en', resolved: { schema: { ...EMPTY_SCHEMA, type } } }) as unknown as StatePayload;
+    const node = `${PAGE}#primary`;
+    expect(verdictText(server('JobPosting'), { feature: 'job-posting', node, verdict: 'closed', date: '2026-10-31' })).toBe('Not shown: this job closed 31 October 2026');
+    expect(verdictText(server('Course'), { feature: 'course-list', node, verdict: 'elsewhere' })).toBe('Needs a list page with at least 3 courses');
+    expect(verdictText(server('CollectionPage'), { feature: 'course-list', node, verdict: 'ready', count: 4, of: 4 })).toBe('Can show: 4 courses');
+    expect(verdictText(server('CollectionPage'), { feature: 'course-list', node, verdict: 'needs', count: 2, of: 5, missing: [{ path: 'itemListElement' }] })).toBe(
+      'Needs at least 3 courses: 2 of the 5 linked pages are complete courses',
+    );
+    // Both are said in gray: nothing the editor can add here.
+    expect(QUIET).toEqual(expect.arrayContaining(['closed', 'elsewhere']));
+    // A detail is asked for by its label on this type: a job's Description.
+    expect(verdictText(server('JobPosting'), { feature: 'job-posting', node, verdict: 'needs', missing: [{ path: 'description', prop: 'description' }] })).toBe('Needs a description');
+    expect(verdictText(server('Event'), { feature: 'event', node, verdict: 'needs', missing: [{ path: 'location.address.addressCountry', prop: 'location_address_addressCountry' }] })).toBe('Needs a country');
+    // A country stored as a name: one from the list.
+    const legacy = { ...server('Event'), resolved: { schema: { ...EMPTY_SCHEMA, type: 'Event', dropped: [{ key: 'location_address_addressCountry', value: 'Finland', kind: 'enum' }] } } } as unknown as StatePayload;
+    expect(verdictText(legacy, { feature: 'event', node, verdict: 'needs', missing: [{ path: 'location.address.addressCountry', prop: 'location_address_addressCountry' }] })).toBe('Needs a country from the list');
+  });
+
+  it('says a closed job, a list page short of courses, and a time in the wrong unit', () => {
+    const schema = (type: string, over: Partial<Resolved['schema']>, values: Partial<NonNullable<SeoValues['schema']>> = {}, more: Partial<Parameters<typeof input>[0]> = {}) =>
+      checks(input({
+        target: { schema: { type, ...values } },
+        resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, type, ...over } },
+        ...more,
+      }));
+    const find = (issues: ReturnType<typeof checks>, id: string) => issues.find((issue) => issue.id === id);
+    // Closed: good to know, with its date, where the date is changed.
+    expect(find(schema('JobPosting', { features: [{ feature: 'job-posting', node: `${PAGE}#primary`, verdict: 'closed', date: '2026-10-31' }] }), 'feature-closed:job-posting')).toMatchObject({
+      severity: 'info',
+      message: 'Job posting: not shown, this job closed 31 October 2026',
+      jump: { field: 'schema.props.validThrough' },
+    });
+    // A list page: how many of its pages count, never "Add itemListElement".
+    const list = schema('CollectionPage', { features: [{ feature: 'course-list', node: `${PAGE}#webpage`, verdict: 'needs', count: 2, of: 5, missing: [{ path: 'itemListElement' }] }] });
+    expect(find(list, 'feature-list:course-list')).toMatchObject({ severity: 'improve', message: 'Course list: 2 of the 5 linked pages are complete courses' });
+    expect(ids(list).filter((id) => id.startsWith('feature-needs'))).toEqual([]);
+    // A course alone is shown from a list page: nothing to say here.
+    expect(ids(schema('Course', { features: [{ feature: 'course-list', node: `${PAGE}#primary`, verdict: 'elsewhere' }] })).filter((id) => id.startsWith('feature-'))).toEqual([]);
+    // A linked cook time of 50 read as hours: asked, with the other unit as the fix.
+    const cook = (unit: 'minute' | 'hour') => find(
+      schema('Recipe', {}, { props: { cookTime: { source: field('field_cook', 'Cook minutes').source, unit } } }, {
+        sources: [field('field_cook', 'Cook minutes', { kinds: ['number'], value: '50' })],
+        input: { scope: 'template', typeLabel: 'Recipe' },
+      }),
+      'schema-unit:cookTime',
+    );
+    expect(cook('minute')).toBeUndefined();
+    const hours = cook('hour');
+    expect(hours).toMatchObject({ severity: 'improve', message: 'Is Cook time in hours or minutes?', detail: 'It reads as 50 h, more than a day.' });
+    const fix = hours?.fix as { apply(values: SeoValues): SeoValues } | undefined;
+    expect(fix?.apply({ schema: { type: 'Recipe', props: { cookTime: { source: field('field_cook', 'Cook minutes').source, unit: 'hour' } } } }).schema?.props?.cookTime).toMatchObject({ unit: 'minute' });
+  });
+
+  it('says a byline linked as text may be several people', () => {
+    const byline = (value: string) =>
+      checks(input({
+        target: { schema: { type: 'Article', props: { author_name: { source: field('field_byline', 'Byline').source } } } },
+        sources: [field('field_byline', 'Byline', { value })],
+        input: { scope: 'template', typeLabel: 'Article' },
+      })).find((issue) => issue.id === 'schema-byline');
+    expect(byline('Ada and Grace')).toMatchObject({ severity: 'info', detail: 'If this names several people, link a field with one person per value.' });
+    expect(byline('Ada, Grace')).toBeDefined();
+    expect(byline('Ada')).toBeUndefined();
   });
 
   it('every kind of row checks.ts makes is tested here', () => {

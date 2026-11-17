@@ -22,7 +22,16 @@ $add = static function (mixed $text) use (&$strings): void {
     $strings[$text] = TRUE;
   }
 };
-foreach ($read('schema-types') as $type) {
+$registry = $read('schema-types');
+// The parts of each shape: a venue's name, an address's country.
+foreach ($registry['$shapes'] ?? [] as $shape) {
+  foreach ($shape['parts'] as $part) {
+    $add($part['label'] ?? NULL);
+    array_map($add, array_values($part['option_labels'] ?? []));
+  }
+}
+unset($registry['$shapes']);
+foreach ($registry as $type) {
   $add($type['label'] ?? NULL);
   $add($type['variants'] ?? NULL);
   foreach (['label', 'name', 'earn', 'not_for'] as $key) {
@@ -30,6 +39,7 @@ foreach ($read('schema-types') as $type) {
   }
   foreach ($type['props'] ?? [] as $prop) {
     $add($prop['label']);
+    $add($prop['ref']['label'] ?? NULL);
     array_map($add, array_values($prop['option_labels'] ?? []));
   }
   foreach ($type['slots'] ?? [] as $slot) {
@@ -52,6 +62,7 @@ foreach ($rules['features'] as $feature) {
   foreach ($feature['rules'] ?? [] as $rule) {
     $add($rule['need'] ?? NULL);
   }
+  $add($feature['elsewhere'] ?? NULL);
   foreach ($feature['not_for'] ?? [] as $not) {
     $add($not['reason']);
     $add($not['why']);

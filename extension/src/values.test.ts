@@ -305,3 +305,64 @@ describe('small helpers', () => {
     expect(tagOf(link('field_venue'), broken, 'description')).toBe('Venue › Street address');
   });
 });
+
+describe('list facts in the link menu', () => {
+  const lookup: Lookup = {
+    ...LOOKUP,
+    sources: [
+      row('field_ingredients', ['Ingredients'], { many: true, count: 8 }),
+      row('field_method', ['Method'], { kinds: ['text', 'html'] }),
+      row('field_steps', ['Steps'], { lines: true }),
+      row('field_summary', ['Summary']),
+    ],
+  };
+  const notes = (items: 'list' | 'one') =>
+    Object.fromEntries(entriesFor('schema.props.recipeIngredient', 'text', 'template', lookup, 'Recipe', undefined, items).filter((entry) => entry.group === 'Recipe').map((entry) => [entry.label, entry.disabled ?? entry.note]));
+
+  it('says what each field gives a list, and refuses one value', () => {
+    expect(notes('list')).toEqual({ Ingredients: 'All 8, in order', Method: 'Each list item, in order', Steps: 'Each line, in order', Summary: 'One value, not a list' });
+  });
+
+  it('says that a single detail takes the first of several', () => {
+    expect(notes('one')).toEqual({ Ingredients: 'First of 8', Method: undefined, Steps: undefined, Summary: undefined });
+  });
+
+  it('suggests a field of several values named like the list first, and refuses the facts', () => {
+    const entries = entriesFor('schema.props.recipeIngredient', 'text', 'template', lookup, 'Recipe', undefined, 'list', 'Ingredients');
+    expect(entries[0]).toMatchObject({ label: 'Ingredients', group: 'Suggested' });
+    const facts = entries.filter((entry) => entry.key.startsWith('fact:'));
+    expect(facts.length).toBeGreaterThan(0);
+    expect(facts.every((entry) => entry.disabled === 'One value, not a list')).toBe(true);
+  });
+
+  it('fills a list of codes from a list field of one value, never from one text', () => {
+    const codes: Lookup = {
+      ...LOOKUP,
+      sources: [row('field_employment', ['Employment'], { value: 'PART_TIME', shown: 'Part time', list: true }), row('body', ['Body'], { kinds: ['text', 'html'] })],
+    };
+    const entries = entriesFor('schema.props.employmentType', 'text', 'template', codes, 'Job', ['FULL_TIME', 'PART_TIME'], 'list');
+    expect(entries.find((entry) => entry.label === 'Employment')?.disabled).toBeUndefined();
+    expect(entries.find((entry) => entry.label === 'Body')?.disabled).toBe('Not one of the options');
+  });
+
+  it('lists the site first for a reference, in its own group', () => {
+    const refs: Lookup = {
+      ...LOOKUP,
+      facts: { ...LOOKUP.facts, identity: fact('Your site', 'ref', 'Example') },
+      sources: [row('field_host', ['Host', 'Title'], { kinds: ['text', 'ref'] })],
+    };
+    expect(entriesFor('schema.props.organizer', 'ref', 'template', refs, 'Event')[0]).toMatchObject({ key: 'fact:identity', group: 'This site' });
+  });
+
+  it('offers a reference field itself as one row: its page, one Enter away', () => {
+    const refs: Lookup = {
+      ...LOOKUP,
+      sources: [row('field_location', ['Location', 'Title'], { kinds: ['text', 'ref'], names: true, value: 'Example office' })],
+    };
+    const page = entriesFor('schema.props.jobLocation', 'ref', 'template', refs, 'Job').find((entry) => entry.key !== 'fact:identity');
+    expect(page).toMatchObject({ label: 'Location', full: 'the Location page', level: null, note: 'Its page: Example office' });
+    expect(tagOf({ source: refs.sources[0].source }, refs, undefined, 'ref')).toBe('Location');
+    // As text, the same row is the page's title, under its reference.
+    expect(entriesFor('schema.props.name', 'text', 'template', refs, 'Job')[0]).toMatchObject({ label: 'Title', level: 'Location' });
+  });
+});

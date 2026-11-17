@@ -308,7 +308,9 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
     self::assertSame('BlogPosting', $graph['primary']['@type']);
     self::assertSame('Grace Hopper', $graph['primary']['author']['name']);
     self::assertSame('Hello', $graph['primary']['headline']);
-    self::assertSame($this->imageOf($hero)['url'], $graph['primary']['image']['url']);
+    // The page's own image, referenced by its @id.
+    self::assertSame(['@id' => $graph['primaryimage']['@id']], $graph['primary']['image']);
+    self::assertSame($this->imageOf($hero)['url'], $graph['primaryimage']['url']);
     self::assertStringContainsString('Template heading', (string) $response->getContent());
     $cached = $this->get($path);
     self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
@@ -413,6 +415,45 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
     self::assertSame(['canonical', 'shortlink'], self::coreLinks($head));
     self::assertSame(['Hello | Example'], $head['titles']);
     self::assertSame([], $head['meta']);
+  }
+
+  /**
+   * A hostile job description reaches the head as filtered HTML.
+   *
+   * One script element, which decodes to the graph: markup in the field
+   * never ends the element or adds another.
+   */
+  public function testHostileJobDescription(): void {
+    $this->createField('field_job', 'text_long', 'Job description');
+    $hostile = '<p onclick="x()">Hi</p><script>alert(1)</script><a href="javascript:alert(1)">apply</a><ul><li>Design</li></ul></script><script>alert(2)</script>';
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Designer',
+      'uid' => $this->author->id(),
+      'field_job' => ['value' => $hostile, 'format' => 'plain_text'],
+    ]);
+    $node->save();
+    $this->createTemplate(TRUE, [
+      'schema' => [
+        'type' => 'JobPosting',
+        'props' => [
+          'description' => [
+            'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_job␞␟value', 'sourceType' => 'entity-field'],
+          ],
+          'hiringOrganization' => ['fact' => 'identity'],
+          'work' => ['text' => 'remote'],
+        ],
+      ],
+    ]);
+    $response = $this->get('/node/' . $node->id());
+    $content = (string) $response->getContent();
+    self::assertSame(1, substr_count($content, '<script type="application/ld+json">'));
+    self::assertStringNotContainsString('alert(', $content);
+    $head = self::readHead($response);
+    self::assertCount(1, $head['json_ld']);
+    $graph = self::graph(['script' => [['textContent' => $head['json_ld'][0]]]]);
+    self::assertSame('JobPosting', $graph['primary']['@type']);
+    self::assertSame('<p>Hi</p><a>apply</a><ul><li>Design</li></ul>', $graph['primary']['description']);
   }
 
   /**

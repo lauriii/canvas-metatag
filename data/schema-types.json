@@ -1,7 +1,74 @@
 {
+  "$shapes": {
+    "address": {
+      "type": "PostalAddress",
+      "requires": [["streetAddress", "addressLocality"], ["addressCountry"]],
+      "parts": [
+        { "key": "streetAddress", "label": "Street address", "kind": "text" },
+        { "key": "postalCode", "label": "Postal code", "kind": "text" },
+        { "key": "addressLocality", "label": "City", "kind": "text" },
+        { "key": "addressRegion", "label": "Region", "kind": "text" },
+        { "key": "addressCountry", "label": "Country", "kind": "enum", "codes": "country", "emit": "code", "suggest": "country", "ai": false }
+      ]
+    },
+    "venue": {
+      "type": "Place",
+      "requires": [["name", "address"]],
+      "parts": [
+        { "key": "name", "label": "Name", "kind": "text" },
+        { "key": "address", "label": "Address", "use": "address" }
+      ]
+    },
+    "who": {
+      "type": "Thing",
+      "requires": [["name"]],
+      "parts": [
+        { "key": "name", "label": "Name", "kind": "text", "ai": false },
+        { "key": "url", "label": "Website", "kind": "url" }
+      ]
+    },
+    "geo": {
+      "type": "GeoCoordinates",
+      "requires": [["latitude"], ["longitude"]],
+      "parts": [
+        { "key": "latitude", "label": "Latitude", "kind": "number", "range": [-90, 90], "ai": false },
+        { "key": "longitude", "label": "Longitude", "kind": "number", "range": [-180, 180], "ai": false }
+      ]
+    },
+    "pay": {
+      "type": "MonetaryAmount",
+      "nested": { "value": "QuantitativeValue" },
+      "requires": [["value_minValue"], ["value_unitText"]],
+      "parts": [
+        { "key": "value_minValue", "label": "From", "kind": "number", "ai": false },
+        { "key": "value_maxValue", "label": "Up to", "kind": "number", "ai": false },
+        { "key": "currency", "label": "Currency", "kind": "currency", "ai": false },
+        { "key": "value_unitText", "label": "Paid per", "kind": "enum", "options": ["HOUR", "DAY", "WEEK", "MONTH", "YEAR"], "option_labels": { "HOUR": "hour", "DAY": "day", "WEEK": "week", "MONTH": "month", "YEAR": "year" }, "emit": "code", "ai": false }
+      ]
+    },
+    "tickets": {
+      "type": "Offer",
+      "requires": [["price"]],
+      "parts": [
+        { "key": "price", "label": "Price", "kind": "number", "ai": false },
+        { "key": "priceCurrency", "label": "Currency", "kind": "currency", "ai": false },
+        { "key": "availability", "label": "Availability", "kind": "enum", "options": ["InStock", "PreOrder", "NotYet", "SoldOut"], "option_labels": { "InStock": "on sale", "PreOrder": "presale", "NotYet": "not on sale yet", "SoldOut": "sold out" }, "ai": false },
+        { "key": "validFrom", "label": "On sale from", "kind": "date", "when": { "availability": ["PreOrder", "NotYet"] } },
+        { "key": "url", "label": "Where to buy", "kind": "url" }
+      ]
+    },
+    "nutrition": {
+      "type": "NutritionInformation",
+      "requires": [["calories"]],
+      "needs": ["recipeYield"],
+      "parts": [
+        { "key": "calories", "label": "Calories", "kind": "number", "format": "{n} calories", "ai": false }
+      ]
+    }
+  },
   "WebPage": {
     "label": "Web page", "page_type": "WebPage",
-    "kind": { "label": "A web page", "name": "a web page", "earn": "No search feature of its own. Right for most pages.", "icon": "file", "order": 6 },
+    "kind": { "label": "A web page", "name": "a web page", "earn": "No search feature of its own. Right for most pages.", "icon": "file", "order": 10 },
     "main": [],
     "variants": "Kind of page",
     "slots": { "name": { "path": "name", "fact": "title" }, "site": { "path": "isPartOf.name", "site": "identity.name", "label": "Site name" } },
@@ -19,6 +86,9 @@
   },
   "CollectionPage": {
     "label": "Collection page", "page_type": "CollectionPage", "variant_of": "WebPage",
+    "props": [
+      { "key": "items", "label": "Pages it lists", "kind": "ref", "list": true, "max": 100, "accept": [], "item": "ListItem", "link_only": true, "scopes": { "page": "component" }, "ai": false }
+    ],
     "slots": { "name": { "path": "name", "fact": "title" }, "site": { "path": "isPartOf.name", "site": "identity.name", "label": "Site name" } },
     "say": [["{name}, a page that lists other pages of {site}."]]
   },
@@ -29,15 +99,13 @@
     "main": ["image", "datePublished"],
     "variants": "Kind of article",
     "refs": { "publisher": "identity" },
-    "nested": { "author": "Person" },
     "props": [
       { "key": "headline", "label": "Headline", "kind": "text", "default": { "fact": "title" } },
       { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
-      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
+      { "key": "image", "label": "Image", "kind": "image", "list": true, "max": 10, "default": { "fact": "image" } },
       { "key": "datePublished", "label": "Published", "kind": "date", "default": { "fact": "published" } },
       { "key": "dateModified", "label": "Updated", "kind": "date", "default": { "fact": "modified" } },
-      { "key": "author_name", "label": "Author name", "kind": "text", "default": { "fact": "author" }, "ai": false },
-      { "key": "author_url", "label": "Author page", "kind": "url" }
+      { "group": "author", "use": "who", "label": "Author", "type": "Person", "list": true, "ref": { "label": "Author", "accept": ["Person", "Organization"], "site": true }, "defaults": { "name": { "fact": "author" } } }
     ],
     "slots": {
       "headline": { "path": "headline", "prop": "headline" },
@@ -73,22 +141,18 @@
     "label": "Event",
     "primary_type": "Event",
     "kind": { "label": "An event people attend in person", "name": "an event", "earn": "Can show in event listings with its date and place.", "not_for": "Not for events that happen only online.", "icon": "calendar", "order": 4 },
-    "main": ["startDate", "location_address_streetAddress", "location_address_addressLocality", "location_address_addressCountry"],
-    "refs": { "organizer": { "to": "identity", "unless": "organizer_name" } },
-    "nested": { "location": "Place", "location_address": "PostalAddress", "organizer": "Organization" },
+    "main": ["startDate", "location"],
     "props": [
       { "key": "name", "label": "Event name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
       { "key": "startDate", "label": "Starts", "kind": "date", "level": "required" },
       { "key": "endDate", "label": "Ends", "kind": "date" },
-      { "key": "location_name", "label": "Venue", "kind": "text" },
-      { "key": "location_address_streetAddress", "label": "Street address", "kind": "text", "level": "required" },
-      { "key": "location_address_addressLocality", "label": "City", "kind": "text" },
-      { "key": "location_address_postalCode", "label": "Postal code", "kind": "text" },
-      { "key": "location_address_addressCountry", "label": "Country", "kind": "text" },
+      { "group": "location", "use": "venue", "label": "Venue", "level": "required", "ref": { "label": "Venue page", "accept": ["Place"], "inline": "address", "per_item": true } },
       { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
       { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
       { "key": "eventStatus", "label": "Status", "kind": "enum", "options": ["EventScheduled", "EventCancelled", "EventPostponed", "EventRescheduled"], "option_labels": { "EventScheduled": "scheduled", "EventCancelled": "cancelled", "EventPostponed": "postponed", "EventRescheduled": "rescheduled" }, "ai": false },
-      { "key": "organizer_name", "label": "Organizer", "kind": "text" }
+      { "group": "offers", "use": "tickets", "label": "Tickets" },
+      { "group": "organizer", "use": "who", "label": "Organizer", "type": "Organization", "ref": { "label": "Organizer", "accept": ["Person", "Organization"], "site": true, "page_default": true } },
+      { "key": "performer", "label": "Performers", "kind": "ref", "list": true, "max": 50, "accept": ["Person", "Organization"], "as": "Person", "per_item": true, "scopes": { "page": "component" }, "ai": false }
     ],
     "slots": {
       "name": { "path": "name", "prop": "name" },
@@ -113,7 +177,7 @@
     "props": [
       { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
       { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
-      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
+      { "key": "image", "label": "Image", "kind": "image", "list": true, "max": 10, "default": { "fact": "image" } },
       { "key": "offers_price", "label": "Price", "kind": "number", "level": "required", "ai": false },
       { "key": "offers_priceCurrency", "label": "Currency", "kind": "currency", "ai": false },
       { "key": "billing", "label": "Billed", "kind": "enum", "options": ["once", "P1M", "P1Y"], "option_labels": { "once": "once", "P1M": "every month", "P1Y": "every year" }, "emit": false, "ai": false },
@@ -182,15 +246,13 @@
     "page_type": "ProfilePage", "primary_type": "Person", "og_type": "profile",
     "kind": { "label": "A person's profile", "name": "a profile", "earn": "Can show the person's name and photo with results from the page.", "icon": "person", "order": 5 },
     "main": ["image", "jobTitle"],
-
-    "nested": { "worksFor": "Organization" },
     "props": [
       { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
       { "key": "description", "label": "About", "kind": "text", "default": { "fact": "description" } },
       { "key": "image", "label": "Photo", "kind": "image", "default": { "fact": "image" } },
       { "key": "jobTitle", "label": "Role", "kind": "text" },
-      { "key": "worksFor_name", "label": "Works for", "kind": "text" },
-      { "key": "sameAs", "label": "Profile elsewhere", "kind": "url" }
+      { "group": "worksFor", "use": "who", "label": "Works for", "type": "Organization", "ref": { "label": "Works for", "accept": ["Organization"], "site": true } },
+      { "key": "sameAs", "label": "Profiles elsewhere", "kind": "url", "list": true, "max": 10 }
     ],
     "slots": {
       "name": { "path": "name", "prop": "name" },
@@ -199,6 +261,117 @@
     "say": [[
       "{name}, {role}, on a profile page.",
       "{name}, on a profile page."
+    ]]
+  },
+  "JobPosting": {
+    "label": "Job posting",
+    "primary_type": "JobPosting",
+    "kind": { "label": "A job posting", "name": "a job posting", "earn": "Can show in job listings with the pay and where the work is.", "not_for": "Set up on a content type: one page per job.", "icon": "backpack", "order": 6 },
+    "scopes": { "page": "component" },
+    "main": ["description", "hiringOrganization", "work", "jobLocation"],
+    "props": [
+      { "key": "title", "label": "Job title", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "description", "label": "Description", "kind": "text", "html": true, "link_only": true, "level": "required", "ai": false },
+      { "key": "datePosted", "label": "Posted", "kind": "date", "default": { "fact": "published" }, "level": "required" },
+      { "key": "validThrough", "label": "Closing date", "kind": "date", "per_item": true },
+      { "key": "employmentType", "label": "Employment type", "kind": "enum", "list": true, "options": ["FULL_TIME", "PART_TIME", "CONTRACTOR", "TEMPORARY", "INTERN", "VOLUNTEER"], "option_labels": { "FULL_TIME": "full time", "PART_TIME": "part time", "CONTRACTOR": "contract", "TEMPORARY": "temporary", "INTERN": "internship", "VOLUNTEER": "volunteer" }, "emit": "code", "ai": false },
+      { "group": "hiringOrganization", "use": "who", "label": "Employer", "type": "Organization", "level": "required", "ref": { "label": "Employer", "accept": ["Organization"], "site": true } },
+      { "key": "work", "label": "Where the work is", "kind": "enum", "options": ["onsite", "remote", "both"], "option_labels": { "onsite": "on site", "remote": "fully remote", "both": "on site or remote" }, "emit": false, "ai": false },
+      { "key": "applicantLocationRequirements", "label": "Open to people in", "kind": "enum", "list": true, "max": 50, "codes": "country", "item": "Country", "emit": "code", "under": "work", "when": { "work": ["remote", "both"] }, "ai": false },
+      { "group": "jobLocation", "use": "venue", "label": "Workplace", "list": true, "when": { "work": ["onsite", "both"] }, "ref": { "label": "Workplace page", "accept": ["Place"], "inline": "address", "per_item": true } },
+      { "group": "baseSalary", "use": "pay", "label": "Pay" }
+    ],
+    "slots": {
+      "title": { "path": "title", "prop": "title" },
+      "employer": { "path": "hiringOrganization.name", "prop": "hiringOrganization_name" },
+      "city": { "path": "jobLocation.address.addressLocality", "prop": "jobLocation_address_addressLocality" }
+    },
+    "say": [[
+      "{title}, a job at {employer} in {city}.",
+      "{title}, a job at {employer}.",
+      "{title}, a job in {city}.",
+      "{title}, a job posting."
+    ]]
+  },
+  "LocalBusiness": {
+    "label": "A place people visit",
+    "primary_type": "LocalBusiness",
+    "kind": { "label": "A place people visit", "name": "a place people visit", "earn": "Can show its address, opening hours and phone number in local results.", "not_for": "Not for a business with no address customers visit.", "icon": "home", "order": 7 },
+    "main": ["address", "openingHoursSpecification", "telephone"],
+    "props": [
+      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "placeKind", "label": "Kind of place", "kind": "enum", "default": { "text": "LocalBusiness" }, "emit": "type", "options": ["Store", "Restaurant", "CafeOrCoffeeShop", "BarOrPub", "Bakery", "Hotel", "Dentist", "MedicalClinic", "HealthAndBeautyBusiness", "LegalService", "FinancialService", "RealEstateAgent", "HomeAndConstructionBusiness", "AutomotiveBusiness", "SportsActivityLocation", "Library", "ChildCare", "TravelAgency", "LocalBusiness", "EventVenue"], "option_labels": { "Store": "store", "Restaurant": "restaurant", "CafeOrCoffeeShop": "café or coffee shop", "BarOrPub": "bar or pub", "Bakery": "bakery", "Hotel": "hotel", "Dentist": "dentist", "MedicalClinic": "medical clinic", "HealthAndBeautyBusiness": "health and beauty", "LegalService": "legal service", "FinancialService": "financial service", "RealEstateAgent": "real estate agent", "HomeAndConstructionBusiness": "home and construction", "AutomotiveBusiness": "automotive", "SportsActivityLocation": "sports and fitness", "Library": "library", "ChildCare": "child care", "TravelAgency": "travel agency", "LocalBusiness": "other local business", "EventVenue": "a venue (not a business)" }, "ai": false },
+      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
+      { "key": "url", "label": "Web address", "kind": "url", "default": { "fact": "url" } },
+      { "group": "address", "use": "address", "label": "Address", "level": "required" },
+      { "key": "openingHoursSpecification", "label": "Opening hours", "kind": "hours", "ai": false },
+      { "key": "telephone", "label": "Telephone", "kind": "text", "pattern": "^\\+?[0-9][0-9 ()./-]{4,30}$", "ai": false },
+      { "group": "geo", "use": "geo", "label": "Coordinates" },
+      { "key": "priceRange", "label": "Price range", "kind": "text", "ai": false },
+      { "key": "menu", "label": "Menu", "kind": "url", "when": { "placeKind": ["Restaurant", "CafeOrCoffeeShop", "BarOrPub", "Bakery"] } },
+      { "key": "servesCuisine", "label": "Cuisine", "kind": "text", "join": ", ", "when": { "placeKind": ["Restaurant", "CafeOrCoffeeShop", "BarOrPub", "Bakery"] } }
+    ],
+    "slots": {
+      "name": { "path": "name", "prop": "name" },
+      "city": { "path": "address.addressLocality", "prop": "address_addressLocality" }
+    },
+    "say": [[
+      "{name}, a place in {city}.",
+      "{name}, a place people visit."
+    ]]
+  },
+  "Recipe": {
+    "label": "Recipe",
+    "primary_type": "Recipe",
+    "kind": { "label": "A recipe", "name": "a recipe", "earn": "Can show in recipe results with its photo and times.", "icon": "recipe", "order": 8 },
+    "main": ["recipeIngredient", "recipeInstructions", "prepTime", "cookTime", "totalTime", "image"],
+    "props": [
+      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "image", "label": "Image", "kind": "image", "list": true, "max": 10, "default": { "fact": "image" } },
+      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "group": "author", "use": "who", "label": "Author", "type": "Person", "ref": { "label": "Author", "accept": ["Person", "Organization"], "site": true, "page_default": true } },
+      { "key": "datePublished", "label": "Published", "kind": "date", "default": { "fact": "published" } },
+      { "key": "prepTime", "label": "Prep time", "kind": "number", "unit": "minute", "units": ["minute", "hour"], "pair": "cookTime", "ai": false },
+      { "key": "cookTime", "label": "Cook time", "kind": "number", "unit": "minute", "units": ["minute", "hour"], "pair": "prepTime", "ai": false },
+      { "key": "totalTime", "label": "Total time", "kind": "number", "unit": "minute", "units": ["minute", "hour"], "ai": false },
+      { "key": "recipeYield", "label": "Serves", "kind": "text" },
+      { "key": "recipeCategory", "label": "Category", "kind": "text", "join": ", " },
+      { "key": "recipeCuisine", "label": "Cuisine", "kind": "text", "join": ", " },
+      { "key": "keywords", "label": "Keywords", "kind": "text", "join": ", " },
+      { "key": "recipeIngredient", "label": "Ingredients", "kind": "text", "list": true, "max": 100, "scopes": { "page": "component" }, "ai": false },
+      { "key": "recipeInstructions", "label": "Steps", "kind": "text", "list": true, "max": 100, "item": "HowToStep", "scopes": { "page": "component" }, "ai": false },
+      { "group": "nutrition", "use": "nutrition", "label": "Nutrition" }
+    ],
+    "slots": {
+      "name": { "path": "name", "prop": "name" },
+      "author": { "path": "author.name", "prop": "author_name" },
+      "yield": { "path": "recipeYield", "prop": "recipeYield" }
+    },
+    "say": [[
+      "{name}, a recipe by {author} that serves {yield}.",
+      "{name}, a recipe by {author}.",
+      "{name}, a recipe that serves {yield}.",
+      "{name}, a recipe."
+    ]]
+  },
+  "Course": {
+    "label": "Course",
+    "primary_type": "Course",
+    "kind": { "label": "A course", "name": "a course", "earn": "Can show in a course list, from a page that lists at least 3 courses.", "icon": "course", "order": 9 },
+    "main": ["description"],
+    "refs": { "provider": "identity" },
+    "props": [
+      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" }, "meter": 60 }
+    ],
+    "slots": {
+      "name": { "path": "name", "prop": "name" },
+      "provider": { "path": "provider.name", "site": "identity.name", "label": "Provider" }
+    },
+    "say": [[
+      "{name}, a course from {provider}.",
+      "{name}, a course."
     ]]
   }
 }

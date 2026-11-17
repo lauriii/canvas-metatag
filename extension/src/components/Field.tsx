@@ -58,6 +58,10 @@ export interface FieldOptions {
   action?: ReactNode;
   /** No Reset in the aside: the control has its own way back (a box's ×). */
   noReset?: boolean;
+  /** The label shown, where its group says the rest ("Name" under Organizer); `label` stays its name. */
+  shortLabel?: string;
+  /** A part in its group's sheet: what the group misses, and what the page lacks, is said once for the group. */
+  quiet?: boolean;
 }
 
 export interface FieldParts {
@@ -162,6 +166,8 @@ export function useField(options: FieldOptions): FieldParts {
       (
         document.getElementById(id) ??
         ref.current?.querySelector<HTMLElement>('[data-focus]') ??
+        // The control that replaced it (a box, a select), else the label.
+        ref.current?.querySelector<HTMLElement>('input, textarea, button:not([data-link])') ??
         document.getElementById(`${id}-label`)
       )?.focus({ preventScroll: true }),
     );
@@ -221,8 +227,10 @@ export function useField(options: FieldOptions): FieldParts {
         : below === 'default'
           ? `the ${language} version`
           : 'the default');
+    // Nothing to go back to: Reset clears.
+    const none = !options.resetTip && below === 'fallback' && !options.fallback;
     action = (
-      <Tooltip content={`Back to ${back}`}>
+      <Tooltip content={none ? 'Back to empty' : `Back to ${back}`}>
         <Btn
           variant="ghost"
           size={24}
@@ -431,7 +439,11 @@ export function Field(
   const found = useIssue(props.scope, props.path);
   // What the Schema stage already says about the page is said here again
   // only once the field is in use: one line at rest, not two.
-  const issue = found && !field.focused && found === stageMatch(issues) ? undefined : found;
+  const issue =
+    (found && !field.focused && found === stageMatch(issues)) ||
+    (props.quiet && found && /^schema-(incomplete|not-on-page):/.test(found.id))
+      ? undefined
+      : found;
   const { meter } = props;
   const guideId = `${field.id}-guide`;
 
@@ -527,9 +539,17 @@ export function Field(
     [field.aside && field.asideId, guide && guideId]
       .filter(Boolean)
       .join(' ') || undefined;
+  const words = props.shortLabel ? (
+    <>
+      <span aria-hidden>{props.shortLabel}</span>
+      <span className="seo-visually-hidden">{props.label}</span>
+    </>
+  ) : (
+    props.label
+  );
   const label = props.group ? (
     <span id={field.labelId} tabIndex={-1} className="seo-label">
-      {props.label}
+      {words}
     </span>
   ) : (
     <label
@@ -538,7 +558,7 @@ export function Field(
       tabIndex={-1}
       className="seo-label"
     >
-      {props.label}
+      {words}
     </label>
   );
   const row = (

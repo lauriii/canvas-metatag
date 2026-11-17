@@ -51,7 +51,8 @@ test('a new page reads as a web page, chosen by default', async ({ page }) => {
   await expect(button(frame, UI.schema.kind)).toHaveAccessibleDescription(new RegExp(`^${UI.schema.webPage}`));
   await button(frame, UI.schema.kind).click();
   const kinds = frame.getByRole('group', { name: UI.schema.kinds });
-  await expect(kinds.getByRole('radio')).toHaveCount(6);
+  // Job postings are set up on a content type: not offered here.
+  await expect(kinds.getByRole('radio')).toHaveCount(9);
   // Focus starts on the chosen kind; Escape goes back to the field.
   await expect(kinds.getByRole('radio', { name: UI.schema.webPage })).toBeChecked();
   await expect(kinds.getByRole('radio', { name: UI.schema.webPage })).toBeFocused();
@@ -241,8 +242,13 @@ test('an event names itself after the page, and its withheld proof reads its val
 
   // Filled in: the name follows the page title, and pressing it opens its
   // own field here, focused, saying so.
-  await frame.getByRole('textbox', { name: 'Street address', exact: true }).fill('Linnankatu 1');
-  await frame.getByRole('textbox', { name: 'Street address', exact: true }).press('Tab');
+  // The fix opens the venue's sheet on the street, focused.
+  await stage(frame).getByRole('button', { name: 'Add Street address', exact: true }).click();
+  const street = frame.getByRole('textbox', { name: 'Street address', exact: true });
+  await expect(street).toBeFocused();
+  await street.fill('Linnankatu 1');
+  await street.press('Tab');
+  await button(frame, UI.action.back).click();
   const name = stage(frame).getByRole('button', { name: /^Event name, .+, from the page title$/ });
   await expect(name).toBeVisible({ timeout: 30_000 });
   await name.click();
@@ -281,9 +287,10 @@ test('changing the kind names what it removes, and Undo brings it back', async (
   const frame = await schema(page, PAGES.stored.id);
   await button(frame, UI.schema.kind).click();
   await frame.getByRole('radio', { name: UI.schema.event }).check();
-  // Said in the form's order, the price first; its words are announced too.
-  await expect(frame.locator('.seo-sheet-foot').getByText(/^Changing to an event removes the price \(€89\) and the billing \(every month\) you set\. Undo brings them back\.$/)).toBeVisible();
-  await expect(frame.getByRole('status').filter({ hasText: /^Changing to an event removes the price/ })).toHaveCount(1);
+  // An event's tickets keep the price: only the billing goes. Its words are
+  // announced too.
+  await expect(frame.locator('.seo-sheet-foot').getByText(/^Changing to an event removes the billing \(every month\) you set\. Undo brings it back\.$/)).toBeVisible();
+  await expect(frame.getByRole('status').filter({ hasText: /^Changing to an event removes the billing/ })).toHaveCount(1);
   // Until it is confirmed, the kind is what it was.
   await button(frame, 'Keep plans for a service').click();
   await expect(frame.locator('.seo-field[data-path="schema.type"]')).toContainText(UI.schema.service);
@@ -302,9 +309,9 @@ test('changing the kind names what it removes, and Undo brings it back', async (
 });
 
 test('a kind this site no longer knows is said, and the page stays a web page', async ({ page }) => {
-  const frame = await schema(page, PAGES.oldRecipe.id);
-  await expect(frame.getByText('This page was described as “Recipe”, which this site no longer knows. Search engines get a plain web page.')).toBeVisible();
-  await expect(frame.locator('.seo-field[data-path="schema.type"]')).toContainText('Not known: “Recipe”');
+  const frame = await schema(page, PAGES.unknownKind.id);
+  await expect(frame.getByText('This page was described as “Movie”, which this site no longer knows. Search engines get a plain web page.')).toBeVisible();
+  await expect(frame.locator('.seo-field[data-path="schema.type"]')).toContainText('Not known: “Movie”');
   await button(frame, UI.tab.checks).click();
   await expect(sheet(frame, 'Checks').getByText('Choose what this page is')).toBeVisible();
 });
@@ -334,7 +341,11 @@ test('the price and its currency fit side by side, no word broken, at 100 and 20
     await expect(currency.getByRole('button', { name: 'Reset Currency' })).toBeVisible();
     // Side by side at the dialog's width; below the width where both fit
     // the pair stacks. Each label row and the chosen currency stay on one line.
-    const apart = Math.abs((await box(price)).y - (await box(currency)).y);
+    // Both measured at once: the stage above may still be reflowing.
+    const apart = await pair.evaluate((element) => {
+      const [one, two] = [...element.querySelectorAll(':scope > .seo-field')].map((field) => field.getBoundingClientRect().top);
+      return Math.abs(one - two);
+    });
     if (size.width === 1440) {
       expect(apart).toBeLessThan(2);
     } else if (apart >= 2) {

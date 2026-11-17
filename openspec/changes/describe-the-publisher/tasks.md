@@ -18,6 +18,12 @@ last two.
 - [ ] 1b.2 The site card's line falls back to the identity description shortened at its first clause when Drupal has no slogan. Verify with `ShareCardTest` (the farm site's description gives "Human expertise that amplifies what your AI agents can do"; a slogan wins; neither gives no line) and `ResolverTest` (the front page named "Home" without a slogan: its `og:image:alt` is "{Site name}: {line}" with that line). (Was the identity-description half of `add-home-page-defaults` 6b.2 and of the site card line in `strengthen-zero-config-defaults`.)
 - [ ] 1b.3 Checks on the front page without a description of its own: with an identity description, no "Add a description" and the description field says "From the site's description"; without one, "Add a description" as `add-home-page-defaults` words it. Verify with `checks.test.ts` cases for both. (Was part of `add-home-page-defaults` 6b.4.)
 
+## 1c. Handed over by `populate-every-schema-type` (H2)
+
+- [ ] 1c.1 "At ‹Site›'s address" for a job's workplace: an inline `Place` with the identity's address, offered only while that address has a street or city and a country. Verify with `SchemaGraphTest::testJobAtPublishersAddressEmitsInlinePlace` and Playwright `schema-kinds.spec.ts` (the choice absent without an address, present with one).
+- [ ] 1c.2 A profile about the publisher is the identity: a reference to it gives `{"@id": "{home}#identity"}`. Verify with kernel `RefTargetsTest` (a recipe author linking to the publisher's profile).
+- [ ] 1c.3 "Same as ‹Site›" in the opening hours sheet once the identity has hours (`WeekEditor`'s `same`). Verify with `controls.test.ts` and Playwright `schema-kinds.spec.ts`.
+
 ## 2. Linked identity
 
 - [ ] 2.1 `{component: …}` identity values for region and front page sources, read through `Sources`, with profile ticks; `data/profile-hosts.json`; same-site, same registrable domain and `mailto:` never offered as profiles. Verify with a new kernel `IdentityLinkTest` (footer with four links: two ticked, partner unticked, `/privacy` absent; email from `mailto:`).

@@ -11,11 +11,17 @@ canvas_metatag.value:
       label: 'Fact'
       requiredKey: false
       constraints:
-        Choice: [title, description, site, url, author, published, modified, image]
+        Choice: [title, description, site, url, author, published, modified, image, identity]
     media:
       type: string
       label: 'Media UUID'
       requiredKey: false
+    unit:
+      type: string
+      label: 'The unit a linked duration field counts in'
+      requiredKey: false
+      constraints:
+        Choice: [minute, hour]
     source:
       type: mapping
       label: 'Canvas entity-field source'

@@ -277,7 +277,7 @@ final class AssistantTest extends CanvasKernelTestBase {
       $this->assertInvalid(fn () => $this->suggestTitle());
     }
     // A type that is not in the registry.
-    foreach (['{"type":"Recipe","properties":[]}', '{"properties":[]}', '{"type":["Event"]}'] as $this->forced) {
+    foreach (['{"type":"Movie","properties":[]}', '{"properties":[]}', '{"type":["Event"]}'] as $this->forced) {
       $this->assertInvalid(fn () => $this->assistant()->suggestSchema('en', self::PAGE));
     }
   }
@@ -327,6 +327,16 @@ final class AssistantTest extends CanvasKernelTestBase {
       'type' => 'Article',
       'props' => ['headline' => 'Plans for teams'],
       'unverified' => ['headline'],
+    ], $this->assistant()->suggestSchema('en', $page));
+
+    // A recipe: only its name is plain text found on the page. A prep time
+    // (a duration) and ingredients (a list a page cannot hold) are the
+    // editor's to add, never proposed.
+    $this->forced = '{"type":"Recipe","properties":[{"key":"name","value":"Rye bread"},{"key":"prepTime","value":"20"},{"key":"recipeIngredient","value":"500 g rye flour"}]}';
+    $this->assertSame([
+      'type' => 'Recipe',
+      'props' => ['name' => 'Rye bread'],
+      'unverified' => ['name'],
     ], $this->assistant()->suggestSchema('en', $page));
     $this->forced = NULL;
 
@@ -632,7 +642,11 @@ final class AssistantTest extends CanvasKernelTestBase {
     $this->assertStringContainsString("WebPage. Types: \n- WebPage: A web page\n- AboutPage: About page, a kind of web page\n", $system);
     $this->assertStringContainsString("\n- Product: A product people buy. Not for services, memberships or subscriptions.\n", $system);
     $this->assertStringContainsString("\n- WebPage: none\n", $system);
-    $this->assertStringContainsString("\n- Event: name (Event name), location_name (Venue), location_address_streetAddress (Street address), location_address_addressLocality (City), location_address_postalCode (Postal code), location_address_addressCountry (Country), description (Summary), organizer_name (Organizer)\n", $system);
+    $this->assertStringContainsString("\n- Event: name (Event name), location_name (Venue), location_address_streetAddress (Street address), location_address_postalCode (Postal code), location_address_addressLocality (City), location_address_addressRegion (Region), description (Summary)\n", $system);
+    // A kind set up on content types only is never proposed for a page, and
+    // a list of text never is.
+    $this->assertStringNotContainsString('JobPosting', $system);
+    $this->assertStringNotContainsString('recipeIngredient', $system);
     $this->assertStringContainsString("\n- Product: name (Name), description (Summary), brand_name (Brand)\n", $system);
     $this->assertStringContainsString("\n- NewsArticle: headline (Headline), description (Summary)\n", $system);
 

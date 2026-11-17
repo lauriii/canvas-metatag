@@ -238,10 +238,17 @@ final class Assistant {
     $allowed = [];
     $hints = $keys = '';
     foreach (SchemaGraph::types() as $id => $type) {
+      // A kind offered on content types only (a job posting) is set up
+      // there, never proposed for a page.
+      if (!SchemaGraph::offered($id, NULL, 'page')) {
+        continue;
+      }
       $allowed[$id] = [];
       $labels = [];
       foreach ($type['props'] ?? [] as $prop) {
-        if ($prop['kind'] === 'text' && ($prop['ai'] ?? TRUE) !== FALSE) {
+        // Plain text found on the page only: never a list, never what only
+        // a field or a component fills.
+        if ($prop['kind'] === 'text' && ($prop['ai'] ?? TRUE) !== FALSE && SchemaGraph::typable($prop, 'page') && SchemaGraph::offered($id, $prop['key'], 'page')) {
           $allowed[$id][$prop['key']] = $prop['kind'];
           $labels[] = "{$prop['key']} ({$prop['label']})";
         }

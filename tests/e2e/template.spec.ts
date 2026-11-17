@@ -161,6 +161,9 @@ test('type-level values are linked to fields, follow the previewed article and p
   if ((await more.getAttribute('aria-expanded')) !== 'true') {
     await more.click();
   }
+  // The author is someone else, named by the byline.
+  await frame.getByRole('combobox', { name: 'Author', exact: true }).click();
+  await frame.getByRole('option', { name: 'Someone else' }).click();
   await linkTo(frame, 'Author name', /^Byline/);
   await expect(frame.getByRole('combobox', { name: 'Author name', exact: true })).toContainText(article.byline);
 

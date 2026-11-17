@@ -239,6 +239,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'capabilities',
       'site',
       'registry',
+      'codes',
       'search_features',
       'target',
       'preview',
@@ -270,6 +271,7 @@ final class ApiTest extends CanvasKernelTestBase {
         ],
         'values' => ['robots' => ['max_image_preview' => 'large']],
         'currency' => '',
+        'country' => '',
       ],
       'target' => [
         'scope' => 'page',
@@ -300,6 +302,7 @@ final class ApiTest extends CanvasKernelTestBase {
         'published' => ['label' => 'First published', 'kind' => 'date', 'value' => self::PUBLISHED],
         'modified' => ['label' => 'Last updated', 'kind' => 'date', 'value' => self::MODIFIED],
         'image' => ['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
+        'identity' => ['label' => 'This site', 'kind' => 'ref', 'value' => 'Example'],
       ],
       'separator' => '|',
       // A page links no field.
@@ -491,6 +494,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'capabilities',
       'site',
       'registry',
+      'codes',
       'search_features',
       'target',
       'preview',
@@ -534,6 +538,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'published',
       'modified',
       'image',
+      'identity',
     ], array_keys($state['facts']));
     self::assertSame($this->imageOf($hero), $state['facts']['image']['image']);
     $rows = array_column($state['sources'], NULL, 'label');
@@ -638,11 +643,23 @@ final class ApiTest extends CanvasKernelTestBase {
     $template = ContentTemplate::load('node.article.full');
     \assert($template instanceof ContentTemplate);
     $gone = ['source' => ['expression' => 'ℹ︎␜entity:node:article␝field_gone␞␟value', 'sourceType' => 'entity-field']];
-    $this->container->get(AutoSaveManager::class)->saveEntity((clone $template)->setThirdPartySetting('canvas_metatag', 'values', ['description' => $gone]), self::CLIENT);
+    // A job description is formatted text: a plain text field cannot give
+    // it, as saving and the head read it.
+    $byline = [
+      'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'],
+    ];
+    $this->container->get(AutoSaveManager::class)->saveEntity((clone $template)->setThirdPartySetting('canvas_metatag', 'values', [
+      'description' => $gone,
+      'schema' => ['type' => 'JobPosting', 'props' => ['description' => $byline]],
+    ]), self::CLIENT);
     self::assertSame([
       'description' => [
         'field' => 'field_gone',
         'reason' => 'missing',
+      ],
+      'schema.props.description' => [
+        'field' => 'field_byline',
+        'reason' => 'kind',
       ],
     ], self::decodeResponse($this->request(Request::create(self::STATE . $query)))['broken']);
 
@@ -741,6 +758,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'capabilities',
       'site',
       'registry',
+      'codes',
       'search_features',
       'target',
       'preview',
@@ -767,6 +785,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'published',
       'modified',
       'image',
+      'identity',
     ], array_keys($state['facts']));
     self::assertSame(['', 'Example'], array_values(array_unique(array_column($state['facts'], 'value'))));
     self::assertSame(['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => NULL], $state['facts']['image']);
@@ -879,7 +898,10 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame($identity, $raw['identity']);
     self::assertEquals($values, $raw['values']);
     $state = self::decodeResponse($this->request(Request::create(self::STATE)));
-    self::assertSame(['identity' => $identity, 'values' => $values, 'currency' => ''], $state['site']);
+    self::assertSame(['identity' => $identity, 'values' => $values, 'currency' => '', 'country' => ''], $state['site']);
+    // The site's default country is what a country picker suggests.
+    $this->config('system.date')->set('country.default', 'FI')->save();
+    self::assertSame('FI', self::decodeResponse($this->request(Request::create(self::STATE)))['site']['country']);
 
     // The site currency: a code, never a symbol; kept when a save leaves it
     // out.

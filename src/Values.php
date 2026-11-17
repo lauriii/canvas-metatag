@@ -34,6 +34,7 @@ final class Values {
     'published' => 'date',
     'modified' => 'date',
     'image' => 'image',
+    'identity' => 'ref',
   ];
 
   /**
@@ -47,6 +48,8 @@ final class Values {
     'enum' => 'text',
     'currency' => 'text',
     'image' => 'image',
+    'ref' => 'ref',
+    'hours' => 'hours',
   ];
 
   /**
@@ -73,6 +76,7 @@ final class Values {
   private const FACT = 'Choose a value from the list.';
   private const FIELD = 'Choose a field from the list.';
   private const CUSTOM_SHAPE = 'Use one object, or a list of up to 10 objects, each with "@type".';
+  private const FROM_FIELD = 'This comes from a field or a component.';
 
   private const LITERAL = [
     'url' => 'Enter a full address that starts with https://.',
@@ -80,6 +84,9 @@ final class Values {
     'number' => 'Enter a number, like 49 or 49.90.',
     'enum' => 'Choose one of the listed options.',
     'currency' => 'Choose a currency code from the list, such as EUR.',
+    'hours' => 'Check the opening hours: times are in order and do not overlap.',
+    'duration' => 'Enter a whole number, or leave it empty if you do not know it.',
+    'duration_max' => 'Use at most 30 days.',
   ];
 
   /**
@@ -118,7 +125,7 @@ final class Values {
         'canonical' => self::canonical($item, $errors),
         'social' => self::social($item, $value, $errors),
         'robots' => self::robots($item, $errors),
-        'schema' => self::schema($item, $value, $inheritedType, $accepts === NULL, $errors),
+        'schema' => self::schema($item, $value, $inheritedType, $accepts === NULL, $scope, $errors),
       };
     }
     return [self::canon($clean), $errors];
@@ -387,6 +394,45 @@ final class Values {
   }
 
   /**
+   * The items of one formatted text, for a list.
+   *
+   * Its list items, else its paragraphs, each as plain text (fromHtml()).
+   * Text with neither is one item. A list item's nested list stays part of
+   * it.
+   *
+   * @return list<string>
+   *   The items in order, without empty ones.
+   */
+  public static function items(string $html): array {
+    if (!mb_check_encoding($html, 'UTF-8')) {
+      return [];
+    }
+    $parts = [];
+    foreach (['li', 'p'] as $tag) {
+      // Only the outermost elements: a nested list is part of its item.
+      $depth = 0;
+      $start = 0;
+      preg_match_all("~<(/?)$tag\\b[^>]*>~i", $html, $tags, PREG_OFFSET_CAPTURE);
+      foreach ($tags[0] as $at => [$tag_text, $offset]) {
+        if ($tags[1][$at][0] === '') {
+          if ($depth++ === 0) {
+            $start = $offset + strlen($tag_text);
+          }
+        }
+        elseif ($depth > 0 && --$depth === 0) {
+          $parts[] = substr($html, $start, $offset - $start);
+        }
+      }
+      if ($parts !== []) {
+        break;
+      }
+    }
+    // An item is read without its own element, so no full stop is added.
+    $items = array_map(static fn (string $part): string => self::fromHtml($part), $parts ?: [$html]);
+    return array_values(array_filter($items, static fn (string $item): bool => $item !== ''));
+  }
+
+  /**
    * The start of a text read from formatted text.
    *
    * 160 characters at most, cut at a word boundary, never inside a character
@@ -459,8 +505,9 @@ final class Values {
    */
   private static function canon(array $values): array {
     foreach ($values as $key => $value) {
-      // "No ending" is the one empty value that is stored.
-      if ($key === 'title_end' && $value === ['text' => '']) {
+      // The empty values that are stored: "No ending", and "Someone else"
+      // not named yet (schema(): an organizer or author on a Canvas page).
+      if ($value === ['text' => ''] && in_array($key, ['title_end', 'organizer', 'author'], TRUE)) {
         continue;
       }
       if (is_array($value)) {
@@ -647,7 +694,7 @@ final class Values {
   /**
    * Cleans the `schema` map against the type registry.
    */
-  private static function schema(mixed $value, callable $clean_value, string $inheritedType, bool $read, array &$errors): array {
+  private static function schema(mixed $value, callable $clean_value, string $inheritedType, bool $read, string $scope, array &$errors): array {
     if (!is_array($value)) {
       $errors['schema'] = self::INVALID;
       return [];
@@ -656,7 +703,7 @@ final class Values {
     $types = SchemaGraph::types();
     $type = isset($types[$inheritedType]) ? $inheritedType : 'WebPage';
     if (isset($value['type']) && $value['type'] !== '') {
-      if (is_string($value['type']) && isset($types[$value['type']])) {
+      if (is_string($value['type']) && isset($types[$value['type']]) && ($read || SchemaGraph::offered($value['type'], NULL, $scope))) {
         $clean['type'] = $type = $value['type'];
       }
       elseif ($read && is_string($value['type']) && preg_match('/^[A-Za-z][A-Za-z0-9]{0,63}$/D', $value['type'])) {
@@ -676,22 +723,48 @@ final class Values {
       $props = array_column($types[$type]['props'] ?? [], NULL, 'key');
       foreach ($value['props'] as $key => $item) {
         $path = "schema.props.$key";
-        if (!isset($props[$key])) {
+        $prop = $props[$key] ?? NULL;
+        if ($prop === NULL) {
           $errors[$path] = self::NOT_HERE;
           continue;
         }
-        $kind = $props[$key]['kind'];
-        $item = $clean_value($item, $path, self::KINDS[$kind], 2000);
-        // Typed text is checked now; a linked value when it is read. A
-        // three-letter currency stored before the code list ("RMB") is kept
-        // when read, so that the graph reports it as dropped instead of
-        // losing it without a word.
-        $code = $read && $kind === 'currency' && preg_match('/^[A-Z]{3}$/D', $item['text'] ?? '');
-        if (isset($item['text']) && !$code && !SchemaGraph::validLiteral($type, (string) $key, $item['text'])) {
-          $errors[$path] = self::LITERAL[$kind] ?? 'This value has characters that are not allowed here.';
+        $error = self::propError($prop, $item, $scope);
+        if ($error !== NULL) {
+          $errors[$path] = $error;
           continue;
         }
-        $clean['props'][$key] = $item;
+        // "Someone else", not named yet: on a Canvas page it keeps the site
+        // from being the organizer or author by default.
+        if (!empty($prop['page_default']) && $scope === 'page' && $item === ['text' => '']) {
+          $clean['props'][$key] = $item;
+          continue;
+        }
+        $kind = $prop['kind'];
+        // A linked duration keeps the unit its field counts in.
+        $unit = is_array($item) && isset($item['unit'], $item['source']) ? $item['unit'] : NULL;
+        if ($unit !== NULL) {
+          unset($item['unit']);
+        }
+        $item = $clean_value($item, $path, self::kindOf($prop), 2000);
+        // Typed text is checked now; a linked value when it is read. A
+        // three-letter currency stored before the code list ("RMB"), and a
+        // country typed as text before countries were codes ("Finland"),
+        // are kept when read, so that the graph reports them as dropped
+        // instead of losing them without a word.
+        $code = $read && (($kind === 'currency' && preg_match('/^[A-Z]{3}$/D', $item['text'] ?? '')) || isset($prop['codes']));
+        if (isset($item['text']) && !$code && !SchemaGraph::literal($prop, $item['text'])) {
+          $errors[$path] = self::LITERAL[match (TRUE) {
+            isset($prop['unit']) && preg_match('/^\d+$/D', $item['text']) && (int) $item['text'] > 0 => 'duration_max',
+            isset($prop['unit']) => 'duration',
+            default => $kind,
+          }] ?? 'This value has characters that are not allowed here.';
+          continue;
+        }
+        if (isset($item['fact']) && $item['fact'] === 'identity' && empty($prop['site'])) {
+          $errors[$path] = self::FACT;
+          continue;
+        }
+        $clean['props'][$key] = $item === NULL || $unit === NULL ? $item : $item + ['unit' => $unit];
       }
     }
     if (isset($value['custom'])) {
@@ -704,6 +777,38 @@ final class Values {
       $errors["schema.$key"] = self::NOT_HERE;
     }
     return $clean;
+  }
+
+  /**
+   * The kind of value a property takes.
+   *
+   * Formatted text for a job description, else its kind's (KINDS).
+   */
+  public static function kindOf(array $prop): string {
+    return empty($prop['html']) ? self::KINDS[$prop['kind']] : 'html';
+  }
+
+  /**
+   * Why a value of a property is refused before its kind is checked.
+   *
+   * A property not offered on the scope, typed text where only a field or
+   * a component gives the value, a unit beside anything but a linked
+   * duration.
+   */
+  private static function propError(array $prop, mixed $item, string $scope): ?string {
+    if (isset($prop['scopes'][$scope])) {
+      return $prop['scopes'][$scope] === 'component' ? self::FROM_FIELD : self::NOT_HERE;
+    }
+    if (!is_array($item)) {
+      return NULL;
+    }
+    if (isset($item['text']) && !SchemaGraph::typable($prop, $scope)) {
+      return self::FROM_FIELD;
+    }
+    if (array_key_exists('unit', $item)) {
+      return isset($item['source']) && count($item) === 2 && in_array($item['unit'], $prop['units'] ?? [], TRUE) ? NULL : self::INVALID;
+    }
+    return NULL;
   }
 
   /**

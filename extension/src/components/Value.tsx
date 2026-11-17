@@ -55,6 +55,8 @@ export interface InputProps {
   set(text: string | undefined): void;
   /** Alt+Down and `{` in an empty input open the link menu. */
   onKeyDown(event: KeyboardEvent<HTMLElement>): void;
+  /** Opens the link menu from this control, where linking is offered. */
+  openMenu?(from: HTMLElement): void;
 }
 
 /** A value as the dialog shows it at rest: dates in words. */
@@ -85,6 +87,9 @@ const UNLINKED: Record<Kind | 'choice', string> = {
   number: 'Type a number instead',
   date: 'Enter a date instead',
   image: 'Use the default image',
+  html: 'Link another field instead',
+  ref: 'Choose who instead',
+  hours: 'Set the hours instead',
   choice: 'Choose an option instead',
 };
 
@@ -132,6 +137,14 @@ export interface LinkOptions {
   choices?: string[];
   /** What the value is resolved against, when not the view's. */
   lookup?: Lookup;
+  /** A reference the publisher cannot be. */
+  noSite?: boolean;
+  /** A choice of who: the site is chosen in its select, never a link. */
+  who?: boolean;
+  /** `list`: the place takes every item of a field; `one`: its first. */
+  items?: 'list' | 'one';
+  /** The box's value in the detail's own words: "20 min" for a duration. */
+  format?(text: string): string;
 }
 
 /** The link button, the menu and the box of one value. */
@@ -145,7 +158,7 @@ function useLink(options: LinkOptions) {
   const type = template ? inSentence(target.label) : 'page';
   const { path, kind, label } = options;
   const value = getPath(state.edits.target, path) as Value | undefined;
-  const linked = !!value && !('text' in value) && !(kind === 'image' && 'media' in value);
+  const linked = !!value && !('text' in value) && !(kind === 'image' && 'media' in value) && !(options.who && 'fact' in value);
   const [editing, setEditing] = useState(false);
   const [menu, setMenu] = useState(false);
   const [seed, setSeed] = useState('');
@@ -170,9 +183,11 @@ function useLink(options: LinkOptions) {
     : lookup.resolvable
       ? { status: 'ok', value: options.defaultWords?.text ?? '', text: options.defaultWords?.text ?? '', image: null }
       : { status: 'none', value: '', text: '', image: null };
-  const source = shownValue ? tagOf(shownValue, lookup, path) : (options.defaultWords?.tag ?? '');
+  const source = shownValue ? tagOf(shownValue, lookup, path, kind) : (options.defaultWords?.tag ?? '');
   // A default is named as one; its source only where it is not the field.
-  const tag = linked ? source : source === label ? 'Default' : `Default · ${source}`;
+  // A default typed in the registry ("Other local business") is the default,
+  // not text anybody typed.
+  const tag = linked ? source : source === label || (!!shownValue && 'text' in shownValue) ? 'Default' : `Default · ${source}`;
   const group = shownValue && 'source' in shownValue ? `${target.label} › ` : '';
   // What a default is, in words: "each event's title", "the site name".
   const defaultName =
@@ -183,8 +198,15 @@ function useLink(options: LinkOptions) {
       : `the ${source.toLowerCase()}`;
   const why = brokenWhy(lookup.broken?.[path]?.reason, kind);
   // Hidden through a reference: for this item only.
-  const item = !!rowOf(lookup, shownValue)?.hop;
-  const valueText = shown.status === 'ok' ? shownText(shown, kind) : stateWords(shown.status, type, why, item);
+  const row = rowOf(lookup, shownValue);
+  const item = !!row?.hop;
+  // A list linked to several values says how many: every one is used.
+  const more = options.items === 'list' && row?.many && (row.count ?? 0) > 1 ? ` and ${row.count! - 1} more` : '';
+  const first = options.format?.(shownText(shown, kind)) ?? shownText(shown, kind);
+  // "Leave overnight and 2 more": the first item's full stop goes.
+  const valueText = shown.status === 'ok'
+    ? (more ? first.replace(/[.。]$/u, '') : first) + more
+    : stateWords(shown.status, type, why, item);
   const unlinked = UNLINKED[options.choices ? 'choice' : kind];
   // The row that types a value instead of the default: "Type a title for
   // every Article", "Enter a date".
@@ -261,7 +283,9 @@ function useLink(options: LinkOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump?.seq]);
 
-  const entries = options.linkable ? entriesFor(path, kind, template ? 'template' : 'page', lookup, target.label, options.choices) : [];
+  const entries = options.linkable
+    ? entriesFor(path, kind, template ? 'template' : 'page', lookup, target.label, options.choices, options.items, label).filter((entry) => !(options.noSite && entry.key === 'fact:identity'))
+    : [];
   const current = linked ? value : byDefault ?? undefined;
   const toItem = (entry: Entry, deep: boolean): MenuItem => ({
     key: entry.key,
@@ -468,7 +492,8 @@ function useLink(options: LinkOptions) {
         className="seo-typed"
         ref={box}
         onBlur={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget) && !event.relatedTarget?.closest('.seo-menu')) {
+          // A select's list, open, is the input's own: it keeps the input.
+          if (!event.currentTarget.contains(event.relatedTarget) && !event.relatedTarget?.closest('.seo-menu, [role="listbox"]')) {
             setEditing(false);
           }
         }}
@@ -479,6 +504,7 @@ function useLink(options: LinkOptions) {
           invalid: field.invalid,
           disabled: field.disabled,
           value: text,
+          openMenu: options.linkable ? (from) => openMenu(from) : undefined,
           set: (next) => {
             setEditing(true);
             dispatch({ type: 'edit', scope: 'target', path, value: next === undefined || next === '' ? undefined : { text: wellFormed(next) } });
@@ -616,7 +642,7 @@ export function ValueField(
       note={props.note}
       group={props.group}
       // A linked box, and a linked image's row, has its own × to go back.
-      noReset={(link.showBox || !!props.image) && link.linked && !link.disabled}
+      noReset={props.noReset || ((link.showBox || !!props.image) && link.linked && !link.disabled)}
     >
       {(field) => (
         <>

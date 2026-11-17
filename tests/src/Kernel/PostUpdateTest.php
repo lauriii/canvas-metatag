@@ -15,6 +15,7 @@ use Drupal\Core\Logger\RfcLoggerTrait;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\Core\Update\UpdateBackend;
 use Drupal\language\Entity\ConfigurableLanguage;
+use Drupal\node\Entity\Node;
 use Drupal\Tests\canvas\Kernel\CanvasKernelTestBase;
 use Drupal\Tests\canvas\Traits\GenerateComponentConfigTrait;
 use Drupal\Tests\content_translation\Traits\ContentTranslationTestTrait;
@@ -29,6 +30,8 @@ use Psr\Log\LoggerInterface;
  */
 #[RunTestsInSeparateProcesses]
 #[CoversFunction('canvas_metatag_post_update_values_as_parts')]
+#[CoversFunction('canvas_metatag_post_update_event_organizer')]
+#[CoversFunction('canvas_metatag_post_update_country_codes')]
 #[Group('canvas_metatag')]
 #[Group('canvas_metatag_canvas_contract')]
 final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterface {
@@ -275,6 +278,104 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
       ContentTemplate::load('node.article.full')?->getThirdPartySetting('canvas_metatag', 'values'),
     ]);
     self::assertSame(['node.article.full: schema.custom: names a field, which custom JSON-LD no longer fills.'], $this->logged);
+  }
+
+  /**
+   * An event template that never set its organizer keeps the site.
+   *
+   * The site was every event's organizer unless a name was typed; it now is
+   * by default only on a Canvas page. A typed organizer is kept.
+   */
+  public function testEventOrganizer(): void {
+    $auto_save = $this->container->get(AutoSaveManager::class);
+    $this->setUpCurrentUser();
+    $event = [
+      'schema' => [
+        'type' => 'Event',
+        'props' => ['startDate' => ['text' => '2027-06-19'], 'location_name' => ['text' => 'Riverside Hall']],
+      ],
+    ];
+    $template = $this->createTemplate(TRUE, $event);
+    // The draft names someone else: it keeps them.
+    $draft = clone $template;
+    $draft->setThirdPartySetting('canvas_metatag', 'values', [
+      'schema' => ['type' => 'Event', 'props' => ['organizer_name' => ['text' => 'Example Hall Ltd']]],
+    ]);
+    $auto_save->saveEntity($draft, self::CLIENT);
+
+    \Drupal::moduleHandler()->loadInclude('canvas_metatag', 'php', 'canvas_metatag.post_update');
+    self::assertStringStartsWith('One event template', canvas_metatag_post_update_event_organizer());
+    $stored = ContentTemplate::load($template->id());
+    \assert($stored instanceof ContentTemplate);
+    self::assertSame(['fact' => 'identity'], $stored->getThirdPartySetting('canvas_metatag', 'values')['schema']['props']['organizer']);
+    // The draft is still the editor's, with its own organizer.
+    $entry = $auto_save->getAutoSaveEntity($stored, TRUE);
+    self::assertSame(self::CLIENT, $entry->clientId);
+    \assert($entry->entity instanceof ContentTemplate);
+    self::assertSame(['organizer_name' => ['text' => 'Example Hall Ltd']], $entry->entity->getThirdPartySetting('canvas_metatag', 'values')['schema']['props']);
+    // The head still names the site as the organizer.
+    $node = Node::create(['type' => 'article', 'title' => 'Midsummer', 'status' => 1]);
+    $node->save();
+    $head = $this->resolver()->resolve($node)['head'];
+    $graph = array_column($head['script'][0]['textContent']['@graph'], NULL, '@type');
+    self::assertSame(['@id' => 'http://localhost/#identity'], $graph['Event']['organizer'] ?? NULL);
+    // Run again: nothing to change.
+    self::assertStringStartsWith('0 event templates', canvas_metatag_post_update_event_organizer());
+  }
+
+  /**
+   * A venue's country written as a name or a code is stored as its code.
+   *
+   * On a template and its draft, a page's revisions, and a page draft that
+   * stays in step with its page; a country no list knows stays as written.
+   */
+  public function testCountryCodes(): void {
+    $auto_save = $this->container->get(AutoSaveManager::class);
+    $this->setUpCurrentUser();
+    $event = static fn (string $country): array => [
+      'schema' => [
+        'type' => 'Event',
+        'props' => [
+          'startDate' => ['text' => '2027-06-19'],
+          'location_address_streetAddress' => ['text' => 'Hämeenkatu 1'],
+          'location_address_addressCountry' => ['text' => $country],
+        ],
+      ],
+    ];
+    $template = $this->createTemplate(TRUE, $event('Finland'));
+    $draft = clone $template;
+    $draft->setThirdPartySetting('canvas_metatag', 'values', $event(' sweden '));
+    $auto_save->saveEntity($draft, self::CLIENT);
+    $page = $this->createPage(['canvas_metatag' => Values::encode($event('fi'))]);
+    $other = $this->createPage([
+      'canvas_metatag' => Values::encode($event('Atlantis')),
+      'path' => ['alias' => '/atlantis'],
+    ]);
+    $page_draft = clone Page::load($page->id());
+    $page_draft->set('canvas_metatag', Values::encode($event('Estonia')));
+    $auto_save->saveEntity($page_draft, self::CLIENT);
+
+    \Drupal::moduleHandler()->loadInclude('canvas_metatag', 'php', 'canvas_metatag.post_update');
+    self::assertSame('4 venue countries are stored as their codes.', canvas_metatag_post_update_country_codes());
+    $country = static fn (mixed $values): ?string => $values['schema']['props']['location_address_addressCountry']['text'] ?? NULL;
+    $stored = ContentTemplate::load($template->id());
+    \assert($stored instanceof ContentTemplate);
+    self::assertSame('FI', $country($stored->getThirdPartySetting('canvas_metatag', 'values')));
+    $entry = $auto_save->getAutoSaveEntity($stored, TRUE);
+    self::assertSame(self::CLIENT, $entry->clientId);
+    \assert($entry->entity instanceof ContentTemplate);
+    self::assertSame('SE', $country($entry->entity->getThirdPartySetting('canvas_metatag', 'values')));
+    $pages = $this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID);
+    $pages->resetCache();
+    self::assertSame('FI', $country(Values::decode($pages->load($page->id())->get('canvas_metatag')->value)));
+    self::assertSame('Atlantis', $country(Values::decode($pages->load($other->id())->get('canvas_metatag')->value)));
+    $entry = $auto_save->getAutoSaveEntity($pages->load($page->id()), TRUE);
+    self::assertSame(self::CLIENT, $entry->clientId);
+    self::assertSame('EE', $country(Values::decode($entry->entity->get('canvas_metatag')->value)));
+    // The draft was in step with its page, and still is.
+    self::assertArrayNotHasKey(AutoSaveManager::AUTO_SAVE_CONFLICT_KEY, $auto_save->getAllAutoSaveList(FALSE, TRUE)[AutoSaveManager::getAutoSaveKey($page)]);
+    // Run again: nothing to change.
+    self::assertSame('0 venue countries are stored as their codes.', canvas_metatag_post_update_country_codes());
   }
 
   /**

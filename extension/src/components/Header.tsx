@@ -456,6 +456,8 @@ export function Sheet(props: {
   end?: ReactNode;
   /** Back takes focus on open (else the sheet's own content does). */
   focusBack?: boolean;
+  /** Its title takes focus on open: a sheet of fields, read from its name. */
+  focusTitle?: boolean;
   /** Under the scroller, never over it: a confirm that stays in sight. */
   foot?: ReactNode;
   onClose(): void;
@@ -463,21 +465,48 @@ export function Sheet(props: {
 }) {
   const id = useId();
   const back = useRef<HTMLButtonElement>(null);
+  const title = useRef<HTMLHeadingElement>(null);
+  const section = useRef<HTMLElement>(null);
   const [scrolled, setScrolled] = useState(false);
+  const close = useRef(props.onClose);
+  close.current = props.onClose;
   useEffect(() => {
-    if (props.focusBack) {
+    if (props.focusTitle) {
+      title.current?.focus();
+    } else if (props.focusBack) {
       back.current?.focus();
     }
+    // A button that took itself away left focus nowhere: Escape still
+    // closes the sheet.
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === 'Escape' && !event.defaultPrevented && (document.activeElement === document.body || document.activeElement === null)) {
+        close.current();
+      }
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
     <section
+      ref={section}
       className="seo-sheet"
       aria-labelledby={id}
       onKeyDown={(event: KeyboardEvent) => {
         if (event.key === 'Escape' && !event.defaultPrevented) {
           event.stopPropagation();
           props.onClose();
+        }
+      }}
+      onBlur={(event) => {
+        // Focus lost with a control that went (Clear, a removed row): the
+        // sheet's title takes it, never the document.
+        if (event.relatedTarget === null) {
+          requestAnimationFrame(() => {
+            if (section.current?.isConnected && (document.activeElement === document.body || document.activeElement === null)) {
+              title.current?.focus();
+            }
+          });
         }
       }}
     >
@@ -491,7 +520,9 @@ export function Sheet(props: {
         >
           <ChevronLeftIcon aria-hidden />
         </IconBtn>
-        <h2 id={id}>{props.title}</h2>
+        <h2 id={id} ref={title} tabIndex={-1}>
+          {props.title}
+        </h2>
         {props.end && <div className="seo-sheet-end">{props.end}</div>}
       </div>
       <div

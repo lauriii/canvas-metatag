@@ -31,7 +31,8 @@ final class RegistryConsistencyTest extends UnitTestCase {
     foreach (SchemaGraph::types() as $id => $type) {
       $own = array_filter([$type['primary_type'] ?? NULL, $type['page_type'] ?? NULL]);
       foreach (SchemaGraph::searchFeatures()['features'] as $name => $feature) {
-        if ($feature['status'] === 'shown' && !isset($feature['node']) && array_intersect($own, $feature['on'])) {
+        // A list feature judges the list, not a type's own details.
+        if ($feature['status'] === 'shown' && !isset($feature['node']) && !isset($feature['list']) && array_intersect($own, $feature['on'])) {
           $by[$id][$name] = $feature;
         }
       }
@@ -71,20 +72,29 @@ final class RegistryConsistencyTest extends UnitTestCase {
   /**
    * What a feature needs and nothing fills by default comes first.
    *
-   * At most four details come before More details.
+   * The first four details a scope offers come before More details: a
+   * recipe's ingredients and steps on a content type, its times on a page.
    */
   public function testMainDetails(): void {
     $by = self::byType();
     foreach (SchemaGraph::types() as $id => $type) {
       $props = array_column($type['props'] ?? [], NULL, 'key');
       $main = $type['main'] ?? [];
-      self::assertLessThanOrEqual(4, count($main), $id);
-      self::assertSame([], array_diff($main, array_keys($props)), "$id shows only its own details first.");
+      self::assertSame([], array_diff($main, [...array_keys($props), ...array_keys($type['groups'] ?? [])]), "$id shows only its own details first.");
+      // A group without a reference of its own is offered with its parts.
+      $first = static fn (string $scope): array => array_slice(array_values(array_filter($main, static fn (string $key): bool => isset($props[$key]) ? SchemaGraph::offered($id, $key, $scope) : TRUE)), 0, 4);
       foreach ($by[$id] ?? [] as $name => $feature) {
         foreach ($feature['required'] as $entry) {
           $key = SchemaGraph::propOf(explode('|', ((array) $entry)[0])[0], $id);
-          if ($key !== NULL && !isset($props[$key]['default']) && $props[$key]['kind'] !== 'currency') {
-            self::assertContains($key, $main, "$id: $name needs $key, which nothing fills.");
+          // A part of a group, or a group in a group, is shown with its group.
+          $shown = $key === NULL ? NULL : $props[$key]['group'] ?? $type['groups'][$key]['parent'] ?? $key;
+          if ($key === NULL || isset($props[$key]['default']) || ($props[$key]['kind'] ?? '') === 'currency') {
+            continue;
+          }
+          foreach (['page', 'template'] as $scope) {
+            if (SchemaGraph::offered($id, NULL, $scope) && (!isset($props[$key]) || SchemaGraph::offered($id, $key, $scope))) {
+              self::assertContains($shown, $first($scope), "$id: $name needs $key, which nothing fills ($scope).");
+            }
           }
         }
       }
@@ -121,7 +131,13 @@ final class RegistryConsistencyTest extends UnitTestCase {
         }
         self::assertTrue((bool) $settable, "$name: " . json_encode($entry) . ' is set by nothing.');
       }
-      if (!isset($feature['node'])) {
+      if (isset($feature['list'])) {
+        // A list feature judges the list a list page makes.
+        self::assertSame('Course', $feature['list']['of']);
+        self::assertArrayHasKey($feature['list']['of'], SchemaGraph::types());
+        self::assertSame('ListItem', SchemaGraph::prop('CollectionPage', 'items')['item']);
+      }
+      elseif (!isset($feature['node'])) {
         self::assertNotEmpty($types, "$name applies to a type of the registry.");
       }
     }

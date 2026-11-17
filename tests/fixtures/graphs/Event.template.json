@@ -1,0 +1,319 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/complex/events/midsummer-night-concert",
+        "langcode": "en",
+        "title": "Midsummer Night Concert",
+        "description": "New music by the lake on the longest evening of the year.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "template",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "Event",
+        "props": {
+            "startDate": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:event␝field_starts␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "endDate": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:event␝field_ends␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "location": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:event␝field_venue␞␟entity␜␜entity:node␝title␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "eventStatus": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:event␝field_event_status␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "image": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:event␝field_poster␞␟entity␜␜entity:media␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}",
+                    "sourceType": "entity-field"
+                }
+            },
+            "organizer": {
+                "fact": "identity"
+            },
+            "performer": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:event␝field_performers␞␟entity␜␜entity:node␝title␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "offers_url": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:event␝field_tickets␞␟uri",
+                    "sourceType": "entity-field"
+                }
+            },
+            "offers_price": {
+                "text": "25"
+            },
+            "offers_availability": {
+                "text": "InStock"
+            }
+        }
+    },
+    "facts": {
+        "title": "Midsummer Night Concert",
+        "description": "New music by the lake on the longest evening of the year.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/complex/events/midsummer-night-concert"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": {
+        "ℹ︎␜entity:node:event␝field_starts␞␟value": "2027-06-19T19:00:00+03:00",
+        "ℹ︎␜entity:node:event␝field_ends␞␟value": "2027-06-19T22:30:00+03:00",
+        "ℹ︎␜entity:node:event␝field_venue␞␟entity␜␜entity:node␝title␞␟value": [
+            {
+                "name": "Lakeside Concert Hall",
+                "url": "https://www.example.com/complex/venues/lakeside-concert-hall",
+                "id": "https://www.example.com/complex/venues/lakeside-concert-hall#primary",
+                "type": "EventVenue",
+                "address": {
+                    "@type": "PostalAddress",
+                    "streetAddress": "Mannerheimintie 13e",
+                    "postalCode": "00100",
+                    "addressLocality": "Helsinki",
+                    "addressCountry": "FI"
+                }
+            }
+        ],
+        "ℹ︎␜entity:node:event␝field_event_status␞␟value": "EventScheduled",
+        "ℹ︎␜entity:node:event␝field_poster␞␟entity␜␜entity:media␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}": {
+            "url": "https://cms.example.com/sites/default/files/poster.png",
+            "width": 1080,
+            "height": 1350,
+            "alt": "The concert poster"
+        },
+        "ℹ︎␜entity:node:event␝field_performers␞␟entity␜␜entity:node␝title␞␟value": [
+            {
+                "name": "Mira Kallio",
+                "url": "https://www.example.com/complex/people/mira-kallio",
+                "id": "https://www.example.com/complex/people/mira-kallio#primary",
+                "type": "Person"
+            },
+            {
+                "name": "عمر حداد",
+                "url": "https://www.example.com/node/5",
+                "id": "https://www.example.com/node/5#primary",
+                "type": "Person"
+            },
+            null
+        ],
+        "ℹ︎␜entity:node:event␝field_tickets␞␟uri": "https://tickets.example.com/midsummer"
+    },
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "startDate": "set",
+            "endDate": "set",
+            "location": "set",
+            "description": "default",
+            "image": "set",
+            "eventStatus": "set",
+            "offers_price": "set",
+            "offers_priceCurrency": "site",
+            "offers_availability": "set",
+            "offers_url": "set",
+            "organizer": "set",
+            "performer": "set"
+        },
+        "gates": [],
+        "type": "Event",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/complex/events/midsummer-night-concert#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/complex/events/midsummer-night-concert#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/complex/events/midsummer-night-concert#primary",
+                "type": "Event",
+                "origin": "main",
+                "at": 4
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [
+            {
+                "key": "performer",
+                "count": 1,
+                "reason": "hidden"
+            }
+        ],
+        "refs_inline": [],
+        "defaults": [],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "https://www.example.com/complex/events/midsummer-night-concert#webpage",
+                "url": "https://www.example.com/complex/events/midsummer-night-concert",
+                "name": "Midsummer Night Concert",
+                "description": "New music by the lake on the longest evening of the year.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/complex/events/midsummer-night-concert#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/complex/events/midsummer-night-concert#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/complex/events/midsummer-night-concert#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            },
+            {
+                "@type": "Event",
+                "@id": "https://www.example.com/complex/events/midsummer-night-concert#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/complex/events/midsummer-night-concert#webpage"
+                },
+                "name": "Midsummer Night Concert",
+                "startDate": "2027-06-19T19:00:00+03:00",
+                "endDate": "2027-06-19T22:30:00+03:00",
+                "location": {
+                    "@id": "https://www.example.com/complex/venues/lakeside-concert-hall#primary",
+                    "@type": "EventVenue",
+                    "name": "Lakeside Concert Hall",
+                    "url": "https://www.example.com/complex/venues/lakeside-concert-hall",
+                    "address": {
+                        "@type": "PostalAddress",
+                        "streetAddress": "Mannerheimintie 13e",
+                        "postalCode": "00100",
+                        "addressLocality": "Helsinki",
+                        "addressCountry": "FI"
+                    }
+                },
+                "description": "New music by the lake on the longest evening of the year.",
+                "image": {
+                    "@type": "ImageObject",
+                    "url": "https://cms.example.com/sites/default/files/poster.png",
+                    "width": 1080,
+                    "height": 1350
+                },
+                "eventStatus": "https://schema.org/EventScheduled",
+                "offers": {
+                    "@type": "Offer",
+                    "price": "25",
+                    "priceCurrency": "EUR",
+                    "availability": "https://schema.org/InStock",
+                    "url": "https://tickets.example.com/midsummer"
+                },
+                "organizer": {
+                    "@id": "https://www.example.com/#identity"
+                },
+                "performer": [
+                    {
+                        "@id": "https://www.example.com/complex/people/mira-kallio#primary",
+                        "@type": "Person",
+                        "name": "Mira Kallio",
+                        "url": "https://www.example.com/complex/people/mira-kallio"
+                    },
+                    {
+                        "@id": "https://www.example.com/node/5#primary",
+                        "@type": "Person",
+                        "name": "عمر حداد",
+                        "url": "https://www.example.com/node/5"
+                    }
+                ]
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": "event",
+            "node": "https://www.example.com/complex/events/midsummer-night-concert#primary",
+            "verdict": "ready"
+        }
+    ]
+}

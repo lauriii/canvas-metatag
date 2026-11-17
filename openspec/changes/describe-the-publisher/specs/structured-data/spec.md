@@ -68,3 +68,21 @@ When Drupal's site slogan is set, the identity node MUST carry it as `slogan`, i
 
 - **WHEN** Drupal's slogan is "Human expertise for AI-made work"
 - **THEN** the identity node MUST carry `slogan` "Human expertise for AI-made work" and its `description` MUST NOT be the slogan
+
+### Requirement: A workplace at the publisher's address is a place
+
+A job whose workplace is the publisher's address MUST emit an inline `Place` whose `address` is the identity's address. That choice MUST be offered only while the identity's address has a street or city and a country, and a job location MUST never reference the identity node itself. (Handed over by `populate-every-schema-type`, H2.)
+
+#### Scenario: At our address
+
+- **WHEN** a job's workplace is the publisher's address and the identity is at Mill Road 4, Tampere, Finland
+- **THEN** `jobLocation` MUST be `{"@type": "Place", "address": {"@type": "PostalAddress", …, "addressCountry": "FI"}}`
+
+### Requirement: A profile about the publisher is the publisher
+
+A reference to a profile page that is about the publisher (its person is the identity) MUST be the identity, `{"@id": "{home}#identity"}`, never the profile's own main node. (Handed over by `populate-every-schema-type`, H2.)
+
+#### Scenario: The founder's own site
+
+- **WHEN** a recipe's author links to a profile page about the publisher, a person
+- **THEN** that author MUST be `{"@id": "{home}#identity"}`

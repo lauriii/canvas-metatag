@@ -245,3 +245,147 @@ function _canvas_metatag_post_update_draft(EntityInterface $entity, ?string $cli
     Cache::invalidateTags([AutoSaveManager::CACHE_TAG]);
   }
 }
+
+/**
+ * Keeps the site as the organizer of the events a template describes.
+ *
+ * An event's organizer was the site unless a name was typed, on templates
+ * too. The site is now the organizer by default only on a Canvas page, so a
+ * template, and its draft, that describes an event and never set an
+ * organizer now says that the site is: the head stays as it was.
+ */
+function canvas_metatag_post_update_event_organizer(): string {
+  // The values with the site as the organizer, or NULL when they keep theirs.
+  $count = _canvas_metatag_post_update_templates(static function (mixed $values): ?array {
+    $props = is_array($values) && ($values['schema']['type'] ?? NULL) === 'Event' ? $values['schema']['props'] ?? [] : NULL;
+    if (!is_array($props) || array_intersect_key($props, array_flip(['organizer', 'organizer_name', 'organizer_url']))) {
+      return NULL;
+    }
+    $values['schema']['props'] = $props + ['organizer' => ['fact' => 'identity']];
+    return $values;
+  });
+  return (string) \Drupal::translation()->formatPlural($count, 'One event template names the site as its organizer.', '@count event templates name the site as their organizer.');
+}
+
+/**
+ * Stores an event venue's country as its code.
+ *
+ * The country was free text; it is now a code from a list, and anything else
+ * is left out of the head. A country written as its code or its name, in
+ * English or the site's language and in any case, becomes the code: on
+ * templates and their drafts, every page revision and translation, and page
+ * drafts. Anything else stays as written, and the dialog asks for the
+ * country.
+ */
+function canvas_metatag_post_update_country_codes(): string {
+  $key = 'location_address_addressCountry';
+  $codes = [];
+  foreach (\Drupal::service('country_manager')->getStandardList() as $code => $name) {
+    foreach ([$code, $name->getUntranslatedString(), (string) $name] as $written) {
+      $codes[mb_strtolower($written)] = $code;
+    }
+  }
+  // The values with the country as its code, or NULL when nothing changes.
+  $coded = static function (mixed $values) use ($key, $codes): ?array {
+    $text = is_array($values) ? $values['schema']['props'][$key]['text'] ?? NULL : NULL;
+    $code = is_string($text) ? $codes[mb_strtolower(trim($text))] ?? NULL : NULL;
+    if ($code === NULL || $code === $text) {
+      return NULL;
+    }
+    $values['schema']['props'][$key] = ['text' => $code];
+    return $values;
+  };
+  $count = _canvas_metatag_post_update_templates($coded);
+
+  // Page drafts in step with their stored page stay so (as when values
+  // became parts): their keys are read before the rows are rewritten.
+  $auto_save = \Drupal::service(AutoSaveManager::class);
+  $in_step = [];
+  foreach ($auto_save->getAllAutoSaveList(FALSE, TRUE) as $entry_key => $entry) {
+    if ($entry['entity_type'] === 'canvas_page' && !isset($entry[AutoSaveManager::AUTO_SAVE_CONFLICT_KEY])) {
+      $in_step[] = $entry_key;
+    }
+  }
+  $pages = \Drupal::entityTypeManager()->getStorage('canvas_page');
+  assert($pages instanceof SqlContentEntityStorage);
+  $definition = \Drupal::service('entity_field.manager')->getFieldStorageDefinitions('canvas_page')['canvas_metatag'] ?? NULL;
+  $column = $definition ? $pages->getTableMapping()->getFieldColumnName($definition, 'value') : NULL;
+  $database = \Drupal::database();
+  $rows = $column ? $database->select($pages->getRevisionDataTable(), 'r')
+    ->fields('r', ['revision_id', 'langcode', $column])
+    ->condition($column, '%' . $database->escapeLike($key) . '%', 'LIKE')
+    ->execute() : [];
+  foreach ($rows as $row) {
+    $new = $coded(Values::decode($row->{$column}));
+    if ($new !== NULL) {
+      foreach ([$pages->getRevisionDataTable(), $pages->getDataTable()] as $table) {
+        $database->update($table)
+          ->fields([$column => Values::encode($new)])
+          ->condition('revision_id', $row->revision_id)
+          ->condition('langcode', $row->langcode)
+          ->execute();
+      }
+      $count++;
+    }
+  }
+  $pages->resetCache();
+  foreach ($auto_save->getAllAutoSaveList(FALSE, TRUE) as $entry_key => $entry) {
+    $page = $entry['entity_type'] === 'canvas_page' ? $pages->load($entry['entity_id']) : NULL;
+    $langcode = (string) $entry['langcode'];
+    $page = $page instanceof ContentEntityInterface && $page->hasTranslation($langcode) ? $page->getTranslation($langcode) : NULL;
+    if ($page === NULL) {
+      continue;
+    }
+    if (in_array($entry_key, $in_step, TRUE) && isset($entry[AutoSaveManager::AUTO_SAVE_CONFLICT_KEY])) {
+      $auto_save->resolveConflict($page, $entry[AutoSaveManager::AUTO_SAVE_CONFLICT_KEY]);
+    }
+    $draft = $auto_save->getAutoSaveEntity($page, TRUE);
+    $new = $draft->entity instanceof ContentEntityInterface ? $coded(Values::decode($draft->entity->get('canvas_metatag')->value)) : NULL;
+    if ($new !== NULL) {
+      $draft->entity->set('canvas_metatag', Values::encode($new));
+      _canvas_metatag_post_update_draft($draft->entity, $draft->clientId);
+      $count++;
+    }
+  }
+  Cache::invalidateTags(['canvas_page_list', 'rendered']);
+  return (string) \Drupal::translation()->formatPlural($count, 'One venue country is stored as its code.', '@count venue countries are stored as their codes.');
+}
+
+/**
+ * Changes the values of every node template and of its draft.
+ *
+ * Saving a template deletes its draft: the draft is read first and written
+ * back after, under its own client id.
+ *
+ * @param callable(mixed): ?array $change
+ *   Stored values => the changed values, or NULL when they stay.
+ *
+ * @return int
+ *   How many templates and drafts changed.
+ */
+function _canvas_metatag_post_update_templates(callable $change): int {
+  $auto_save = \Drupal::service(AutoSaveManager::class);
+  $count = 0;
+  $templates = \Drupal::entityTypeManager()->getStorage(ContentTemplate::ENTITY_TYPE_ID);
+  assert($templates instanceof ConfigEntityStorageInterface);
+  foreach ($templates->loadMultipleOverrideFree() as $template) {
+    assert($template instanceof ContentTemplate);
+    $draft = $auto_save->getAutoSaveEntity($template, TRUE);
+    $entity = $draft->entity instanceof ContentTemplate ? $draft->entity : NULL;
+    $kept = \Drupal::keyValue(AutoSaveManager::AUTO_SAVE_STORE)->get(AutoSaveManager::getAutoSaveKey($template));
+    $stored = $change($template->getThirdPartySetting('canvas_metatag', 'values'));
+    $drafted = $entity ? $change($entity->getThirdPartySetting('canvas_metatag', 'values')) : NULL;
+    if ($stored !== NULL) {
+      $template->setThirdPartySetting('canvas_metatag', 'values', $stored)->save();
+      $count++;
+    }
+    if ($entity && ($stored !== NULL || $drafted !== NULL)) {
+      if ($drafted !== NULL) {
+        $entity->setThirdPartySetting('canvas_metatag', 'values', $drafted);
+        $count++;
+      }
+      _canvas_metatag_post_update_draft($entity, $draft->clientId, is_array($kept) ? $kept : NULL);
+    }
+  }
+  return $count;
+}

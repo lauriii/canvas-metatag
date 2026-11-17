@@ -27,7 +27,7 @@ import { Header, Sheet } from './components/Header';
 import { type ImageRequest, ImageSheet, PICKED } from './components/MediaPicker';
 import { OutputSheet, originNote } from './components/Output';
 import { SearchSkeleton } from './components/Previews';
-import { CustomJson, KindSheet, SchemaTab } from './components/SchemaTab';
+import { CustomJson, GroupSheet, HoursSheet, KindSheet, SchemaTab } from './components/SchemaTab';
 import { SearchTab } from './components/SearchTab';
 import { SiteView } from './components/SiteTab';
 import { SocialTab } from './components/SocialTab';
@@ -58,6 +58,7 @@ import {
   reducer,
   robotsUnsent,
   saveDraft,
+  sheetOf,
   sitePaths,
   strips,
   tabOf,
@@ -82,7 +83,10 @@ export type SheetState =
   | { kind: 'output'; section?: 'schema' }
   | { kind: 'custom' }
   | { kind: 'kinds' }
-  | { kind: 'image'; request: ImageRequest };
+  | { kind: 'image'; request: ImageRequest }
+  /** A group of details: the venue, the pay. */
+  | { kind: 'group'; type: string; group: string; focus?: string }
+  | { kind: 'hours'; path: string; label: string };
 
 // What components get. One context, read with useApp().
 
@@ -907,6 +911,19 @@ export default function App() {
           setSheet({ kind: 'custom' });
           return;
         }
+        // A part of a group shown as a box: its sheet, on that part. Back
+        // returns to the group's box (GroupSheet).
+        const server = now.current.server;
+        const typeId = shownView?.effective.schema?.type;
+        const part = to.scope === 'target' && to.field.startsWith('schema.props.') && server?.target && typeId && server.registry[typeId]
+          ? sheetOf(server.registry, typeId, to.field.slice('schema.props.'.length), server.target.scope)
+          : null;
+        if (part && typeId) {
+          // Back returns to where the jump came from, else to the group's
+          // box (GroupSheet).
+          setSheet({ kind: 'group', type: typeId, group: part.group, focus: part.focus });
+          return;
+        }
         setJump((last) => ({
           ...to,
           suggest: how.suggest ?? false,
@@ -1248,7 +1265,19 @@ function Ready(props: {
 }) {
   const { state, dispatch, sheet, closeSheet } = useApp();
   const server = state.server!;
-  const shown = footer(state);
+  // An Undo stays in the bar for 6 s, longer while the bar has focus or
+  // the pointer: editing makes many small changes, and the bar would
+  // always cover the end of the view. It goes; nothing is undone.
+  const [dismissed, setDismissed] = useState<State['undo']>(null);
+  const [holding, setHolding] = useState(false);
+  useEffect(() => {
+    if (!state.undo || state.undo === dismissed || holding) {
+      return;
+    }
+    const timer = setTimeout(() => setDismissed(state.undo), 6000);
+    return () => clearTimeout(timer);
+  }, [state.undo, dismissed, holding]);
+  const shown = footer(state.undo && state.undo === dismissed ? { ...state, undo: null } : state);
   const bar = barOf(state, shown);
   const notes = useNotes();
   const frame = useRef<HTMLDivElement>(null);
@@ -1420,7 +1449,14 @@ function Ready(props: {
       {sheet && <SheetHost sheet={sheet} onClose={() => closeSheet()} />}
       {/* Over a sheet too: a fix made there is undone here. */}
       {bar && (
-          <div className="seo-bar" ref={barRef}>
+          <div
+            className="seo-bar"
+            ref={barRef}
+            onFocus={() => setHolding(true)}
+            onBlur={(event) => setHolding(event.currentTarget.contains(event.relatedTarget))}
+            onPointerEnter={() => setHolding(true)}
+            onPointerLeave={(event) => setHolding(event.currentTarget.contains(document.activeElement))}
+          >
             {shown.actions.includes('hide') ? (
               <ExclamationTriangleIcon aria-hidden />
             ) : (
@@ -1510,6 +1546,12 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
         <OutputSheet section={sheet.section} />
       </Sheet>
     );
+  }
+  if (sheet.kind === 'group') {
+    return <GroupSheet type={sheet.type} group={sheet.group} focus={sheet.focus} onClose={onClose} />;
+  }
+  if (sheet.kind === 'hours') {
+    return <HoursSheet path={sheet.path} label={sheet.label} onClose={onClose} />;
   }
   if (sheet.kind === 'kinds') {
     return (

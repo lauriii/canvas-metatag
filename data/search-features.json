@@ -7,7 +7,8 @@
     "offers.seller": "sold_here",
     "mainEntity.name": "name",
     "mainEntity.alternateName": "name",
-    "author.sameAs": "author_url"
+    "author.sameAs": "author_url",
+    "jobLocationType": "work"
   },
   "site": {
     "name": "identity.name",
@@ -136,6 +137,118 @@
     "url": {
       "label": "Home address",
       "need": "a home address"
+    },
+    "title": {
+      "label": "Job title",
+      "need": "a job title"
+    },
+    "datePosted": {
+      "label": "Posted",
+      "need": "a posted date"
+    },
+    "validThrough": {
+      "label": "Closing date",
+      "need": "a closing date"
+    },
+    "employmentType": {
+      "label": "Employment type",
+      "need": "an employment type"
+    },
+    "hiringOrganization.name": {
+      "label": "Employer",
+      "need": "an employer"
+    },
+    "jobLocationType": {
+      "label": "Where the work is",
+      "need": "where the work is"
+    },
+    "jobLocation.address": {
+      "label": "Workplace",
+      "need": "a workplace address"
+    },
+    "applicantLocationRequirements": {
+      "label": "Open to people in",
+      "need": "the countries people can apply from"
+    },
+    "baseSalary.value": {
+      "label": "Pay",
+      "need": "the pay"
+    },
+    "address": {
+      "label": "Address",
+      "need": "an address customers visit"
+    },
+    "geo": {
+      "label": "Coordinates",
+      "need": "coordinates"
+    },
+    "openingHoursSpecification": {
+      "label": "Opening hours",
+      "need": "opening hours"
+    },
+    "telephone": {
+      "label": "Telephone",
+      "need": "a telephone number"
+    },
+    "priceRange": {
+      "label": "Price range",
+      "need": "a price range"
+    },
+    "menu": {
+      "label": "Menu",
+      "need": "a menu"
+    },
+    "servesCuisine": {
+      "label": "Cuisine",
+      "need": "a cuisine"
+    },
+    "prepTime": {
+      "label": "Prep time",
+      "need": "a prep time"
+    },
+    "cookTime": {
+      "label": "Cook time",
+      "need": "a cook time"
+    },
+    "recipeYield": {
+      "label": "Serves",
+      "need": "how many it serves"
+    },
+    "recipeCategory": {
+      "label": "Category",
+      "need": "a category"
+    },
+    "recipeCuisine": {
+      "label": "Cuisine",
+      "need": "a cuisine"
+    },
+    "keywords": {
+      "label": "Keywords",
+      "need": "keywords"
+    },
+    "recipeIngredient": {
+      "label": "Ingredients",
+      "need": "ingredients"
+    },
+    "recipeInstructions": {
+      "label": "Steps",
+      "need": "steps"
+    },
+    "nutrition.calories": {
+      "label": "Calories",
+      "need": "calories"
+    },
+    "streetAddress": {
+      "label": "Street address",
+      "need": "a street address"
+    },
+    "addressLocality": {
+      "label": "City",
+      "need": "a city"
+    },
+    "addressCountry": {
+      "label": "Country",
+      "need": "a country"
     }
   },
   "features": {
@@ -334,6 +447,219 @@
         "description",
         "eventStatus",
         "organizer"
+      ]
+    },
+    "job-posting": {
+      "label": "Job posting",
+      "for": "job listings",
+      "where": "Your job in job listings, with the pay and where the work is.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/job-posting",
+      "on": [
+        "JobPosting"
+      ],
+      "required": [
+        "title",
+        "description",
+        "datePosted",
+        "hiringOrganization.name",
+        [
+          "jobLocation.address",
+          "jobLocationType"
+        ]
+      ],
+      "recommended": [
+        "validThrough",
+        "employmentType",
+        "baseSalary.value"
+      ],
+      "accepts": {
+        "employmentType": [
+          "FULL_TIME",
+          "PART_TIME",
+          "CONTRACTOR",
+          "TEMPORARY",
+          "INTERN",
+          "VOLUNTEER",
+          "PER_DIEM",
+          "OTHER"
+        ],
+        "jobLocationType": [
+          "TELECOMMUTE"
+        ],
+        "baseSalary.value.unitText": [
+          "HOUR",
+          "DAY",
+          "WEEK",
+          "MONTH",
+          "YEAR"
+        ]
+      },
+      "rules": [
+        {
+          "path": "description",
+          "differs": "title",
+          "need": "a full job description"
+        },
+        {
+          "path": "applicantLocationRequirements",
+          "when": "jobLocationType",
+          "need": "the countries people can apply from"
+        }
+      ],
+      "not_for": [
+        {
+          "id": "closed",
+          "past": "validThrough",
+          "reason": "this job closed",
+          "why": "Job listings show only jobs people can still apply for. The markup stays, so the job shows again if its closing date moves."
+        }
+      ],
+      "confirm": [
+        "The page is about one job people can apply for."
+      ],
+      "names": [
+        "title",
+        "description",
+        "datePosted",
+        "validThrough",
+        "employmentType",
+        "hiringOrganization",
+        "name",
+        "jobLocation",
+        "address",
+        "jobLocationType",
+        "applicantLocationRequirements",
+        "baseSalary",
+        "value",
+        "unitText"
+      ]
+    },
+    "recipe": {
+      "label": "Recipe result",
+      "for": "recipe results",
+      "where": "Your recipe in recipe results, with its photo and times.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/recipe",
+      "on": [
+        "Recipe"
+      ],
+      "required": [
+        "name",
+        "image"
+      ],
+      "recommended": [
+        "author.name",
+        "datePublished",
+        "description",
+        "prepTime",
+        "cookTime",
+        "recipeYield",
+        "recipeCategory",
+        "recipeCuisine",
+        "keywords",
+        "recipeIngredient",
+        "recipeInstructions",
+        "nutrition.calories"
+      ],
+      "confirm": [
+        "The page is about one recipe, and shows its ingredients and steps."
+      ],
+      "names": [
+        "name",
+        "image",
+        "author",
+        "datePublished",
+        "description",
+        "prepTime",
+        "cookTime",
+        "totalTime",
+        "recipeYield",
+        "recipeCategory",
+        "recipeCuisine",
+        "keywords",
+        "recipeIngredient",
+        "recipeInstructions",
+        "nutrition",
+        "calories"
+      ]
+    },
+    "local-business": {
+      "label": "Local business",
+      "for": "local results",
+      "where": "Your place in local results, with its address, hours and phone number.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/local-business",
+      "on": [
+        "LocalBusiness",
+        "Store",
+        "Restaurant",
+        "CafeOrCoffeeShop",
+        "BarOrPub",
+        "Bakery",
+        "Hotel",
+        "Dentist",
+        "MedicalClinic",
+        "HealthAndBeautyBusiness",
+        "LegalService",
+        "FinancialService",
+        "RealEstateAgent",
+        "HomeAndConstructionBusiness",
+        "AutomotiveBusiness",
+        "SportsActivityLocation",
+        "Library",
+        "ChildCare",
+        "TravelAgency"
+      ],
+      "required": [
+        "name",
+        "address"
+      ],
+      "recommended": [
+        "geo",
+        "openingHoursSpecification",
+        "telephone",
+        "url",
+        "priceRange",
+        "menu",
+        "servesCuisine"
+      ],
+      "confirm": [
+        "Customers visit this address."
+      ],
+      "names": [
+        "name",
+        "address",
+        "geo",
+        "openingHoursSpecification",
+        "telephone",
+        "url",
+        "priceRange",
+        "menu",
+        "servesCuisine"
+      ]
+    },
+    "course-list": {
+      "label": "Course list",
+      "for": "course lists",
+      "where": "Your courses in a list in results, from a page that lists them.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/course",
+      "on": [
+        "ItemList",
+        "Course"
+      ],
+      "list": {
+        "of": "Course",
+        "min": 3
+      },
+      "elsewhere": "a list page with at least 3 courses",
+      "required": [],
+      "names": [
+        "itemListElement",
+        "name",
+        "description",
+        "provider"
       ]
     },
     "profile-page": {

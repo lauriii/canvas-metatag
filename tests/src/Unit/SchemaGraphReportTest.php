@@ -57,8 +57,8 @@ final class SchemaGraphReportTest extends UnitTestCase {
    */
   public function testReport(): void {
     // An unknown stored type: a web page, and said.
-    $result = self::build(['type' => 'Recipe']);
-    self::assertSame('Recipe', $result['unknown_type']);
+    $result = self::build(['type' => 'Movie']);
+    self::assertSame('Movie', $result['unknown_type']);
     self::assertSame('WebPage', $result['type']);
     self::assertSame(['Organization', 'WebSite', 'WebPage'], array_column($result['graph']['@graph'], '@type'));
     self::assertNull(self::build([])['unknown_type']);

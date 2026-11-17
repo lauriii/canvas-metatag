@@ -61,6 +61,7 @@ final class Resolver {
     'published' => 'First published',
     'modified' => 'Last updated',
     'image' => 'Image',
+    'identity' => 'This site',
   ];
 
   /**
@@ -193,6 +194,8 @@ final class Resolver {
     // With their overrides: a translated site name varies by language.
     $cacheability->addCacheableDependency($this->configFactory->get('system.site'));
     $facts['site']['value'] = $identity['name'] !== '' ? $identity['name'] : (string) $this->configFactory->get('system.site')->get('name');
+    // The publisher: a reference to the site's own identity, by its name.
+    $facts['identity']['value'] = $facts['site']['value'];
     if ($entity === NULL) {
       return $facts;
     }
@@ -270,10 +273,11 @@ final class Resolver {
     $rows = [];
     foreach ($this->sources->vocabulary($bundle) as $expression => $row) {
       $source = ['expression' => $expression, 'sourceType' => 'entity-field'];
-      // One kind per row; SourcesTest::testVocabulary pins it.
+      // A row previews its first kind: formatted text's markup and a
+      // reference's target come beside its text (SourcesTest::testVocabulary).
       $kind = $row['kinds'][0];
       [$status, $value] = $node === NULL ? ['none', NULL] : $this->link($source, $node, $kind, $cacheability);
-      $out = ['source' => $source] + array_diff_key($row, ['html' => TRUE, 'scale' => TRUE, 'shown' => TRUE]) + [
+      $out = ['source' => $source] + array_diff_key($row, ['html' => TRUE, 'decimal' => TRUE, 'shown' => TRUE]) + [
         'status' => $status,
         'value' => is_string($value) ? $value : '',
       ];
@@ -286,6 +290,10 @@ final class Resolver {
       if (isset($row['shown']) && $status === 'ok' && $node !== NULL) {
         $out['shown'] = (string) $this->sources->shown($source, $node, $cacheability);
       }
+      // How many items a field of several values has for the item.
+      if (isset($row['many']) && $node !== NULL && $status === 'ok') {
+        $out['count'] = count((array) $this->link($source, $node, $kind, $cacheability, TRUE)[1]);
+      }
       $rows[] = $out;
     }
     return $rows;
@@ -294,21 +302,123 @@ final class Resolver {
   /**
    * What a template's stored source gives for a node.
    *
-   * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: string|array|null}
-   *   The status, and text or an image array. An address is absolute
-   *   http(s) on the public base, or nothing; an image a public file.
+   * @param array $source
+   *   The stored source.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $node
+   *   The node.
+   * @param string $kind
+   *   The kind of value wanted.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the value depends on.
+   * @param bool $list
+   *   Every item, in field order (Sources::evaluate()).
+   * @param int $max
+   *   For the ref kind: how many targets a visitor may see are read; the
+   *   rest are FALSE, counted and never read (their pages, templates and
+   *   cache tags).
+   *
+   * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: mixed}
+   *   The status, and text or an image array; with $list a list of them,
+   *   NULL for an item a visitor may not see. An address is absolute
+   *   http(s) on the public base, or nothing; an image a public file. The
+   *   ref kind gives the targets (target()), always a list.
    */
-  public function link(array $source, ContentEntityInterface $node, string $kind, CacheableMetadata $cacheability): array {
-    [$status, $value] = $this->sources->evaluate($source, $node, $kind, $cacheability);
+  public function link(array $source, ContentEntityInterface $node, string $kind, CacheableMetadata $cacheability, bool $list = FALSE, int $max = PHP_INT_MAX): array {
+    [$status, $value] = $this->sources->evaluate($source, $node, $kind, $cacheability, $list);
     if ($status !== 'ok') {
       return [$status, NULL];
     }
-    $value = match ($kind) {
-      'address' => $this->address((string) $value, $node->language(), $cacheability),
-      'image' => $this->uriImage($value, $cacheability),
-      default => $value,
+    if ($kind === 'ref') {
+      $seen = [];
+      $targets = [];
+      foreach ($value as $item) {
+        $target = count($seen) < $max ? $this->target($item, $node->language()->getId(), $cacheability) : FALSE;
+        if (is_array($target)) {
+          $seen[$target['url']] = TRUE;
+        }
+        $targets[] = $target;
+      }
+      return [$targets === [] ? 'empty' : 'ok', $targets];
+    }
+    $one = fn (mixed $item): mixed => match ($kind) {
+      'address' => $this->address((string) $item, $node->language(), $cacheability),
+      'image' => $this->uriImage($item, $cacheability),
+      default => $item,
     };
-    return [$value === NULL || $value === '' ? 'empty' : 'ok', $value];
+    $value = $list ? array_map($one, $value) : $one($value);
+    return [$value === NULL || $value === '' || $value === [] ? 'empty' : 'ok', $value];
+  }
+
+  /**
+   * What a reference says of its target.
+   *
+   * The page's name and address, and what it is described as.
+   * Reads the target's own SEO values and fields, never its rendered page,
+   * and never another reference: one hop. A target a visitor may not see,
+   * in the host's language, is NULL: a published page whose translation is
+   * not is never named by that translation.
+   *
+   * @return array{name: string, url: string, type?: string, id?: string, address?: array, complete?: bool}|null
+   *   `type`: the schema.org type of its main thing; `id`: that node's @id;
+   *   `address`: its PostalAddress, when complete; `complete`: a course with
+   *   a summary.
+   */
+  public function target(mixed $entity, string $langcode, CacheableMetadata $cacheability): ?array {
+    if (!$entity instanceof ContentEntityInterface) {
+      return NULL;
+    }
+    $entity = self::translated($entity, $langcode);
+    $cacheability->addCacheableDependency($entity);
+    if (!$this->allowed($entity, 'view', $cacheability)) {
+      return NULL;
+    }
+    $url = $this->url($entity, $cacheability);
+    $target = ['name' => (string) $entity->label(), 'url' => $url];
+    if (!$this->owns($entity)) {
+      // Named only, until a template describes its bundle: making or
+      // enabling one rebuilds every head that names it.
+      $template = $entity->getEntityTypeId() === 'node' ? ContentTemplate::loadForEntity($entity, 'full') : NULL;
+      $template !== NULL
+        ? $cacheability->addCacheableDependency($template)
+        : $cacheability->addCacheTags($this->entityTypeManager->getDefinition(ContentTemplate::ENTITY_TYPE_ID)->getListCacheTags());
+      return $target;
+    }
+    $layers = $this->layers($entity, FALSE, $cacheability);
+    $schema = array_replace_recursive($layers['from_default'], $layers['target'])['schema'] ?? [];
+    $type_id = $schema['type'] ?? 'WebPage';
+    $type = SchemaGraph::types()[$type_id] ?? NULL;
+    if (!isset($type['primary_type'])) {
+      return $target;
+    }
+    $text = function (string $key) use ($schema, $type_id, $entity, $cacheability): string {
+      $value = $schema['props'][$key] ?? SchemaGraph::prop($type_id, $key)['default'] ?? NULL;
+      $found = match (array_key_first($value ?? [])) {
+        'text' => $value['text'],
+        'source' => $entity->getEntityTypeId() === 'node' ? $this->link($value['source'], $entity, 'text', $cacheability)[1] : NULL,
+        default => NULL,
+      };
+      return is_string($found) ? Values::plain($found, 255) : '';
+    };
+    // A kind of place linked to a field is used only when it is one of the
+    // listed kinds: the target's own page validates it the same way.
+    $kind = $type_id === 'LocalBusiness' ? $text('placeKind') : '';
+    $target['type'] = $type_id === 'LocalBusiness'
+      ? (SchemaGraph::validLiteral('LocalBusiness', 'placeKind', $kind) ? $kind : 'LocalBusiness')
+      : $type['primary_type'];
+    $target['id'] = $url . '#primary';
+    if (isset($type['groups']['address'])) {
+      $parts = [];
+      foreach ($type['groups']['address']['parts'] as $key) {
+        $parts[substr($key, strlen('address_'))] = $text($key);
+      }
+      if (($parts['streetAddress'] !== '' || $parts['addressLocality'] !== '') && in_array($parts['addressCountry'], SchemaGraph::codes('country'), TRUE)) {
+        $target['address'] = ['@type' => 'PostalAddress'] + array_filter($parts, 'strlen');
+      }
+    }
+    if ($type_id === 'Course') {
+      $target['complete'] = $text('description') !== '' || $this->facts($entity, $cacheability)['description']['value'] !== '';
+    }
+    return $target;
   }
 
   /**
@@ -428,14 +538,14 @@ final class Resolver {
 
     // What a value gives for this entity, by kind; each value is read once.
     $memo = [];
-    $value = function (array $value, string $kind) use ($entity, $facts, $cacheability, &$memo): string|array|null {
-      $key = json_encode([$value, $kind]);
+    $value = function (array $value, string $kind, bool $list = FALSE, int $max = PHP_INT_MAX) use ($entity, $facts, $cacheability, &$memo): mixed {
+      $key = json_encode([$value, $kind, $list, $max]);
       if (!array_key_exists($key, $memo)) {
         $memo[$key] = match (array_key_first($value)) {
           'text' => $value['text'],
           'fact' => $kind === 'image' ? $facts[$value['fact']]['image'] ?? NULL : $facts[$value['fact']]['value'] ?? '',
           'media' => $this->image($value['media'], $cacheability),
-          'source' => $entity->getEntityTypeId() === 'node' ? $this->link($value['source'], $entity, $kind, $cacheability)[1] : NULL,
+          'source' => $entity->getEntityTypeId() === 'node' ? $this->link($value['source'], $entity, $kind, $cacheability, $list, $max)[1] : NULL,
           default => NULL,
         };
       }
@@ -484,7 +594,15 @@ final class Resolver {
       }
     }
 
+    // Dated opening hours that have passed are left out: a head that has
+    // them is kept until the day ends.
+    $today = new \DateTimeImmutable('now', new \DateTimeZone($this->timezone()));
+    if (preg_match('/\b\d{4}-\d{2}-\d{2} /', json_encode($effective['schema']['props']['openingHoursSpecification'] ?? []))) {
+      $cacheability->mergeCacheMaxAge(max(60, $today->modify('tomorrow')->getTimestamp() - $today->getTimestamp()));
+    }
     $report = SchemaGraph::build([
+      'scope' => $entity->getEntityTypeId() === 'canvas_page' ? 'page' : 'template',
+      'today' => $today->format('Y-m-d'),
       'home' => $origin['url'] . '/',
       'url' => $own,
       'langcode' => $entity->language()->isLocked() ? '' : $entity->language()->getId(),
@@ -506,6 +624,7 @@ final class Resolver {
     // The front page in the entity's language, with its prefix.
     $report['front'] = $own === $this->publicUrl(Url::fromRoute('<front>', [], ['language' => $entity->language()]), $cacheability);
     $report['home'] = $origin['url'] . '/';
+    $report['today'] = $today->format('Y-m-d');
     $report['url'] = $own;
     $article = $og_type === 'article';
 
@@ -582,10 +701,15 @@ final class Resolver {
       'url' => $schema['url'],
       'front' => $schema['front'],
       'type' => $schema['type'],
+      'scope' => $entity->getEntityTypeId() === 'canvas_page' ? 'page' : 'template',
       'gates' => $schema['gates'],
       // A withheld main node is judged as it would ship, so the dialog says
       // what it needs.
       'extra' => isset($schema['withheld']['node']) ? [$schema['withheld']['node']] : [],
+      'judged' => $schema['judged'],
+      'incomplete' => $schema['incomplete'],
+      'items' => $schema['items'],
+      'today' => $schema['today'],
     ]);
     $result['schema']['rules'] = SchemaGraph::rules($graph, ['home' => $home], $schema['nodes']);
     return $result;

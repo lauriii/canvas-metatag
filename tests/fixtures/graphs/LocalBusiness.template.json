@@ -1,0 +1,250 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/complex/venues/example-office",
+        "langcode": "en",
+        "title": "Example office",
+        "description": "Our Stockholm office.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "template",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "LocalBusiness",
+        "props": {
+            "address_streetAddress": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:venue␝field_street␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "address_postalCode": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:venue␝field_postal_code␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "address_addressLocality": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:venue␝field_locality␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "address_addressCountry": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:venue␝field_country␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "openingHoursSpecification": {
+                "text": "Mo-Fr 09:00-17:00"
+            },
+            "telephone": {
+                "text": "+46 8 123 456"
+            }
+        }
+    },
+    "facts": {
+        "title": "Example office",
+        "description": "Our Stockholm office.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/complex/venues/example-office"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": {
+        "ℹ︎␜entity:node:venue␝field_street␞␟value": "Kungsgatan 1",
+        "ℹ︎␜entity:node:venue␝field_postal_code␞␟value": "111 43",
+        "ℹ︎␜entity:node:venue␝field_locality␞␟value": "Stockholm",
+        "ℹ︎␜entity:node:venue␝field_country␞␟value": "SE"
+    },
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "placeKind": "default",
+            "description": "default",
+            "image": "default",
+            "url": "default",
+            "address_streetAddress": "set",
+            "address_postalCode": "set",
+            "address_addressLocality": "set",
+            "address_addressCountry": "set",
+            "openingHoursSpecification": "set",
+            "telephone": "set"
+        },
+        "gates": [],
+        "type": "LocalBusiness",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/complex/venues/example-office#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/complex/venues/example-office#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/complex/venues/example-office#primary",
+                "type": "LocalBusiness",
+                "origin": "main",
+                "at": 4
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [],
+        "refs_inline": [],
+        "defaults": [],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "https://www.example.com/complex/venues/example-office#webpage",
+                "url": "https://www.example.com/complex/venues/example-office",
+                "name": "Example office",
+                "description": "Our Stockholm office.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/complex/venues/example-office#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/complex/venues/example-office#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/complex/venues/example-office#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            },
+            {
+                "@type": "LocalBusiness",
+                "@id": "https://www.example.com/complex/venues/example-office#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/complex/venues/example-office#webpage"
+                },
+                "name": "Example office",
+                "description": "Our Stockholm office.",
+                "image": {
+                    "@id": "https://www.example.com/complex/venues/example-office#primaryimage"
+                },
+                "url": "https://www.example.com/complex/venues/example-office",
+                "address": {
+                    "@type": "PostalAddress",
+                    "streetAddress": "Kungsgatan 1",
+                    "postalCode": "111 43",
+                    "addressLocality": "Stockholm",
+                    "addressCountry": "SE"
+                },
+                "openingHoursSpecification": {
+                    "@type": "OpeningHoursSpecification",
+                    "dayOfWeek": [
+                        "https://schema.org/Monday",
+                        "https://schema.org/Tuesday",
+                        "https://schema.org/Wednesday",
+                        "https://schema.org/Thursday",
+                        "https://schema.org/Friday"
+                    ],
+                    "opens": "09:00",
+                    "closes": "17:00"
+                },
+                "telephone": "+46 8 123 456"
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": "local-business",
+            "node": "https://www.example.com/complex/venues/example-office#primary",
+            "verdict": "ready",
+            "helps": [
+                {
+                    "path": "geo",
+                    "prop": "geo"
+                },
+                {
+                    "path": "priceRange",
+                    "prop": "priceRange"
+                },
+                {
+                    "path": "menu",
+                    "prop": "menu"
+                },
+                {
+                    "path": "servesCuisine",
+                    "prop": "servesCuisine"
+                }
+            ]
+        }
+    ]
+}

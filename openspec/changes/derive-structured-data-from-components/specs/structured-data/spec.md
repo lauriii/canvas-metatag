@@ -2,19 +2,19 @@
 
 ### Requirement: Page types come from one registry
 
-The available types MUST be the twelve of the registry: Web page, About page,
-Contact page, Collection page, Article, Blog post, News article, Event,
-Product, Service, Video to watch and Profile. An absent or unknown type MUST
-be a plain Web page, and the report MUST name the unknown stored type. Blog
-post and News article MUST have the properties of Article with their own main
-type. A property key MUST be one the type has; property values without a type
-of their own belong to the inherited type (page-seo).
+The types MUST be the registry's: Web page, About page, Contact page,
+Collection page, Article, Blog post, News article, Event, Product, Service,
+Profile, Job posting, A place people visit, Recipe, Course and Video to
+watch. An absent or unknown type MUST be a plain Web page, and the report
+MUST name it. Blog post and News article MUST have Article's properties with
+their own main type. A property key MUST be one the type has; values without
+a type of their own belong to the inherited type.
 
 #### Scenario: An unknown type
 
-- **WHEN** the stored type is `Recipe`
+- **WHEN** the stored type is `Movie`
 - **THEN** the graph MUST be that of a Web page, with no main node
-- **AND** the report MUST carry `unknown_type: "Recipe"`
+- **AND** the report MUST carry `unknown_type: "Movie"`
 
 #### Scenario: A blog post
 
@@ -30,6 +30,11 @@ of their own belong to the inherited type (page-seo).
 
 - **WHEN** the type is Service with a name and a price
 - **THEN** the main node MUST be a `Service` whose `provider` references the identity and whose `offers` is one `Offer`
+
+#### Scenario: A recipe
+
+- **WHEN** a node of a type described as Recipe has a name and an image
+- **THEN** the main node MUST be a `Recipe` at `{url}#primary`
 
 #### Scenario: A video to watch
 

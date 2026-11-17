@@ -104,7 +104,8 @@ final class SourcesTest extends CanvasKernelTestBase {
     $row = static fn (string $label): array => array_values(array_filter($rows, static fn (array $one): bool => $one['label'] === $label))[0] ?? [];
     // A formatted text with a summary is its text and its summary, read as
     // stored, never as filters render it.
-    self::assertSame(['text'], $row('Body')['kinds']);
+    // Its markup too, for a job description.
+    self::assertSame(['text', 'html'], $row('Body')['kinds']);
     self::assertTrue($row('Body')['html']);
     self::assertArrayHasKey(self::ARTICLE . 'field_body␞␟value', $rows);
     self::assertArrayHasKey(self::ARTICLE . 'field_body␞␟summary', $rows);
@@ -113,18 +114,35 @@ final class SourcesTest extends CanvasKernelTestBase {
     self::assertSame(['Writer', 'Title'], $row('Writer › Title')['path']);
     self::assertTrue($row('Writer › Title')['hop']);
     self::assertSame('field_writer', $row('Writer › Title')['field']);
-    // Several tags: a list, of which a text takes the first.
+    // A reference's own name also gives what it references.
+    self::assertSame(['text', 'ref'], $row('Writer › Title')['kinds']);
+    self::assertArrayNotHasKey('many', $row('Writer › Title'));
+    // Several tags: a list, of which a text takes the first and a list
+    // property every one. A term is no page: no reference.
     self::assertSame(['text'], $row('Tags › Name')['kinds']);
+    self::assertTrue($row('Tags › Name')['many']);
+    self::assertArrayNotHasKey('many', $row('Summary'));
+    // One long plain text gives its lines to a list; a short one does not.
+    self::assertTrue($row('Summary')['lines']);
+    self::assertArrayNotHasKey('lines', $row('Byline'));
     // Dates, addresses, numbers; a decimal keeps its digits.
     self::assertSame(['date'], $row('When')['kinds']);
     self::assertSame(['address'], $row('More')['kinds']);
     // Every row gives one kind: the dialog previews a row by its first kind
     // (Resolver::sourceRows()), so a row of two would preview in one place
     // what the head does not output. A Canvas match that gives two fails
-    // here.
-    self::assertSame([], array_keys(array_filter($rows, static fn (array $one): bool => count($one['kinds']) !== 1)));
+    // here. Formatted text's markup and a reference's target come beside
+    // its text, which is what it previews.
+    self::assertSame([], array_keys(array_filter($rows, static fn (array $one): bool => count(array_diff($one['kinds'], [
+      'html',
+      'ref',
+    ])) !== 1 || ($one['kinds'] !== array_diff($one['kinds'], ['html', 'ref']) && $one['kinds'][0] !== 'text'))));
     self::assertSame(['number'], $rows[self::ARTICLE . 'field_price␞␟value']['kinds']);
-    self::assertSame(2, $rows[self::ARTICLE . 'field_price␞␟value']['scale']);
+    // The decimal contract: the row is the module's own, read as digits.
+    // The day Canvas matches a decimal itself, its row comes first, not
+    // marked as the module's, and this fails: the module's decimal rows can
+    // then go.
+    self::assertTrue($rows[self::ARTICLE . 'field_price␞␟value']['decimal']);
     // An image object is read through its file, byte for byte.
     self::assertSame(['image'], $rows[self::ARTICLE . 'field_hero␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}']['kinds']);
     self::assertSame(['Hero', 'Image'], $rows[self::ARTICLE . 'field_hero␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}']['path']);
@@ -240,7 +258,30 @@ final class SourcesTest extends CanvasKernelTestBase {
     self::assertSame(['ok', 'Ada'], $evaluate('field_writer␞␟entity␜␜entity:node␝title␞␟value', 'text'));
     self::assertSame(['ok', 'AI'], $evaluate('field_tags␞␟entity␜␜entity:taxonomy_term␝name␞␟value', 'text'));
     self::assertSame(['ok', '2026-07-01T19:00:00+03:00'], $evaluate('field_when␞␟value', 'date'));
-    self::assertSame(['ok', '49.90'], $evaluate('field_price␞␟value', 'number'));
+    // A decimal is its exact digits, without trailing zeros.
+    self::assertSame(['ok', '49.9'], $evaluate('field_price␞␟value', 'number'));
+    // A list property: every tag, in order; one formatted text, its items.
+    $list = static fn (string $path, string $kind = 'text'): array => $sources->evaluate([
+      'expression' => self::ARTICLE . $path,
+      'sourceType' => 'entity-field',
+    ], $node, $kind, new CacheableMetadata(), TRUE);
+    self::assertSame(['ok', ['AI', 'Writing']], $list('field_tags␞␟entity␜␜entity:taxonomy_term␝name␞␟value'));
+    // Its paragraphs, when it has no list items: a heading is no item.
+    self::assertSame(['ok', ['Solid oak.']], $list('field_body␞␟value'));
+    self::assertSame(['ok', ['{site}']], $list('field_byline␞␟value'));
+    // One long plain text gives its lines.
+    $node->set('field_summary', "Mix\n\nBake\r\n")->save();
+    self::assertSame(['ok', ['Mix', 'Bake']], $list('field_summary␞␟value'));
+    // Text that is not valid UTF-8 gives nothing, never an error.
+    $node->set('field_summary', "Mix\xC3\x28\nBake")->save();
+    self::assertSame(['empty', []], $list('field_summary␞␟value'));
+    $node->set('field_summary', 'How teams turn output into stories.')->save();
+    // A job description is the stored markup.
+    self::assertSame(['ok', '<h2>Made to last</h2><p>Solid oak.</p>'], $evaluate('field_body␞␟value', 'html'));
+    // A reference gives what it references.
+    [$status, $targets] = $evaluate('field_writer␞␟entity␜␜entity:node␝title␞␟value', 'ref');
+    self::assertSame('ok', $status);
+    self::assertSame([(int) $writer->id()], array_map(static fn (Node $target): int => (int) $target->id(), $targets));
     [$status, $link] = $evaluate('field_more␞␟uri', 'address');
     self::assertSame(['ok', 'internal:/pricing'], [$status, $link]);
     [$status, $image] = $evaluate('field_hero␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}', 'image');
@@ -262,6 +303,11 @@ final class SourcesTest extends CanvasKernelTestBase {
     $node = $this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id());
     \assert($node instanceof Node);
     self::assertSame('hidden', $evaluate('field_writer␞␟entity␜␜entity:node␝title␞␟value', 'text')[0]);
+    // The field gives its target all the same: Resolver::target() checks
+    // it, and never names it (RefTargetsTest).
+    [$status, $targets] = $evaluate('field_writer␞␟entity␜␜entity:node␝title␞␟value', 'ref');
+    $ids = array_map(static fn (Node $target): int => (int) $target->id(), $targets);
+    self::assertSame(['ok', [(int) $writer->id()]], [$status, $ids]);
 
     // Broken: another kind, a field that is gone, another bundle, a
     // malformed string. Never an exception.

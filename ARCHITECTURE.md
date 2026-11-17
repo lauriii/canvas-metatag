@@ -238,7 +238,7 @@ A link (templates only) is a Canvas entity-field prop source,
   `names`: a filter for the reference finds it first. Formatted text is read as
   stored (`value`, `summary`), never as `processed`; a text list gives its
   stored key (its label is shown); a decimal, which Canvas never matches, is
-  added with its scale. The standard image object is rewritten to read the
+  added as the module's own `decimal` row, read as its stored digits. The standard image object is rewritten to read the
   file's URI. Cached per bundle and language with `entity_field_info`,
   `config:media_type_list` and the form display's tag, and for the rest of
   the request in `cache.memory` with the same tags (typed as any backend:
@@ -365,6 +365,105 @@ values that gave nothing or did not fit, and the node as it would have been),
 `unknown_type`, and `nodes` (every node with its origin `site`, `page`,
 `main` or `hand`, its place in `@graph`, or why it was left out:
 `withheld`, `skip`, `reserved`, `duplicate`). Nothing is silent.
+
+### Value shapes: groups, lists, references
+
+`data/schema-types.json` describes each type's properties with a few value
+shapes instead of one kind per schema.org shape. `SchemaGraph::types()`
+expands them at load; the client receives the expanded registry.
+
+- **Shapes and groups.** `$shapes` (address, venue, who, geo, pay, tickets,
+  nutrition) list their parts in a fixed order and what they `require`
+  (each entry a list of parts of which one must be set). A type's group
+  entry (`group`, `use`, `label`, `level`, `ref`) becomes one property per
+  part, keyed by path as before (`location_address_postalCode`), plus the
+  group's reference (`location`) when it has one; the type lists the group
+  under `groups` and each nested node's type under `nested`. A group is
+  emitted only when its requirements resolve; otherwise it is reported under
+  `incomplete` and the verdicts judge the node with the group as it is
+  (`judged`), so a verdict names the part it misses. A required group left
+  out withholds the main node. A group's name part is labelled by the group
+  outside it ("Venue") and by its own label inside it (`short`).
+- **Scopes.** A type or a property lists the scopes where it is **not**
+  offered, with a reason (`component`: only a component mapping could fill
+  it; `policy`). `SchemaGraph::offered()` is read by `Values::clean()`
+  (refused with "This comes from a field or a component."), by `build()`
+  (ignored), and by the dialog (not shown). `CoverageContractTest` and
+  `coverage.test.ts` fail when an offered property has no way in that is not
+  custom JSON-LD.
+- **Lists.** A `list` property takes every item of a linked multi-value field
+  (`Sources::evaluate(..., TRUE)`), in field order, without empty items, up
+  to its `max`; one formatted text gives its list items, else its paragraphs
+  (`Values::items()`), one plain text its lines. Lists of references, URLs,
+  images and codes drop repeats; lists of text keep them. A typed value is
+  several codes on a code list (`FI,SE`), one value on a URL, image or
+  reference list, and refused on a text list. A list of one is emitted as
+  its item. `join` makes several values one text; `item` wraps each
+  (`HowToStep` when there are several, `Country`).
+- **References.** A `ref` value is the publisher (`{fact: identity}`), a
+  reference field on a template, or a name (`{text}`). Only as many targets
+  as the property emits (`max`) are read; the rest are counted as over the
+  cap, never read. `Resolver::target()` reads each
+  target's own SEO values and fields, never its rendered page and never its
+  references: its label, public URL, the kind it is described as (a
+  restaurant is a local business, a place and an organization:
+  `SchemaGraph::ancestors()`), its address when it has one, and, for a
+  course, whether it has a summary. An accepted target is emitted as
+  `{@id, @type, name, url, address}`; any other gives only its name, which a
+  group keeps beside its own parts, and is reported under `refs_inline`; a
+  target visitors may not see, in the host's language, is never named
+  (`Resolver::target()` checks the translation and gives NULL, once per
+  target; `dropped_items`, reason `hidden`). A kind of place linked to a field counts only when it is a
+  listed kind. Its cache tags join the head; a target no template describes
+  yet joins it with its bundle's template, or the template list, so that
+  describing it later rebuilds the head. A list group with one target that
+  gives only a name (a workplace page described otherwise) keeps its own
+  parts beside it, as a venue does. On a Canvas page an organizer or a
+  recipe's author nobody set is the publisher (`page_default`), reported
+  under `defaults`; "Someone else" not named yet is stored as `{text: ''}`
+  on the reference (kept by `Values::canon()` and the client's `prune()`, as
+  "No ending" is), so the default stops and nothing is emitted. Event
+  templates relied on the site as the organizer before `page_default`:
+  `canvas_metatag_post_update_event_organizer()` stores it on those that
+  never set one. A required group nothing was set for withholds the main
+  node; one set but incomplete is left out and reported, so an event that
+  shipped with only a street keeps its Event, and
+  `canvas_metatag_post_update_country_codes()` stores a venue country
+  written as a name or code as its code.
+- **Enum emission.** `emit` is `url` (`https://schema.org/X`, the default),
+  `code` (`FULL_TIME`, `FI`), `type` (the main node's `@type`: a kind of
+  place) or `false` (a gate).
+- **Durations, hours, pay.** A duration is a whole number of its `unit`; a
+  linked one keeps the unit its field counts in beside the source
+  (`{source, unit}`); emitted as ISO 8601, at most 30 days
+  (`SchemaGraph::DURATION_MAX`, also in `controls.ts`). `pair` emits prep and cook time
+  together or neither (`unpaired`). Opening hours are one week in a small
+  grammar shared with the dialog (`SchemaGraph::hours()`, `controls.ts`,
+  `tests/fixtures/hours.json`); weekly days with the same times share a node,
+  a dated entry is its own, dates that have passed are left out (the head is
+  then cached until the day ends). Pay with one amount is a `value`; From
+  above To is left out (`pay_order`).
+- **The job description** is the only text kept as markup:
+  `SchemaGraph::filterHtml()` keeps `p ul ol li br strong em` and `a` with an
+  absolute http(s) `href`, removes the content of script, style and template
+  elements, and cuts at 20,000 characters; then every `<` that does not
+  start one of the tags it rebuilt is escaped. It is linked only
+  (`link_only`), never typed or proposed by AI; job postings are offered on
+  templates only. Where the work is (`work`: on site, fully remote, on site
+  or remote) is a gate: remote gives `jobLocationType` `TELECOMMUTE`, and it
+  gates the workplace and the applicant countries (a group's `when` holds
+  for each part). A one-of requirement names the alternative an answer has
+  not ruled out (`SchemaGraph::asked()`).
+- **Each page's own** (`per_item`): a closing date, performers, a venue page
+  and a workplace page are linked only on templates
+  (`SchemaGraph::typable($prop, $scope)`), never typed once for every page.
+- **A country** is a code; a linked one in lower case is upper-cased, and a
+  name stored before countries were codes is kept when read, so the report
+  lists it as dropped.
+- **A list page** (`CollectionPage` with `items`, templates only) is the page
+  node's `mainEntity`: an `ItemList` of the public pages a reference field
+  holds, in order. The course list feature counts the linked courses that
+  are complete (`items` in the report; `features()` reads it).
 
 Commerce: a price billed every month or year (`billing`, a gate) is also
 emitted as `offers.priceSpecification` (a `UnitPriceSpecification` with the
@@ -627,6 +726,8 @@ loudly.
 | `PropSourceSuggester`'s constructor parameter `entityDisplayRepository`, and properties named as its parameters | `SourcesTest::testSuggesterFailure` only | that test cannot build its failing suggester | the test itself |
 | `getAllAutoSaveList(FALSE, TRUE)` and its `conflict_id` key (`AUTO_SAVE_CONFLICT_KEY`); `resolveConflict()`; the key-value store `AUTO_SAVE_STORE` and its entry keys `owner` and `updated` | `canvas_metatag_post_update_values_as_parts()` | after the update, drafts of converted pages report a conflict, or name the update as their editor | `PostUpdateTest::testValuesAsParts` |
 | `Labeler::label()`, `Labeler::flatten()` and its separators | row labels and paths | labels change | `SourcesTest::testVocabulary` (paths) |
+| The suggester matches a multi-value formatted text field to an array of HTML strings (`htmls`), and a multi-value field to the shape of its items for a single prop; it offers no array of image objects (a media gallery is linked by its first image only, never as a list) and no `office_hours` or `daterange` fields on the farm site (opening hours are typed) | list rows (`many`), recipe steps | lists give their first item only, or steps vanish from the menu | `SourcesTest::testVocabulary`, `testEvaluate` (list mode), `RefTargetsTest::testTemplates` |
+| A reference field's items are read directly (`$items->referencedEntities` through each item's `entity`), with `view` access for an anonymous visitor per target | `Sources::targets()` | references read nothing | `SourcesTest::testEvaluate` (ref kind), `RefTargetsTest` |
 | JSON schema ref `json-schema-definitions://canvas.module/image` and the standard image object expression | image rows and their file rewrite | image rows vanish | `SourcesTest::testVocabulary` (the rewrite byte for byte), `SourcesTest::testEvaluate` (a media image) |
 | Page form `canvas_page_form`: `seo_settings.serp_preview`, `metatags` | `formCanvasPageFormAlter()` | the alter does nothing (guarded) | `MetatagCoexistenceTest` |
 | Route option `_canvas_use_template_draft`, set by `CanvasContentController::get()` | `HeadlessContentController` | drafts not shown in headless previews (fails closed to published) | `HeadlessHeadTest::testDrafts` |
@@ -921,17 +1022,19 @@ each row names the test that fails when it changes.
 | `ResolverTest` | ownership, layers, facts and access, the form's order, linked values (empty, hidden, deleted field, formatted text), the head, cacheability and drafts, the public base | PHPUnit (kernel) |
 | `SourcesTest` (group `canvas_metatag_canvas_contract`) | the Canvas contract of `src/Sources.php`: vocabulary, exclusions, labels, the image rewrite, a round trip and value per field type, every status and the account rule, `accepts()` | PHPUnit (kernel); also against Canvas 1.x-dev in CI |
 | `BoundaryTest` | only `src/Sources.php` uses Canvas's prop source code | PHPUnit (unit) |
-| `LegacyTest`, `PostUpdateTest` | the conversion of token strings, each loss logged; the post_update on site, templates, drafts, page revisions and page drafts | PHPUnit (unit, kernel) |
+| `LegacyTest`, `PostUpdateTest` | the conversion of token strings, each loss logged; the post_update on site, templates, drafts, page revisions and page drafts; the site kept as the organizer of event templates; venue countries stored as codes | PHPUnit (unit, kernel) |
 | `PageDraftTest`, `TemplateDraftTest` | the draft transport against real Canvas: editor saves carry our value, the conflict rule, publish, translations (incl. draft-only, the details of a published type, a new translation equal to the default), refusals, duplicate | PHPUnit (kernel) |
 | `CoupledHeadTest` | the HTML head an anonymous visitor gets, with both page caches; non-owned routes untouched; a failing build serves core's head | PHPUnit (kernel) |
 | `HeadlessHeadTest` | the content API head, preview drafts, routes left alone, the runtime requirement | PHPUnit (kernel) |
 | `MetatagCoexistenceTest` | Metatag silent where the head is ours, widgets hidden | PHPUnit (kernel) |
 | `ApiTest` | route requirements, state (facts, separator, sources, broken links, the report's verdicts and rules; incl. a template without a node to preview), site (stored links ignored, the currency, what a save changes elsewhere), the registry in the dialog's language, media, writes follow shown values, refused links | PHPUnit (kernel) |
+| `RegistryTest`, `CoverageContractTest`, `PopulateEveryTypeTest`, `NormaliseTest` | every registry attribute has its reader, shapes and groups are consistent; every property offered on a scope has a way in that is not custom JSON-LD, every required fact is offered with its type, a fixture per offered type and scope; each fixture in `tests/fixtures/graphs/<type>[.<case>].<scope>.json` builds its graph, report and verdicts with no custom JSON-LD and only accepted values; one formatted text's list items | PHPUnit (unit) |
+| `RefTargetsTest` | every type end to end on the complex fixture: venues described as places, events pointing at them and at profiles, hidden references never named, jobs (filtered description, workplace address, pay from a decimal, a closed job), recipes (ingredients and steps from multi-value fields), Canvas pages typing values and picking a venue page, a course list | PHPUnit (kernel) |
 | `ComplexContentTest`, `ComplexTemplateTest` | the complex content fixture (`tests/src/Fixture/ComplexContent.php`) and template scope on it: field discovery in form order, values per node (headings, list items and table rows as sentences), heads and structured data (a square logo's small card), hidden references published and deleted (coupled and headless), drafts, headless | PHPUnit (kernel) |
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
 | `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
-| `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks (verdict rows, parity with the page, hand-added items), the read-back, kinds, API client, host adapter parsing | `npm run verify` |
+| `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks (verdict rows, parity with the page, hand-added items, what a node left out), the read-back, kinds, API client, host adapter parsing; `coverage.test.ts` (every offered detail has a control), `controls.test.ts` (controls by shape, durations, the hours grammar, pickers, group lines) | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
 | Playwright `coupled` (`page`, `template`, `site`, `access`, `schema`) |
  the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates linked to fields, title endings, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |

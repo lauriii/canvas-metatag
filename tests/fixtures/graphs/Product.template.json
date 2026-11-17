@@ -1,0 +1,257 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/complex/products/oak-desk-lamp",
+        "langcode": "en",
+        "title": "Oak desk lamp",
+        "description": "Made to last. Solid oak, turned by hand.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "template",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "Product",
+        "props": {
+            "image": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:product␝field_gallery␞␟entity␜␜entity:media␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}",
+                    "sourceType": "entity-field"
+                }
+            },
+            "offers_price": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:product␝field_price␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "offers_priceCurrency": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:product␝field_currency␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "sku": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:product␝field_sku␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "sold_here": {
+                "text": "yes"
+            },
+            "offers_availability": {
+                "text": "InStock"
+            },
+            "brand_name": {
+                "text": "Example Works"
+            }
+        }
+    },
+    "facts": {
+        "title": "Oak desk lamp",
+        "description": "Made to last. Solid oak, turned by hand.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/complex/products/oak-desk-lamp"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": {
+        "ℹ︎␜entity:node:product␝field_gallery␞␟entity␜␜entity:media␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}": [
+            {
+                "url": "https://cms.example.com/sites/default/files/lamp-front.png",
+                "width": 1200,
+                "height": 1200,
+                "alt": "The lamp from the front"
+            },
+            {
+                "url": "https://cms.example.com/sites/default/files/lamp-side.png",
+                "width": 1200,
+                "height": 1200,
+                "alt": "The lamp from the side"
+            }
+        ],
+        "ℹ︎␜entity:node:product␝field_price␞␟value": "89.00",
+        "ℹ︎␜entity:node:product␝field_currency␞␟value": "EUR",
+        "ℹ︎␜entity:node:product␝field_sku␞␟value": "LAMP-OAK-01"
+    },
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "description": "default",
+            "image": "set",
+            "offers_price": "set",
+            "offers_priceCurrency": "set",
+            "sold_here": "set",
+            "offers_availability": "set",
+            "brand_name": "set",
+            "sku": "set"
+        },
+        "gates": {
+            "sold_here": "yes"
+        },
+        "type": "Product",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/complex/products/oak-desk-lamp#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/complex/products/oak-desk-lamp#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/complex/products/oak-desk-lamp#primary",
+                "type": "Product",
+                "origin": "main",
+                "at": 4
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [],
+        "refs_inline": [],
+        "defaults": [],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "https://www.example.com/complex/products/oak-desk-lamp#webpage",
+                "url": "https://www.example.com/complex/products/oak-desk-lamp",
+                "name": "Oak desk lamp",
+                "description": "Made to last. Solid oak, turned by hand.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/complex/products/oak-desk-lamp#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/complex/products/oak-desk-lamp#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/complex/products/oak-desk-lamp#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            },
+            {
+                "@type": "Product",
+                "@id": "https://www.example.com/complex/products/oak-desk-lamp#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/complex/products/oak-desk-lamp#webpage"
+                },
+                "name": "Oak desk lamp",
+                "description": "Made to last. Solid oak, turned by hand.",
+                "image": [
+                    {
+                        "@type": "ImageObject",
+                        "url": "https://cms.example.com/sites/default/files/lamp-front.png",
+                        "width": 1200,
+                        "height": 1200
+                    },
+                    {
+                        "@type": "ImageObject",
+                        "url": "https://cms.example.com/sites/default/files/lamp-side.png",
+                        "width": 1200,
+                        "height": 1200
+                    }
+                ],
+                "offers": {
+                    "@type": "Offer",
+                    "price": "89.00",
+                    "priceCurrency": "EUR",
+                    "availability": "https://schema.org/InStock",
+                    "seller": {
+                        "@id": "https://www.example.com/#identity"
+                    }
+                },
+                "brand": {
+                    "@type": "Brand",
+                    "name": "Example Works"
+                },
+                "sku": "LAMP-OAK-01"
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": "product-snippet",
+            "node": "https://www.example.com/complex/products/oak-desk-lamp#primary",
+            "verdict": "ready"
+        },
+        {
+            "feature": "merchant-listing",
+            "node": "https://www.example.com/complex/products/oak-desk-lamp#primary",
+            "verdict": "ready"
+        }
+    ]
+}

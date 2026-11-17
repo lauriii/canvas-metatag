@@ -1747,6 +1747,10 @@ button.seo-feature-line:hover {
 }
 textarea.seo-input {
   min-height: 52px;
+  /* Grows with its text up to ten lines, then scrolls: a long paste never
+     fills the dialog. */
+  max-height: 220px;
+  overflow-y: auto;
   white-space: pre-wrap;
   resize: none;
   field-sizing: content;
@@ -3521,4 +3525,340 @@ button.seo-row:focus-visible {
 /* In a row, Reset says where the value is set: no room for both. */
 .seo-row-head > .seo-aside:has(> .seo-btn[aria-label^="Reset"]) > span {
   display: none;
+}
+
+/* ── Value shapes: groups, pickers, durations, opening hours ── */
+.seo-group > .seo-label {
+  display: block;
+  margin-bottom: var(--seo-1);
+  color: var(--seo-ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.seo-group-box,
+.seo-picker-box {
+  all: unset;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--seo-2);
+  width: 100%;
+  min-height: var(--seo-control-h);
+  padding: 6px 10px 6px 12px;
+  border-radius: var(--seo-radius-control);
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--seo-control-border);
+  color: var(--seo-ink);
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.seo-group-box > span,
+.seo-picker-box > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* A linked group: its link tag over what it reads, as a linked box. */
+.seo-group-words {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.seo-group-box > svg,
+.seo-picker-box > svg {
+  flex: none;
+  color: var(--seo-icon);
+}
+.seo-group-box:hover,
+.seo-picker-box:hover {
+  box-shadow: inset 0 0 0 1px var(--seo-control-border-hover);
+}
+.seo-group-box:focus-visible,
+.seo-picker-box:focus-visible,
+.seo-picker-box[data-state="open"] {
+  outline: none;
+  box-shadow: var(--seo-ring);
+}
+.seo-group-box:disabled,
+.seo-picker-box:disabled {
+  background: var(--gray-a2);
+  color: var(--seo-ink-2);
+  cursor: default;
+}
+.seo-muted {
+  color: var(--seo-ink-2);
+}
+.seo-reads-as {
+  margin: 0 0 var(--seo-4);
+  color: var(--seo-ink-2);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+/* What a group misses, said once under "Reads as". */
+.seo-group-gap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seo-1);
+  margin: calc(-1 * var(--seo-2)) 0 var(--seo-4);
+}
+.seo-group-parts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seo-field-gap);
+}
+.seo-link-only {
+  margin: 0;
+  font-size: 13px;
+}
+.seo-check-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seo-2);
+  padding-top: 2px;
+}
+.seo-picker {
+  width: min(320px, calc(100vw - 32px));
+  /* Never taller than the room on its side: the filter stays in sight. */
+  max-height: min(320px, var(--radix-popover-content-available-height, 320px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--seo-2);
+  padding: var(--seo-2);
+}
+.seo-picker-list {
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+/* One row anatomy with the link menu and Selects: 32 px. */
+.seo-picker-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--seo-2);
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 6px 8px;
+  line-height: 20px;
+  border-radius: var(--seo-radius-control);
+  font-size: 14px;
+  cursor: pointer;
+}
+.seo-picker-row:hover,
+.seo-picker-row:focus-visible,
+.seo-picker-row[data-active] {
+  outline: none;
+  background: var(--seo-hover);
+}
+.seo-picker-row[aria-selected="true"] {
+  background: var(--seo-selected);
+}
+.seo-picker-row[data-after-suggested] {
+  margin-top: 4px;
+  box-shadow: 0 -3px 0 -2px var(--seo-line-soft);
+}
+.seo-picker-check {
+  display: inline-flex;
+  color: var(--seo-primary);
+}
+/* A list that takes several: an empty box on every row, ticked when chosen. */
+.seo-picker-check[data-box] {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--seo-control-border);
+}
+.seo-picker-row[aria-selected="true"] > .seo-picker-check[data-box] {
+  background: var(--seo-primary);
+  box-shadow: none;
+  color: var(--color-panel-solid);
+}
+.seo-picker-foot {
+  padding: 4px 8px 0;
+  border-top: 1px solid var(--seo-line-soft);
+  color: var(--seo-ink-2);
+  font-size: 12px;
+}
+/* One box with two numbers: hours, then minutes, each with its unit word. */
+.seo-duration-box {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: var(--seo-3);
+  width: fit-content;
+  max-width: 100%;
+  min-height: var(--seo-control-h);
+  padding: 0 10px 0 4px;
+  border-radius: var(--seo-radius-control);
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--seo-control-border);
+}
+.seo-duration-box:focus-within {
+  box-shadow: var(--seo-ring);
+}
+.seo-duration-box[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--red-9);
+}
+.seo-duration-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--seo-ink-2);
+  font-size: 13px;
+}
+.seo-duration-slot > .seo-input {
+  width: 48px;
+  min-height: calc(var(--seo-control-h) - 2px);
+  padding: 0 4px;
+  box-shadow: none;
+  background: transparent;
+  text-align: right;
+}
+.seo-duration-slot > .seo-input:focus,
+.seo-duration-slot > .seo-input:focus-visible {
+  box-shadow: none;
+  outline: none;
+}
+.seo-week {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--seo-4);
+}
+.seo-week > .seo-reads-as {
+  margin: 0;
+}
+/* A day on one row: its name, its times, then its status, which lines up
+   with every other day's. */
+.seo-day {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--seo-1) var(--seo-2);
+}
+.seo-day-name {
+  font-size: 14px;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+.seo-day-status {
+  justify-self: end;
+}
+/* "Not set" in a select, and a week nobody set (its days Closed), read
+   in gray, as every empty box does. */
+.seo-select-box[data-unset],
+.seo-day-status[data-unset] {
+  color: var(--seo-ink-2);
+}
+.seo-day-copy {
+  grid-column: 2 / -1;
+  margin-left: -6px;
+}
+/* A second range wraps under the first; the + stays beside the last. */
+.seo-day-times {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--seo-1);
+  min-width: 0;
+}
+.seo-day-range,
+.seo-day-open,
+.seo-day-close {
+  display: flex;
+  align-items: center;
+  gap: var(--seo-1);
+}
+.seo-day-open > .seo-input,
+.seo-day-close > .seo-input {
+  width: 100px;
+}
+/* Narrow (200 % zoom): the day's name and status on one line, its times
+   under them; a time pair stacks, the dash starting the closing time's
+   line. */
+@container (max-width: 400px) {
+  .seo-day {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .seo-day-times {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .seo-day-copy {
+    grid-column: 1 / -1;
+  }
+  .seo-day-range {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .seo-day-open {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .seo-day-close {
+    flex: 1 1 0;
+    min-width: 0;
+    padding-right: 14px;
+  }
+  .seo-day-open > .seo-input,
+  .seo-day-close > .seo-input {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+  }
+}
+.seo-day > .seo-day-error {
+  grid-column: 1 / -1;
+}
+.seo-special {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--seo-2);
+}
+.seo-special > .seo-day {
+  flex: 1;
+}
+.seo-sheet-section {
+  margin: var(--seo-3) 0 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+/* What a linked duration's field counts in: wraps, never wider than the column. */
+.seo-unit-question {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--seo-1) var(--seo-2);
+  margin-top: var(--seo-2);
+  color: var(--seo-ink-2);
+  font-size: 13px;
+}
+/* Every detail shown under another, in the view and in More details alike:
+   nearer than the next field, one gap. */
+.seo-panel > .seo-under,
+.seo-more-details > .seo-under {
+  margin-top: var(--seo-4);
+}
+.seo-unit-question > .seo-select-box {
+  min-width: 0;
+  max-width: 100%;
+}
+/* A detail asked for under another: someone else's name, who can apply. */
+.seo-under {
+  display: flex;
+  flex-direction: column;
+  gap: var(--seo-field-gap);
+  margin-top: 0;
+  padding-left: var(--seo-3);
+  border-left: 2px solid var(--seo-line-soft);
+}
+.seo-special-add {
+  display: flex;
+  gap: var(--seo-2);
+}
+.seo-special-add > .seo-input {
+  flex: 1;
+  min-width: 0;
 }
