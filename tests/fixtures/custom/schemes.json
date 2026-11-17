@@ -1,0 +1,107 @@
+[
+  {
+    "name": "a script address",
+    "input": "{\"@type\": \"Organization\", \"sameAs\": [\"javascript:alert(5)\"]}",
+    "accepted": false,
+    "message": "sameAs: text can’t start with “javascript:”.",
+    "item": 0,
+    "path": "/sameAs/0"
+  },
+  {
+    "name": "a script address in capitals",
+    "input": "{\"@type\": \"Organization\", \"url\": \" JavaScript:alert(5)\"}",
+    "accepted": false,
+    "message": "url: text can’t start with “javascript:”.",
+    "item": 0,
+    "path": "/url"
+  },
+  {
+    "name": "vbscript",
+    "input": "{\"@type\": \"Organization\", \"sameAs\": [\"vbscript:msgbox\"]}",
+    "accepted": false,
+    "message": "sameAs: text can’t start with “vbscript:”.",
+    "item": 0,
+    "path": "/sameAs/0"
+  },
+  {
+    "name": "a data address",
+    "input": "{\"@type\": \"Organization\", \"sameAs\": [\"data:text/html,x\"]}",
+    "accepted": false,
+    "message": "sameAs: text can’t start with “data:”.",
+    "item": 0,
+    "path": "/sameAs/0"
+  },
+  {
+    "name": "a file address",
+    "input": "{\"@type\": \"Organization\", \"sameAs\": [\"file:///etc\"]}",
+    "accepted": false,
+    "message": "sameAs: text can’t start with “file:”.",
+    "item": 0,
+    "path": "/sameAs/0"
+  },
+  {
+    "name": "a script scheme mentioned in text",
+    "input": "{\"@type\": \"Course\", \"name\": \"Learn javascript: the basics\"}",
+    "accepted": true
+  },
+  {
+    "name": "data mentioned in text",
+    "input": "{\"@type\": \"Dataset\", \"description\": \"Data: collected in 2026\"}",
+    "accepted": true
+  },
+  {
+    "name": "file mentioned in text",
+    "input": "{\"@type\": \"Report\", \"name\": \"File: annual report\"}",
+    "accepted": true
+  },
+  {
+    "name": "a tab inside the script scheme",
+    "input": "{\"@type\": \"Organization\", \"sameAs\": [\"java\\tscript:alert(1)\"]}",
+    "accepted": false,
+    "message": "sameAs: text can’t start with “javascript:”.",
+    "item": 0,
+    "path": "/sameAs/0"
+  },
+  {
+    "name": "a line break inside the script scheme",
+    "input": "{\"@type\": \"Organization\", \"url\": \"jav\\nascript:alert(1)\"}",
+    "accepted": false,
+    "message": "url: text can’t start with “javascript:”.",
+    "item": 0,
+    "path": "/url"
+  },
+  {
+    "name": "a script scheme as the type",
+    "input": "{\"@type\": \"javascript:alert(1)\"}",
+    "accepted": false,
+    "message": "@type: text can’t start with “javascript:”.",
+    "item": 0,
+    "path": "/@type"
+  },
+  {
+    "name": "a script scheme in a list of types",
+    "input": "{\"@type\": [\"Organization\", \"vbscript:x\"]}",
+    "accepted": false,
+    "message": "@type: text can’t start with “vbscript:”.",
+    "item": 0,
+    "path": "/@type"
+  },
+  {
+    "name": "a line break after a word and colon in text",
+    "input": "{\"@type\": \"Dataset\", \"description\": \"Notes:\\nkept as text\"}",
+    "accepted": true
+  },
+  {
+    "name": "a script scheme after a no-break space (address parsers keep it: a relative address)",
+    "input": "{\"@type\": \"Organization\", \"url\": \" javascript:x\"}",
+    "accepted": true
+  },
+  {
+    "name": "a script scheme after a tab and a form feed",
+    "input": "{\"@type\": \"Organization\", \"url\": \"\\t\\fjavascript:x\"}",
+    "accepted": false,
+    "message": "url: text can’t start with “javascript:”.",
+    "item": 0,
+    "path": "/url"
+  }
+]

@@ -6,6 +6,7 @@ import { ApiError } from './api';
 import type { EditorToken, HostContext } from './host';
 import { durationText, groupLine, hoursLine, parseHours } from './controls';
 import { dateWords } from './readback';
+import { set as setJson, value as readJson } from './custom/doc';
 import {
   type Lookup,
   type ShownImage,
@@ -144,6 +145,12 @@ export const optionText = (prop: SchemaProp, option: string) => {
 
 /** The details a change of kind removes, said with their values. */
 export function removed(server: StatePayload, values: SeoValues, to: string, locale: string): string[] {
+  // Added details keep everything but a type list that no longer fits.
+  const stray = strayTypes(server, values, to, values.schema?.props ?? {});
+  return [...removedProps(server, values, to, locale), ...(stray ? [`the added ${stray.types.length === 1 ? 'type' : 'types'} (${stray.types.join(', ')})`] : [])];
+}
+
+function removedProps(server: StatePayload, values: SeoValues, to: string, locale: string): string[] {
   const registry = server.registry;
   const from = typeOf(registry, values.schema?.type ?? String(inherited(server, 'target', 'schema.type')));
   const next = typeOf(registry, to).props ?? [];
@@ -249,17 +256,50 @@ const NOUNS: Record<string, string> = {
   sold_here: 'the answer to “Bought on this page”',
 };
 
+/**
+ * The type the main thing is output with, as Values::nodeTypes() decides
+ * it: a kind of place chosen, else the registry's.
+ */
+function primaryType(server: StatePayload, type: string, props: Record<string, Value | undefined>): string {
+  const entry = typeOf(server.registry, type);
+  let primary = entry.primary_type ?? 'Thing';
+  for (const prop of entry.props ?? []) {
+    const own = props[prop.key];
+    const text = prop.emit === 'type' ? (own && 'text' in own ? own.text : prop.default && 'text' in prop.default ? prop.default.text : null) : null;
+    if (typeof text === 'string' && prop.options?.includes(text)) primary = text;
+  }
+  return primary;
+}
+
+/**
+ * Added details whose added @type list no longer keeps the main thing's
+ * type: the details stay, the list goes (as the server reads them). Null
+ * when nothing changes.
+ */
+function strayTypes(server: StatePayload, values: SeoValues, to: string, props: Record<string, Value | undefined>): { text: string; types: string[] } | null {
+  const text = values.schema?.extend?.['#primary'];
+  const data = text ? readJson(text) : undefined;
+  if (!text || data === null || typeof data !== 'object' || Array.isArray(data)) return null;
+  const types = (data as Record<string, unknown>)['@type'];
+  const list = (Array.isArray(types) ? types : [types]).filter((one): one is string => typeof one === 'string');
+  if (!list.length || list.includes(primaryType(server, to, props))) return null;
+  return { text: setJson(text, ['@type'], undefined), types: list };
+}
+
 /** The values with another kind: the details the new one has are kept. */
 export function withKind(server: StatePayload, values: SeoValues, to: string, errors: Record<string, string> = {}): SeoValues {
   const next = typeOf(server.registry, to).props ?? [];
   const schema = values.schema ?? {};
+  // A value the server refused is not carried into the new kind.
+  const props = Object.fromEntries(Object.entries(schema.props ?? {}).filter(([key]) => next.some((prop) => prop.key === key) && errors[`schema.props.${key}`] === undefined));
+  const stray = strayTypes(server, values, to, props);
   return {
     ...values,
     schema: {
       ...schema,
       type: to,
-      // A value the server refused is not carried into the new kind.
-      props: Object.fromEntries(Object.entries(schema.props ?? {}).filter(([key]) => next.some((prop) => prop.key === key) && errors[`schema.props.${key}`] === undefined)),
+      props,
+      ...(stray && { extend: { ...schema.extend, '#primary': stray.text.trim() === '{}' ? undefined : stray.text } }),
     },
   };
 }
@@ -1054,6 +1094,9 @@ export function reducer(state: State, action: Action): State {
           )
         : state;
 
+    case 'forgetUndo':
+      return state.undo?.text === action.text ? { ...state, undo: null } : state;
+
     case 'undo': {
       if (!state.server || !state.undo) {
         return state;
@@ -1120,6 +1163,7 @@ export function reducer(state: State, action: Action): State {
           ...state.errors,
           [action.scope]: { ...state.errors[action.scope], ...action.fields },
         },
+        ...(action.places && { places: { ...state.places, ...action.places } }),
       };
 
     case 'live':
@@ -1304,7 +1348,7 @@ export interface DraftIO {
   quiet(ms: number): Promise<void>;
   /** Throws ApiError. */
   getState(): Promise<StatePayload>;
-  refuse(fields: Record<string, string>): void;
+  refuse(fields: Record<string, string>, places?: Record<string, { item: number; path: string }>): void;
   /** Our write is in the draft: replace the server truth, never the inputs. */
   confirmed(state: StatePayload, sent: string): void;
 }
@@ -1360,7 +1404,7 @@ export async function saveDraft(io: DraftIO): Promise<DraftResult> {
         Object.keys(error.fields).some((path) => !known.includes(path)) &&
         ++refusals <= 20
       ) {
-        io.refuse(error.fields);
+        io.refuse(error.fields, error.places);
         attempt--;
         continue;
       }
@@ -1530,7 +1574,7 @@ export const fieldNames = (paths: string[]): string[] => [
 ];
 
 /** Error paths of PUT /site, as paths into the site working copy. */
-export const sitePaths = (fields: Record<string, string>) =>
+export const sitePaths = <T,>(fields: Record<string, T>): Record<string, T> =>
   Object.fromEntries(
     Object.entries(fields).map(([path, message]) => [
       path.startsWith('identity.') || path === 'currency' ? path : `values.${path}`,

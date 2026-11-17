@@ -745,6 +745,17 @@ describe('reducer', () => {
     expect(undone.siteDirty).toBe(true);
   });
 
+  it('Undo after Format restores the text as it was written; a sheet left forgets its Undo', () => {
+    const written = '[{"@type": "Rating", "ratingValue": 4.50}]';
+    const typed = run(ready({ target: target({ values: { schema: { custom: written } } }) }));
+    const formatted = run(typed, { type: 'apply', scope: 'target', values: { schema: { custom: '[\n  {\n    "@type": "Rating",\n    "ratingValue": 4.50\n  }\n]' } }, undo: 'Formatted' });
+    expect(formatted.undo?.text).toBe('Formatted');
+    expect(run(formatted, { type: 'undo' }).edits.target.schema?.custom).toBe(written);
+    // Leaving the sheet forgets its own Undo, never another's.
+    expect(run(formatted, { type: 'forgetUndo', text: 'Removed image' }).undo?.text).toBe('Formatted');
+    expect(run(formatted, { type: 'forgetUndo', text: 'Formatted' }).undo).toBeNull();
+  });
+
   it('a site currency names where it goes live before it is saved', () => {
     const dirty = run(
       ready(),
@@ -1691,6 +1702,12 @@ describe('footer and strips', () => {
     });
     // A value the server refused is not carried into the new kind.
     expect(withKind(server, product.edits.target, 'Service', { 'schema.props.name': 'Use at most 255 characters.' }).schema?.props).not.toHaveProperty('name');
+    // Added details stay; an added type list that no longer keeps the main
+    // thing's type goes, said in the confirm (the server reads it the same).
+    const extended = ready({ target: target({ values: { schema: { type: 'Product', extend: { '#primary': '{\n  "@type": ["Product", "IndividualProduct"],\n  "color": "Oak"\n}' } } } }) });
+    expect(withKind(extended.server!, extended.edits.target, 'Event').schema?.extend).toEqual({ '#primary': '{\n  "color": "Oak"\n}' });
+    expect(removed(extended.server!, extended.edits.target, 'Event', 'en')).toEqual(['the added types (Product, IndividualProduct)']);
+    expect(removed(extended.server!, extended.edits.target, 'Product', 'en')).toEqual([]);
     // A group is said once, as its box reads it; opening hours and a
     // country in words.
     const place = ready({

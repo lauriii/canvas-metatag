@@ -207,9 +207,11 @@ const ITEMS: [RegExp, string][] = [
  */
 export function itemKind(node: Node, rules: SearchFeatures): string {
   const type = typeof node['@type'] === 'string' ? node['@type'] : '';
-  // A feature of the site's own nodes ("Logo") does not name an item.
-  const feature = Object.values(rules.features).find((one) => !one.node && one.on.includes(type));
-  return feature?.label ?? ITEMS.find(([pattern]) => pattern.test(type))?.[1] ?? 'an item';
+  // A feature of the site's own nodes ("Logo") does not name an item, nor
+  // one of hand-added items ("Review snippet"): their type's label does.
+  const feature = Object.values(rules.features).find((one) => !one.node && !one.only && one.on.includes(type));
+  const label = rules.labels?.[type]?.toLowerCase();
+  return feature?.label ?? (label ? `${/^[aeiou]/.test(label) ? 'an' : 'a'} ${label}` : undefined) ?? ITEMS.find(([pattern]) => pattern.test(type))?.[1] ?? 'an item';
 }
 
 /** The name of a hand-added item: its own, else what it is. */

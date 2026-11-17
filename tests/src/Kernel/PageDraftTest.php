@@ -327,6 +327,9 @@ final class PageDraftTest extends CanvasKernelTestBase {
       'has_draft' => TRUE,
       'values' => [],
       'from_default' => ['robots' => ['noindex' => TRUE], 'schema' => ['type' => 'Product']],
+      // Nothing stored was refused, and the source has no items to copy.
+      'refused' => NULL,
+      'source' => NULL,
     ], array_diff_key($state['target'], array_flip(['scope', 'entity_type', 'id', 'translatable'])));
     self::assertSame('Precios', $state['preview']['label']);
 

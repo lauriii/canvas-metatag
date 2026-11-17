@@ -118,7 +118,7 @@ final class Legacy {
       $new['schema']['props'][$key] = $value === ($prop['default'] ?? NULL) ? NULL : $value;
     }
     if (is_string($old['schema']['custom'] ?? NULL) && str_contains($old['schema']['custom'], '{field.')) {
-      $log[] = 'schema.custom: names a field, which custom JSON-LD no longer fills.';
+      $log[] = 'schema.custom: names a field. A whole value is filled from its field; a name inside other text stays as written.';
     }
 
     // What the scope may not hold goes, and is said.

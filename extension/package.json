@@ -9,11 +9,12 @@
     "type-check": "tsc --noEmit --pretty",
     "test": "vitest run",
     "check-patterns": "node check-patterns.mjs",
-    "verify": "npm run type-check && npm test && npm run check-patterns && npm run build"
+    "verify": "npm run type-check && npm test && npm run build && npm run check-patterns"
   },
   "dependencies": {
     "@radix-ui/react-icons": "^1.3.2",
     "@radix-ui/themes": "^3.3.0",
+    "jsonc-parser": "3.3.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -21,6 +22,7 @@
     "@types/node": "^24.19.2",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "fast-check": "4.10.2",
     "tsup": "^9.0.0",
     "typescript": "^5.8.3",
     "vitest": "^5.0.5"

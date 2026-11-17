@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Drupal\Tests\canvas_metatag\Unit;
 
 use Drupal\canvas_metatag\Hook\CanvasMetatagHooks;
+use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
 use Drupal\Component\Uuid\Uuid;
@@ -98,7 +99,11 @@ final class SchemaGraphTest extends UnitTestCase {
     $ids = array_column($graph['@graph'], '@id');
     self::assertSame($ids, array_unique($ids), 'Every @id is unique.');
     foreach ($graph['@graph'] as $node) {
-      self::assertIsString($node['@type'] ?? NULL, 'Every node has a type.');
+      // One type, or a hand-added list of them.
+      self::assertNotEmpty($node['@type'] ?? NULL, 'Every node has a type.');
+      foreach ((array) $node['@type'] as $type) {
+        self::assertIsString($type, 'Every type is a name.');
+      }
     }
     $ours = array_map(static fn (string $name): string => (in_array($name, [
       'identity',
@@ -724,10 +729,92 @@ final class SchemaGraphTest extends UnitTestCase {
     self::assertSame(['@type' => 'Thing', 'name' => 'A'], $result['graph']['@graph'][3]);
     self::assertGraphRules($result['graph'], self::HOME, self::URL);
 
+    // Two types: output as the list it was written as.
+    $result = self::build(['custom' => '{"@type":["Restaurant","Store"],"@id":"#shop","name":"Rye"}']);
+    self::assertSame(['@type' => ['Restaurant', 'Store'], '@id' => self::URL . '#shop', 'name' => 'Rye'], $result['graph']['@graph'][3]);
+    self::assertGraphRules($result['graph'], self::HOME, self::URL);
+
     // Garbage that got past the cleaner adds nothing.
     foreach (['<script>', '"text"', '[1, {"name": "no type"}]'] as $text) {
       self::assertCount(3, self::build(['custom' => $text])['graph']['@graph']);
     }
+  }
+
+  /**
+   * A reference to a module node the graph has not is removed and reported.
+   */
+  public function testReferenceToAbsentModuleNodeRemoved(): void {
+    $result = self::build([
+      'type' => 'Event',
+      'custom' => '{"@type": "Review", "@id": "#r", "itemReviewed": {"@id": "#primary"}, "author": {"@id": "#logo"}, "reviewBody": "Fine."}',
+    ]);
+    self::assertNotNull($result['withheld']);
+    self::assertSame(['@type' => 'Review', '@id' => self::URL . '#r', 'reviewBody' => 'Fine.'], end($result['graph']['@graph']));
+    self::assertSame([
+      ['path' => 'itemReviewed', 'item' => 0, 'name' => self::URL . '#primary', 'status' => 'absent'],
+      ['path' => 'author', 'item' => 0, 'name' => self::HOME . '#logo', 'status' => 'absent'],
+    ], $result['empty']);
+  }
+
+  /**
+   * Structured data that cannot be written out is left out on its own.
+   */
+  public function testUnencodableGraphLeftOut(): void {
+    $graph = self::build(['custom' => '{"@type": "Thing", "name": "A"}'])['graph'];
+    self::assertSame([['type' => 'application/ld+json', 'textContent' => $graph]], Resolver::script($graph, $error));
+    self::assertNull($error);
+    self::assertSame($graph, Resolver::graphOf(['script' => Resolver::script($graph)]));
+    $graph['@graph'][] = ['@type' => 'Rating', 'ratingValue' => INF];
+    self::assertSame([], Resolver::script($graph, $error));
+    self::assertNotNull($error);
+    // The report judges what the head carries: nothing, never a warning.
+    self::assertSame(['@context' => 'https://schema.org', '@graph' => []], Resolver::graphOf(['script' => Resolver::script($graph)]));
+  }
+
+  /**
+   * A snippet from a generator: its schema.org context is not output.
+   */
+  public function testPastedContextLeftOut(): void {
+    $graph = self::build(['custom' => '{"@context":"https://schema.org","@type":"Organization","name":"Acme Logistics"}'])['graph'];
+    $item = end($graph['@graph']);
+    self::assertSame('Acme Logistics', $item['name']);
+    self::assertArrayNotHasKey('@context', $item);
+  }
+
+  /**
+   * Linked text is cut at a word; a graph over 256 KB loses what was added.
+   */
+  public function testOutputCaps(): void {
+    $long = str_repeat('word ', 9000);
+    $result = SchemaGraph::build(self::CTX + [
+      'scope' => 'template',
+      'fill' => static fn (string $name): array => ['ok', $long],
+    ], ['custom' => '{"@type": "Article", "@id": "#a", "articleBody": "{field.body}"}'], static fn (): mixed => NULL);
+    $body = end($result['graph']['@graph'])['articleBody'];
+    self::assertLessThanOrEqual(SchemaGraph::FILL_MAX, mb_strlen($body));
+    self::assertStringEndsWith('word', $body);
+    self::assertSame([['path' => 'articleBody', 'item' => 0]], $result['cut']);
+
+    // Ten items of 30 KB: the module's nodes stay, the rest is left out.
+    $items = array_map(static fn (int $n): array => [
+      '@type' => 'Thing',
+      '@id' => "#t$n",
+      'name' => str_repeat('x', 30000),
+    ], range(1, 10));
+    $result = self::build([
+      'type' => 'Article',
+      'custom' => (string) json_encode($items),
+      'extend' => ['#webpage' => '{"keywords": "k", "name": "Clashes"}'],
+    ]);
+    self::assertTrue($result['over']);
+    self::assertCount(4, $result['graph']['@graph']);
+    self::assertArrayNotHasKey('keywords', $result['graph']['@graph'][2]);
+    // Nothing reports details that are no longer output.
+    self::assertSame([], array_filter(array_column($result['nodes'], 'extended')));
+    foreach (['added', 'clashes', 'type_added', 'unmatched'] as $member) {
+      self::assertArrayNotHasKey($member, $result);
+    }
+    self::assertSame(array_fill(0, 10, 'over'), array_column(array_filter($result['nodes'], static fn (array $node): bool => $node['origin'] === 'hand'), 'left_out'));
   }
 
   /**

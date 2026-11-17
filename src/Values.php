@@ -65,7 +65,7 @@ final class Values {
   private const KEYS = [
     'page' => ['title', 'title_end', 'canonical', 'social', 'robots', 'schema'],
     'template' => ['title', 'title_end', 'description', 'social', 'robots', 'schema'],
-    'site' => ['title_end', 'robots'],
+    'site' => ['title_end', 'robots', 'schema'],
   ];
 
   private const PREVIEWS = ['none', 'standard', 'large'];
@@ -76,6 +76,36 @@ final class Values {
   private const FACT = 'Choose a value from the list.';
   private const FIELD = 'Choose a field from the list.';
   private const CUSTOM_SHAPE = 'Use one object, or a list of up to 10 objects, each with "@type".';
+  private const DEEP = 'Too deeply nested (items and lists count). Keep to 8.';
+  private const AT_KEYS = 'Only “@type”, “@id” and a schema.org “@context” may start with @.';
+
+  /**
+   * The bytes every hand-added text of one page shares, minified.
+   */
+  public const CUSTOM_MAX = 32768;
+
+  /**
+   * The bytes one hand-added text may have as written.
+   */
+  public const CUSTOM_RAW_MAX = 65536;
+
+  /**
+   * The flags structured data is written out with (CanvasMetatagHooks).
+   */
+  public const OUTPUT_FLAGS = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES
+    | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR;
+
+  /**
+   * A pasted context that is schema.org's.
+   */
+  private const CONTEXT = '~^https?://schema\.org/?$~';
+
+  /**
+   * An added-details key that names items of a list: "offers[*]".
+   *
+   * Or one item by its name: "offers[name=Growth]".
+   */
+  public const SELECTOR = '/^[A-Za-z][A-Za-z0-9_-]*\[(\*|name=[^\]]{1,200})\]$/D';
   private const FROM_FIELD = 'This comes from a field or a component.';
 
   private const LITERAL = [
@@ -104,12 +134,23 @@ final class Values {
    * @param string $inheritedType
    *   The structured-data type that applies when the values name none: a
    *   page translation's details belong to the type of the default one.
+   * @param string|null $origin
+   *   The site's public base: an absolute address on it that ends in one of
+   *   the module's ids is refused as a hand-added item's @id too.
+   * @param array|null $paths
+   *   Set to where in hand-added JSON-LD each refusal is: field path =>
+   *   {item, path (a JSON pointer inside that item)}.
+   * @param array{identity?: string} $context
+   *   What decides the type of a node that takes added details, besides the
+   *   values themselves: the identity's kind ('organization' or 'person')
+   *   the site saves with.
    *
    * @return array{0: array, 1: array<string, string>}
    *   The clean values in canonical key order, and field path => message.
    */
-  public static function clean(array $input, string $scope, ?callable $accepts, string $inheritedType = 'WebPage'): array {
+  public static function clean(array $input, string $scope, ?callable $accepts, string $inheritedType = 'WebPage', ?string $origin = NULL, ?array &$paths = NULL, array $context = []): array {
     $errors = [];
+    $paths = [];
     $clean = [];
     $value = static function (mixed $item, string $path, string $kind, int $max = 255) use ($scope, $accepts, &$errors): ?array {
       return self::value($item, $path, $kind, $scope, $accepts, $max, $errors);
@@ -125,7 +166,7 @@ final class Values {
         'canonical' => self::canonical($item, $errors),
         'social' => self::social($item, $value, $errors),
         'robots' => self::robots($item, $errors),
-        'schema' => self::schema($item, $value, $inheritedType, $accepts === NULL, $scope, $errors),
+        'schema' => self::schema($item, $value, $inheritedType, $accepts === NULL, $scope, $origin, $errors, $paths, $context),
       };
     }
     return [self::canon($clean), $errors];
@@ -694,12 +735,20 @@ final class Values {
   /**
    * Cleans the `schema` map against the type registry.
    */
-  private static function schema(mixed $value, callable $clean_value, string $inheritedType, bool $read, string $scope, array &$errors): array {
+  private static function schema(mixed $value, callable $clean_value, string $inheritedType, bool $read, string $scope, ?string $origin, array &$errors, array &$paths, array $context = []): array {
     if (!is_array($value)) {
       $errors['schema'] = self::INVALID;
       return [];
     }
     $clean = [];
+    // The site adds details to its identity, and nothing else.
+    if ($scope === 'site') {
+      foreach (array_diff(array_keys($value), ['extend']) as $key) {
+        $errors["schema.$key"] = self::NOT_HERE;
+      }
+      self::own(array_intersect_key($value, ['extend' => TRUE]), $clean, 'WebPage', $scope, $read, $origin, $errors, $paths, $context);
+      return $clean;
+    }
     $types = SchemaGraph::types();
     $type = isset($types[$inheritedType]) ? $inheritedType : 'WebPage';
     if (isset($value['type']) && $value['type'] !== '') {
@@ -767,13 +816,12 @@ final class Values {
         $clean['props'][$key] = $item === NULL || $unit === NULL ? $item : $item + ['unit' => $unit];
       }
     }
-    if (isset($value['custom'])) {
-      $clean['custom'] = self::custom($value['custom'], $errors);
+    self::own($value, $clean, $type, $scope, $read, $origin, $errors, $paths, $context);
+    if (isset($value['skip']) || isset($clean['skip'])) {
+      $sent = $value['skip'] ?? [];
+      $clean['skip'] = self::skip(is_array($sent) && array_is_list($sent) ? [...$sent, ...$clean['skip'] ?? []] : $sent, $clean['custom'] ?? NULL, $errors);
     }
-    if (isset($value['skip'])) {
-      $clean['skip'] = self::skip($value['skip'], $clean['custom'] ?? NULL, $errors);
-    }
-    foreach (array_diff(array_keys($value), ['type', 'props', 'custom', 'skip']) as $key) {
+    foreach (array_diff(array_keys($value), ['type', 'props', 'custom', 'skip', 'extend', 'main']) as $key) {
       $errors["schema.$key"] = self::NOT_HERE;
     }
     return $clean;
@@ -845,89 +893,587 @@ final class Values {
   }
 
   /**
-   * Parses, restricts and re-encodes custom JSON-LD; the input is never echoed.
+   * Checks hand-added JSON-LD, or details added to a node, as written.
+   *
+   * The rules are the dialog's red problems, exactly (extension/src/custom/
+   * validate.ts runs the same fixtures, tests/fixtures/custom/). The text is
+   * never re-encoded: what is saved is what reloads. The 32 KB the minified
+   * encodings of every hand-added text share is counted by schema().
+   *
+   * @param mixed $value
+   *   The text as sent or stored.
+   * @param array{extend?: list<string>, origin?: ?string} $mode
+   *   How to read it. With `extend`, the text adds details to a node of
+   *   these types (any one of them may be the node's), so it is one object
+   *   without an @id, its keys may name list items, and its @type may only
+   *   add to the node's.
+   *   `origin`: the site's public base, so that an absolute id of one of the
+   *   module's nodes is refused too.
+   *
+   * @return array{text: ?string, data: mixed, size: int, error: ?array{message: string, item: int, path: string}}
+   *   The trimmed text (NULL for nothing to store), its decoded form (objects
+   *   as \stdClass), the length of its minified encoding, and the first
+   *   problem with the item it is in and a JSON pointer inside that item.
    */
-  private static function custom(mixed $value, array &$errors): ?string {
+  public static function checkCustom(mixed $value, array $mode = []): array {
+    $result = ['text' => NULL, 'data' => NULL, 'size' => 0, 'error' => NULL];
+    $fail = static function (string $message, int $item = 0, string $path = '') use (&$result): array {
+      $result['error'] = ['message' => $message, 'item' => $item, 'path' => $path];
+      $result['text'] = NULL;
+      return $result;
+    };
     if (!is_string($value)) {
-      $errors['schema.custom'] = self::INVALID;
-      return NULL;
+      return $fail(self::INVALID);
     }
-    if (self::blank($value)) {
-      return NULL;
+    // Spaces and byte order marks around the text, as the dialog trims it.
+    $text = $value;
+    do {
+      $before = $text;
+      $text = trim($text);
+      $text = str_starts_with($text, "\u{FEFF}") ? substr($text, 3) : $text;
+      $text = str_ends_with($text, "\u{FEFF}") ? substr($text, 0, -3) : $text;
+    } while ($text !== $before);
+    if (self::blank($text)) {
+      return $result;
     }
-    if (strlen($value) > 32768) {
-      $errors['schema.custom'] = 'Custom JSON-LD is too large. Keep it under 32 KB.';
-      return NULL;
+    if (strlen($text) > self::CUSTOM_RAW_MAX) {
+      return $fail(sprintf('%d KB as written. Keep under %d KB.', (int) ceil(strlen($text) / 1024), self::CUSTOM_RAW_MAX / 1024));
     }
     try {
-      // Objects decode to \stdClass so that {} and [] stay distinguishable.
-      $data = json_decode($value, FALSE, 64, JSON_THROW_ON_ERROR);
+      // Objects decode to \stdClass so that {} and [] stay apart.
+      $data = json_decode($text, FALSE, 64, JSON_THROW_ON_ERROR);
     }
     catch (\JsonException $e) {
-      $errors['schema.custom'] = $e->getCode() === JSON_ERROR_DEPTH ? self::CUSTOM_SHAPE : 'This is not valid JSON.';
-      return NULL;
+      return $fail(match ($e->getCode()) {
+        JSON_ERROR_DEPTH => self::DEEP,
+        JSON_ERROR_UTF16, JSON_ERROR_UTF8 => 'This text has a broken character.',
+        default => 'This is not valid JSON.',
+      });
     }
-    $nodes = is_array($data) ? $data : [$data];
-    $error = count($nodes) > 10 ? self::CUSTOM_SHAPE : NULL;
-    foreach ($nodes as $index => $node) {
-      if (!$node instanceof \stdClass || !isset($node->{'@type'})) {
-        $error = self::CUSTOM_SHAPE;
-        break;
+    $extend = $mode['extend'] ?? NULL;
+    if ($extend !== NULL) {
+      if (!$data instanceof \stdClass) {
+        return $fail('Use one object of details, like {"sku": "…"}.');
       }
-      $nodes[$index] = self::customValue($node, 1, $error);
+      $nodes = [$data];
     }
-    if ($error !== NULL) {
-      $errors['schema.custom'] = $error;
-      return NULL;
+    else {
+      $nodes = is_array($data) ? $data : [$data];
+      if (count($nodes) > 10) {
+        return $fail(sprintf('%d items. Keep up to 10.', count($nodes)), 10);
+      }
     }
-    return $nodes ? self::json(is_array($data) ? $nodes : $nodes[0]) : NULL;
+    $ids = [];
+    foreach ($nodes as $index => $node) {
+      if (!$node instanceof \stdClass) {
+        return $fail(self::CUSTOM_SHAPE, $index);
+      }
+      if ($extend === NULL && !isset($node->{'@type'})) {
+        return $fail('“@type” is missing.', $index);
+      }
+      $problem = self::walk($node, 1, [], $extend === NULL ? 'item' : 'extend');
+      if ($problem !== NULL) {
+        return $fail($problem[0], $index, self::pointer($problem[1]));
+      }
+      if ($extend !== NULL && isset($node->{'@type'}) && !array_intersect((array) $node->{'@type'}, $extend)) {
+        return $fail(sprintf('@type: a type can only be added to “%s”, in a list that keeps it.', $extend[0]), $index, '/@type');
+      }
+      $id = $node->{'@id'} ?? NULL;
+      if ($extend === NULL && is_string($id)) {
+        if (self::reserved($id, $mode['origin'] ?? NULL)) {
+          return $fail(sprintf('“%s” is made by this page. Use Add details, or give the item another @id.', $id), $index, '/@id');
+        }
+        if (isset($ids[$id])) {
+          return $fail(sprintf('“%s” is used by two items. Give the second another @id.', $id), $index, '/@id');
+        }
+        $ids[$id] = TRUE;
+      }
+    }
+    if ($nodes === []) {
+      return $result;
+    }
+    try {
+      // Output re-encodes with these flags: a value they refuse is refused
+      // now, never in a visitor's head.
+      json_encode($data, self::OUTPUT_FLAGS);
+    }
+    catch (\JsonException) {
+      return $fail('This can’t be written out as structured data.');
+    }
+    $result['text'] = $text;
+    $result['data'] = $data;
+    $result['size'] = strlen(self::json($data));
+    return $result;
   }
 
   /**
-   * Checks one custom JSON-LD value and returns it with object keys sorted.
+   * The first problem in one value of hand-added JSON-LD.
+   *
+   * @param mixed $value
+   *   The decoded value.
+   * @param int $depth
+   *   Its depth: an item is 1, and lists count.
+   * @param list<int|string> $at
+   *   Its path inside the item.
+   * @param string $role
+   *   An "item" at the top, "extend" for added details, "" inside.
+   *
+   * @return array{0: string, 1: list<int|string>}|null
+   *   The sentence and the path it is about.
    */
-  private static function customValue(mixed $value, int $depth, ?string &$error): mixed {
-    if (is_string($value) && preg_match('~^[\s\x00-\x1F]*(?:javascript|vbscript|data|file)\s*:~i', $value)) {
-      // Consumers turn JSON-LD addresses into links.
-      $error ??= 'Addresses must start with https:// or http://.';
+  private static function walk(mixed $value, int $depth, array $at, string $role = ''): ?array {
+    $label = implode(' › ', array_filter($at, is_string(...)));
+    $say = static fn (string $text, ?array $path = NULL): array => [
+      $label === '' ? ucfirst($text) : "$label: $text",
+      $path ?? $at,
+    ];
+    if (is_string($value)) {
+      $scheme = self::scheme($value);
+      return $scheme === NULL ? NULL : $say(sprintf('text can’t start with “%s:”.', $scheme));
+    }
+    if (is_float($value) && !is_finite($value)) {
+      return $say('this number is too large to use.');
+    }
+    if ($value === NULL) {
+      return [($label === '' ? 'This' : $label) . ' is empty (null). Remove it or give it a value.', $at];
+    }
+    if (!is_array($value) && !$value instanceof \stdClass) {
       return NULL;
     }
-    if (is_string($value) || is_int($value) || is_float($value) || is_bool($value)) {
-      return $value;
-    }
-    if ($depth > 8 || !(is_array($value) || $value instanceof \stdClass)) {
-      $error ??= self::CUSTOM_SHAPE;
-      return NULL;
+    if ($depth > 8) {
+      return $say('too deeply nested (items and lists count). Keep to 8.');
     }
     if (is_array($value)) {
-      return array_map(static function (mixed $item) use ($depth, &$error): mixed {
-        return self::customValue($item, $depth + 1, $error);
-      }, $value);
-    }
-    $members = [];
-    foreach (get_object_vars($value) as $key => $item) {
-      $key = (string) $key;
-      if (str_starts_with($key, '@')) {
-        if ($key !== '@type' && $key !== '@id') {
-          $error ??= 'Only "@type" and "@id" may start with @.';
-        }
-        elseif (!is_string($item) || $item === '') {
-          $error ??= $key === '@id' ? 'An "@id" must be a full address, or a name that starts with #.' : self::CUSTOM_SHAPE;
-        }
-        elseif ($key === '@id' && !preg_match('/^#\S+$/u', $item) && !self::isHttpUrl($item)) {
-          $error ??= 'An "@id" must be a full address, or a name that starts with #.';
+      foreach ($value as $index => $item) {
+        $problem = self::walk($item, $depth + 1, [...$at, $index]);
+        if ($problem !== NULL) {
+          return $problem;
         }
       }
-      $members[$key] = self::customValue($item, $depth + 1, $error);
+      return NULL;
     }
-    ksort($members, SORT_STRING);
-    // Back to an object: a PHP array with the keys "0", "1" would encode as
-    // a list.
-    $object = new \stdClass();
-    foreach ($members as $key => $item) {
-      $object->{$key} = $item;
+    foreach (get_object_vars($value) as $key => $item) {
+      $key = (string) $key;
+      $path = [...$at, $key];
+      if (str_starts_with($key, '@')) {
+        $problem = match ($key) {
+          '@type' => self::typeProblem($item) ?? (($scheme = self::scheme(...array_filter((array) $item, is_string(...)))) === NULL ? NULL : sprintf('@type: text can’t start with “%s:”.', $scheme)),
+          '@id' => match (TRUE) {
+            $role === 'extend' => '@id: the id of this item can’t change. Leave @id out.',
+            !is_string($item) || (!preg_match('/^#\S+$/u', $item) && !self::isHttpUrl($item)) => '@id: use a full address, or a name that starts with #.',
+            default => NULL,
+          },
+          '@context' => $role === 'item' && self::isContext($item) ? NULL : self::AT_KEYS,
+          default => self::AT_KEYS,
+        };
+        if ($problem !== NULL) {
+          $words = match (TRUE) {
+            $label === '' => $problem,
+            $problem === self::AT_KEYS => "$label: " . lcfirst($problem),
+            default => "$label › $problem",
+          };
+          return [$words, $path];
+        }
+        continue;
+      }
+      if ($role === 'extend' && str_contains($key, '[') && !preg_match(self::SELECTOR, $key)) {
+        return [sprintf('“%s”: name one item with [name=…], or every item with [*].', $key), $path];
+      }
+      $problem = self::walk($item, $depth + 1, $path);
+      if ($problem !== NULL) {
+        return $problem;
+      }
     }
-    return $object;
+    return NULL;
+  }
+
+  /**
+   * The script, data or file scheme a string starts with, if any.
+   *
+   * Consumers turn JSON-LD addresses into links, and address parsers drop
+   * tabs and line breaks ("java\tscript:"), so they are dropped before the
+   * colon too. A word before a colon in a sentence ("Data: collected in
+   * 2026") is not an address.
+   *
+   * @param string ...$values
+   *   The strings: one value, or the types of an @type list.
+   */
+  public static function scheme(string ...$values): ?string {
+    foreach ($values as $value) {
+      $colon = strpos($value, ':');
+      if ($colon === FALSE) {
+        continue;
+      }
+      $probe = str_replace(["\t", "\n", "\r"], '', substr($value, 0, $colon)) . substr($value, $colon);
+      // ASCII spaces only, as the dialog's mirror reads them.
+      if (preg_match('~^[ \x00-\x1F]*(javascript|vbscript)[ \t\n\x0B\f\r]*:~i', $probe, $m) || preg_match('~^[ \x00-\x1F]*(data|file):[\t\n\r]*(?=[^ \t\n\x0B\f\r])~i', $probe, $m)) {
+        return strtolower($m[1]);
+      }
+    }
+    return NULL;
+  }
+
+  /**
+   * Why an @type is refused: one type, or a list of up to four.
+   */
+  private static function typeProblem(mixed $type): ?string {
+    $types = is_array($type) ? $type : [$type];
+    $ok = $types !== [] && count($types) <= 4 && !array_filter($types, static fn (mixed $one): bool => !is_string($one) || trim($one) === '');
+    return $ok ? NULL : '@type: use one type, or a list of up to 4 types.';
+  }
+
+  /**
+   * Whether a pasted @context is schema.org's, in any of its spellings.
+   */
+  public static function isContext(mixed $context): bool {
+    $one = static fn (mixed $item): bool => (is_string($item) && preg_match(self::CONTEXT, $item))
+      || ($item instanceof \stdClass && array_keys(get_object_vars($item)) === ['@vocab'] && is_string($item->{'@vocab'}) && preg_match(self::CONTEXT, $item->{'@vocab'}));
+    return is_array($context) ? $context !== [] && count(array_filter($context, $one)) === count($context) : $one($context);
+  }
+
+  /**
+   * Whether a hand-added item's @id is one of the module's.
+   *
+   * "#webpage", "#c-…", and with the site's public base an absolute address
+   * on it, http or https, that ends in one of them.
+   */
+  public static function reserved(string $id, ?string $origin = NULL): bool {
+    // On the site's address whichever scheme it is written with.
+    $bare = static fn (string $url): string => (string) preg_replace('~^https?:~i', '', $url);
+    $name = match (TRUE) {
+      str_starts_with($id, '#') => substr($id, 1),
+      $origin !== NULL && $origin !== '' && str_starts_with($bare($id), rtrim($bare($origin), '/') . '/') && str_contains($id, '#') => substr($id, strpos($id, '#') + 1),
+      default => NULL,
+    };
+    return $name !== NULL && (isset(SchemaGraph::MODULE_IDS[$name]) || str_starts_with($name, SchemaGraph::COMPONENT_PREFIX));
+  }
+
+  /**
+   * Renames top-level ids that are the module's, or another item's.
+   *
+   * Hand-added JSON-LD stored before ids were reserved keeps its output: the
+   * item is renamed "‹id›-2" ("#item-c-…" for an id with the components'
+   * prefix); references to it are renamed too when they
+   * reached it (a site id, "#identity", was the page's own "#identity"
+   * then); an item that was left out (one of the page's ids, or the second
+   * of two) is listed in `skip`.
+   *
+   * @param mixed $data
+   *   The decoded text (\stdClass objects).
+   *
+   * @return array{0: mixed, 1: list<array{from: string, to: string, skip: bool}>}
+   *   The data, and what was renamed.
+   */
+  public static function renameReserved(mixed $data): array {
+    $nodes = is_array($data) ? $data : [$data];
+    $taken = [];
+    foreach ($nodes as $node) {
+      if ($node instanceof \stdClass && is_string($node->{'@id'} ?? NULL)) {
+        $taken[$node->{'@id'}] = TRUE;
+      }
+    }
+    $seen = $renames = $refs = [];
+    foreach ($nodes as $node) {
+      $id = $node instanceof \stdClass && is_string($node->{'@id'} ?? NULL) ? $node->{'@id'} : NULL;
+      if ($id === NULL) {
+        continue;
+      }
+      $reserved = self::reserved($id);
+      $duplicate = isset($seen[$id]);
+      $seen[$id] = TRUE;
+      if (!$reserved && !$duplicate) {
+        continue;
+      }
+      $name = substr($id, 1);
+      // "#c-suite" is reserved by its prefix, so every "-2" would be too:
+      // the new name starts with a word of its own.
+      $base = $reserved && !isset(SchemaGraph::MODULE_IDS[$name]) ? '#item-' . $name : $id;
+      $new = $base;
+      for ($n = 2; isset($taken[$new]) || self::reserved($new); $n++) {
+        $new = "$base-$n";
+      }
+      $taken[$new] = TRUE;
+      // An id of the page was its node, never this item; a site id on a
+      // page, or a "#c-…" id, was this item. The second of two was left out.
+      $page_id = $reserved && (SchemaGraph::MODULE_IDS[$name] ?? NULL) === 'url';
+      $renames[] = ['from' => $id, 'to' => $new, 'skip' => $page_id || $duplicate];
+      if (!$page_id && !$duplicate) {
+        $refs[$id] = $new;
+      }
+      $node->{'@id'} = $new;
+    }
+    if ($refs) {
+      $rewrite = static function (mixed $value, bool $top) use (&$rewrite, $refs): mixed {
+        if (is_array($value)) {
+          return array_map(static fn (mixed $item): mixed => $rewrite($item, FALSE), $value);
+        }
+        if (!$value instanceof \stdClass) {
+          return $value;
+        }
+        foreach (get_object_vars($value) as $key => $item) {
+          if ($key === '@id' && !$top && is_string($item) && isset($refs[$item])) {
+            $value->{'@id'} = $refs[$item];
+          }
+          elseif ($key !== '@id') {
+            $value->{$key} = $rewrite($item, FALSE);
+          }
+        }
+        return $value;
+      };
+      foreach ($nodes as $node) {
+        $rewrite($node, TRUE);
+      }
+    }
+    return [$data, $renames];
+  }
+
+  /**
+   * Hand-added JSON-LD written by the module: two spaces, keys in order.
+   */
+  public static function pretty(mixed $data): string {
+    $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+    return (string) preg_replace_callback('/^( {4})+/m', static fn (array $m): string => str_repeat('  ', intdiv(strlen($m[0]), 4)), $json);
+  }
+
+  /**
+   * The type each node that takes added details has before they merge.
+   *
+   * An added @type must be a list that keeps it. The main node's is the
+   * kind chosen by a prop emitted as the type ("Kind of place"), else the
+   * registry's; the page node's is the registry's; the identity's is its
+   * kind, or either when that is not known.
+   *
+   * @param string $type
+   *   The registry type.
+   * @param array $props
+   *   The type's stored props (a page translation's include those it
+   *   inherits).
+   * @param string|null $identityKind
+   *   'organization', 'person', or NULL for either.
+   *
+   * @return array{'#primary': list<string>, '#webpage': list<string>, '#identity': list<string>}
+   *   Short id => the types an added list must keep one of.
+   */
+  public static function nodeTypes(string $type, array $props = [], ?string $identityKind = NULL): array {
+    $types = SchemaGraph::types();
+    $type = isset($types[$type]) ? $type : 'WebPage';
+    $primary = $types[$type]['primary_type'] ?? 'Thing';
+    foreach ($types[$type]['props'] ?? [] as $prop) {
+      $text = ($prop['emit'] ?? NULL) === 'type' ? ($props[$prop['key']]['text'] ?? $prop['default']['text'] ?? NULL) : NULL;
+      if (is_string($text) && in_array($text, $prop['options'] ?? [], TRUE)) {
+        $primary = $text;
+      }
+    }
+    return [
+      '#primary' => [$primary],
+      '#webpage' => [$types[$type]['page_type'] ?? 'WebPage'],
+      '#identity' => match ($identityKind) {
+        'person' => ['Person'],
+        'organization' => ['Organization'],
+        default => ['Organization', 'Person'],
+      },
+    ];
+  }
+
+  /**
+   * Hand-added JSON-LD stored before a rule, read as far as it can be.
+   *
+   * Ids taken before they were reserved are renamed (renameReserved()); an
+   * item that is still refused is left out, so that the others are output.
+   *
+   * @param string $text
+   *   The stored text.
+   * @param array{message: string, item: int, path: string} $error
+   *   Why it is refused as stored.
+   * @param string|null $origin
+   *   The site's public base.
+   *
+   * @return array{0: array, 1: list<string>, 2: ?array{message: string, item: int, path: string}}
+   *   checkCustom()'s result for what is kept, the renamed ids to leave out
+   *   as before, and the refusal of the first item that was left out.
+   */
+  private static function legacy(string $text, array $error, ?string $origin): array {
+    $refused = ['text' => NULL, 'data' => NULL, 'size' => 0, 'error' => $error];
+    try {
+      $data = json_decode($text, FALSE, 64, JSON_THROW_ON_ERROR);
+    }
+    catch (\JsonException) {
+      return [$refused, [], NULL];
+    }
+    if (!is_array($data) && !$data instanceof \stdClass) {
+      return [$refused, [], NULL];
+    }
+    [$data, $renames] = self::renameReserved($data);
+    $kept_out = array_column(array_filter($renames, static fn (array $one): bool => $one['skip']), 'to');
+    $nodes = is_array($data) ? $data : [$data];
+    $first = NULL;
+    // Item by item: at most one round per item, and one for what is left.
+    for ($round = 0; $round <= 11; $round++) {
+      $drop = NULL;
+      foreach ($nodes as $at => $node) {
+        try {
+          json_encode($node, self::OUTPUT_FLAGS);
+        }
+        catch (\JsonException) {
+          // A number stored as 1e400: refused by the walk, never encoded.
+          $drop = [$at, $error['item'] === $at ? $error : [
+            'message' => 'This can’t be written out as structured data.',
+            'item' => $at,
+            'path' => '',
+          ],
+          ];
+          break;
+        }
+      }
+      if ($drop === NULL) {
+        $probe = self::checkCustom(self::written(count($nodes) === 1 ? $nodes[0] : $nodes), ['origin' => $origin]);
+        $item_only = [self::CUSTOM_SHAPE, '“@type” is missing.'];
+        $own = $probe['error'] !== NULL && ($probe['error']['path'] !== '' || in_array($probe['error']['message'], $item_only, TRUE));
+        if (!$own || !isset($nodes[$probe['error']['item']])) {
+          return [$probe, $kept_out, $probe['error'] === NULL ? $first : NULL];
+        }
+        $drop = [$probe['error']['item'], $probe['error']];
+      }
+      $first ??= $drop[1];
+      array_splice($nodes, $drop[0], 1);
+      if ($nodes === []) {
+        return [['text' => NULL, 'data' => NULL, 'size' => 0, 'error' => NULL], $kept_out, $first];
+      }
+    }
+    return [$refused, $kept_out, NULL];
+  }
+
+  /**
+   * Hand-added JSON-LD as the module writes it: pretty when it fits.
+   *
+   * Two spaces, keys in order; minified when indenting would take it over
+   * the 64 KB a text may have as written.
+   *
+   * @param mixed $data
+   *   Decoded JSON-LD (\stdClass objects) that can be encoded.
+   */
+  public static function written(mixed $data): string {
+    $pretty = self::pretty($data);
+    return strlen($pretty) <= self::CUSTOM_RAW_MAX ? $pretty : self::json($data);
+  }
+
+  /**
+   * A path as a JSON pointer.
+   *
+   * @param list<int|string> $path
+   *   Keys and indexes.
+   */
+  private static function pointer(array $path): string {
+    return implode('', array_map(static fn (int|string $part): string => '/' . str_replace(['~', '/'], ['~0', '~1'], (string) $part), $path));
+  }
+
+  /**
+   * Cleans hand-added JSON-LD, added details and the main thing.
+   *
+   * @param array $value
+   *   The `schema` map, as sent or stored.
+   * @param array $clean
+   *   The clean map so far: `custom`, `extend` and `main` are added.
+   * @param string $type
+   *   The structured-data type the values have.
+   * @param string $scope
+   *   One of 'page', 'template', 'site'.
+   * @param bool $read
+   *   Read mode: ids stored before they were reserved are renamed.
+   * @param ?string $origin
+   *   The site's public base, when known.
+   * @param array<string, string> $errors
+   *   Collects path => sentence.
+   * @param array<string, array{item: int, path: string}> $paths
+   *   Collects path => where in the text the problem is.
+   * @param array{identity?: string} $context
+   *   What decides an added @type besides the values (clean()).
+   */
+  private static function own(array $value, array &$clean, string $type, string $scope, bool $read, ?string $origin, array &$errors, array &$paths, array $context = []): void {
+    $refuse = static function (string $field, array $error) use (&$errors, &$paths): void {
+      $errors[$field] = $error['message'];
+      $paths[$field] = ['item' => $error['item'], 'path' => $error['path']];
+    };
+    $size = 0;
+    if (isset($value['custom'])) {
+      $checked = self::checkCustom($value['custom'], ['origin' => $origin]);
+      if ($read && $checked['error'] !== NULL && is_string($value['custom'])) {
+        // Stored before a rule: renamed as the update does, and only the
+        // items still refused are left out, each reported.
+        [$checked, $kept_out, $refused] = self::legacy($value['custom'], $checked['error'], $origin);
+        if ($kept_out) {
+          $clean['skip'] = array_values(array_unique([...$clean['skip'] ?? [], ...$kept_out]));
+        }
+        if ($refused !== NULL) {
+          $refuse('schema.custom', $refused);
+        }
+      }
+      if ($checked['error'] !== NULL) {
+        $refuse('schema.custom', $checked['error']);
+      }
+      elseif ($checked['text'] !== NULL) {
+        $clean['custom'] = $checked['text'];
+        $size += $checked['size'];
+      }
+    }
+    if (isset($value['extend'])) {
+      // Read mode doesn't know the identity's kind: either is kept.
+      $nodes = self::nodeTypes($type, $clean['props'] ?? [], $read ? NULL : ($context['identity'] ?? NULL));
+      if (!is_array($value['extend']) || array_is_list($value['extend']) && $value['extend'] !== []) {
+        $errors['schema.extend'] = self::INVALID;
+      }
+      else {
+        foreach ($value['extend'] as $node => $text) {
+          $field = "schema.extend.$node";
+          if (!in_array($node, SchemaGraph::EXTEND[$scope] ?? [], TRUE)) {
+            $errors[$field] = self::NOT_HERE;
+            continue;
+          }
+          $checked = self::checkCustom($text, ['extend' => $nodes[$node]]);
+          if ($read && $checked['error'] !== NULL && $checked['error']['path'] === '/@type' && is_string($text)) {
+            // An added type that no longer fits the node (its page type or
+            // the identity's kind changed): the other details still merge,
+            // so only the type is left out.
+            $data = json_decode($text);
+            if ($data instanceof \stdClass) {
+              unset($data->{'@type'});
+              $checked = self::checkCustom(get_object_vars($data) ? self::written($data) : '', ['extend' => $nodes[$node]]);
+            }
+          }
+          if ($checked['error'] !== NULL) {
+            $refuse($field, $checked['error']);
+          }
+          elseif ($checked['text'] !== NULL) {
+            $clean['extend'][$node] = $checked['text'];
+            $size += $checked['size'];
+          }
+        }
+      }
+    }
+    if ($size > self::CUSTOM_MAX) {
+      // Said on every hand-added text: each one sent back as stored is
+      // carried (ApiController::carry()), and the one that grew still fails.
+      $over = [
+        'message' => sprintf('%d KB. Keep under %d KB, including added details.', (int) ceil($size / 1024), self::CUSTOM_MAX / 1024),
+        'item' => 0,
+        'path' => '',
+      ];
+      foreach (array_merge(isset($clean['custom']) ? ['schema.custom'] : [], array_map(static fn (string $node): string => "schema.extend.$node", array_keys($clean['extend'] ?? []))) as $field) {
+        $refuse($field, $over);
+      }
+      unset($clean['custom'], $clean['extend']);
+    }
+    if (isset($value['main'])) {
+      $items = json_decode($clean['custom'] ?? '', TRUE);
+      $items = is_array($items) ? (array_is_list($items) ? $items : [$items]) : [];
+      $ids = array_filter(array_map(static fn (mixed $item): mixed => is_array($item) ? $item['@id'] ?? NULL : NULL, $items), is_string(...));
+      if ($scope !== 'site' && is_string($value['main']) && in_array($value['main'], $ids, TRUE)) {
+        $clean['main'] = $value['main'];
+      }
+      elseif (!$read) {
+        $errors['schema.main'] = $scope === 'site' ? self::NOT_HERE : 'Choose one of your own items.';
+      }
+    }
   }
 
 }

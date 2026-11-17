@@ -559,4 +559,3 @@ title-like place.
 
 - **WHEN** a template write sends a composed postal code detail
 - **THEN** the system MUST refuse it with "This setting is not available here."
-

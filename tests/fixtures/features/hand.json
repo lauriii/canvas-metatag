@@ -1,0 +1,93 @@
+[
+  {
+    "name": "an employer rating of another company",
+    "graph": [
+      {"@type": "EmployerAggregateRating", "@id": "https://example.com/jobs#rating", "itemReviewed": {"@type": "Organization", "name": "Acme Logistics", "sameAs": "https://acme-logistics.example"}, "ratingValue": 4.2, "ratingCount": 318, "bestRating": 5}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "employer-rating", "node": "https://example.com/jobs#rating", "verdict": "ready", "helps": [{"path": "worstRating"}]}]
+  },
+  {
+    "name": "an employer rating of a company given as a name",
+    "graph": [
+      {"@type": "EmployerAggregateRating", "@id": "https://example.com/jobs#rating", "itemReviewed": "Acme Logistics", "ratingValue": 4.2, "ratingCount": 318, "bestRating": 5, "worstRating": 1}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "employer-rating", "node": "https://example.com/jobs#rating", "verdict": "needs", "missing": [{"path": "itemReviewed", "expects": {"is": "item:Organization", "needs": ["name"]}}]}]
+  },
+  {
+    "name": "an employer rating without a count",
+    "graph": [
+      {"@type": "EmployerAggregateRating", "@id": "https://example.com/jobs#rating", "itemReviewed": {"@id": "https://example.com/jobs#acme"}, "ratingValue": "4.2"},
+      {"@type": "Corporation", "@id": "https://example.com/jobs#acme", "name": "Acme Logistics"}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "employer-rating", "node": "https://example.com/jobs#rating", "verdict": "needs", "missing": [{"path": "ratingCount"}], "helps": [{"path": "bestRating"}, {"path": "worstRating"}]}]
+  },
+  {
+    "name": "a review with its author as a name",
+    "graph": [
+      {"@type": "Review", "@id": "https://example.com/books#review", "itemReviewed": {"@type": "Book", "name": "The Quiet Orchard"}, "author": "Mia Virtanen", "reviewRating": {"@type": "Rating", "ratingValue": 4}, "datePublished": "2026-11-02", "reviewBody": "Calm and kind."}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "review-snippet", "node": "https://example.com/books#review", "verdict": "needs", "missing": [{"path": "author", "expects": {"is": "item:Person|Organization", "needs": ["name"]}}], "helps": [{"path": "reviewRating.bestRating"}]}]
+  },
+  {
+    "name": "a rating of a product",
+    "graph": [
+      {"@type": "AggregateRating", "@id": "https://example.com/desk#stars", "itemReviewed": {"@type": "Product", "name": "Oak desk"}, "ratingValue": "85%", "reviewCount": 12, "bestRating": "100%", "worstRating": "0%"}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "rating-snippet", "node": "https://example.com/desk#stars", "verdict": "ready"}]
+  },
+  {
+    "name": "an image credit",
+    "graph": [
+      {"@type": "ImageObject", "@id": "https://example.com/gallery#lake", "contentUrl": "https://example.com/files/lake.jpg", "creditText": "Mia Virtanen"}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "image-metadata", "node": "https://example.com/gallery#lake", "verdict": "ready", "helps": [{"path": "acquireLicensePage"}, {"path": "license"}]}]
+  },
+  {
+    "name": "an app without a price",
+    "graph": [
+      {"@type": ["MobileApplication", "VideoGame"], "@id": "https://example.com/app#app", "name": "Orchard", "aggregateRating": {"@type": "AggregateRating", "ratingValue": 4.6, "ratingCount": 900}, "operatingSystem": "Android"}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "software-app", "node": "https://example.com/app#app", "verdict": "needs", "missing": [{"path": "offers.price"}], "helps": [{"path": "applicationCategory"}]}]
+  },
+  {
+    "name": "a dataset",
+    "graph": [
+      {"@type": "Dataset", "@id": "https://example.com/rain#data", "name": "Rain"}
+    ],
+    "item": 0,
+    "verdicts": []
+  },
+  {
+    "name": "an FAQ, whose feature is retired",
+    "graph": [
+      {"@type": "FAQPage", "@id": "https://example.com/help#faq", "name": "Questions"}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "faq", "node": "https://example.com/help#faq", "verdict": "retired"}]
+  },
+  {
+    "name": "a review of the site's own organization",
+    "graph": [
+      {"@type": "Review", "@id": "https://example.com/about#review", "itemReviewed": {"@id": "https://example.com/#identity"}, "author": {"@type": "Person", "name": "Mia Virtanen"}, "reviewRating": {"@type": "Rating", "ratingValue": 5}},
+      {"@type": "Organization", "@id": "https://example.com/#identity", "name": "Humanify Studio"}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "review-snippet", "node": "https://example.com/about#review", "verdict": "not_fit", "reason": "own"}]
+  },
+  {
+    "name": "an employer rating of the site's own organization, which is fine",
+    "graph": [
+      {"@type": "EmployerAggregateRating", "@id": "https://example.com/jobs#rating", "itemReviewed": {"@id": "https://example.com/#identity"}, "ratingValue": 4.2, "ratingCount": 318, "bestRating": 5, "worstRating": 1},
+      {"@type": "Organization", "@id": "https://example.com/#identity", "name": "Humanify Studio"}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "employer-rating", "node": "https://example.com/jobs#rating", "verdict": "ready"}]
+  }
+]

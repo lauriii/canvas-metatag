@@ -13,6 +13,7 @@ use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
+use Drupal\canvas_metatag\Vocabulary;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Component\Uuid\Uuid;
 use Drupal\Core\Cache\CacheableMetadata;
@@ -35,6 +36,7 @@ use Drupal\media\Plugin\media\Source\Image;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 /**
@@ -81,7 +83,7 @@ final class ApiController implements ContainerInjectionInterface {
   /**
    * Registry and rules keys that hold only strings the dialog shows.
    */
-  private const ALL_SHOWN = ['option_labels', 'say', 'confirm'];
+  private const ALL_SHOWN = ['option_labels', 'say', 'confirm', 'about', 'labels'];
 
   /**
    * Locale storage, when the locale module is installed: it is optional.
@@ -98,6 +100,7 @@ final class ApiController implements ContainerInjectionInterface {
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly AccountInterface $currentUser,
     private readonly Sources $sources,
+    private readonly Vocabulary $vocabulary,
   ) {}
 
   /**
@@ -162,6 +165,10 @@ final class ApiController implements ContainerInjectionInterface {
     $strings = RegistryStrings::all();
     $translated = array_flip($this->translatedSentences($ui));
     $broken = $template ? $this->broken($target['values'], $bundle) : [];
+    // The type an added @type list keeps, by node: the dialog checks it as
+    // the server will.
+    $schema = $target['values']['schema'] ?? [];
+    $extend_types = Values::nodeTypes($schema['type'] ?? $target['from_default']['schema']['type'] ?? 'WebPage', $schema['props'] ?? [], $identity['kind']);
     if ($target !== NULL) {
       // An empty map is an object in JSON.
       $target['values'] = (object) $target['values'];
@@ -187,9 +194,19 @@ final class ApiController implements ContainerInjectionInterface {
         // The site's default country: the country a picker suggests first,
         // never a value of its own.
         'country' => in_array($country = (string) $this->configFactory->get('system.date')->get('country.default'), SchemaGraph::codes('country'), TRUE) ? $country : '',
+        // The zone a typed date and time is stored in, unless the editor
+        // chooses another (state only).
+        'timezone' => (string) ($this->configFactory->get('system.date')->get('timezone.default') ?: 'UTC'),
       ],
       'registry' => self::shown(SchemaGraph::types(), $strings, $translated, $ui),
       'codes' => ['country' => SchemaGraph::codes('country')],
+      // The ids the module emits, by name, with what each is anchored on:
+      // hand-added items never take one, and a short id points at it.
+      'module_ids' => SchemaGraph::MODULE_IDS,
+      'extend_types' => $extend_types,
+      // The schema.org vocabulary the site downloaded, read from
+      // vocabulary() when the hand-added JSON-LD form needs it.
+      'vocabulary' => ($installed = $this->vocabulary->installed()) === NULL ? NULL : ['release' => $installed['release']],
       // The path maps are data: their members are named like shown ones.
       'search_features' => self::shown(array_diff_key(SchemaGraph::searchFeatures(), ['props' => TRUE, 'site' => TRUE]), $strings, $translated, $ui) + SchemaGraph::searchFeatures(),
       'target' => $target,
@@ -215,6 +232,25 @@ final class ApiController implements ContainerInjectionInterface {
   }
 
   /**
+   * The schema.org vocabulary the site downloaded (Vocabulary).
+   *
+   * Cached by the browser for good: the dialog asks with the release in the
+   * address. 404 when none is installed.
+   */
+  public function vocabulary(): Response {
+    $installed = $this->vocabulary->installed();
+    $data = $installed === NULL ? FALSE : file_get_contents($installed['uri']);
+    if ($data === FALSE) {
+      return self::error(404, 'not_found', 'No schema.org vocabulary is installed. Run drush canvas-metatag:vocabulary.');
+    }
+    return new Response($data, 200, [
+      'Content-Type' => 'application/json',
+      'Cache-Control' => 'private, max-age=31536000, immutable',
+      'X-Content-Type-Options' => 'nosniff',
+    ]);
+  }
+
+  /**
    * Saves the site identity, the site-wide defaults and the currency.
    *
    * Last save wins. With `dry_run` nothing is saved: the answer says where
@@ -226,7 +262,7 @@ final class ApiController implements ContainerInjectionInterface {
       return self::badRequest();
     }
     [$identity, $identity_errors] = Values::cleanIdentity($body['identity']);
-    [$values, $errors] = Values::clean($body['values'], 'site', static fn (): bool => FALSE);
+    [$values, $errors] = Values::clean($body['values'], 'site', static fn (): bool => FALSE, 'WebPage', $this->resolver->origin(new CacheableMetadata())['url'], $paths, ['identity' => $identity['kind']]);
     $config = $this->configFactory->getEditable('canvas_metatag.site');
     if ($errors) {
       $stored = $config->get('values');
@@ -238,7 +274,7 @@ final class ApiController implements ContainerInjectionInterface {
       $errors['currency'] = $currency_error;
     }
     if ($errors + $identity_errors) {
-      return self::error(422, 'invalid', 'Some values need attention.', $errors + $identity_errors);
+      return self::error(422, 'invalid', 'Some values need attention.', $errors + $identity_errors, $paths);
     }
     if ($body['dry_run'] ?? FALSE) {
       return new JsonResponse(['effect' => $currency === $stored_currency ? NULL : $this->effect()]);
@@ -377,7 +413,7 @@ final class ApiController implements ContainerInjectionInterface {
    *   those of a page translation's published type (putPage()).
    */
   private function putDraft(Page|ContentTemplate $entity, string $scope, callable $accepts, array $body, string $type = 'WebPage', array $keep = []): JsonResponse {
-    [$clean, $errors] = Values::clean($body['values'], $scope, $accepts, $type);
+    [$clean, $errors] = Values::clean($body['values'], $scope, $accepts, $type, $this->resolver->origin(new CacheableMetadata())['url'], $paths);
     // A refused value sent back exactly as the draft or the stored entity has
     // it is kept: an Undo back to the stored value while a draft exists.
     $draft = $errors ? $this->autoSaveManager->getAutoSaveEntity($entity, bypass_cache: TRUE)->entity : NULL;
@@ -390,7 +426,7 @@ final class ApiController implements ContainerInjectionInterface {
       [$clean, $errors] = self::carry($body['values'], $clean, $errors, $current, $scope, $type);
     }
     if ($errors) {
-      return self::error(422, 'invalid', 'Some values need attention.', $errors);
+      return self::error(422, 'invalid', 'Some values need attention.', $errors, $paths);
     }
     $key = AutoSaveManager::getAutoSaveKey($entity);
     try {
@@ -476,15 +512,26 @@ final class ApiController implements ContainerInjectionInterface {
    *   The clean values and the errors that remain.
    */
   private static function carry(array $sent, array $clean, array $errors, array $current, string $scope, string $type = 'WebPage'): array {
+    $carried = [];
     foreach (array_keys($errors) as $path) {
       $parents = explode('.', (string) $path);
       $kept = NestedArray::getValue($current, $parents, $exists);
       if ($exists && $kept === NestedArray::getValue($sent, $parents)) {
         NestedArray::setValue($clean, $parents, $kept);
+        $carried[$path] = $errors[$path];
         unset($errors[$path]);
       }
     }
-    return [Values::clean($clean, $scope, NULL, $type)[0], $errors];
+    $clean = Values::clean($clean, $scope, NULL, $type)[0];
+    // A carried value the values as a whole still refuse (the 32 KB the
+    // hand-added texts share) keeps its error: never dropped without a word.
+    foreach ($carried as $path => $message) {
+      NestedArray::getValue($clean, explode('.', (string) $path), $exists);
+      if (!$exists) {
+        $errors[$path] = $message;
+      }
+    }
+    return [$clean, $errors];
   }
 
   /**
@@ -588,6 +635,20 @@ final class ApiController implements ContainerInjectionInterface {
     $draft = $update ? $this->autoSaveManager->getAutoSaveEntityForPreview($page)->entity : NULL;
     $entity = $draft instanceof Page ? $draft : $page;
     $layers = $this->resolver->layers($entity, FALSE, new CacheableMetadata());
+    $type = $layers['from_default']['schema']['type'] ?? 'WebPage';
+    // A translation's hand-added items are its own: the source's are offered
+    // to copy while it has none.
+    $source = NULL;
+    if (!$entity->isDefaultTranslation() && !isset($layers['target']['schema']['custom'])) {
+      $default = $entity->getUntranslated();
+      $custom = Values::clean(Values::decode($default->get('canvas_metatag')->value), 'page', NULL)[0]['schema']['custom'] ?? NULL;
+      $items = is_string($custom) ? json_decode($custom, TRUE) : NULL;
+      $source = is_array($items) ? [
+        'langcode' => $default->language()->getId(),
+        'custom' => $custom,
+        'count' => array_is_list($items) ? count($items) : 1,
+      ] : NULL;
+    }
     return [
       'target' => [
         'scope' => 'page',
@@ -601,6 +662,8 @@ final class ApiController implements ContainerInjectionInterface {
         'has_draft' => $update && !$this->autoSaveManager->getAutoSaveEntity($page, TRUE)->isEmpty(),
         'values' => $layers['target'],
         'from_default' => $layers['from_default'],
+        'refused' => self::refused(Values::decode($entity->get('canvas_metatag')->value), 'page', $type),
+        'source' => $source,
       ],
       'can' => $update && $this->currentUser->hasPermission('edit canvas metatag'),
       'entity' => $entity,
@@ -653,12 +716,32 @@ final class ApiController implements ContainerInjectionInterface {
         // In canonical key order, whatever order the config system stored.
         'values' => Values::clean(is_array($values) ? $values : [], 'template', NULL)[0],
         'from_default' => [],
+        'refused' => self::refused($values, 'template'),
+        'source' => NULL,
       ],
       'can' => $update && $this->currentUser->hasPermission('edit canvas metatag'),
       'entity' => $node,
       'draft' => $update,
       'vocabulary' => ['node', $template->getTargetBundle()],
     ];
+  }
+
+  /**
+   * Stored hand-added JSON-LD that read mode leaves items of out.
+   *
+   * Stored before a rule: the dialog shows the text as written, with the
+   * problem, so that the editor can fix it instead of losing it.
+   *
+   * @return array{text: string, message: string, item: int, path: string}|null
+   *   The stored text and its first refusal, or NULL.
+   */
+  private static function refused(mixed $values, string $scope, string $type = 'WebPage'): ?array {
+    $text = is_array($values) ? $values['schema']['custom'] ?? NULL : NULL;
+    if (!is_string($text)) {
+      return NULL;
+    }
+    [, $errors] = Values::clean(['schema' => ['custom' => $text]], $scope, NULL, $type, NULL, $paths);
+    return isset($errors['schema.custom']) ? ['text' => $text, 'message' => $errors['schema.custom']] + $paths['schema.custom'] : NULL;
   }
 
   /**
@@ -839,8 +922,10 @@ final class ApiController implements ContainerInjectionInterface {
   /**
    * The error shape of every response of ours that is not 2xx.
    */
-  private static function error(int $status, string $code, string $message, array $fields = []): JsonResponse {
-    $error = ['code' => $code, 'message' => $message] + ($fields ? ['fields' => $fields] : []);
+  private static function error(int $status, string $code, string $message, array $fields = [], array $paths = []): JsonResponse {
+    // Where in hand-added JSON-LD a refused text's problem is: {item, path}.
+    $paths = array_intersect_key($paths, $fields);
+    $error = ['code' => $code, 'message' => $message] + ($fields ? ['fields' => $fields] : []) + ($paths ? ['error_paths' => $paths] : []);
     return new JsonResponse(['error' => $error], $status);
   }
 

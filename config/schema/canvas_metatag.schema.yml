@@ -127,6 +127,17 @@ canvas_metatag.values:
           sequence:
             type: string
             label: '@id as written'
+        extend:
+          type: sequence
+          label: 'Details added to the module''s own items, by short id (#primary, #webpage, #identity)'
+          requiredKey: false
+          sequence:
+            type: string
+            label: 'JSON-LD details, as written'
+        main:
+          type: string
+          label: 'The hand-added item the page is mainly about, by @id as written'
+          requiredKey: false
 
 canvas_metatag.site:
   type: config_object

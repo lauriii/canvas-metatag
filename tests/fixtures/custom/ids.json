@@ -1,0 +1,65 @@
+[
+  {
+    "name": "a name on the page",
+    "input": "{\"@type\": \"Thing\", \"@id\": \"#thing\"}",
+    "accepted": true
+  },
+  {
+    "name": "an absolute id",
+    "input": "[{\"@type\":\"Thing\",\"@id\":\"https://example.com/#thing\",\"about\":{\"@id\":\"#primary\"}}]",
+    "accepted": true
+  },
+  {
+    "name": "a short id pointed at",
+    "input": "{\"@type\": \"Review\", \"author\": {\"@id\": \"#identity\"}}",
+    "accepted": true
+  },
+  {
+    "name": "a relative id",
+    "input": "{\"@type\": \"Thing\", \"@id\": \"/thing\"}",
+    "accepted": false,
+    "message": "@id: use a full address, or a name that starts with #.",
+    "item": 0,
+    "path": "/@id"
+  },
+  {
+    "name": "a script id inside",
+    "input": "{\"@type\": \"Thing\", \"about\": {\"@id\": \"javascript:alert(1)\"}}",
+    "accepted": false,
+    "message": "about › @id: use a full address, or a name that starts with #.",
+    "item": 0,
+    "path": "/about/@id"
+  },
+  {
+    "name": "the page's own id",
+    "input": "{\"@type\": \"Thing\", \"@id\": \"#webpage\"}",
+    "accepted": false,
+    "message": "“#webpage” is made by this page. Use Add details, or give the item another @id.",
+    "item": 0,
+    "path": "/@id"
+  },
+  {
+    "name": "the site's own id",
+    "input": "{\"@type\": \"Organization\", \"@id\": \"#identity\"}",
+    "accepted": false,
+    "message": "“#identity” is made by this page. Use Add details, or give the item another @id.",
+    "item": 0,
+    "path": "/@id"
+  },
+  {
+    "name": "a component part's id",
+    "input": "{\"@type\": \"Offer\", \"@id\": \"#c-1234\"}",
+    "accepted": false,
+    "message": "“#c-1234” is made by this page. Use Add details, or give the item another @id.",
+    "item": 0,
+    "path": "/@id"
+  },
+  {
+    "name": "two items with one id",
+    "input": "[{\"@type\": \"Organization\", \"@id\": \"#acme\"}, {\"@type\": \"Organization\", \"@id\": \"#acme\"}]",
+    "accepted": false,
+    "message": "“#acme” is used by two items. Give the second another @id.",
+    "item": 1,
+    "path": "/@id"
+  }
+]

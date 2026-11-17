@@ -1,3 +1,4 @@
+import type { Vocabulary } from './custom/vocab';
 import type { EditorToken, HostContext } from './host';
 import type {
   MediaPage,
@@ -31,6 +32,8 @@ export class ApiError extends Error {
     message: string,
     /** Dotted path => sentence. Only for `invalid`. */
     public readonly fields: Record<string, string> = {},
+    /** Dotted path => where in a hand-added text (`error_paths`). */
+    public readonly places: Record<string, { item: number; path: string }> = {},
   ) {
     super(message);
   }
@@ -101,6 +104,7 @@ export function createApi(base: string, fetchFn: typeof fetch = fetch) {
           error.code,
           String(error.message ?? ''),
           error.fields ?? {},
+          error.error_paths ?? {},
         )
       : new ApiError(
           response.status === 403 ? 'forbidden' : 'network',
@@ -191,6 +195,11 @@ export function createApi(base: string, fetchFn: typeof fetch = fetch) {
     /** PUT /site as a dry run: where the save would change structured data. */
     siteEffect(site: SiteSettings): Promise<{ effect: SiteEffect | null }> {
       return request('site', json('PUT', { ...site, dry_run: true }));
+    },
+
+    /** GET /vocabulary: the schema.org vocabulary the site downloaded. */
+    getVocabulary(release: string): Promise<Vocabulary> {
+      return request(`vocabulary?r=${encodeURIComponent(release)}`);
     },
 
     /** GET /media: image media the user may view, newest first. */

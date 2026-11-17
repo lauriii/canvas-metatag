@@ -54,6 +54,9 @@ foreach ($rules['facts'] as $fact) {
   $add($fact['label']);
   $add($fact['need']);
 }
+// One line about each type the rules document, in the module's own words.
+array_map($add, array_values($rules['about'] ?? []));
+array_map($add, array_values($rules['labels'] ?? []));
 foreach ($rules['features'] as $feature) {
   foreach (['label', 'for', 'where'] as $key) {
     $add($feature[$key] ?? NULL);
@@ -63,6 +66,9 @@ foreach ($rules['features'] as $feature) {
     $add($rule['need'] ?? NULL);
   }
   $add($feature['elsewhere'] ?? NULL);
+  foreach ($feature['say'] ?? [] as $clause) {
+    array_map($add, $clause);
+  }
   foreach ($feature['not_for'] ?? [] as $not) {
     $add($not['reason']);
     $add($not['why']);

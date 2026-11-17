@@ -249,6 +249,130 @@
     "addressCountry": {
       "label": "Country",
       "need": "a country"
+    },
+    "itemReviewed": {
+      "label": "Item reviewed",
+      "need": "the item reviewed"
+    },
+    "ratingValue": {
+      "label": "Rating value",
+      "need": "a rating value"
+    },
+    "ratingCount": {
+      "label": "Ratings",
+      "need": "a rating count or review count"
+    },
+    "reviewCount": {
+      "label": "Reviews",
+      "need": "a review count"
+    },
+    "bestRating": {
+      "label": "Best rating",
+      "need": "a best rating"
+    },
+    "worstRating": {
+      "label": "Worst rating",
+      "need": "a worst rating"
+    },
+    "author": {
+      "label": "Author",
+      "need": "an author"
+    },
+    "reviewRating.ratingValue": {
+      "label": "Rating",
+      "need": "a rating"
+    },
+    "reviewBody": {
+      "label": "Review text",
+      "need": "the review text"
+    },
+    "mainEntity.acceptedAnswer": {
+      "label": "Answer",
+      "need": "an answer"
+    },
+    "mainEntity.answerCount": {
+      "label": "Answers",
+      "need": "an answer count"
+    },
+    "text": {
+      "label": "Text",
+      "need": "text, an image or a video"
+    },
+    "contentUrl": {
+      "label": "Image file",
+      "need": "the image file's address"
+    },
+    "creator": {
+      "label": "Creator",
+      "need": "a creator, a credit, a copyright notice or a licence"
+    },
+    "license": {
+      "label": "Licence",
+      "need": "a licence"
+    },
+    "acquireLicensePage": {
+      "label": "Licence page",
+      "need": "a page about getting a licence"
+    },
+    "creditText": {
+      "label": "Credit",
+      "need": "a credit"
+    },
+    "copyrightNotice": {
+      "label": "Copyright notice",
+      "need": "a copyright notice"
+    },
+    "applicationCategory": {
+      "label": "Category",
+      "need": "a category"
+    },
+    "operatingSystem": {
+      "label": "Operating system",
+      "need": "an operating system"
+    },
+    "director": {
+      "label": "Director",
+      "need": "a director"
+    },
+    "dateCreated": {
+      "label": "Released",
+      "need": "a release date"
+    },
+    "comment": {
+      "label": "Replies",
+      "need": "replies"
+    },
+    "interactionStatistic": {
+      "label": "Counts",
+      "need": "counts of likes or replies"
+    },
+    "reviewRating.bestRating": {
+      "label": "Best rating",
+      "need": "a best rating"
+    },
+    "mainEntity.text": {
+      "label": "Question text",
+      "need": "the question text"
+    },
+    "mainEntity.datePublished": {
+      "label": "Asked",
+      "need": "the date it was asked"
+    },
+    "mainEntity.author.name": {
+      "label": "Asked by",
+      "need": "who asked"
+    },
+    "director.name": {
+      "label": "Director",
+      "need": "a director"
+    },
+    "mainEntity.suggestedAnswer": {
+      "label": "Answer",
+      "need": "an answer"
+    },
+    "video": {
+      "label": "Video",
+      "need": "a video"
     }
   },
   "features": {
@@ -295,6 +419,19 @@
         "review",
         "aggregateRating",
         "brand"
+      ],
+      "say": [
+        [
+          "{name}",
+          "A product"
+        ],
+        [
+          ", {offers.price} {offers.priceCurrency}",
+          ", {offers.price}"
+        ],
+        [
+          "."
+        ]
       ]
     },
     "merchant-listing": {
@@ -447,6 +584,21 @@
         "description",
         "eventStatus",
         "organizer"
+      ],
+      "say": [
+        [
+          "{name}",
+          "An event"
+        ],
+        [
+          ", starting {startDate}"
+        ],
+        [
+          " at {location.name}"
+        ],
+        [
+          "."
+        ]
       ]
     },
     "job-posting": {
@@ -582,6 +734,18 @@
         "recipeInstructions",
         "nutrition",
         "calories"
+      ],
+      "say": [
+        [
+          "{name}",
+          "A recipe"
+        ],
+        [
+          " by {author.name}"
+        ],
+        [
+          "."
+        ]
       ]
     },
     "local-business": {
@@ -808,6 +972,839 @@
         "Quiz"
       ],
       "names": []
+    },
+    "employer-rating": {
+      "label": "Employer rating",
+      "for": "employer ratings",
+      "where": "A company's rating by the people who work there, beside its results.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/employer-rating",
+      "reviewed": "2026-11-17",
+      "on": [
+        "EmployerAggregateRating"
+      ],
+      "only": "hand",
+      "required": [
+        "itemReviewed",
+        "ratingValue",
+        "ratingCount|reviewCount"
+      ],
+      "recommended": [
+        "bestRating",
+        "worstRating"
+      ],
+      "expects": {
+        "itemReviewed": {
+          "is": "item:Organization",
+          "needs": [
+            "name"
+          ]
+        }
+      },
+      "say": [
+        [
+          "{itemReviewed.name} as an employer",
+          "An employer rating"
+        ],
+        [
+          ": {ratingValue} out of {bestRating}",
+          ": {ratingValue} out of 5"
+        ],
+        [
+          " from {ratingCount} ratings",
+          " from {reviewCount} reviews"
+        ],
+        [
+          "."
+        ]
+      ],
+      "confirm": [
+        "Only if visitors can post ratings on this site"
+      ],
+      "names": [
+        "itemReviewed",
+        "ratingValue",
+        "ratingCount",
+        "reviewCount",
+        "bestRating",
+        "worstRating",
+        "name",
+        "url",
+        "sameAs",
+        "logo"
+      ]
+    },
+    "review-snippet": {
+      "label": "Review snippet",
+      "for": "review snippets",
+      "where": "Stars and a short review under the result.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/review-snippet",
+      "reviewed": "2026-11-17",
+      "on": [
+        "Review"
+      ],
+      "only": "hand",
+      "not_for": [
+        {
+          "id": "own",
+          "ours": "itemReviewed",
+          "reason": "a review of your own organization",
+          "why": "Review stars are not shown for reviews an organization publishes of itself. Ratings of other companies are fine."
+        }
+      ],
+      "required": [
+        "itemReviewed",
+        "author",
+        "reviewRating.ratingValue"
+      ],
+      "recommended": [
+        "datePublished",
+        "reviewBody",
+        "reviewRating.bestRating"
+      ],
+      "expects": {
+        "itemReviewed": {
+          "is": "item:Book|Course|CreativeWorkSeason|CreativeWorkSeries|Episode|Event|Game|LocalBusiness|MediaObject|Movie|MusicPlaylist|MusicRecording|Organization|Product|Recipe|SoftwareApplication",
+          "needs": [
+            "name"
+          ]
+        },
+        "author": {
+          "is": "item:Person|Organization",
+          "needs": [
+            "name"
+          ]
+        }
+      },
+      "say": [
+        [
+          "{author.name} on {itemReviewed.name}",
+          "A review of {itemReviewed.name}",
+          "A review"
+        ],
+        [
+          ": {reviewRating.ratingValue} out of {reviewRating.bestRating}",
+          ": {reviewRating.ratingValue} out of 5"
+        ],
+        [
+          "."
+        ]
+      ],
+      "confirm": [
+        "Not a review of your own organization or of something you sell under your own name, unless visitors wrote it."
+      ],
+      "names": [
+        "itemReviewed",
+        "author",
+        "reviewRating",
+        "ratingValue",
+        "bestRating",
+        "worstRating",
+        "datePublished",
+        "reviewBody",
+        "name"
+      ]
+    },
+    "rating-snippet": {
+      "label": "Review snippet",
+      "for": "review snippets",
+      "where": "Stars and the number of ratings under the result.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/review-snippet",
+      "reviewed": "2026-11-17",
+      "on": [
+        "AggregateRating"
+      ],
+      "only": "hand",
+      "not_for": [
+        {
+          "id": "own",
+          "ours": "itemReviewed",
+          "reason": "a rating of your own organization",
+          "why": "Review stars are not shown for reviews an organization publishes of itself. Ratings of other companies are fine."
+        }
+      ],
+      "required": [
+        "itemReviewed",
+        "ratingValue",
+        "ratingCount|reviewCount"
+      ],
+      "recommended": [
+        "bestRating",
+        "worstRating"
+      ],
+      "expects": {
+        "itemReviewed": {
+          "is": "item:Book|Course|CreativeWorkSeason|CreativeWorkSeries|Episode|Event|Game|LocalBusiness|MediaObject|Movie|MusicPlaylist|MusicRecording|Organization|Product|Recipe|SoftwareApplication",
+          "needs": [
+            "name"
+          ]
+        }
+      },
+      "say": [
+        [
+          "{itemReviewed.name}",
+          "A rating"
+        ],
+        [
+          ": {ratingValue} out of {bestRating}",
+          ": {ratingValue} out of 5"
+        ],
+        [
+          " from {ratingCount} ratings",
+          " from {reviewCount} reviews"
+        ],
+        [
+          "."
+        ]
+      ],
+      "confirm": [
+        "Visitors can see the ratings on the page."
+      ],
+      "names": [
+        "itemReviewed",
+        "ratingValue",
+        "ratingCount",
+        "reviewCount",
+        "bestRating",
+        "worstRating",
+        "name"
+      ]
+    },
+    "qa": {
+      "label": "Q&A",
+      "for": "Q&A results",
+      "where": "The question and its best answers under the result.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/qapage",
+      "reviewed": "2026-11-17",
+      "on": [
+        "QAPage"
+      ],
+      "only": "page",
+      "required": [
+        "mainEntity.name",
+        "mainEntity.answerCount",
+        [
+          "mainEntity.acceptedAnswer",
+          "mainEntity.suggestedAnswer"
+        ]
+      ],
+      "recommended": [
+        "mainEntity.text",
+        "mainEntity.datePublished",
+        "mainEntity.author.name"
+      ],
+      "expects": {
+        "mainEntity": {
+          "is": "item:Question",
+          "needs": [
+            "name"
+          ]
+        }
+      },
+      "say": [
+        [
+          "{mainEntity.name}",
+          "A question"
+        ],
+        [
+          ", with {mainEntity.answerCount} answers"
+        ],
+        [
+          "."
+        ]
+      ],
+      "confirm": [
+        "The page is one question and the answers visitors gave to it."
+      ],
+      "names": [
+        "mainEntity",
+        "name",
+        "text",
+        "answerCount",
+        "acceptedAnswer",
+        "suggestedAnswer",
+        "upvoteCount",
+        "datePublished",
+        "author",
+        "url"
+      ]
+    },
+    "discussion-forum": {
+      "label": "Discussion",
+      "for": "discussion results",
+      "where": "Posts and replies from forums in results.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/discussion-forum",
+      "reviewed": "2026-11-17",
+      "on": [
+        "DiscussionForumPosting",
+        "SocialMediaPosting"
+      ],
+      "only": "hand",
+      "required": [
+        "author",
+        "datePublished",
+        [
+          "text",
+          "image",
+          "video"
+        ]
+      ],
+      "recommended": [
+        "headline",
+        "url",
+        "comment",
+        "interactionStatistic"
+      ],
+      "expects": {
+        "author": {
+          "is": "item:Person|Organization",
+          "needs": [
+            "name"
+          ]
+        }
+      },
+      "say": [
+        [
+          "{headline} by {author.name}",
+          "{headline}",
+          "A post by {author.name}",
+          "A post"
+        ],
+        [
+          ", posted {datePublished}"
+        ],
+        [
+          "."
+        ]
+      ],
+      "confirm": [
+        "Visitors wrote the posts."
+      ],
+      "names": [
+        "author",
+        "datePublished",
+        "text",
+        "image",
+        "video",
+        "headline",
+        "url",
+        "comment",
+        "interactionStatistic",
+        "name"
+      ]
+    },
+    "image-metadata": {
+      "label": "Image credit",
+      "for": "image credits",
+      "where": "Who made an image, and how to license it, beside the image in image results.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/image-license-metadata",
+      "reviewed": "2026-11-17",
+      "on": [
+        "ImageObject"
+      ],
+      "only": "hand",
+      "required": [
+        "contentUrl",
+        [
+          "creator",
+          "creditText",
+          "copyrightNotice",
+          "license"
+        ]
+      ],
+      "recommended": [
+        "acquireLicensePage",
+        "license"
+      ],
+      "expects": {
+        "contentUrl": "url",
+        "license": "url",
+        "acquireLicensePage": "url"
+      },
+      "say": [
+        [
+          "An image by {creator.name}",
+          "An image credited to {creditText}",
+          "An image"
+        ],
+        [
+          ", licensed under {license}"
+        ],
+        [
+          "."
+        ]
+      ],
+      "names": [
+        "contentUrl",
+        "creator",
+        "creditText",
+        "copyrightNotice",
+        "license",
+        "acquireLicensePage",
+        "name",
+        "caption"
+      ]
+    },
+    "software-app": {
+      "label": "App result",
+      "for": "app results",
+      "where": "An app with its rating and price in results.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/software-app",
+      "reviewed": "2026-11-17",
+      "on": [
+        "SoftwareApplication",
+        "MobileApplication",
+        "WebApplication",
+        "VideoGame"
+      ],
+      "only": "hand",
+      "required": [
+        "name",
+        "offers.price",
+        [
+          "aggregateRating",
+          "review"
+        ]
+      ],
+      "recommended": [
+        "applicationCategory",
+        "operatingSystem"
+      ],
+      "say": [
+        [
+          "{name}",
+          "An app"
+        ],
+        [
+          ", an app for {operatingSystem}"
+        ],
+        [
+          ", {offers.price} {offers.priceCurrency}",
+          ", {offers.price}"
+        ],
+        [
+          "."
+        ]
+      ],
+      "names": [
+        "name",
+        "offers",
+        "price",
+        "priceCurrency",
+        "aggregateRating",
+        "review",
+        "applicationCategory",
+        "operatingSystem"
+      ]
+    },
+    "movie": {
+      "label": "Movie result",
+      "for": "movie results",
+      "where": "A film with its image and details in results.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/movie",
+      "reviewed": "2026-11-17",
+      "on": [
+        "Movie"
+      ],
+      "only": "hand",
+      "required": [
+        "name",
+        "image"
+      ],
+      "recommended": [
+        "dateCreated",
+        "director.name",
+        "aggregateRating",
+        "review"
+      ],
+      "say": [
+        [
+          "{name}",
+          "A film"
+        ],
+        [
+          ", directed by {director.name}"
+        ],
+        [
+          ", released {dateCreated}"
+        ],
+        [
+          "."
+        ]
+      ],
+      "names": [
+        "name",
+        "image",
+        "dateCreated",
+        "director",
+        "aggregateRating",
+        "review"
+      ]
     }
+  },
+  "expects": {
+    "name": "text",
+    "alternateName": "text",
+    "description": "text",
+    "headline": "text",
+    "text": "text",
+    "url": "url",
+    "sameAs": "url",
+    "image": "url|item:ImageObject",
+    "logo": "url|item:ImageObject",
+    "contentUrl": "url",
+    "license": "url",
+    "acquireLicensePage": "url",
+    "menu": "url",
+    "creditText": "text",
+    "copyrightNotice": "text",
+    "caption": "text",
+    "creator": {
+      "is": "item:Person|Organization",
+      "needs": [
+        "name"
+      ]
+    },
+    "author": {
+      "is": "item:Person|Organization",
+      "needs": [
+        "name"
+      ]
+    },
+    "director": {
+      "is": "item:Person",
+      "needs": [
+        "name"
+      ]
+    },
+    "organizer": {
+      "is": "item:Person|Organization",
+      "needs": [
+        "name"
+      ]
+    },
+    "hiringOrganization": {
+      "is": "item:Organization",
+      "needs": [
+        "name"
+      ]
+    },
+    "brand": "item:Brand|Organization",
+    "itemReviewed": {
+      "is": "item:Thing",
+      "needs": [
+        "name"
+      ]
+    },
+    "reviewRating": {
+      "is": "item:Rating",
+      "needs": [
+        "ratingValue"
+      ]
+    },
+    "aggregateRating": {
+      "is": "item:AggregateRating",
+      "needs": [
+        "ratingValue"
+      ]
+    },
+    "review": "item:Review",
+    "ratingValue": "number|text",
+    "bestRating": "number|text",
+    "worstRating": "number|text",
+    "ratingCount": "number",
+    "reviewCount": "number",
+    "answerCount": "number",
+    "upvoteCount": "number",
+    "mainEntity": "item:Thing",
+    "acceptedAnswer": {
+      "is": "item:Answer",
+      "needs": [
+        "text"
+      ]
+    },
+    "suggestedAnswer": {
+      "is": "item:Answer",
+      "needs": [
+        "text"
+      ]
+    },
+    "comment": "item:Comment",
+    "interactionStatistic": "item:InteractionCounter",
+    "video": "item:VideoObject",
+    "datePublished": "date|datetime",
+    "dateModified": "date|datetime",
+    "dateCreated": "date|datetime",
+    "datePosted": "date|datetime",
+    "validThrough": "date|datetime",
+    "startDate": "date|datetime",
+    "endDate": "date|datetime",
+    "prepTime": "duration",
+    "cookTime": "duration",
+    "totalTime": "duration",
+    "offers": "item:Offer|AggregateOffer",
+    "price": "number|text",
+    "priceCurrency": "text",
+    "availability": "enum:InStock|OutOfStock|PreOrder|BackOrder|Discontinued|InStoreOnly|LimitedAvailability|OnlineOnly|PreSale|SoldOut",
+    "itemCondition": "enum:NewCondition|UsedCondition|RefurbishedCondition|DamagedCondition",
+    "eventStatus": "enum:EventScheduled|EventCancelled|EventMovedOnline|EventPostponed|EventRescheduled",
+    "eventAttendanceMode": "enum:OfflineEventAttendanceMode|OnlineEventAttendanceMode|MixedEventAttendanceMode",
+    "isAccessibleForFree": "bool",
+    "sku": "text",
+    "gtin": "text",
+    "isbn": "text",
+    "telephone": "text",
+    "postalCode": "text",
+    "location": "item:Place|PostalAddress|VirtualLocation",
+    "address": "item:PostalAddress|text",
+    "streetAddress": "text",
+    "addressLocality": "text",
+    "addressCountry": "text",
+    "geo": "item:GeoCoordinates",
+    "openingHoursSpecification": "item:OpeningHoursSpecification",
+    "priceRange": "text",
+    "servesCuisine": "text",
+    "recipeYield": "text",
+    "recipeCategory": "text",
+    "recipeCuisine": "text",
+    "keywords": "text",
+    "recipeIngredient": "text",
+    "recipeInstructions": "text|item:HowToStep",
+    "nutrition": "item:NutritionInformation",
+    "employmentType": "text",
+    "title": "text",
+    "jobLocation": "item:Place",
+    "jobLocationType": "text",
+    "baseSalary": "item:MonetaryAmount",
+    "applicantLocationRequirements": "item:Country|AdministrativeArea",
+    "itemListElement": "item:ListItem",
+    "provider": "item:Organization|Person",
+    "applicationCategory": "text",
+    "operatingSystem": "text",
+    "width": "number|text",
+    "height": "number|text",
+    "billingDuration": "duration|number",
+    "calories": "text",
+    "priceSpecification": "item:PriceSpecification|UnitPriceSpecification",
+    "reviewBody": "text",
+    "seller": {
+      "is": "item:Organization|Person",
+      "needs": [
+        "name"
+      ]
+    },
+    "unitText": "text",
+    "value": "number|text|item:QuantitativeValue"
+  },
+  "subtypes": {
+    "Thing": [
+      "*"
+    ],
+    "Organization": [
+      "Corporation",
+      "NGO",
+      "EducationalOrganization",
+      "GovernmentOrganization",
+      "NewsMediaOrganization",
+      "SportsOrganization",
+      "MedicalOrganization",
+      "Airline",
+      "OnlineStore",
+      "OnlineBusiness",
+      "LocalBusiness",
+      "Store",
+      "Restaurant",
+      "CafeOrCoffeeShop",
+      "BarOrPub",
+      "Bakery",
+      "Hotel",
+      "Dentist",
+      "MedicalClinic",
+      "HealthAndBeautyBusiness",
+      "LegalService",
+      "FinancialService",
+      "RealEstateAgent",
+      "HomeAndConstructionBusiness",
+      "AutomotiveBusiness",
+      "SportsActivityLocation",
+      "Library",
+      "ChildCare",
+      "TravelAgency"
+    ],
+    "LocalBusiness": [
+      "Store",
+      "Restaurant",
+      "CafeOrCoffeeShop",
+      "BarOrPub",
+      "Bakery",
+      "Hotel",
+      "Dentist",
+      "MedicalClinic",
+      "HealthAndBeautyBusiness",
+      "LegalService",
+      "FinancialService",
+      "RealEstateAgent",
+      "HomeAndConstructionBusiness",
+      "AutomotiveBusiness",
+      "SportsActivityLocation",
+      "Library",
+      "ChildCare",
+      "TravelAgency"
+    ],
+    "Rating": [
+      "AggregateRating",
+      "EmployerAggregateRating"
+    ],
+    "AggregateRating": [
+      "EmployerAggregateRating"
+    ],
+    "CreativeWork": [
+      "Article",
+      "BlogPosting",
+      "NewsArticle",
+      "Book",
+      "Movie",
+      "Recipe",
+      "Course",
+      "SoftwareApplication",
+      "MobileApplication",
+      "WebApplication",
+      "VideoGame",
+      "Review",
+      "ImageObject",
+      "VideoObject",
+      "MediaObject",
+      "DiscussionForumPosting",
+      "SocialMediaPosting",
+      "Comment",
+      "Answer",
+      "Question"
+    ],
+    "MediaObject": [
+      "ImageObject",
+      "VideoObject",
+      "AudioObject"
+    ],
+    "SoftwareApplication": [
+      "MobileApplication",
+      "WebApplication",
+      "VideoGame"
+    ],
+    "Place": [
+      "LocalBusiness",
+      "Store",
+      "Restaurant",
+      "CafeOrCoffeeShop",
+      "BarOrPub",
+      "Bakery",
+      "Hotel",
+      "Dentist",
+      "MedicalClinic",
+      "HealthAndBeautyBusiness",
+      "LegalService",
+      "FinancialService",
+      "RealEstateAgent",
+      "HomeAndConstructionBusiness",
+      "AutomotiveBusiness",
+      "SportsActivityLocation",
+      "Library",
+      "ChildCare",
+      "TravelAgency"
+    ],
+    "Offer": [
+      "AggregateOffer"
+    ],
+    "Comment": [
+      "Answer"
+    ]
+  },
+  "labels": {
+    "EmployerAggregateRating": "Employer rating",
+    "AggregateRating": "Overall rating",
+    "QAPage": "Q&A page",
+    "FAQPage": "FAQ page",
+    "DiscussionForumPosting": "Forum post",
+    "SocialMediaPosting": "Post",
+    "ImageObject": "Image",
+    "SoftwareApplication": "App",
+    "MobileApplication": "Mobile app",
+    "WebApplication": "Web app",
+    "BlogPosting": "Blog post",
+    "NewsArticle": "News article",
+    "JobPosting": "Job posting",
+    "LocalBusiness": "Local business",
+    "WebSite": "Website",
+    "WebPage": "Web page",
+    "ItemList": "List",
+    "HowTo": "How-to",
+    "SearchAction": "Search box",
+    "SpecialAnnouncement": "Announcement",
+    "Quiz": "Practice problems",
+    "ProfilePage": "Profile page"
+  },
+  "about": {
+    "EmployerAggregateRating": "A company's rating by the people who work there.",
+    "Review": "One person's review of a product, a place or a work.",
+    "AggregateRating": "The average of many ratings of one thing.",
+    "QAPage": "A page with one question and the answers to it.",
+    "Question": "A question people asked, with its answers.",
+    "Answer": "One answer to a question.",
+    "DiscussionForumPosting": "A post in a discussion forum, with its replies.",
+    "SocialMediaPosting": "A post people share and reply to.",
+    "ImageObject": "An image, with who made it and how it may be used.",
+    "SoftwareApplication": "An app or a program, with its price and rating.",
+    "MobileApplication": "An app for phones and tablets.",
+    "WebApplication": "An app that runs in a browser.",
+    "VideoGame": "A game played on a computer or a console.",
+    "Movie": "A film, with its director and release date.",
+    "Product": "Something people buy, with its price and stock.",
+    "Article": "A piece of writing with a headline, an author and a date.",
+    "BlogPosting": "A post on a blog.",
+    "NewsArticle": "A news story.",
+    "Event": "Something that happens at a time and a place.",
+    "JobPosting": "An open job, with its pay and where the work is.",
+    "Recipe": "How to cook a dish, with its ingredients and steps.",
+    "LocalBusiness": "A place customers visit, with its address and hours.",
+    "Course": "A course people can take.",
+    "ItemList": "A list of things in order.",
+    "ProfilePage": "A page about one person or organization.",
+    "Organization": "A company, a club or any other organization.",
+    "Person": "A person.",
+    "WebSite": "A whole website.",
+    "FAQPage": "A page of questions and answers.",
+    "HowTo": "Steps to do something.",
+    "SearchAction": "A way to search the site.",
+    "SpecialAnnouncement": "A notice such as a closure.",
+    "Quiz": "Practice questions.",
+    "Offer": "A price for something, with its stock.",
+    "Rating": "One rating of one thing.",
+    "Dataset": "A collection of data.",
+    "Book": "A book.",
+    "Service": "A service people can buy.",
+    "AutomotiveBusiness": "A garage, a car dealer or a car wash.",
+    "Bakery": "A bakery.",
+    "BarOrPub": "A bar or a pub.",
+    "CafeOrCoffeeShop": "A café or a coffee shop.",
+    "ChildCare": "A day care or a nursery.",
+    "Dentist": "A dentist's practice.",
+    "FinancialService": "A bank, an accountant or another financial service.",
+    "HealthAndBeautyBusiness": "A hair salon, a spa or another beauty business.",
+    "HomeAndConstructionBusiness": "A builder, a plumber or another home service.",
+    "Hotel": "A hotel.",
+    "LegalService": "A lawyer's office or another legal service.",
+    "Library": "A library.",
+    "MedicalClinic": "A clinic or a health centre.",
+    "RealEstateAgent": "An estate agent.",
+    "Restaurant": "A restaurant.",
+    "SportsActivityLocation": "A gym, a pool or another place for sport.",
+    "Store": "A shop.",
+    "TravelAgency": "A travel agency."
   }
 }

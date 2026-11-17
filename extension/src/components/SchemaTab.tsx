@@ -20,7 +20,7 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
-import { QUIET, groupGap, leftOutText, lineName, notYetText, retiredText, stageMatch, verdictText } from '../checks';
+import { QUIET, groupGap, lineName, notYetText, retiredText, stageMatch, verdictText } from '../checks';
 import {
   andList,
   catchingUp,
@@ -33,7 +33,6 @@ import {
   inSentence,
   kindOfType,
   kinds,
-  leaveOut,
   offered,
   optionText,
   removed,
@@ -42,13 +41,12 @@ import {
   typeOf,
   withKind,
 } from '../model';
-import { type ReadFact, dateWords, itemKind, itemName, judged, readback, valueAt } from '../readback';
+import { type ReadFact, dateWords, judged, readback, valueAt } from '../readback';
 import { choicesOf, controlFor, durationText, groupLine, hoursLine, missingParts, parseHours, partNoun, plainText } from '../controls';
-import type { GraphNode, Registry, SchemaProp, SchemaType, Value, Verdict } from '../types';
+import type { Registry, SchemaProp, SchemaType, Value, Verdict } from '../types';
 import { factsFor, propKind, resolve, sameValue, tagOf } from '../values';
 import { CheckRows, DurationInput, Picker, WeekEditor } from './Controls';
 import { Field, Guide, useField, useHeld } from './Field';
-import { useRecheck } from './ChecksSheet';
 import { Sheet } from './Header';
 import { ImageRow } from './MediaPicker';
 import { Disclosure, List } from './SettingsList';
@@ -1322,7 +1320,7 @@ function Stage(props: { onReveal(key: string): void }) {
               ))}
             </dl>
           )}
-          {read.hand.length > 0 && (
+          {(read.hand.length > 0 || issues.some((issue) => issue.id === 'hand-unsaved')) && (
             <p>
               <button
                 type="button"
@@ -1337,7 +1335,12 @@ function Stage(props: { onReveal(key: string): void }) {
               >
                 Added by hand
               </button>
-              : {andList(read.hand)}.
+              {read.hand.length > 0 && `: ${andList(read.hand)}.`}
+              {issues.some((issue) => issue.id === 'hand-unsaved') && (
+                <span className="seo-chip" data-tone="fix">
+                  Not saved
+                </span>
+              )}
             </p>
           )}
         </div>
@@ -1747,7 +1750,7 @@ function KindField() {
 }
 
 /** The kinds, each with what it is for and what it can earn. */
-export function KindSheet(props: { onDone(): void; onClose(): void }) {
+export function KindSheet(props: { focus?: 'else'; onDone(): void; onClose(): void }) {
   const { state, dispatch, openSheet } = useApp();
   const server = state.server!;
   const registry = server.registry;
@@ -1762,7 +1765,10 @@ export function KindSheet(props: { onDone(): void; onClose(): void }) {
   // Focus starts on the chosen kind, as in any radio group.
   const group = useRef<HTMLFieldSetElement>(null);
   useEffect(() => {
-    if (!locked) {
+    if (props.focus === 'else') {
+      // Back from the type search: on the button that opened it.
+      document.querySelector<HTMLElement>('.seo-kind-else')?.focus();
+    } else if (!locked) {
       (group.current?.querySelector<HTMLInputElement>('input:checked') ?? group.current?.querySelector<HTMLInputElement>('input'))?.focus();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1846,14 +1852,15 @@ export function KindSheet(props: { onDone(): void; onClose(): void }) {
         })}
       </fieldset>
       <p className="seo-sheet-intro">Results that search engines no longer show, such as FAQ and how-to, aren't offered.</p>
-      {/* While a change waits, its confirm is the next stop after the list. */}
-      {!to && (
-        <p className="seo-sheet-intro">
-          Something else?{' '}
-          <Btn variant="ghost" size={24} onClick={() => openSheet({ kind: 'custom' })}>
-            Add your own JSON-LD
-          </Btn>
-        </p>
+      {/* While a change waits, its confirm is the next stop after the list. It leaves the kind as it is. */}
+      {!to && !locked && (
+        <button type="button" className="seo-kind seo-kind-else" onClick={() => openSheet({ kind: 'custom', start: 'search', entry: 'What this page is' })}>
+          <span className="seo-kind-text">
+            <span className="seo-kind-label">Something else on this page</span>
+            <small>A rating, a review, a discussion… Add it as its own item.</small>
+          </span>
+          <ChevronRightIcon aria-hidden className="seo-kind-chevron" />
+        </button>
       )}
       {/* The confirm's sentence is said; its buttons are not read with it. */}
       <p className="seo-visually-hidden" role="status">
@@ -1918,6 +1925,11 @@ export function SchemaTab() {
   const props = useShown(id, type);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [moved, dismissMoved] = useMovedNotice(target.auto_save_key, !!stored.custom);
+  // Opened by any route, the sheet is found: the notice goes.
+  useEffect(() => {
+    if (app.sheet?.kind === 'custom') dismissMoved();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [app.sheet]);
   // A field opened in place belongs to the kind it was opened for.
   useEffect(() => setRevealed(null), [id]);
   // While a recurring price rules the listing out, "Bought on this page"
@@ -2024,209 +2036,6 @@ export function SchemaTab() {
           </Disclosure>
         </List>
       )}
-    </>
-  );
-}
-
-/** Indented for reading; stored as typed. Text that does not parse stays as it is. */
-function pretty(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2);
-  } catch {
-    return text;
-  }
-}
-
-/** "Line 4: this is not valid JSON.", or nothing when the text parses. */
-function jsonError(text: string): string | undefined {
-  if (text.trim() === '') {
-    return undefined;
-  }
-  try {
-    JSON.parse(text);
-    return undefined;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : '';
-    const at = message.match(/position (\d+)/)?.[1];
-    const line =
-      message.match(/line (\d+)/)?.[1] ??
-      (at === undefined ? undefined : String(text.slice(0, Number(at)).split('\n').length));
-    return line === undefined ? 'This is not valid JSON.' : `Line ${line}: this is not valid JSON.`;
-  }
-}
-
-/** What each hand-added item gives: its verdicts, its rules and the page. */
-function HandItems() {
-  const { state, dispatch, issues } = useApp();
-  const recheck = useRecheck();
-  const server = state.server!;
-  const report = server.resolved?.schema;
-  const rules = server.search_features;
-  const items = (report?.nodes ?? []).filter((node) => node.origin === 'hand');
-  // An item without an id is matched by what its features apply to.
-  const own = (node: GraphNode, verdict: Verdict) =>
-    node.id !== null
-      ? verdict.node === node.id
-      : verdict.node === null && verdict.feature !== null && !!rules.features[verdict.feature]?.on.includes(node.type);
-  if (!items.length) {
-    return null;
-  }
-  // By the name the stage reads back, and what it is: "Pricing questions · FAQ".
-  const graph = server.resolved?.head.script.find((script) => script.type === 'application/ld+json')?.textContent as { '@graph'?: Record<string, unknown>[] } | undefined;
-  let written: unknown[] = [];
-  try {
-    const parsed: unknown = JSON.parse(state.edits.target.schema?.custom ?? '');
-    written = Array.isArray(parsed) ? parsed : [parsed];
-  } catch {
-    // Not JSON yet: its items are named by their type.
-  }
-  const itemOf = (node: GraphNode) => {
-    const data = (node.at !== undefined ? graph?.['@graph']?.[node.at] : undefined) ?? written[node.item!];
-    return data && typeof data === 'object' ? (data as Record<string, unknown>) : { '@type': node.type };
-  };
-  const words = (node: GraphNode) => {
-    const item = itemOf(node);
-    const own = itemName(item, rules);
-    const what = itemKind(item, rules);
-    const name = own === what ? what : `${own} · ${what}`;
-    return name.charAt(0).toUpperCase() + name.slice(1);
-  };
-  const skipped = (node: GraphNode) => node.left_out === 'skip';
-  const putBack = (node: GraphNode) => {
-    const written = node.id?.startsWith(`${server.preview?.url}#`) ? node.id.slice(server.preview!.url.length) : node.id;
-    const schema = state.edits.target.schema ?? {};
-    dispatch({
-      type: 'apply',
-      scope: 'target',
-      values: { ...state.edits.target, schema: { ...schema, skip: (schema.skip ?? []).filter((one) => one !== written && one !== node.id) } },
-      undo: 'Put back',
-    });
-  };
-  return (
-    <section className="seo-hand" aria-labelledby="seo-hand-title">
-      <h3 id="seo-hand-title">Your items</h3>
-      <ul>
-        {items.map((node) => {
-          const verdicts = node.left_out ? [] : (report?.features ?? []).filter((one) => own(node, one));
-          const lines = issues.filter((issue) => issue.id.startsWith('hand-') && new RegExp(`^hand-\\w+:${node.item}(:|$)`).test(issue.id));
-          return (
-            <li key={node.item} className="seo-hand-item">
-              <p className="seo-hand-name" tabIndex={-1}>
-                {words(node)}
-                {node.left_out && (
-                  <span className="seo-meta">
-                    {' · '}
-                    {skipped(node)
-                      ? "Left out until it's on the page"
-                      : node.left_out === 'reserved'
-                        ? "Left out: it uses an id of the site's own"
-                        : 'Left out: another item has the same id'}
-                  </span>
-                )}
-              </p>
-              {verdicts.map((verdict) => {
-                // "Not shown since 7 May 2026", not "FAQ · …" under an FAQ.
-                const label = featureLabel(rules, verdict.feature);
-                const same = label.toLowerCase() === itemKind(itemOf(node), rules).toLowerCase();
-                return (
-                  <p key={verdict.feature} className="seo-meta">
-                    {same ? verdictText(server, verdict) : `${label} · ${verdictText(server, verdict)}`}
-                  </p>
-                );
-              })}
-              {lines.map((issue) => (
-                <div key={issue.id} className="seo-hand-line" data-tone={issue.severity === 'fix' ? 'fix' : 'improve'}>
-                  <span className="seo-hand-text" id={`seo-hand-${node.item}-${issue.id}`}>
-                    {issue.id.startsWith('hand-identity:') ? issue.detail : issue.message}
-                  </span>
-                  {issue.fix && 'apply' in issue.fix && state.readonly === 'no' && (
-                    <Btn
-                      variant="soft"
-                      size={24}
-                      aria-describedby={`seo-hand-${node.item}-${issue.id}`}
-                      onClick={(event) => {
-                        const next = leaveOut(state.edits.target, node, server.preview?.url ?? '');
-                        if (next) {
-                          // The line and its button go: focus stays with the item.
-                          event.currentTarget.closest('li')?.querySelector<HTMLElement>('.seo-hand-name')?.focus();
-                          dispatch({ type: 'apply', scope: 'target', values: next.values, undo: leftOutText(next) });
-                        }
-                      }}
-                    >
-                      {issue.fix.label}
-                    </Btn>
-                  )}
-                  {issue.recheck && (
-                    <Btn variant="ghost" size={24} aria-describedby={`seo-hand-${node.item}-${issue.id}`} onClick={() => recheck(issue.id)}>
-                      {issue.recheck}
-                    </Btn>
-                  )}
-                </div>
-              ))}
-              {skipped(node) && state.readonly === 'no' && (
-                <Btn variant="ghost" size={24} onClick={() => putBack(node)}>
-                  Put it back
-                </Btn>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-/** One object or a list, parsed here when the field is left and validated again by the server. */
-export function CustomJson() {
-  const { state, dispatch } = useApp();
-  const stored = state.edits.target.schema?.custom ?? '';
-  const [bad, setBad] = useState<string>();
-  const held = useHeld(
-    pretty(stored),
-    (text) => dispatch({ type: 'edit', scope: 'target', path: 'schema.custom', value: text }),
-    true,
-  );
-  const area = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => area.current?.focus(), []);
-  const target = state.server?.target;
-  return (
-    <>
-      <p className="seo-sheet-intro">
-        Added to {target?.scope === 'template' ? `every ${inSentence(target.label)}'s` : "this page's"} structured data.{' '}
-        <InfoTip
-          label="About names in braces"
-          text="In its texts, {title}, {description}, {site}, {sep}, {url}, {author}, {published}, {modified} and {image} are filled in with the page's values. Other text in braces stays as typed."
-        />
-      </p>
-      <div className="seo-json-wrap">
-        <Field scope="target" path="schema.custom" label="Your own JSON-LD" labelHidden error={bad}>
-          {(field) => (
-            <div>
-              <textarea
-                ref={area}
-                id={field.id}
-                className="seo-input seo-json"
-                rows={12}
-                spellCheck={false}
-                disabled={field.disabled}
-                aria-invalid={field.invalid || undefined}
-                aria-describedby={field.describedBy}
-                value={held.value}
-                onChange={(event) => {
-                  setBad(undefined);
-                  held.onChange(event);
-                }}
-                onBlur={() => {
-                  setBad(jsonError(held.value));
-                  held.onBlur();
-                }}
-                onKeyDown={held.onKeyDown}
-              />
-            </div>
-          )}
-        </Field>
-      </div>
-      <HandItems />
     </>
   );
 }

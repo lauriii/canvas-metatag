@@ -32,6 +32,7 @@ use Psr\Log\LoggerInterface;
 #[CoversFunction('canvas_metatag_post_update_values_as_parts')]
 #[CoversFunction('canvas_metatag_post_update_event_organizer')]
 #[CoversFunction('canvas_metatag_post_update_country_codes')]
+#[CoversFunction('canvas_metatag_post_update_own_jsonld_as_written')]
 #[Group('canvas_metatag')]
 #[Group('canvas_metatag_canvas_contract')]
 final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterface {
@@ -254,7 +255,7 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
 
     // What lost text is logged, by entity and key, never with the value.
     self::assertContains('node.article.full: social.title: uses its default; dropped typed text, {field.field_byline}.', $this->logged);
-    self::assertContains('node.article.full: schema.custom: names a field, which custom JSON-LD no longer fills.', $this->logged);
+    self::assertContains('node.article.full: schema.custom: names a field. A whole value is filled from its field; a name inside other text stays as written.', $this->logged);
     self::assertContains("canvas_page {$page->id()} (en, revision {$page->getRevisionId()}): title: kept its first part; dropped {title}.", $this->logged);
     self::assertContains("canvas_page {$page->id()} (fr, revision $first): social.title: kept its first part; dropped typed text.", $this->logged);
     foreach ($this->logged as $line) {
@@ -277,7 +278,7 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
       $this->config('canvas_metatag.site')->get('values'),
       ContentTemplate::load('node.article.full')?->getThirdPartySetting('canvas_metatag', 'values'),
     ]);
-    self::assertSame(['node.article.full: schema.custom: names a field, which custom JSON-LD no longer fills.'], $this->logged);
+    self::assertSame(['node.article.full: schema.custom: names a field. A whole value is filled from its field; a name inside other text stays as written.'], $this->logged);
   }
 
   /**
@@ -376,6 +377,93 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
     self::assertArrayNotHasKey(AutoSaveManager::AUTO_SAVE_CONFLICT_KEY, $auto_save->getAllAutoSaveList(FALSE, TRUE)[AutoSaveManager::getAutoSaveKey($page)]);
     // Run again: nothing to change.
     self::assertSame('0 venue countries are stored as their codes.', canvas_metatag_post_update_country_codes());
+  }
+
+  /**
+   * Hand-added JSON-LD is stored as written; ids that are now reserved move.
+   *
+   * No page's output changes: what read mode renames before the update is
+   * what the update stores.
+   */
+  public function testOwnJsonLdAsWritten(): void {
+    $this->setUpCurrentUser();
+    $legacy = '[{"@id":"#identity","@type":"Organization","name":"Acme Logistics"},'
+      . '{"@id":"#rating","@type":"EmployerAggregateRating","itemReviewed":{"@id":"#identity"},"ratingCount":318,"ratingValue":4.2},'
+      . '{"@id":"#webpage","@type":"Thing","name":"Dropped before"}]';
+    $template = $this->createTemplate(TRUE, ['schema' => ['custom' => '{"@type":"Person","author":"{field.field_byline}","name":"A"}']]);
+    $suite = $this->createPage([
+      'canvas_metatag' => Values::encode(['schema' => ['custom' => '[{"@id":"#c-suite","@type":"Thing","name":"Suite"},{"@type":"Review","itemReviewed":{"@id":"#c-suite"}}]']]),
+      'path' => ['alias' => '/suite'],
+    ]);
+    $node = Node::create(['type' => 'article', 'title' => 'Hello', 'field_byline' => 'Mia Virtanen', 'status' => TRUE]);
+    $node->save();
+    $page = $this->createPage(['canvas_metatag' => Values::encode(['schema' => ['custom' => $legacy]])]);
+    $big = $this->createPage([
+      'canvas_metatag' => Values::encode(['schema' => ['custom' => '{"@type":"Thing","name":"' . str_repeat('x', Values::CUSTOM_RAW_MAX) . '"}']]),
+      'path' => ['alias' => '/big'],
+    ]);
+    // About 30 KB minified, over 64 KB once indented: stays minified.
+    $dense = json_encode(['@type' => 'Thing', 'name' => 'Dense', 'a' => [[array_fill(0, 15000, 1)]]]);
+    $packed = $this->createPage([
+      'canvas_metatag' => Values::encode(['schema' => ['custom' => $dense]]),
+      'path' => ['alias' => '/dense'],
+    ]);
+    // A number stored before validation: listed, left as it is.
+    $huge = $this->createPage([
+      'canvas_metatag' => Values::encode(['schema' => ['custom' => '{"@type":"Rating","ratingValue":1e400}']]),
+      'path' => ['alias' => '/huge'],
+    ]);
+    $pages = $this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID);
+    $graph = fn (mixed $entity): array => $this->resolver()->resolve($entity)['head']['script'][0]['textContent'];
+    $before = [
+      $graph(Page::load($page->id())),
+      $graph(Node::load($node->id())),
+      $graph(Page::load($packed->id())),
+      $graph(Page::load($suite->id())),
+    ];
+
+    \Drupal::moduleHandler()->loadInclude('canvas_metatag', 'php', 'canvas_metatag.post_update');
+    $output = canvas_metatag_post_update_own_jsonld_as_written();
+    $pages->resetCache();
+    $this->container->get('entity_type.manager')->getStorage('node')->resetCache();
+    $after = [
+      $graph($pages->load($page->id())),
+      $graph(Node::load($node->id())),
+      $graph($pages->load($packed->id())),
+      $graph($pages->load($suite->id())),
+    ];
+    self::assertSame($before, $after);
+    $suite_items = json_decode(Values::decode($pages->load($suite->id())->get('canvas_metatag')->value)['schema']['custom'], TRUE);
+    self::assertSame(['@id' => '#item-c-suite'], $suite_items[1]['itemReviewed']);
+    self::assertSame($dense, Values::decode($pages->load($packed->id())->get('canvas_metatag')->value)['schema']['custom']);
+    self::assertStringContainsString('1e400', Values::decode($pages->load($huge->id())->get('canvas_metatag')->value)['schema']['custom']);
+
+    $stored = Values::decode($pages->load($page->id())->get('canvas_metatag')->value)['schema'];
+    $items = json_decode($stored['custom'], TRUE);
+    self::assertSame(['#identity-2', '#rating', '#webpage-2'], array_column($items, '@id'));
+    self::assertSame(['@id' => '#identity-2'], $items[1]['itemReviewed']);
+    self::assertSame(['#webpage-2'], $stored['skip']);
+    self::assertStringStartsWith("[\n  {\n    \"@id\": \"#identity-2\"", $stored['custom']);
+    $template = ContentTemplate::load($template->id());
+    \assert($template instanceof ContentTemplate);
+    self::assertSame("{\n  \"@type\": \"Person\",\n  \"author\": \"{field.field_byline}\",\n  \"name\": \"A\"\n}", $template->getThirdPartySetting('canvas_metatag', 'values')['schema']['custom']);
+    // Over 64 KB as written: listed, and left as it is.
+    self::assertStringContainsString('"name":"xxx', Values::decode($pages->load($big->id())->get('canvas_metatag')->value)['schema']['custom']);
+    self::assertSame(implode("\n", [
+      'Hand-added JSON-LD is stored as written in 3 places.',
+      'template node.article.full: {field.field_byline} is now filled from its field',
+      "page {$suite->id()} (en): #c-suite is now #item-c-suite",
+      "page {$page->id()} (en): #identity is now #identity-2",
+      "page {$page->id()} (en): #webpage is now #webpage-2, left out as before",
+      "page {$big->id()} (en): over 64 KB as written, left as it is",
+      "page {$huge->id()} (en): has a value that can't be written out, left as it is",
+    ]), $output);
+    // Run again: nothing to change.
+    self::assertSame(implode("\n", [
+      'Hand-added JSON-LD is stored as written in 0 places.',
+      "page {$big->id()} (en): over 64 KB as written, left as it is",
+      "page {$huge->id()} (en): has a value that can't be written out, left as it is",
+    ]), canvas_metatag_post_update_own_jsonld_as_written());
   }
 
   /**

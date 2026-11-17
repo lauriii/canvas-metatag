@@ -297,8 +297,27 @@ function canvas_metatag_post_update_country_codes(): string {
   };
   $count = _canvas_metatag_post_update_templates($coded);
 
-  // Page drafts in step with their stored page stay so (as when values
-  // became parts): their keys are read before the rows are rewritten.
+  $count += _canvas_metatag_post_update_pages($key, static fn (mixed $values): ?array => $coded($values));
+  return (string) \Drupal::translation()->formatPlural($count, 'One venue country is stored as its code.', '@count venue countries are stored as their codes.');
+}
+
+/**
+ * Changes the values of every page revision, translation and draft.
+ *
+ * Page drafts in step with their stored page stay so (as when values became
+ * parts): their keys are read before the rows are rewritten.
+ *
+ * @param string $like
+ *   Text the stored values hold when they may change.
+ * @param callable(mixed, string): ?array $change
+ *   Stored values and where they are ("page 3 (en)", "page 3 (en) draft")
+ *   => the changed values, or NULL when they stay.
+ *
+ * @return int
+ *   How many rows and drafts changed.
+ */
+function _canvas_metatag_post_update_pages(string $like, callable $change): int {
+  $count = 0;
   $auto_save = \Drupal::service(AutoSaveManager::class);
   $in_step = [];
   foreach ($auto_save->getAllAutoSaveList(FALSE, TRUE) as $entry_key => $entry) {
@@ -312,11 +331,11 @@ function canvas_metatag_post_update_country_codes(): string {
   $column = $definition ? $pages->getTableMapping()->getFieldColumnName($definition, 'value') : NULL;
   $database = \Drupal::database();
   $rows = $column ? $database->select($pages->getRevisionDataTable(), 'r')
-    ->fields('r', ['revision_id', 'langcode', $column])
-    ->condition($column, '%' . $database->escapeLike($key) . '%', 'LIKE')
+    ->fields('r', ['id', 'revision_id', 'langcode', $column])
+    ->condition($column, '%' . $database->escapeLike($like) . '%', 'LIKE')
     ->execute() : [];
   foreach ($rows as $row) {
-    $new = $coded(Values::decode($row->{$column}));
+    $new = $change(Values::decode($row->{$column}), "page $row->id ($row->langcode)");
     if ($new !== NULL) {
       foreach ([$pages->getRevisionDataTable(), $pages->getDataTable()] as $table) {
         $database->update($table)
@@ -340,7 +359,7 @@ function canvas_metatag_post_update_country_codes(): string {
       $auto_save->resolveConflict($page, $entry[AutoSaveManager::AUTO_SAVE_CONFLICT_KEY]);
     }
     $draft = $auto_save->getAutoSaveEntity($page, TRUE);
-    $new = $draft->entity instanceof ContentEntityInterface ? $coded(Values::decode($draft->entity->get('canvas_metatag')->value)) : NULL;
+    $new = $draft->entity instanceof ContentEntityInterface ? $change(Values::decode($draft->entity->get('canvas_metatag')->value), "page {$page->id()} ($langcode) draft") : NULL;
     if ($new !== NULL) {
       $draft->entity->set('canvas_metatag', Values::encode($new));
       _canvas_metatag_post_update_draft($draft->entity, $draft->clientId);
@@ -348,7 +367,69 @@ function canvas_metatag_post_update_country_codes(): string {
     }
   }
   Cache::invalidateTags(['canvas_page_list', 'rendered']);
-  return (string) \Drupal::translation()->formatPlural($count, 'One venue country is stored as its code.', '@count venue countries are stored as their codes.');
+  return $count;
+}
+
+/**
+ * Stores hand-added JSON-LD as written, and renames the module's ids in it.
+ *
+ * Hand-added JSON-LD was stored re-encoded with sorted keys; it is now
+ * stored as written. Each stored text is written out once with two spaces,
+ * in its stored key order (a text over 64 KB is listed and left as it is).
+ * A top-level @id that is now the module's, or another item's, is renamed
+ * "‹id›-2" with the references that reached it, and an item that was left
+ * out stays out (Values::renameReserved()): no page's output changes. A
+ * whole value "{field.…}" that starts to be filled is listed.
+ */
+function canvas_metatag_post_update_own_jsonld_as_written(): string {
+  $listed = [];
+  $change = static function (mixed $values, string $where) use (&$listed): ?array {
+    $text = is_array($values) ? $values['schema']['custom'] ?? NULL : NULL;
+    if (!is_string($text) || trim($text) === '') {
+      return NULL;
+    }
+    if (strlen($text) > Values::CUSTOM_RAW_MAX) {
+      $listed[] = "$where: over 64 KB as written, left as it is";
+      return NULL;
+    }
+    $data = json_decode($text, FALSE, 64);
+    if (!is_array($data) && !$data instanceof \stdClass) {
+      return NULL;
+    }
+    [$data, $renames] = Values::renameReserved($data);
+    foreach ($renames as $rename) {
+      $listed[] = "$where: {$rename['from']} is now {$rename['to']}" . ($rename['skip'] ? ', left out as before' : '');
+      if ($rename['skip']) {
+        $values['schema']['skip'][] = $rename['to'];
+      }
+    }
+    try {
+      // Minified when indenting would take it over 64 KB: read mode would
+      // refuse it, and the page would lose its hand-added JSON-LD.
+      $pretty = Values::written($data);
+    }
+    catch (\JsonException) {
+      // A number stored before validation (1e400): read mode leaves out
+      // the item it is in, as before.
+      $listed[] = "$where: has a value that can't be written out, left as it is";
+      return NULL;
+    }
+    if ($pretty === $text && !$renames) {
+      return NULL;
+    }
+    $strings = json_decode($pretty, TRUE);
+    array_walk_recursive($strings, static function (mixed $value) use (&$listed, $where): void {
+      if (is_string($value) && preg_match('/^\{field\.[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)?\}$/D', $value)) {
+        $listed[] = "$where: $value is now filled from its field";
+      }
+    });
+    $values['schema']['custom'] = $pretty;
+    return $values;
+  };
+  $count = _canvas_metatag_post_update_templates($change);
+  $count += _canvas_metatag_post_update_pages('"custom"', $change);
+  $message = (string) \Drupal::translation()->formatPlural($count, 'Hand-added JSON-LD is stored as written in one place.', 'Hand-added JSON-LD is stored as written in @count places.');
+  return implode("\n", [$message, ...array_values(array_unique($listed))]);
 }
 
 /**
@@ -357,8 +438,9 @@ function canvas_metatag_post_update_country_codes(): string {
  * Saving a template deletes its draft: the draft is read first and written
  * back after, under its own client id.
  *
- * @param callable(mixed): ?array $change
- *   Stored values => the changed values, or NULL when they stay.
+ * @param callable(mixed, string): ?array $change
+ *   Stored values and where they are ("template node.article.full") => the
+ *   changed values, or NULL when they stay.
  *
  * @return int
  *   How many templates and drafts changed.
@@ -373,8 +455,8 @@ function _canvas_metatag_post_update_templates(callable $change): int {
     $draft = $auto_save->getAutoSaveEntity($template, TRUE);
     $entity = $draft->entity instanceof ContentTemplate ? $draft->entity : NULL;
     $kept = \Drupal::keyValue(AutoSaveManager::AUTO_SAVE_STORE)->get(AutoSaveManager::getAutoSaveKey($template));
-    $stored = $change($template->getThirdPartySetting('canvas_metatag', 'values'));
-    $drafted = $entity ? $change($entity->getThirdPartySetting('canvas_metatag', 'values')) : NULL;
+    $stored = $change($template->getThirdPartySetting('canvas_metatag', 'values'), "template {$template->id()}");
+    $drafted = $entity ? $change($entity->getThirdPartySetting('canvas_metatag', 'values'), "template {$template->id()} draft") : NULL;
     if ($stored !== NULL) {
       $template->setThirdPartySetting('canvas_metatag', 'values', $stored)->save();
       $count++;
