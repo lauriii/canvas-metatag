@@ -7,6 +7,7 @@ namespace Drupal\Tests\canvas_metatag\Unit;
 use Drupal\canvas_metatag\Hook\CanvasMetatagHooks;
 use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
+use Drupal\Component\Uuid\Uuid;
 use Drupal\Tests\UnitTestCase;
 use Masterminds\HTML5;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -47,14 +48,44 @@ final class SchemaGraphTest extends UnitTestCase {
 
   /**
    * Builds a graph the way the resolver does.
+   *
+   * @param array $schema
+   *   The effective `schema` value.
+   * @param array<string, string> $facts
+   *   Fact name => text; also what custom JSON-LD strings are filled with.
+   * @param array<string, array> $images
+   *   Media UUID, or `image` for the Image fact => image array.
+   * @param array $ctx
+   *   Overrides of the context.
+   * @param array<string, string> $links
+   *   Source expression => what the link gives.
    */
-  private static function build(array $schema, array $tokens = [], array $images = [], array $ctx = []): array {
+  private static function build(array $schema, array $facts = [], array $images = [], array $ctx = [], array $links = []): array {
     return SchemaGraph::build(
-      $ctx + self::CTX,
+      $ctx + ['facts' => $facts] + self::CTX,
       $schema,
-      static fn (string $template, bool $keep = FALSE): string => Values::fill($template, $tokens, $keep),
-      static fn (string $reference): ?array => $images[$reference] ?? NULL,
+      static fn (array $value, string $kind): string|array|null => match (array_key_first($value)) {
+        'text' => $value['text'],
+        'fact' => $kind === 'image' ? $images[$value['fact']] ?? NULL : $facts[$value['fact']] ?? '',
+        'media' => $images[$value['media']] ?? NULL,
+        'source' => $links[$value['source']['expression']] ?? NULL,
+        default => NULL,
+      },
     );
+  }
+
+  /**
+   * Typed text.
+   */
+  private static function typed(string $text): array {
+    return ['text' => $text];
+  }
+
+  /**
+   * A field link.
+   */
+  private static function link(string $field): array {
+    return ['source' => ['expression' => "ℹ︎␜entity:node:page␝{$field}␞␟value", 'sourceType' => 'entity-field']];
   }
 
   /**
@@ -69,7 +100,11 @@ final class SchemaGraphTest extends UnitTestCase {
     foreach ($graph['@graph'] as $node) {
       self::assertIsString($node['@type'] ?? NULL, 'Every node has a type.');
     }
-    $ours = array_map(static fn (string $name): string => (in_array($name, ['identity', 'logo', 'website'], TRUE) ? $home : $url) . "#$name", [
+    $ours = array_map(static fn (string $name): string => (in_array($name, [
+      'identity',
+      'logo',
+      'website',
+    ], TRUE) ? $home : $url) . "#$name", [
       'identity',
       'logo',
       'website',
@@ -93,7 +128,7 @@ final class SchemaGraphTest extends UnitTestCase {
   #[DataProvider('providerFixtures')]
   public function testFixture(string $name): void {
     $fixture = json_decode((string) file_get_contents(dirname(__DIR__, 2) . "/fixtures/graphs/$name.json"), TRUE, 32, JSON_THROW_ON_ERROR);
-    $result = self::build($fixture['schema'], $fixture['tokens'], $fixture['images'], $fixture['ctx']);
+    $result = self::build($fixture['schema'], $fixture['facts'], $fixture['images'], $fixture['ctx'], $fixture['links']);
     self::assertSame($fixture['graph'], $result['graph']);
     self::assertSame($fixture['report'], array_diff_key($result, ['graph' => TRUE]));
     self::assertGraphRules($result['graph'], $fixture['ctx']['home'], $fixture['ctx']['url']);
@@ -122,6 +157,7 @@ final class SchemaGraphTest extends UnitTestCase {
         'NewsArticle',
         'Event',
         'Product',
+        'Service',
         'ProfilePage',
       ],
       array_keys($types),
@@ -129,20 +165,22 @@ final class SchemaGraphTest extends UnitTestCase {
     foreach (['BlogPosting' => 'Blog post', 'NewsArticle' => 'News article'] as $id => $label) {
       self::assertSame($label, $types[$id]['label']);
       self::assertSame($id, $types[$id]['primary_type']);
-      self::assertSame('Article', $types[$id]['group']);
+      self::assertSame('Article', $types[$id]['variant_of']);
       self::assertSame('article', $types[$id]['og_type']);
+      // A variant is reached through its base's kind; it has none itself.
+      self::assertArrayNotHasKey('kind', $types[$id]);
       self::assertSame($types['Article']['props'], $types[$id]['props']);
       self::assertSame($types['Article']['refs'], $types[$id]['refs']);
       self::assertSame($types['Article']['nested'], $types[$id]['nested']);
       self::assertArrayNotHasKey('extends', $types[$id]);
     }
-    // Every key is a legal config key and a schema.org property path, and
-    // every intermediate object has a type.
+    // Every key is a legal config key and, unless it is never emitted, a
+    // schema.org property path whose every intermediate object has a type.
     foreach ($types as $id => $type) {
       foreach ($type['props'] ?? [] as $prop) {
         self::assertMatchesRegularExpression('/^[A-Za-z]+(_[A-Za-z]+)*$/', $prop['key']);
-        self::assertContains($prop['kind'], ['text', 'url', 'date', 'number', 'enum', 'image']);
-        $path = explode('_', $prop['key']);
+        self::assertContains($prop['kind'], ['text', 'url', 'date', 'number', 'enum', 'currency', 'image']);
+        $path = ($prop['emit'] ?? TRUE) ? explode('_', $prop['key']) : [];
         array_pop($path);
         while ($path) {
           self::assertArrayHasKey(implode('_', $path), $type['nested'], "$id: {$prop['key']}");
@@ -158,15 +196,177 @@ final class SchemaGraphTest extends UnitTestCase {
     foreach ([[], ['type' => 'Recipe']] as $schema) {
       $result = self::build($schema);
       self::assertSame(['Organization', 'WebSite', 'WebPage'], array_column($result['graph']['@graph'], '@type'));
-      self::assertFalse($result['withheld']);
+      self::assertNull($result['withheld']);
     }
+    // The six kinds, each a type the editor can choose, in their order.
+    $kinds = array_filter($types, static fn (array $type): bool => isset($type['kind']));
+    uasort($kinds, static fn (array $a, array $b): int => $a['kind']['order'] <=> $b['kind']['order']);
+    self::assertSame(['Product', 'Service', 'Article', 'Event', 'ProfilePage', 'WebPage'], array_keys($kinds));
+    foreach ($types as $id => $type) {
+      self::assertTrue(isset($type['kind']) xor isset($type['variant_of']), "$id is a kind or a variant of one");
+    }
+  }
+
+  /**
+   * Plans for a service, billing and the seller.
+   */
+  public function testCommerce(): void {
+    $offer = static fn (array $schema, array $ctx = []): array => self::build($schema, ['title' => 'Studio membership'], [], $ctx)['graph']['@graph'][3];
+    // A service: provided by the identity, one offer.
+    $service = $offer([
+      'type' => 'Service',
+      'props' => ['offers_price' => self::typed('2500'), 'offers_priceCurrency' => self::typed('EUR')],
+    ]);
+    self::assertSame('Service', $service['@type']);
+    self::assertSame(['@id' => self::HOME . '#identity'], $service['provider']);
+    self::assertSame('Studio membership', $service['name']);
+    self::assertSame(['@type' => 'Offer', 'price' => '2500', 'priceCurrency' => 'EUR'], $service['offers']);
+
+    // Billed every month or year: a price specification beside the price.
+    foreach (['P1M' => 'MON', 'P1Y' => 'ANN'] as $period => $unit) {
+      $node = $offer([
+        'type' => 'Service',
+        'props' => [
+          'offers_price' => self::typed('2500'),
+          'offers_priceCurrency' => self::typed('EUR'),
+          'billing' => self::typed($period),
+        ],
+      ]);
+      self::assertSame([
+        '@type' => 'Offer',
+        'price' => '2500',
+        'priceCurrency' => 'EUR',
+        'priceSpecification' => [
+          '@type' => 'UnitPriceSpecification',
+          'price' => '2500',
+          'priceCurrency' => 'EUR',
+          'billingDuration' => $period,
+          'unitCode' => $unit,
+        ],
+      ], $node['offers']);
+    }
+    // Once, or not set: nothing more.
+    foreach ([['billing' => self::typed('once')], []] as $billing) {
+      $node = $offer([
+        'type' => 'Product',
+        'props' => ['offers_price' => self::typed('89'), 'offers_priceCurrency' => self::typed('EUR')] + $billing,
+      ]);
+      self::assertArrayNotHasKey('priceSpecification', $node['offers']);
+      self::assertArrayNotHasKey('billing', $node);
+    }
+
+    // The site is the seller only when people buy it here; the answer itself
+    // never ships.
+    $product = static fn (?string $here): array => $offer([
+      'type' => 'Product',
+      'props' => ['offers_price' => self::typed('89')] + ($here === NULL ? [] : ['sold_here' => self::typed($here)]),
+    ]);
+    self::assertSame(['@id' => self::HOME . '#identity'], $product('yes')['offers']['seller']);
+    self::assertArrayNotHasKey('seller', $product('no')['offers']);
+    self::assertArrayNotHasKey('seller', $product(NULL)['offers']);
+    self::assertStringNotContainsString('sold_here', (string) json_encode($product('yes')));
+    $result = self::build([
+      'type' => 'Product',
+      'props' => ['offers_price' => self::typed('89'), 'sold_here' => self::typed('yes')],
+    ], ['title' => 'Lamp']);
+    self::assertSame(['sold_here' => 'yes'], $result['gates']);
+    // A gate keeps the clean value it was validated as: a linked value with
+    // spaces around it still bills and still sells.
+    $result = self::build([
+      'type' => 'Product',
+      'props' => [
+        'offers_price' => self::typed('89'),
+        'sold_here' => self::typed('yes '),
+        'billing' => self::typed(' P1M'),
+      ],
+    ], ['title' => 'Lamp']);
+    self::assertSame(['billing' => 'P1M', 'sold_here' => 'yes'], $result['gates']);
+    self::assertSame('P1M', $result['graph']['@graph'][3]['offers']['priceSpecification']['billingDuration']);
+    self::assertSame(['@id' => self::HOME . '#identity'], $result['graph']['@graph'][3]['offers']['seller']);
+
+    // The currency: the product's, else the site's, else none.
+    self::assertSame('USD', $offer([
+      'type' => 'Product',
+      'props' => ['offers_price' => self::typed('89'), 'offers_priceCurrency' => self::typed('USD')],
+    ], ['currency' => 'EUR'])['offers']['priceCurrency']);
+    self::assertSame('EUR', $offer([
+      'type' => 'Product',
+      'props' => ['offers_price' => self::typed('89')],
+    ], ['currency' => 'EUR'])['offers']['priceCurrency']);
+    self::assertArrayNotHasKey('priceCurrency', $offer([
+      'type' => 'Product',
+      'props' => ['offers_price' => self::typed('89')],
+    ])['offers']);
+    // No price, no offer: the site currency never makes an offer of nothing.
+    $priceless = self::build(['type' => 'Service', 'props' => []], ['title' => 'Consulting'], [], ['currency' => 'EUR']);
+    self::assertArrayNotHasKey('offers', $priceless['graph']['@graph'][3]);
+    self::assertArrayNotHasKey('offers_priceCurrency', $priceless['sources']);
+
+    // An event's organizer is the identity, unless it names another.
+    $event = static fn (array $props): array => self::build([
+      'type' => 'Event',
+      'props' => $props + [
+        'startDate' => self::typed('2026-07-01'),
+        'location_address_streetAddress' => self::typed('1 Example Street'),
+      ],
+    ], ['title' => 'Launch'])['graph']['@graph'][3];
+    self::assertSame(['@id' => self::HOME . '#identity'], $event([])['organizer']);
+    self::assertSame([
+      '@type' => 'Organization',
+      'name' => 'Example Hall Ltd',
+    ], $event(['organizer_name' => self::typed('Example Hall Ltd')])['organizer']);
+    // A person's employer.
+    $person = self::build([
+      'type' => 'ProfilePage',
+      'props' => ['worksFor_name' => self::typed('Example')],
+    ], ['title' => 'Ada'])['graph']['@graph'][3];
+    self::assertSame(['@type' => 'Organization', 'name' => 'Example'], $person['worksFor']);
+  }
+
+  /**
+   * A hand-added item can be left out by its @id, its text kept.
+   */
+  public function testSkip(): void {
+    $custom = (string) json_encode([
+      ['@type' => 'FAQPage', '@id' => '#faq', 'name' => 'Questions'],
+      ['@type' => 'Thing', 'name' => 'Kept'],
+    ]);
+    $result = self::build(['custom' => $custom, 'skip' => ['#faq']]);
+    self::assertSame([
+      'Organization',
+      'WebSite',
+      'WebPage',
+      'Thing',
+    ], array_column($result['graph']['@graph'], '@type'));
+    self::assertSame([
+      'id' => self::URL . '#faq',
+      'type' => 'FAQPage',
+      'origin' => 'hand',
+      'item' => 0,
+      'left_out' => 'skip',
+    ], $result['nodes'][3]);
+    self::assertSame([
+      'id' => NULL,
+      'type' => 'Thing',
+      'origin' => 'hand',
+      'item' => 1,
+      'at' => 3,
+    ], $result['nodes'][4]);
+    // Not listed: emitted.
+    self::assertSame([
+      'Organization',
+      'WebSite',
+      'WebPage',
+      'FAQPage',
+      'Thing',
+    ], array_column(self::build(['custom' => $custom])['graph']['@graph'], '@type'));
   }
 
   /**
    * The @id table, exactly. These are identity and never change.
    */
   public function testIds(): void {
-    $result = self::build(['type' => 'Article'], ['title' => 'Hello'], ['{image}' => self::IMAGE], [
+    $result = self::build(['type' => 'Article'], ['title' => 'Hello'], ['image' => self::IMAGE], [
       'logo' => ['url' => 'https://cms.example.com/logo.png', 'width' => 10, 'height' => 10],
       'image' => self::IMAGE,
     ]);
@@ -182,14 +382,64 @@ final class SchemaGraphTest extends UnitTestCase {
   }
 
   /**
-   * A summary left at its default is the page's description, not the token.
+   * The Description fact is the page's description as search shows it.
    */
   public function testSummaryDefault(): void {
     $result = self::build(['type' => 'Article'], ['description' => 'Raw body text cut at'], [], ['description' => 'The summary.']);
     self::assertSame('The summary.', $result['graph']['@graph'][3]['description']);
-    // Stored, it is filled like any other value.
-    $result = self::build(['type' => 'Article', 'props' => ['description' => '{description}']], ['description' => 'Raw body text cut at']);
-    self::assertSame('Raw body text cut at', $result['graph']['@graph'][3]['description']);
+    // Linked to it explicitly, the same.
+    $result = self::build([
+      'type' => 'Article',
+      'props' => ['description' => ['fact' => 'description']],
+    ], ['description' => 'Raw body text cut at'], [], ['description' => 'The summary.']);
+    self::assertSame('The summary.', $result['graph']['@graph'][3]['description']);
+  }
+
+  /**
+   * A link that gives nothing gives the default.
+   *
+   * One that does not fit is left out.
+   */
+  public function testLinkedValues(): void {
+    $article = static fn (array $props, array $links): array => self::build([
+      'type' => 'Article',
+      'props' => $props,
+    ], ['title' => 'Hello', 'author' => 'Ada'], [], [], $links)['graph']['@graph'][3];
+    // Empty: the default.
+    self::assertSame([
+      '@type' => 'Person',
+      'name' => 'Ada',
+    ], $article(['author_name' => self::link('field_byline')], [])['author']);
+    self::assertSame('Hello', $article(['headline' => self::link('field_headline')], ['ℹ︎␜entity:node:page␝field_headline␞␟value' => ''])['headline']);
+    // Linked: the value, never scanned for names.
+    self::assertSame([
+      '@type' => 'Person',
+      'name' => '{site}',
+    ], $article(['author_name' => self::link('field_byline')], ['ℹ︎␜entity:node:page␝field_byline␞␟value' => '{site}'])['author']);
+    // A field that is not an address: the author page is left out.
+    self::assertArrayNotHasKey('url', $article(['author_url' => self::link('field_link')], ['ℹ︎␜entity:node:page␝field_link␞␟value' => 'not an address'])['author'] ?? []);
+    // Defaults are facts.
+    $defaults = self::build([
+      'type' => 'Article',
+    ], [
+      'title' => 'Hello',
+      'author' => 'Ada',
+      'published' => '2026-01-02',
+      'modified' => '2026-01-03',
+    ], ['image' => self::IMAGE])['graph']['@graph'][3];
+    self::assertSame([
+      'Hello',
+      '2026-01-02',
+      '2026-01-03',
+      'Ada',
+      self::IMAGE['url'],
+    ], [
+      $defaults['headline'],
+      $defaults['datePublished'],
+      $defaults['dateModified'],
+      $defaults['author']['name'],
+      $defaults['image']['url'],
+    ]);
   }
 
   /**
@@ -198,14 +448,16 @@ final class SchemaGraphTest extends UnitTestCase {
   public function testMissing(): void {
     // Recommended and optional properties: the node ships without them.
     // No description: the summary, which defaults to it, is left out too.
-    $result = self::build(['type' => 'Article', 'props' => ['author_url' => '{field.field_link}']], [
+    $result = self::build(['type' => 'Article', 'props' => ['author_url' => self::link('field_link')]], [
       'title' => 'Hello',
-      'field.field_link' => 'not a url',
       'modified' => 'yesterday',
-    ], [], ['description' => '']);
-    self::assertFalse($result['withheld']);
-    self::assertSame([], $result['missing_required']);
-    self::assertSame(['image', 'datePublished', 'dateModified', 'author_name'], $result['missing_recommended']);
+    ], [], ['description' => ''], ['ℹ︎␜entity:node:page␝field_link␞␟value' => 'not a url']);
+    self::assertNull($result['withheld']);
+    // Values that do not fit are said, with what they gave.
+    self::assertSame([
+      ['key' => 'dateModified', 'value' => 'yesterday', 'kind' => 'date'],
+      ['key' => 'author_url', 'value' => 'not a url', 'kind' => 'url'],
+    ], $result['dropped']);
     $article = $result['graph']['@graph'][3];
     self::assertSame(['@type', '@id', 'mainEntityOfPage', 'publisher', 'headline'], array_keys($article));
     self::assertSame(['@id' => self::URL . '#primary'], $result['graph']['@graph'][2]['mainEntity']);
@@ -213,19 +465,19 @@ final class SchemaGraphTest extends UnitTestCase {
     // A required property that does not resolve withholds the primary node.
     $result = self::build([
       'type' => 'Event',
-      'props' => ['startDate' => '{field.field_when}', 'location_name' => 'Example Hall'],
-    ], ['title' => 'Launch', 'field.field_when' => ''], [], ['description' => '']);
-    self::assertTrue($result['withheld']);
-    self::assertSame(['startDate', 'location_address_streetAddress'], $result['missing_required']);
-    self::assertSame(['endDate', 'description', 'image'], $result['missing_recommended']);
+      'props' => ['startDate' => self::link('field_when'), 'location_name' => self::typed('Example Hall')],
+    ], ['title' => 'Launch'], [], ['description' => ''], ['ℹ︎␜entity:node:page␝field_when␞␟value' => '']);
+    self::assertSame(['startDate', 'location_address_streetAddress'], $result['withheld']['missing']);
+    self::assertSame([], $result['withheld']['dropped']);
+    // The node as it would have been, for the verdicts.
+    self::assertSame(['@type' => 'Place', 'name' => 'Example Hall'], $result['withheld']['node']['location']);
     self::assertSame(['Organization', 'WebSite', 'WebPage'], array_column($result['graph']['@graph'], '@type'));
     self::assertArrayNotHasKey('mainEntity', $result['graph']['@graph'][2]);
     self::assertGraphRules($result['graph'], self::HOME, self::URL);
 
     // A stored empty default: the title is empty, so the name is missing.
     $result = self::build(['type' => 'ProfilePage'], ['title' => ' ']);
-    self::assertTrue($result['withheld']);
-    self::assertSame(['name'], $result['missing_required']);
+    self::assertSame(['name'], $result['withheld']['missing']);
     self::assertSame('ProfilePage', $result['graph']['@graph'][2]['@type']);
   }
 
@@ -234,7 +486,10 @@ final class SchemaGraphTest extends UnitTestCase {
    */
   public function testEmission(): void {
     $event = static fn (array $props, string $timezone = 'Europe/Helsinki'): array => self::build(
-      ['type' => 'Event', 'props' => $props + ['location_address_streetAddress' => '1 Example Street']],
+      [
+        'type' => 'Event',
+        'props' => array_map(static fn (string $v): array => Uuid::isValid($v) ? ['media' => $v] : self::typed($v), $props + ['location_address_streetAddress' => '1 Example Street']),
+      ],
       ['title' => 'Launch'],
       [self::UUID => self::IMAGE],
       ['timezone' => $timezone],
@@ -256,7 +511,12 @@ final class SchemaGraphTest extends UnitTestCase {
       'location_name' => "  Example \n Hall\x07 ",
     ]);
     self::assertSame('https://schema.org/EventCancelled', $node['eventStatus']);
-    self::assertSame(['@type' => 'ImageObject', 'url' => self::IMAGE['url'], 'width' => 1200, 'height' => 630], $node['image']);
+    self::assertSame([
+      '@type' => 'ImageObject',
+      'url' => self::IMAGE['url'],
+      'width' => 1200,
+      'height' => 630,
+    ], $node['image']);
     self::assertSame([
       '@type' => 'Place',
       'name' => 'Example Hall',
@@ -288,7 +548,10 @@ final class SchemaGraphTest extends UnitTestCase {
     // An image without stored dimensions (an SVG, a migrated file) claims
     // none: no width or height of 0.
     $unmeasured = ['width' => 0, 'height' => 0] + self::IMAGE;
-    $graph = self::build(['type' => 'Article', 'props' => ['image' => self::UUID]], [], [self::UUID => $unmeasured], [
+    $graph = self::build([
+      'type' => 'Article',
+      'props' => ['image' => ['media' => self::UUID]],
+    ], [], [self::UUID => $unmeasured], [
       'logo' => ['url' => 'https://cms.example.com/logo.svg', 'width' => 0, 'height' => 0],
       'image' => $unmeasured,
     ])['graph']['@graph'];
@@ -338,12 +601,20 @@ final class SchemaGraphTest extends UnitTestCase {
     yield 'enum' => ['Product', 'offers_availability', 'InStock', TRUE];
     yield 'enum URL form' => ['Product', 'offers_availability', 'https://schema.org/InStock', FALSE];
     yield 'enum other' => ['Event', 'eventStatus', 'InStock', FALSE];
-    yield 'pattern' => ['Product', 'offers_priceCurrency', 'EUR', TRUE];
-    yield 'pattern lower case' => ['Product', 'offers_priceCurrency', 'eur', FALSE];
-    yield 'pattern trailing newline' => ['Product', 'offers_priceCurrency', "EUR\n", FALSE];
+    yield 'currency' => ['Product', 'offers_priceCurrency', 'EUR', TRUE];
+    yield 'currency lower case' => ['Product', 'offers_priceCurrency', 'eur', FALSE];
+    yield 'currency trailing newline' => ['Product', 'offers_priceCurrency', "EUR\n", FALSE];
+    yield 'currency symbol' => ['Product', 'offers_priceCurrency', '€', FALSE];
+    yield 'currency not in the list' => ['Product', 'offers_priceCurrency', 'ABC', FALSE];
+    yield 'billing' => ['Service', 'billing', 'P1M', TRUE];
+    yield 'billing other period' => ['Service', 'billing', 'P1W', FALSE];
+    yield 'bought here' => ['Product', 'sold_here', 'yes', TRUE];
+    yield 'bought here other' => ['Product', 'sold_here', 'maybe', FALSE];
+    yield 'back order kept' => ['Product', 'offers_availability', 'BackOrder', TRUE];
+
     yield 'pattern no space' => ['Product', 'sku', 'A 1', FALSE];
-    yield 'image UUID' => ['Article', 'image', self::UUID, TRUE];
-    yield 'image token' => ['Article', 'image', '{image}', TRUE];
+    // An image is a media item, a fact or a link, never text.
+    yield 'image UUID' => ['Article', 'image', self::UUID, FALSE];
     yield 'image file name' => ['Article', 'image', 'hello.jpg', FALSE];
   }
 
@@ -352,11 +623,12 @@ final class SchemaGraphTest extends UnitTestCase {
    */
   public function testCustom(): void {
     $custom = [
-      // Appended; a known token is filled, other brace text stays.
+      // Appended; a fixed name is filled, other brace text stays, field
+      // names included.
       [
         '@type' => 'WebSite',
         '@id' => '#search',
-        'name' => '{site} search',
+        'name' => '{site} search by {field.field_byline}',
         'potentialAction' => [
           '@type' => 'SearchAction',
           'target' => ['urlTemplate' => '{url}?q={search_term_string}'],
@@ -392,7 +664,7 @@ final class SchemaGraphTest extends UnitTestCase {
       [
         '@type' => 'WebSite',
         '@id' => self::URL . '#search',
-        'name' => 'Example search',
+        'name' => 'Example search by {field.field_byline}',
         'potentialAction' => [
           '@type' => 'SearchAction',
           'target' => ['urlTemplate' => self::URL . '?q={search_term_string}'],
@@ -415,8 +687,11 @@ final class SchemaGraphTest extends UnitTestCase {
 
     // One object instead of a list; a withheld primary node cannot be
     // referenced.
-    $result = self::build(['type' => 'Event', 'custom' => '{"@type":"Thing","subjectOf":{"@id":"#primary"},"name":"A"}']);
-    self::assertTrue($result['withheld']);
+    $result = self::build([
+      'type' => 'Event',
+      'custom' => '{"@type":"Thing","subjectOf":{"@id":"#primary"},"name":"A"}',
+    ]);
+    self::assertNotNull($result['withheld']);
     self::assertSame(['@type' => 'Thing', 'name' => 'A'], $result['graph']['@graph'][3]);
     self::assertGraphRules($result['graph'], self::HOME, self::URL);
 
@@ -434,7 +709,7 @@ final class SchemaGraphTest extends UnitTestCase {
     $result = self::build(
       [
         'type' => 'Article',
-        'props' => ['headline' => '{title}'],
+        'props' => ['headline' => ['fact' => 'title']],
         'custom' => (string) json_encode(['@type' => 'Thing', 'name' => $hostile]),
       ],
       ['title' => $hostile],

@@ -30,11 +30,16 @@ function useSettled<T>(value: T, ms: number): T {
 
 /** Puts focus in the field a part of a preview shows (pointer only). */
 function focusPath(path: string) {
+  // The title ending is the title field's second part.
+  const ending = path === 'title_end';
   const field = document.querySelector(
-    `.seo-panel[data-state="active"] [data-path="${path}"]`,
+    `.seo-panel[data-state="active"] [data-path="${ending ? 'title' : path}"]`,
   );
   field
-    ?.querySelector<HTMLElement>('textarea, input, [data-focus]')
+    ?.querySelector<HTMLElement>(
+      // A value that is linked or follows its default is its box.
+      ending ? '.seo-ending-btn' : 'textarea, input, .seo-linked-box, [data-focus]',
+    )
     ?.focus();
 }
 
@@ -84,7 +89,8 @@ export function Stage(props: {
       parts.some(
         (part) =>
           !part.hasAttribute('data-cut') &&
-          part.scrollWidth > part.clientWidth,
+          // Widths are rounded: a pixel over is subpixel rounding, not a cut.
+          part.scrollWidth - part.clientWidth > 1,
       );
     for (let index = parts.length - 1; index >= 0 && cut(); index--) {
       parts[index].setAttribute('data-cut', '');
@@ -100,6 +106,8 @@ export function Stage(props: {
   useLayoutEffect(() => {
     const observer = new ResizeObserver(() => fit());
     observer.observe(cap.current!);
+    // Text measured in a fallback font is measured again in the real one.
+    void document.fonts?.ready.then(() => fit());
     return () => observer.disconnect();
   }, []);
   return (
@@ -134,7 +142,7 @@ export function OutputButton() {
 function useAddress(): string {
   const { state, view } = useApp();
   const server = state.server!;
-  const saved = view?.tokens.url?.value || server.preview?.url || '';
+  const saved = view?.facts.url?.value || server.preview?.url || '';
   const alias = state.ctx.kind === 'page' ? state.live.alias : undefined;
   let path = '';
   try {
@@ -190,8 +198,15 @@ export function SearchPreview() {
   const texts = { ...view.texts, ...trial };
   const robots = view.effective.robots ?? {};
   const snippets = robots.nosnippet !== true && robots.max_snippet !== 0;
-  const site = view.values.site ?? '';
+  const site = view.facts.site?.value ?? '';
   const title = previewText('title', texts.title, measurer);
+  // Each part of the title lights up with its own control.
+  const mainLength =
+    texts.title_main && texts.title.startsWith(texts.title_main)
+      ? texts.title_main.length
+      : title.length;
+  const titleMain = title.slice(0, mainLength);
+  const titleEnd = title.slice(titleMain.length);
   const description = !snippets
     ? 'No description: text previews are off'
     : texts.description
@@ -278,8 +293,17 @@ export function SearchPreview() {
             data-on={on('title')}
             onClick={() => focusPath('title')}
           >
-            {title}
+            {titleMain}
           </span>
+          {titleEnd && (
+            <span
+              className="seo-part"
+              data-on={focusField === 'title_end' || undefined}
+              onClick={() => focusPath('title_end')}
+            >
+              {titleEnd}
+            </span>
+          )}
         </div>
         <div
           className="seo-result-text"
@@ -360,7 +384,7 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
       : '';
   const [broken, setBroken] = useState<string | null>(null);
   const texts = { ...view.texts, ...trial };
-  const { image } = socialImage(state, view, PICKED);
+  const { image } = socialImage(state, view);
   const small = smallCard(image);
   const large = !small;
   // The image on screen changes only once the next one has loaded, and

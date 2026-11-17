@@ -10,7 +10,11 @@
  * @endcode
  *
  * Prints the ids and paths of what it made, as JSON. Running it again keeps
- * the content and resets the content templates and their drafts.
+ * the content and resets the content templates and their drafts. Content
+ * changed by hand (an event's poster removed, a venue published) stays as it
+ * is: to bring the content back to the fixture too, run teardown.php in the
+ * same directory first, then this script. Node ids then start after the
+ * highest id the site has had.
  */
 
 declare(strict_types=1);

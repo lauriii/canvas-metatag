@@ -212,8 +212,8 @@ the saved one.
 
 #### Scenario: Typing a title
 
-- **WHEN** an editor types "Pricing plans" into an inherited page title with the site pattern "{title} {sep} {site}"
-- **THEN** the preview MUST show "Pricing plans | Example" for the site "Example"
+- **WHEN** an editor types "Pricing plans" into the title of a page whose ending is the site's name "Example"
+- **THEN** the preview MUST show "Pricing plans | Example"
 
 #### Scenario: A new alias in Page data
 
@@ -243,12 +243,23 @@ the saved one.
 ### Requirement: Preview and fields point at each other
 
 Clicking a part of a preview MUST put focus in the field that sets it. Focusing a
-field MUST highlight its part of the preview.
+field MUST highlight its part of the preview. The title's main part and its
+ending MUST each highlight only their own words.
 
 #### Scenario: Clicking the preview's title
 
 - **WHEN** an editor clicks the title in the search preview
 - **THEN** the Title field MUST have focus
+
+#### Scenario: Focusing the ending
+
+- **WHEN** an editor focuses the title ending button, or opens its menu
+- **THEN** only the separator and the ending MUST be highlighted in the search preview
+
+#### Scenario: Clicking the title of a template
+
+- **WHEN** an editor of "Every Event", whose title follows its default, clicks the title in the search preview
+- **THEN** the Title box MUST have focus
 
 ### Requirement: The link preview
 
@@ -298,11 +309,11 @@ Canvas's inputs are what the server saw, the texts MUST be the server's own.
 
 ### Requirement: Output shows the exact head
 
-Each preview MUST offer "View output", which opens the Output sheet. It MUST
-list, value by value and whole, the tags the server resolves for the target,
-draft included: title, description, robots and canonical first, then the rest
-as emitted. It MUST show the structured data as formatted JSON, and offer "Copy
-tags" and "Copy structured data", each confirmed with "Copied".
+Each preview MUST offer "View output", and the Schema view "Code", which open
+the Output sheet. It MUST list, value by value and whole, the tags the server
+resolves for the target, draft included: title, description, robots and
+canonical first, then the rest as emitted. It MUST offer "Copy tags",
+confirmed with "Copied".
 
 #### Scenario: After publishing
 
@@ -324,6 +335,24 @@ tags" and "Copy structured data", each confirmed with "Copied".
 - **WHEN** the server returned no head
 - **THEN** the sheet MUST say "There is no page to show output for."
 
+### Requirement: Output outlines the structured data
+
+The Output sheet's structured data section MUST list the graph's nodes as an
+outline, main node first, each with its name, type, `@id` and origin,
+left-out and retired nodes with their reason, then the formatted JSON behind
+"Show JSON-LD". It MUST offer "Copy structured data", confirmed with
+"Copied", and "Test this page".
+
+#### Scenario: The outline
+
+- **WHEN** a product page with a hand-added FAQ is opened in Output
+- **THEN** the list "Structured data" MUST start with the product node tagged "Main", and the FAQ row MUST say "Not shown since 7 May 2026" and "Added by hand"
+
+#### Scenario: Testing a draft
+
+- **WHEN** the target has unpublished changes and the editor presses "Test this page"
+- **THEN** the structured data MUST be copied and the dialog MUST say "Copied. Paste the code into the test."
+
 ### Requirement: Each field shows what it inherits
 
 A field without a value of its own MUST show the value it inherits, in grey, and
@@ -335,70 +364,12 @@ settings, the field MUST offer "Edit", which leads to that setting in Site.
 #### Scenario: An untouched title
 
 - **WHEN** a page has no title of its own
-- **THEN** the Title field MUST show the site pattern resolved for the page, and say "Site default"
+- **THEN** the main part MUST show the page's title in grey, and the ending MUST show the site's ending and say "Site default"
 
 #### Scenario: Edit the site default
 
-- **WHEN** an administrator presses "Edit" beside an inherited title
-- **THEN** the dialog MUST switch to Site and put focus in "Title pattern"
-
-### Requirement: Typing into an inherited page title keeps the site's pattern
-
-At page scope, the first input into an inherited title MUST replace the
-pattern's page title with what is typed and keep the rest. Text that brings its
-own dynamic values MUST be taken as written. Erasing the typed words MUST
-return the field to the inherited title. At template scope, "Use the site
-pattern" MUST copy the site's pattern into an empty title.
-
-#### Scenario: The first key
-
-- **WHEN** an editor types "Pricing plans" into an inherited title with the site pattern "{title} {sep} {site}"
-- **THEN** the field MUST read "Pricing plans {Separator} {Site name}", with the caret after "Pricing plans", and say "Set on this page"
-
-#### Scenario: Erasing it again
-
-- **WHEN** the editor deletes "Pricing plans" from that title
-- **THEN** the page MUST have no title of its own
-
-### Requirement: Dynamic values are chips
-
-Text fields MUST show each dynamic value as a chip with its label, such as
-"{Page title}", and store its name, such as "{title}". "Insert value", and
-typing "{", MUST open a menu of the text values the field may use, with a
-filter that takes the keys typed next, grouped as the content type's fields
-(template scope only), the page's values and the site's values.
-
-#### Scenario: Picking a value by keyboard
-
-- **WHEN** an editor types " by {", then "Page t" and Enter
-- **THEN** the field MUST read "… by {Page title} …", and the preview MUST show the page's title in its place
-
-#### Scenario: Images are not text
-
-- **WHEN** the insert menu is opened in a text field
-- **THEN** it MUST NOT offer image values
-
-### Requirement: A chip is one unit
-
-Backspace or Delete next to or inside a chip MUST remove it whole and announce
-"Removed" with its label. The caret MUST step over a chip, and a selection MUST
-NOT end inside one. Pasted text MUST be plain. A single-line field MUST turn
-pasted line breaks into spaces and MUST NOT break a line on Enter.
-
-#### Scenario: Removing a chip
-
-- **WHEN** the caret is after "{Page title}" and the editor presses Backspace
-- **THEN** the whole chip MUST be removed
-
-### Requirement: A chip field says what it becomes
-
-While a chip field has focus and no preview of it is in sight, the field MUST
-show what it resolves to for the page.
-
-#### Scenario: A structured data detail
-
-- **WHEN** an editor focuses a detail bound to "{Byline}" on the Schema tab
-- **THEN** the field MUST show the previewed article's byline
+- **WHEN** an administrator presses "Edit" beside the title of a page whose ending is inherited, by mouse or by keyboard
+- **THEN** the dialog MUST switch to Site, scroll to its title ending and put focus on it
 
 ### Requirement: A page's description is Canvas's own field
 
@@ -422,13 +393,20 @@ the field MUST return to Canvas's value.
 
 Clearing a text field, or leaving only white space in it, MUST remove the
 override. A switch, a select or an image set to the value it would inherit MUST
-store nothing, so it keeps following its source. Text MUST be kept as typed,
-trailing spaces included.
+store nothing, so it keeps following its source. Choosing the site's ending in
+the title ending's menu MUST store nothing. A link MUST be stored even when it
+gives the same value as the default. Text MUST be kept as typed, trailing spaces
+included.
 
 #### Scenario: A switch turned off and on again
 
 - **WHEN** an editor turns "Show in search results" off and on again on a page that inherits it
 - **THEN** the page MUST store no visibility setting
+
+#### Scenario: Linking the default source
+
+- **WHEN** an editor links "Every Article"'s title main part to the Title fact, which is its default
+- **THEN** the template MUST store the link, and the field MUST offer Reset
 
 ### Requirement: Reset and Undo
 
@@ -699,14 +677,14 @@ Ctrl/Cmd+Enter MUST NOT hide the site.
 
 ### Requirement: Content type settings are previewed with a node
 
-At template scope, text fields MUST also offer the content type's fields as
-dynamic values, the social image MAY be bound to one of its image fields, and
-previews, checks and Output MUST use the node the editor previews.
+At template scope, values MAY be linked to the content type's fields
+(value-links), and previews, checks and Output MUST use the node the editor
+previews.
 
 #### Scenario: A title bound to a field
 
-- **WHEN** an editor sets "Every Article"'s title to "{Page title} by {Byline}"
-- **THEN** the preview MUST show the previewed article's title and byline, and the template's draft MUST hold "{title} by {field.field_byline}"
+- **WHEN** an editor links "Every Article"'s title main part to Byline
+- **THEN** the preview MUST show the previewed article's byline followed by the ending, and the template's draft MUST hold the link
 
 ### Requirement: Translations are edited where the editor edits them
 
@@ -727,7 +705,7 @@ say so. Which translation is edited is page-seo.
 
 ### Requirement: Sheets cover the view
 
-Checks, Output, Choose image and Custom JSON-LD MUST open as sheets that cover
+Checks, Output, Choose image and Add your own JSON-LD MUST open as sheets that cover
 the dialog, with "Back" and a title. Only one MUST be open at a time, and the
 view behind it MUST be out of reach. Escape or Back MUST close it and return
 focus to what opened it, else to the scope button.
@@ -806,29 +784,28 @@ stay inside the dialog".
 When a type's Full content template has no node to preview, the dialog MUST
 show the template's values at rest, read-only, with no previews, no Output and
 no Checks, and MUST say "No ‹type› yet. Add one to preview and edit these
-settings.". No dynamic value MUST be marked as empty; a field without a value
-of its own MUST show what it inherits, also to assistive technology; a setting
-MUST show its value in words.
+settings.". No value MUST be marked as empty; a box MUST say "No ‹type› to
+preview", also to assistive technology; a setting MUST show its value in words.
 
 #### Scenario: The Announcement type
 
-- **WHEN** the Announcement template stores the title `{title} {sep} News` and the type has no content
-- **THEN** the Search view MUST show that title with its dynamic values as labels, none of them marked as empty, MUST NOT offer to edit it, and MUST say "No announcement yet. Add one to preview and edit these settings."
+- **WHEN** the Announcement template stores `title_end: {text: 'News'}` and the type has no content
+- **THEN** the Search view MUST show the title's box saying "No announcement to preview" and the ending "News", none of them marked as empty, MUST NOT offer to edit them, and MUST say "No announcement yet. Add one to preview and edit these settings."
 
 #### Scenario: Inherited fields
 
-- **WHEN** the Announcement template stores no description and no social title, and the type has no content
-- **THEN** the description MUST show the Description value as a label, and the social title MUST say "Same as the search title", each also in the field's accessible description
+- **WHEN** the Announcement template stores no description and no social texts, and the type has no content
+- **THEN** the description's box and the social description's box MUST each say "No announcement to preview", also in their accessible descriptions
 
 #### Scenario: Settings at rest
 
 - **WHEN** the Announcement template sets no robots directive and no structured-data type, and the type has no content
-- **THEN** "Show in search results" MUST read "On" and "Text previews" "Allowed", with no switch and no menu, and the Type MUST read "None" without the hint that invites a choice
+- **THEN** "Show in search results" MUST read "On" and "Text previews" "Allowed", with no switch and no menu, and "What this page is" MUST read "A web page" with no sheet to open
 
 #### Scenario: Custom JSON-LD not set
 
 - **WHEN** the Announcement template has no custom JSON-LD and the type has no content
-- **THEN** the Schema view MUST show "Custom JSON-LD" as "Off" and MUST NOT open an empty editor
+- **THEN** the Schema view MUST NOT offer "Add your own JSON-LD" and MUST NOT open an empty editor
 
 #### Scenario: The first announcement is added
 
@@ -840,14 +817,14 @@ MUST show its value in words.
 At template scope, when the previewed node is not published, the captions of
 the search and link previews MUST add "Not published yet", and the
 information of each MUST first say that this node is not published yet and
-that values only editors can see are left out. When the template is not in use
-either, the caption MUST name only the node's state, and the information MUST
-add the template's.
+that its fields are read with the editor's access until visitors can see it.
+When the template is not in use either, the caption MUST name only the node's
+state, and the information MUST add the template's.
 
 #### Scenario: Previewing a draft event
 
 - **WHEN** the template editor previews an event that is not published
-- **THEN** the caption MUST read "Previewing" with the event's name and "Not published yet", and the information MUST start with "This event isn't published yet. Values that only editors can see are left out."
+- **THEN** the caption MUST read "Previewing" with the event's name and "Not published yet", and the information MUST start with "This event isn't published yet. Its fields are read with your access until visitors can see it."
 
 #### Scenario: Previewing a published event
 
@@ -876,11 +853,10 @@ arrives, the sheet MUST show the new rows without the marker.
 
 Every text that shows a value MUST take its direction from its own text: the
 previews' title, description, address and caption, the link preview's texts,
-values at rest and inherited values, and every input for free text (titles,
-descriptions, names, search and filter fields). An empty input that shows an
-inherited value MUST take the direction of that value. Inputs for addresses,
-numbers, dates and code, and the dialog's own words, MUST keep the dialog's
-direction.
+values at rest in boxes and link menus, and every input for free text (titles,
+descriptions, names, search and filter fields). An empty input's placeholder
+MUST take the direction of the inherited value. Inputs for addresses, numbers,
+dates and code, and the dialog's own words, MUST keep the dialog's direction.
 
 #### Scenario: An Arabic description
 
@@ -894,8 +870,13 @@ direction.
 
 #### Scenario: An inherited Arabic value
 
-- **WHEN** a person's social title is not set and inherits an Arabic name
-- **THEN** the empty input MUST show the inherited name right to left, as the link preview does
+- **WHEN** a person's social title is not set and follows its default, an Arabic name
+- **THEN** the default box MUST show the name right to left, as the link preview does
+
+#### Scenario: A linked Arabic value
+
+- **WHEN** "Every Product"'s description is linked to a field and the previewed product's value is Arabic
+- **THEN** the linked box MUST show it right to left
 
 ### Requirement: The frame uses the height of the editor's window
 
@@ -926,86 +907,6 @@ nothing of this MUST remain on the editor's page.
 - **WHEN** the editor's window is 1600 x 1000
 - **THEN** the frame MUST end inside the window and inside the dialog, and MUST NOT be shorter than Canvas makes it
 
-### Requirement: Value menus stay inside the dialog
-
-A menu that lists values with their previews MUST open fully inside the
-dialog, whichever column its field is in. Each entry MUST show its value
-under its label across the menu's width, up to two lines, with the whole
-value available on hover. Once a value is chosen, or the menu is left with
-Escape, the field MUST have focus. A value MUST go in at the caret the editor
-placed, else at the end. To assistive technology the menu MUST be named after
-the field it fills.
-
-#### Scenario: By keyboard alone
-
-- **WHEN** an editor tabs into a title holding "{Page title} {Separator} Tickets", tabs to "Insert value", presses Enter and chooses a value with Enter
-- **THEN** the value MUST follow "Tickets"
-
-#### Scenario: A field in the right-hand column
-
-- **WHEN** an editor opens the insert menu of Street address, beside Venue on "Every Event"'s Schema tab
-- **THEN** the whole menu MUST be inside the dialog
-
-#### Scenario: A double-click on the insert button in a short window
-
-- **WHEN** an editor double-clicks "Insert value" of Street address on "Every Event"'s Schema tab in a window 1440 × 350
-- **THEN** the menu MUST be open with its first entry active under the still pointer, and the second click MUST NOT insert a value, so the field stays empty
-
-#### Scenario: A long value
-
-- **WHEN** the menu lists the previewed event's description
-- **THEN** the description MUST be shown under "Description" on up to two lines, not cut beside the label
-
-#### Scenario: A short window
-
-- **WHEN** the editor's window is 1440 × 350 or 1440 × 420 and an editor types "{" in the description of "Every Event"
-- **THEN** the menu MUST use the frame's height from the column's left edge and be as wide as the column, with nothing of the header beside it, MUST show at least two entries whole and a part of the next one as a cue that the list goes on, MUST NOT show the keyboard hints, and its filter MUST say "Insert into Description", on screen and to assistive technology alike
-
-#### Scenario: The arrows in a short window
-
-- **WHEN** an editor presses the down arrow through the menu in a window 1440 × 350
-- **THEN** the active entry MUST stay clear of the cue that more entries are below
-
-#### Scenario: The filter at every height
-
-- **WHEN** the menu is open in a window 1440 × 900
-- **THEN** its filter MUST say "Insert into ‹label›" for the field it fills, as in a short window, where the menu covers the field
-
-#### Scenario: A window resized across 420 px
-
-- **WHEN** the window goes from 350 to 900 px tall, or from 900 to 350, while the menu is open
-- **THEN** the menu MUST close at once and the field MUST have focus, holding what it held
-
-#### Scenario: At 200 % zoom
-
-- **WHEN** an editor opens the menu in a dialog half its normal width
-- **THEN** the menu MUST NOT show the keyboard hints
-
-#### Scenario: Typing on right after a choice
-
-- **WHEN** an editor types "{Perfo" in the description, presses Enter and at once types " AFTER", in a window 1440 × 900, 1440 × 420 or 1440 × 350
-- **THEN** the description MUST have focus with its caret after the value and read "{Performers} AFTER"
-
-#### Scenario: Typing on right after Escape
-
-- **WHEN** an editor types "{" in an empty description, presses Escape and at once types "x"
-- **THEN** the description MUST read "x"
-
-#### Scenario: Escape from the insert button of a field never focused
-
-- **WHEN** an editor clicks "Insert value" of a title holding "{Page title} {Separator} Tickets" that never had focus, presses Escape and types "x"
-- **THEN** the caret MUST be at the end, as for a value inserted in a field whose caret was never placed (reached by Tab, or never focused), and the title MUST read "{Page title} {Separator} Ticketsx"
-
-#### Scenario: A group whose label has a space
-
-- **WHEN** the menu is opened on "Every Job posting"
-- **THEN** each group MUST be named by its label to assistive technology, the type's group "Job posting"
-
-#### Scenario: A very long value
-
-- **WHEN** the menu lists a description of 6,000 characters
-- **THEN** that entry's accessible name MUST be at most its label and 150 characters of the value with an ellipsis, and its hover text MUST hold the whole value
-
 ### Requirement: Information buttons open on click
 
 An information button (ⓘ) MUST show its sentence on hover and on keyboard
@@ -1030,3 +931,473 @@ assistive technology.
 
 - **WHEN** an editor tabs to "About checks"
 - **THEN** its sentence MUST be shown, and Escape MUST hide it
+
+### Requirement: The title is edited as a main part and an ending
+
+The Title field MUST be one control in two parts: the main part, and a button
+named "Title ending: ‹value›", described "Added after the separator ‹sep›."
+("The title ends with its main part." for "No ending"), that shows the
+separator and the ending and opens the ending's menu (value-links). The main
+part MUST be a text input on a page (with Suggest when suggestions are
+offered) and a value that can be linked on a template. Reset MUST remove both
+parts.
+
+#### Scenario: A page's title
+
+- **WHEN** an editor opens the Search tab of a page on the site "Example" with the installed defaults
+- **THEN** the Title field MUST be one textbox named "Title" and one button named "Title ending: Example"
+
+### Requirement: Reset of the title says what it clears
+
+When only the ending of a title is set, the field MUST say so ("Ending set for
+every ‹Type›", "Ending set on this page") and its Reset MUST say that it goes
+back to the site ending. After any Reset, the field MUST say where the value
+now comes from beside Undo.
+
+#### Scenario: Resetting a title
+
+- **WHEN** a page sets both its main part and the ending "Docs", and the editor presses Reset beside Title
+- **THEN** both parts MUST be removed, and the field MUST say "Reset ·" and where the title now comes from, with Undo
+
+#### Scenario: Only the ending is set
+
+- **WHEN** "Every Event" sets the ending "Tickets" and no main part
+- **THEN** the Title field MUST say "Ending set for every Event", and its Reset MUST be named "Reset title ending" and say "Back to the site ending"
+
+### Requirement: Site sets only the title ending
+
+Site MUST set the title's ending only, as a field "Title ending" as wide as the
+other controls, with no control for the main part, and an example line of a
+whole title under it.
+
+#### Scenario: The site's title
+
+- **WHEN** an administrator opens Site
+- **THEN** a field "Title ending" MUST show the ending as wide as the other controls, with no "Page title" control, the separator under it, and an example line such as "For About us: About us | Example"
+
+### Requirement: Undo stays with what it would change
+
+The action bar's Undo of a change to the target MUST go when the target is
+published, or when another item is previewed: it would change what is now
+live, or what was done for another preview.
+
+#### Scenario: Publishing after linking
+
+- **WHEN** an editor links "Every Article"'s description to Byline and publishes the template
+- **THEN** the bar MUST NOT offer Undo for the link
+
+### Requirement: Link menus stay inside the dialog
+
+A menu that lists values with their previews (a link menu, the title ending's
+menu) MUST open fully inside the dialog, whichever column its field is in, and
+keep its side while open. Each entry MUST show its value under its label
+across the menu's width, up to two lines, with the whole value available on
+hover. Once a value is chosen, or the menu is left with Escape, the field MUST
+have focus. To assistive technology the menu MUST be named after the field it
+fills.
+
+#### Scenario: By keyboard alone
+
+- **WHEN** an editor tabs to the description's box of "Every Event", presses Alt+Down and then Enter on an entry
+- **THEN** the description MUST be linked to that entry and its box MUST have focus
+
+#### Scenario: A field in the right-hand column
+
+- **WHEN** an editor opens the link menu of Street address, beside Venue on "Every Event"'s Schema tab
+- **THEN** the whole menu MUST be inside the dialog
+
+#### Scenario: A double-click on the box in a short window
+
+- **WHEN** an editor double-clicks the box of Street address on "Every Event"'s Schema tab in a window 1440 × 350, the menu opening over the box
+- **THEN** the menu MUST be open with its current entry active, and the second press MUST link nothing, wherever it lands
+
+#### Scenario: A long value
+
+- **WHEN** the menu lists the previewed event's description
+- **THEN** the description MUST be shown under "Description" on up to two lines, not cut beside the label
+
+#### Scenario: A short window
+
+- **WHEN** the editor's window is 1440 × 350 or 1440 × 420 and an editor presses Alt+Down on the description's box of "Every Event"
+- **THEN** the menu MUST use the frame's height from the column's left edge and be as wide as the column, with nothing of the header beside it, MUST show at least two entries whole and a part of the next one as a cue that the list goes on, MUST NOT show the keyboard hints, and its filter MUST say "Find a field", on screen and to assistive technology alike
+
+#### Scenario: The arrows in a short window
+
+- **WHEN** an editor presses the down arrow through the menu in a window 1440 × 350
+- **THEN** the active entry MUST stay clear of the cue that more entries are below
+
+#### Scenario: The filter at every height
+
+- **WHEN** the menu is open in a window 1440 × 900
+- **THEN** its filter MUST say "Find a field", as in a short window, and typing in it MUST NOT move it
+
+#### Scenario: A window resized across 420 px
+
+- **WHEN** the window goes from 350 to 900 px tall, or from 900 to 350, while the menu is open
+- **THEN** the menu MUST close at once and the field MUST have focus, holding what it held
+
+#### Scenario: At 200 % zoom
+
+- **WHEN** an editor opens the menu in a dialog half its normal width
+- **THEN** the menu MUST NOT show the keyboard hints
+
+#### Scenario: A key right after a choice
+
+- **WHEN** an editor presses Alt+Down on the description's box, types "Perfo", presses Enter and at once Backspace, in a window 1440 × 900, 1440 × 420 or 1440 × 350
+- **THEN** the description MUST have been linked to the performer's name, Performers › Title, and Backspace MUST have unlinked it, leaving an empty description with focus
+
+#### Scenario: Typing on right after Escape
+
+- **WHEN** an editor types "{" in the description's empty input (after unlinking), presses Escape and at once types "x"
+- **THEN** the description MUST read "x"
+
+#### Scenario: Escape from a box
+
+- **WHEN** an editor opens the menu from the title's box, presses Escape and at once Alt+Down
+- **THEN** the box MUST have focus at once, and the menu MUST open again
+
+#### Scenario: A group whose label has a space
+
+- **WHEN** the menu is opened on "Every Job posting"
+- **THEN** each group MUST be named by its label to assistive technology, the type's group "Job posting"
+
+#### Scenario: A very long value
+
+- **WHEN** the menu lists a description of 6,000 characters
+- **THEN** that entry's accessible name MUST be at most its label and 150 characters of the value with an ellipsis, and its hover text MUST hold the whole value
+
+### Requirement: A link menu has room for its entries
+
+A menu MUST never move its filter while it is open: below its field it MUST
+grow with what it lists, up to the room there; above its field, or opened by
+a key, it MUST keep the height it opened with. It MUST list at least three
+entries, or all of them, when the frame has room, and MUST end above the
+action bar while the bar shows, in a short frame too. Its keyboard hints MUST
+show in every menu, except in a frame up to 420 px tall and at 200 % zoom.
+
+#### Scenario: A menu above its field
+
+- **WHEN** an editor opens the link menu of Status, low on "Every Event"'s Schema tab in a window 1440 × 900 or 1440 × 600
+- **THEN** the menu MUST show every entry that fits and the row of those that do not, whole
+
+#### Scenario: Opening again after Escape
+
+- **WHEN** an editor presses Enter on a box, Escape, Enter again, then Down and a letter
+- **THEN** the menu's filter MUST have focus and hold the letter, and the box MUST keep its value
+
+### Requirement: A link menu opens on the side with room
+
+A menu MUST open below its field when three entries fit there, else on the
+side with more room, and MUST stay inside the frame at its left and right
+edges. Moving the pointer onto an entry MUST NOT scroll the list.
+
+#### Scenario: A description in the middle of the frame
+
+- **WHEN** an editor opens the link menu of "Every Event"'s description in a window 1440 × 900, with less room below the field than three entries need and more above
+- **THEN** the menu MUST open above the field and list at least three entries whole
+
+#### Scenario: The pointer on the last rows
+
+- **WHEN** the title's link menu is scrolled to its end and the pointer moves onto its last row
+- **THEN** the list MUST NOT scroll, and a click MUST link the row under the pointer
+
+### Requirement: The Schema view opens on what search engines read
+
+The Schema view MUST open with a stage captioned "Understood as" holding one
+to three plain sentences built only from the structured data the target
+ships, then one line per search feature, then one line saying whether the
+facts match the page. schema.org type and property names MUST NOT appear in
+the view outside Output.
+
+#### Scenario: A product page
+
+- **WHEN** a page is a product named "Oak desk lamp" at 89 EUR, in stock, bought on this page
+- **THEN** the stage MUST read "Oak desk lamp, a product sold by Humanify Studio for €89, in stock."
+
+#### Scenario: A clause with nothing behind it
+
+- **WHEN** the product's "Bought on this page" is unset
+- **THEN** the sentence MUST NOT say "sold by", because the graph has no seller
+
+#### Scenario: A monthly price stored without its billing
+
+- **WHEN** a product's price is 2500 and no billing is set
+- **THEN** the sentence MUST say "for €2,500" with no period
+
+### Requirement: Each fact in the sentence leads to where it is set
+
+Each fact in the read-back MUST be a button named "‹Label›, ‹value›, ‹where
+it is set›" ("Price, €89, set on this page", "Seller, Humanify Studio, from
+Site"). Pressing it MUST focus its field, or go to Search, Social or Site
+when the value is set there. The facts MUST be one group: Tab enters it,
+the arrow keys move inside it, Tab leaves it.
+
+#### Scenario: The seller
+
+- **WHEN** an editor presses "Humanify Studio" in a product's sentence
+- **THEN** the dialog MUST switch to Site with the identity name field in view
+
+#### Scenario: Keyboard
+
+- **WHEN** focus is on the first fact and the editor presses the right arrow
+- **THEN** focus MUST move to the next fact, and Tab MUST move to the first feature line
+
+### Requirement: A required fact from a default opens its own field
+
+When a fact that a feature of the kind requires comes from a default, pressing
+it MUST open that fact's own field in place, out of More details, and focus
+it. While its value follows the page title, the field MUST say "Now the page
+title" with a secondary "Edit in Search".
+
+#### Scenario: A page title as an event name
+
+- **WHEN** an event's name follows the page title and the editor presses it in the sentence
+- **THEN** focus MUST land on the Schema view's Name field, which says "Now the page title" with "Edit in Search"
+
+### Requirement: A product named after its page is said
+
+On a page, a product or service name equal to the page title MUST carry the
+hint "The name is the page title. Give the product its own name.", with
+"Edit in Search" while it follows the title. At template scope a name that
+follows each item's own title MUST NOT carry it.
+
+#### Scenario: A page title as a product name
+
+- **WHEN** a product's name follows the page title "Shop our lamps" and the editor presses it in the sentence
+- **THEN** focus MUST land on the Schema view's Name field, not on Search's title, and the field MUST show the hint and "Edit in Search"
+
+#### Scenario: Every Product
+
+- **WHEN** "Every Product" names each product after its own title
+- **THEN** no hint and no Checks row MUST ask for another name
+
+### Requirement: One line per search feature
+
+Under the sentence, captioned "In search results", the stage MUST show one
+line per verdict (search-features), at most four, ordered: needs, only if
+people buy it here, can show, complete, doesn't fit, not shown here, retired,
+no search feature. Each feature's line MUST be a button named after the
+feature and its verdict, and MAY carry a separate fix button for the first
+missing fact; "No search feature" is plain text. A verdict that changes, in
+its words, MUST be announced once.
+
+#### Scenario: A profile
+
+- **WHEN** a page is a person's profile and its profile verdict is given on the page node
+- **THEN** the stage MUST show that one line, and no "No search feature" beside it
+
+#### Scenario: The line's name
+
+- **WHEN** the merchant listing does not fit a monthly price
+- **THEN** its line MUST be named "Merchant listing doesn't fit: a recurring price"
+
+#### Scenario: Needs an image
+
+- **WHEN** a product bought here has no image
+- **THEN** the stage MUST show "Merchant listing" with "Needs an image" and a "Choose" button that opens the image chooser with the page's own images first
+
+#### Scenario: A fix button's name
+
+- **WHEN** the event result needs a city
+- **THEN** its fix button MUST be named "Add City", after the fact it sets
+
+#### Scenario: The fix applies nothing by itself
+
+- **WHEN** the page shows an image and the product has none
+- **THEN** no button MUST set that image as the product image in one click
+
+#### Scenario: The change is announced
+
+- **WHEN** the editor chooses an image and the verdict becomes "Can show"
+- **THEN** the status region MUST say "Merchant listing can show" once
+
+### Requirement: A verdict opens its proof
+
+Pressing a feature line MUST open a proof named after the feature: where the
+feature appears in one plain sentence, each required fact with its value or
+a button to set it, at most four facts that also help each with its own
+"Add", at most two guidelines no machine checks, and the rules' review date
+with a link to the feature's documentation.
+
+#### Scenario: Merchant listing needs an image
+
+- **WHEN** the editor opens the merchant listing proof of a product without an image
+- **THEN** it MUST list Name, Price and Bought on this page with their values as their fields show them, and Image as "Not set" with "Choose", and say "Your product in shopping results, with its price and stock."
+
+#### Scenario: Focus on open
+
+- **WHEN** the editor opens a proof by keyboard
+- **THEN** focus MUST land on the proof's title, not on one of its actions, and every action in it MUST show the dialog's focus ring
+
+#### Scenario: A withheld event
+
+- **WHEN** an event with a start date, a city and a country but no street address is withheld and the editor opens its proof
+- **THEN** the proof MUST show the start date, and "Not set" only for the street address
+
+#### Scenario: Doesn't fit
+
+- **WHEN** the editor opens the merchant listing proof of a monthly membership
+- **THEN** it MUST say that shopping listings are for things people buy and own, and suggest Plans for a service
+
+### Requirement: What this page is
+
+The first field MUST be "What this page is", reading the kind in plain words
+("A product people buy", "Plans for a service", "An article", "An event people
+attend in person", "A person's profile", "A web page"). It MUST open a sheet
+listing each kind with what it is for and what it can earn. Retired features
+MUST NOT be kinds.
+
+#### Scenario: The kinds sheet
+
+- **WHEN** an editor opens "What this page is"
+- **THEN** a radio group "What is this page?" MUST list the six kinds, and under "A product people buy" say it is not for services, memberships or subscriptions
+
+#### Scenario: A blog post
+
+- **WHEN** the stored type is Blog post
+- **THEN** the kind MUST read "An article" with "Kind of article: Blog post" under it, and the "Kind of article" choice MUST be in More details
+
+### Requirement: The kind always reads what search engines get
+
+"A web page" MUST be a kind the editor can choose. The field and the kinds
+sheet MUST always show the kind that is output, marked "Default" when it is
+inherited, never an empty or "Choose" state, read-only included. Choosing
+the inherited kind MUST show it as chosen.
+
+#### Scenario: A new page
+
+- **WHEN** an editor opens Schema on a page with no stored type
+- **THEN** the field MUST read "A web page" and the kinds sheet MUST have "A web page" selected and marked "Default"
+
+#### Scenario: Back to a web page
+
+- **WHEN** an editor changes an article to "A web page"
+- **THEN** the field MUST read "A web page", the output graph MUST have no main node, and after the draft is saved and the dialog reopened the field MUST still read "A web page"
+
+#### Scenario: A translation of an article
+
+- **WHEN** a translation's default-language version is an article and the editor chooses "A web page"
+- **THEN** the translation MUST store `WebPage` and its output MUST be a web page while the default-language version stays an article
+
+### Requirement: Changing the kind names what is removed
+
+When choosing another kind would remove values set here, the dialog MUST
+say which values, with their values, and that Undo brings them back, and
+change the kind only when the editor confirms. The confirm MUST stay in
+sight at the foot of the kinds sheet however far it is scrolled, and MUST
+NOT cover the list; in a frame too short to hold both, it follows the list.
+While it waits, its buttons MUST be the next stops after the list. Until
+then the field MUST show the current kind.
+
+#### Scenario: A product becomes an event
+
+- **WHEN** a product with a typed price of 120 EUR is changed to an event
+- **THEN** the dialog MUST say "Changing to an event removes the price (€120) you set. Undo brings it back." with "Change to an event" and "Keep a product"
+
+#### Scenario: An event becomes an article
+
+- **WHEN** an event with a start on 12 May 2027 at 18:00, an end and a venue is changed to an article
+- **THEN** the removed values MUST be named in the form's order, each as its field shows it: "the start (12 May 2027, 18:00), the end (…) and the venue (…)", followed by "Undo brings them back."
+
+### Requirement: Facts follow what the features need
+
+After the kind, the view MUST show at most four facts the kind lists first,
+which MUST include those its features require that nothing fills by default
+and those that decide whether a feature fits. The rest MUST be behind one
+"More details" disclosure, open when one of them holds a value of its own or
+a problem. A required fact that resolves empty MUST show its guidance at
+rest, and a field MUST show the Checks about itself.
+
+#### Scenario: A product
+
+- **WHEN** a page is a product
+- **THEN** Price, Currency, Bought on this page and Image MUST come before More details
+
+#### Scenario: Guidance at rest
+
+- **WHEN** a product bought here has no image
+- **THEN** the Image field MUST say "Needed for merchant listings" without being focused
+
+### Requirement: A membership is offered its honest kind
+
+When a product's price is billed every month or year, the kind field MUST say
+"Memberships and subscriptions are services." with "Change to plans for a
+service", which changes the kind and keeps the name, price, currency and
+billing.
+
+#### Scenario: Today's pricing page
+
+- **WHEN** a product named "Studio membership" is billed every month and the editor presses "Change to plans for a service"
+- **THEN** the kind MUST be Plans for a service with the same name, price and billing, and the stage MUST read "No search feature"
+
+### Requirement: The stage says whether the facts are on the page
+
+The stage MUST end with one line: the facts set here match the page,
+nothing is set here to compare, the most serious fact not found on the page
+with its fix and "Show" in its Checks tone, or no preview to check against.
+Hand-added text to fix MUST mark "Added by hand" in the to-fix colour. It
+MUST compare text, prices with their currency and period, dates, images and
+ratings, never codes or identifiers.
+
+#### Scenario: A price shown per month
+
+- **WHEN** the page shows "€2,500 / month" and the product's price is 2500 with no billing
+- **THEN** the line MUST say "Couldn't find €2,500 as a one-time price on this page: it says €2,500 a month."
+
+#### Scenario: The same amount in another currency
+
+- **WHEN** the page shows "$2,500" and the product's price is 2500 EUR
+- **THEN** the line MUST say "Couldn't find €2,500 on this page: it says $2,500." and lead to Currency
+
+#### Scenario: Nothing set here
+
+- **WHEN** a page sets no structured data facts and no JSON-LD of its own
+- **THEN** there MUST be no match line, since nothing of the editor's is there to compare
+
+#### Scenario: A number that is not a price
+
+- **WHEN** the page says "2,500 customers" and nowhere shows a price of 2500
+- **THEN** the price MUST count as not found
+
+### Requirement: Your own JSON-LD lives behind Code
+
+The stage MUST have a "Code" button that opens Output. Custom JSON-LD MUST be
+edited in a sheet titled "Add your own JSON-LD", opened from Output or from
+the sentence's "Added by hand" part, and MUST NOT have a row in the Schema
+view. Its items MUST read back as "Added by hand: ‹items›.", each by its name,
+its feature or a plain word ("a review"), and get verdicts, also in the
+sheet's list of items. Closing the sheet MUST return focus to what opened the
+first sheet.
+
+#### Scenario: Pages that had custom JSON-LD
+
+- **WHEN** a page with custom JSON-LD is opened for the first time in this browser, in the first release with this change
+- **THEN** a notice MUST say "Custom JSON-LD moved to Code › Add your own JSON-LD" with a button that opens that sheet, and MUST NOT be shown again when the page is opened again
+
+#### Scenario: Inline checks
+
+- **WHEN** the sheet holds an `Organization` named like the site's identity
+- **THEN** it MUST say "This is your site's organization. Point to it with “@id”: “‹home›#identity” instead.", with the site's home address in place of ‹home›
+
+### Requirement: An unknown stored kind is said
+
+When the stored type is not in the registry, the view MUST show the notice
+"This page was described as “‹type›”, which this site no longer knows. Search
+engines get a plain web page." with "Choose what it is", and the kind field
+MUST read "Not known: “‹type›”".
+
+#### Scenario: A removed type
+
+- **WHEN** a page's stored type is `Recipe`
+- **THEN** the notice MUST be shown and Checks MUST list one issue to improve
+
+### Requirement: A sentence without a translation is a list
+
+When the dialog's language has no translation for a kind's sentence, the stage
+MUST show the facts as a list of label and value instead of a sentence.
+Prices and dates MUST be formatted in the dialog's language.
+
+#### Scenario: An untranslated sentence
+
+- **WHEN** the dialog is in Finnish and the product sentence has no Finnish translation
+- **THEN** the stage MUST list "Nimi · Oak desk lamp" style rows and no English sentence

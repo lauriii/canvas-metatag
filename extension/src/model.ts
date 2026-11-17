@@ -1,9 +1,18 @@
 // Pure logic: no DOM, no network, no host. Everything here runs in vitest's
-// node environment. cascade(), fill(), plain() and texts() mirror the PHP
-// class Values and are pinned to it by tests/fixtures/text-cases.json.
-import rawRegistry from '../../data/schema-types.json';
+// node environment. cascade(), plain() and texts() mirror the PHP class
+// Values and are pinned to it by tests/fixtures/text-cases.json.
+import currencyCodes from '../../data/currencies.json';
 import { ApiError } from './api';
 import type { EditorToken, HostContext } from './host';
+import { dateWords } from './readback';
+import {
+  type Lookup,
+  type ShownImage,
+  rowOf,
+  resolve,
+  sameValue,
+  textOf,
+} from './values';
 import type {
   Action,
   AiOffReason,
@@ -12,8 +21,11 @@ import type {
   Measurer,
   Pending,
   Registry,
+  Resolved,
+  SchemaProp,
   Scope,
   SchemaType,
+  SearchFeatures,
   SeoValues,
   SiteSettings,
   Source,
@@ -21,23 +33,238 @@ import type {
   StatePayload,
   Tab,
   Texts,
-  TokenInfo,
+  Value,
+  Verdict,
 } from './types';
+
+export type { ShownImage } from './values';
 
 type Obj = Record<string, unknown>;
 
 const isObj = (value: unknown): value is Obj =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const RAW = rawRegistry as unknown as Record<string, SchemaType>;
+/** Whether a map is one value: typed text, a fact, a media item or a link. */
+const isValue = (value: Obj) => {
+  const keys = Object.keys(value);
+  return keys.length === 1 && ['text', 'fact', 'media', 'source'].includes(keys[0]);
+};
 
-/** The JSON-LD type registry with `extends` resolved (one level). */
-export const REGISTRY: Registry = Object.fromEntries(
-  Object.entries(RAW).map(([id, type]) => [
+// The type registry and the search features come with the state, in the
+// dialog's language (ApiController::state()).
+
+/** A registry type, or the web page for one the registry does not have. */
+export const typeOf = (registry: Registry, id: string | undefined): SchemaType =>
+  (id !== undefined && registry[id]) || registry.WebPage;
+
+/** The type whose kind a type is: itself, or the one it is a variant of. */
+export const kindOfType = (registry: Registry, id: string | undefined): string => {
+  const type = id !== undefined && registry[id] ? id : 'WebPage';
+  return registry[type].variant_of ?? type;
+};
+
+/** "Euro · EUR", in the dialog's language: a symbol can stand for several. */
+export function currencyName(code: string, locale: string): string {
+  try {
+    const name = new Intl.DisplayNames([locale], { type: 'currency' }).of(code) ?? code;
+    return name === code ? code : `${name.charAt(0).toUpperCase()}${name.slice(1)} · ${code}`;
+  } catch {
+    return code;
+  }
+}
+
+const currencyLists = new Map<string, (readonly [string, string])[]>();
+
+/** Every currency a price may be in, by its name in the dialog's language. */
+export function currencyOptions(locale: string): (readonly [string, string])[] {
+  let list = currencyLists.get(locale);
+  if (!list) {
+    list = (currencyCodes as string[])
+      .map((code) => [code, currencyName(code, locale)] as const)
+      .sort((a, b) => a[1].localeCompare(b[1], locale));
+    currencyLists.set(locale, list);
+  }
+  return list;
+}
+
+/**
+ * The currencies to choose from: those in use here, then the most common,
+ * then every other by name.
+ */
+export function currencyChoices(locale: string, inUse: (string | undefined)[]) {
+  const all = currencyOptions(locale);
+  const first = [...new Set([...inUse, 'EUR', 'USD', 'GBP'])];
+  const common = first.flatMap((code) => all.filter(([one]) => one === code));
+  return { common, rest: all.filter((one) => !common.includes(one)) };
+}
+
+/** The kinds, in their order. */
+export const kinds = (registry: Registry): string[] =>
+  Object.keys(registry)
+    .filter((id) => registry[id].kind)
+    .sort((a, b) => registry[a].kind!.order - registry[b].kind!.order);
+
+/** "Merchant listing", or the feature id when the rules have none. */
+export const featureLabel = (rules: SearchFeatures, feature: string | null) =>
+  feature === null ? '' : (rules.features[feature]?.label ?? feature);
+
+/**
+ * The stage's feature lines: the server's verdicts in their order, then,
+ * when the main node has no feature of its own, "No search feature" last.
+ * A verdict on the page node (a profile's) is the main node's. At most four.
+ */
+export function stageVerdicts(report: Resolved['schema'] | undefined, main: string, page: string): Verdict[] {
+  const features = report?.features ?? [];
+  const none =
+    !!report?.nodes.some((node) => node.origin === 'main') &&
+    !features.some((one) => one.node === main || one.node === page) &&
+    features[0]?.verdict !== 'none';
+  return [...features, ...(none ? [{ feature: null, node: main, verdict: 'none' as const }] : [])].slice(0, 4);
+}
+
+/** "In stock" for the option "InStock": its words, capitalized. */
+export const optionText = (prop: SchemaProp, option: string) => {
+  const words = prop.option_labels?.[option] ?? option;
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+/** The details a change of kind removes, said with their values. */
+export function removed(server: StatePayload, values: SeoValues, to: string, locale: string): string[] {
+  const registry = server.registry;
+  const from = typeOf(registry, values.schema?.type ?? String(inherited(server, 'target', 'schema.type')));
+  const next = typeOf(registry, to).props ?? [];
+  const props = values.schema?.props ?? {};
+  // In the order the form shows them: the facts shown first, then the rest.
+  const order = [...(from.main ?? []), ...(from.props ?? []).map((prop) => prop.key)];
+  const at = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
+  const gone = Object.keys(props)
+    .filter((key) => !next.some((prop) => prop.key === key))
+    .sort((a, b) => at(a) - at(b));
+  return gone
+    .filter((key) => !(key === 'offers_priceCurrency' && gone.includes('offers_price')))
+    .map((key) => {
+      const prop = from.props?.find((one) => one.key === key);
+      const value = props[key];
+      // A question is named by what it asks; a detail by its name.
+      const label = NOUNS[key] ?? `the ${(prop?.label ?? key).toLowerCase()}`;
+      if (!value || !('text' in value)) {
+        return label;
+      }
+      const currency = props.offers_priceCurrency;
+      const shown =
+        // A draft that is not a number yet is said as typed.
+        key === 'offers_price' && currency && 'text' in currency && value.text.trim() !== '' && Number.isFinite(Number(value.text))
+          ? new Intl.NumberFormat(locale, { style: 'currency', currency: currency.text, minimumFractionDigits: 0 }).format(Number(value.text))
+          : prop?.kind === 'enum'
+            ? (prop.option_labels?.[value.text] ?? value.text)
+            : prop?.kind === 'date'
+              ? (dateWords(value.text, locale) ?? value.text)
+              : value.text;
+      return `${label} (${shown})`;
+    });
+}
+
+/**
+ * "a, b and c". The copy is English, so the list is too, in the dialog's
+ * date style: no comma before "and".
+ */
+export const andList = (items: string[]) => new Intl.ListFormat('en-GB', { type: 'conjunction' }).format(items);
+
+/** The kinds sheet's confirm: what a change of kind removes (removed()). */
+export const changeKindText = (name: string, lost: string[]) =>
+  lost.length
+    ? `Changing to ${name} removes ${andList(lost)} you set. Undo brings ${lost.length === 1 ? 'it' : 'them'} back.`
+    : `Change this page to ${name}.`;
+
+/** The AI tray's confirm, for a proposed kind that removes details. */
+export const proposalLossText = (lost: string[]) => `Using this removes ${andList(lost)} you set.`;
+
+/** Details whose label is not a noun, as a sentence names them. */
+const NOUNS: Record<string, string> = {
+  billing: 'the billing',
+  startDate: 'the start',
+  endDate: 'the end',
+  datePublished: 'the publication date',
+  dateModified: 'the update date',
+  sold_here: 'the answer to “Bought on this page”',
+};
+
+/** The values with another kind: the details the new one has are kept. */
+export function withKind(server: StatePayload, values: SeoValues, to: string): SeoValues {
+  const next = typeOf(server.registry, to).props ?? [];
+  const schema = values.schema ?? {};
+  return {
+    ...values,
+    schema: {
+      ...schema,
+      type: to,
+      props: Object.fromEntries(Object.entries(schema.props ?? {}).filter(([key]) => next.some((prop) => prop.key === key))),
+    },
+  };
+}
+
+/**
+ * Leaves out a hand-added item until it is on the page.
+ *
+ * The report's entry names the item: by its `@id` (`base` is the page's own
+ * address, which a "#local" id is relative to), or, without one, by its
+ * place and type. NULL when the JSON-LD no longer holds it, as after an
+ * unsent edit. An item without an `@id` is given one first (`#‹type›`,
+ * unique on the page), so that it can be listed: `given` names it.
+ */
+export function leaveOut(
+  values: SeoValues,
+  entry: { item?: number; id: string | null; type: string },
+  base: string,
+): { values: SeoValues; id: string; given: boolean } | null {
+  let data: unknown;
+  try {
+    data = JSON.parse(values.schema?.custom ?? '');
+  } catch {
+    return null;
+  }
+  const list = Array.isArray(data) ? [...data] : [data];
+  const written = (one: unknown) =>
+    isObj(one) && typeof one['@id'] === 'string' ? (one['@id'].startsWith('#') ? base + one['@id'] : one['@id']) : null;
+  const item =
+    entry.id !== null
+      ? list.findIndex((one) => written(one) === entry.id)
+      : isObj(list[entry.item ?? -1]) && written(list[entry.item!]) === null && (list[entry.item!] as Record<string, unknown>)['@type'] === entry.type
+        ? entry.item!
+        : -1;
+  const node = list[item];
+  if (!isObj(node)) {
+    return null;
+  }
+  let id = typeof node['@id'] === 'string' ? node['@id'] : '';
+  const given = id === '';
+  if (given) {
+    const base = `#${String(node['@type'] ?? 'item').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
+    const taken = new Set(list.map((one) => (isObj(one) ? one['@id'] : null)));
+    // Never one of the site's own ids, never one another item has.
+    const reserved = ['#identity', '#logo', '#website', '#webpage', '#primaryimage', '#primary'];
+    id = base;
+    for (let n = 2; taken.has(id) || reserved.includes(id); n++) {
+      id = `${base}-${n}`;
+    }
+    list[item] = { '@id': id, ...node };
+  }
+  const schema = values.schema ?? {};
+  return {
+    values: {
+      ...values,
+      schema: {
+        ...schema,
+        custom: given
+          ? JSON.stringify(Array.isArray(data) ? list : list[0])
+          : schema.custom,
+        skip: [...new Set([...(schema.skip ?? []), id])],
+      },
+    },
     id,
-    { ...(type.extends ? RAW[type.extends] : {}), ...type },
-  ]),
-);
+    given,
+  };
+}
 
 // Paths and canonical form.
 
@@ -69,14 +296,18 @@ export function setPath<T>(values: T, path: string, value: unknown): T {
   return copy as T;
 }
 
-function pruned(value: unknown): unknown {
+function pruned(value: unknown, key?: string): unknown {
+  // "No ending" is the one empty value that is stored.
+  if (key === 'title_end' && isObj(value) && value.text === '' && Object.keys(value).length === 1) {
+    return value;
+  }
   if (Array.isArray(value)) {
-    const list = value.map(pruned).filter((item) => item !== undefined);
+    const list = value.map((item) => pruned(item)).filter((item) => item !== undefined);
     return list.length ? list : undefined;
   }
   if (isObj(value)) {
     const entries = Object.entries(value)
-      .map(([key, item]) => [key, pruned(item)] as const)
+      .map(([name, item]) => [name, pruned(item, name)] as const)
       .filter(([, item]) => item !== undefined);
     return entries.length ? Object.fromEntries(entries) : undefined;
   }
@@ -86,7 +317,7 @@ function pruned(value: unknown): unknown {
   return value ?? undefined;
 }
 
-/** Drops empty maps, empty lists and strings that are empty or only whitespace. */
+/** Drops empty maps, empty lists and strings that are empty or only whitespace; keeps "No ending". */
 export const prune = <T>(values: T): T => (pruned(values) ?? {}) as T;
 
 const sorted = (value: unknown): unknown =>
@@ -119,13 +350,13 @@ export function merge<T>(base: T, over: T): T {
 }
 
 /**
- * The effective values. The site layer supplies the title pattern and robots
+ * The effective values. The site layer supplies the title ending and robots
  * directives only; everything else comes from the target.
  */
 export function cascade(target: SeoValues, site: SeoValues): SeoValues {
   const out: SeoValues = { ...target };
-  if (out.title === undefined && site.title !== undefined) {
-    out.title = site.title;
+  if (out.title_end === undefined && site.title_end !== undefined) {
+    out.title_end = site.title_end;
   }
   const robots = { ...site.robots, ...target.robots };
   if (Object.keys(robots).length) {
@@ -145,31 +376,14 @@ export function source(
   if (getPath(layers.from_default, path) !== undefined) {
     return 'default';
   }
-  // A directive follows Site › Defaults whether or not the site stores it:
-  // the switch there is what changes it.
-  return path.startsWith('robots.') ||
-    (path === 'title' && getPath(layers.site, path) !== undefined)
+  // A directive and the title ending follow Site whether or not the site
+  // stores them: the control there is what changes them.
+  return path.startsWith('robots.') || path === 'title_end'
     ? 'site'
     : 'fallback';
 }
 
 // Text outputs.
-
-const TOKEN = /\{([a-z][a-z0-9_]*(?:\.[a-z0-9_]+)?)\}/g;
-
-/** The token names a template uses, in order, without repeats. */
-export const tokensIn = (template: string): string[] => [
-  ...new Set(Array.from(template.matchAll(TOKEN), (match) => match[1])),
-];
-
-/**
- * One pass: a known name becomes its value, an unknown one the empty string.
- * A substituted value is never scanned again.
- */
-export const fill = (template: string, values: Record<string, string>) =>
-  template.replace(TOKEN, (_, name: string) =>
-    Object.hasOwn(values, name) ? String(values[name]) : '',
-  );
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
 
@@ -252,104 +466,54 @@ function cut(text: string, max: number): string {
     : short;
 }
 
-/** A separator is only ever a whole word equal to the {sep} value. */
-export function trimSeparators(text: string, sep: string): string {
-  if (sep === '') {
-    return text;
-  }
-  const kept: string[] = [];
-  for (const word of text.split(' ')) {
-    // Leading, or directly after a kept separator.
-    if (word === sep && (kept.length === 0 || kept.at(-1) === sep)) {
-      continue;
-    }
-    kept.push(word);
-  }
-  while (kept.at(-1) === sep) {
-    kept.pop();
-  }
-  return kept.join(' ');
-}
-
-/** The four text outputs. `tokens` is the flat map name => value. */
+/**
+ * The four text outputs, and the two parts of the title. As Values::texts():
+ * a value that is not set, or gives nothing for the item, gives its default.
+ * `text` gives what a value gives for the item, '' for none.
+ */
 export function texts(
   effective: SeoValues,
-  tokens: Record<string, string>,
+  text: (value: Value) => string,
+  separator: string,
+  siteEnd?: Value,
 ): Texts {
-  const value = (name: string) => tokens[name] ?? '';
-  const title =
-    trimSeparators(cut(fill(effective.title ?? '', tokens), 255), value('sep')) ||
-    cut(value('title'), 255) ||
-    cut(value('site'), 255);
-  const description =
-    cut(fill(effective.description ?? '', tokens), 1000) ||
-    cut(value('description'), 1000);
+  const value = (own: Value | undefined, fallback: Value | null, max: number) => {
+    const out = own ? cut(text(own), max) : '';
+    return out !== '' || !fallback ? out : cut(text(fallback), max);
+  };
+  let main = value(effective.title, { fact: 'title' }, 255);
+  // Without an ending of its own, or with one that gives nothing for the
+  // item, the site's; without one there, the site name. "No ending" is the
+  // empty typed ending.
+  const siteEnding = siteEnd ?? { fact: 'site' };
+  const ending = effective.title_end ?? siteEnding;
+  let end =
+    'text' in ending && ending.text === '' ? '' : value(ending, siteEnding, 255);
+  let title = main + end;
+  if (main !== '' && end !== '') {
+    // Over 255 characters the main part loses words; the ending stays whole.
+    const glue = ` ${plain(separator, 3)} `;
+    const room = 255 - Array.from(glue).length - Array.from(end).length;
+    if (Array.from(main).length > room) {
+      main = room > 0 ? cut(main, room) : '';
+    }
+    title = main === '' ? end : main + glue + end;
+  }
+  const description = value(
+    effective.description,
+    { fact: 'description' },
+    1000,
+  );
   return {
-    title,
+    title: title || value({ fact: 'site' }, null, 255),
     description,
-    social_title:
-      cut(fill(effective.social?.title ?? '', tokens), 255) ||
-      cut(value('title'), 255),
+    social_title: value(effective.social?.title, { fact: 'title' }, 255),
     social_description:
-      cut(fill(effective.social?.description ?? '', tokens), 1000) ||
-      description,
+      value(effective.social?.description, null, 1000) || description,
+    title_main: main,
+    title_end: end,
   };
 }
-
-// Chips: storage holds {name}, the editor shows {Label}.
-
-type Labelled = Record<string, { label: string }>;
-
-/** Token name => the label shown in its chip, unique within the vocabulary. */
-export function displayLabels(tokens: Labelled): Record<string, string> {
-  const clean = (name: string) =>
-    tokens[name].label.replace(/[{}]/g, '').trim() || name;
-  const seen: Record<string, number> = {};
-  for (const name of Object.keys(tokens)) {
-    seen[clean(name)] = (seen[clean(name)] ?? 0) + 1;
-  }
-  return Object.fromEntries(
-    Object.keys(tokens).map((name) => [
-      name,
-      seen[clean(name)] > 1 ? `${clean(name)} (${name})` : clean(name),
-    ]),
-  );
-}
-
-/** Each known {name} becomes {Label}; an unknown one is shown as written. */
-export function toDisplay(template: string, tokens: Labelled): string {
-  const labels = displayLabels(tokens);
-  return template.replace(TOKEN, (match, name: string) =>
-    Object.hasOwn(labels, name) ? `{${labels[name]}}` : match,
-  );
-}
-
-/** Each {Label} becomes {name}; a pasted {name} and any other brace text stay as written. */
-export function toStored(text: string, tokens: Labelled): string {
-  const names = Object.fromEntries(
-    Object.entries(displayLabels(tokens)).map(([name, label]) => [label, name]),
-  );
-  return text.replace(/\{([^{}]*)\}/g, (match, label: string) =>
-    Object.hasOwn(names, label) ? `{${names[label]}}` : match,
-  );
-}
-
-/**
- * Maps the text of every string value in JSON text, leaving keys and the
- * rest as typed. Text that is not JSON is mapped the same way.
- */
-export const jsonStrings = (json: string, to: (text: string) => string) =>
-  json.replace(
-    /"((?:[^"\\]|\\.)*)"(\s*:)?/g,
-    (match, text: string, key?: string) => (key ? match : `"${to(text)}"`),
-  );
-
-/**
- * The override created by the first input into an inherited page title: the
- * pattern with its first {title} replaced by what was typed.
- */
-export const seedTitle = (pattern: string, typed: string): string =>
-  pattern.includes('{title}') ? pattern.replace('{title}', () => typed) : typed;
 
 // Meters and truncation.
 
@@ -455,6 +619,8 @@ export interface Meter {
   where: 'desktop' | 'phones' | 'both' | null;
   /** The last words that fit, for "may be cut off after …". */
   after: string;
+  /** How much of the text is shown, in UTF-16 code units; all of it unless `long`. */
+  shown: number;
   /** The visible sentence, also the meter's aria-valuetext. */
   sentence: string;
 }
@@ -467,7 +633,7 @@ export function meter(
   const { font, desktop, phone } = LIMITS[kind];
   const chars = Array.from(text).length;
   const count = `${chars} ${chars === 1 ? 'character' : 'characters'}`;
-  const base = { chars, ratio: 0, where: null, after: '' };
+  const base = { chars, ratio: 0, where: null, after: '', shown: text.length };
   if (text === '') {
     return {
       ...base,
@@ -511,6 +677,7 @@ export function meter(
     state: 'long',
     where,
     after,
+    shown: cut.replace(/…$/, '').trimEnd().length,
     sentence: `${count} · may be cut off${
       where === 'both' ? '' : where === 'desktop' ? ' on desktop' : ' on phones'
     } after "…${after}"`,
@@ -559,7 +726,8 @@ export const initialState = (ctx: HostContext): State => ({
   scope: 'target',
   tab: 'search',
   tabs: { target: 'search', site: 'identity' },
-  edits: { target: {}, site: { identity: EMPTY_IDENTITY, values: {} } },
+  edits: { target: {}, site: { identity: EMPTY_IDENTITY, values: {}, currency: '' } },
+  effect: null,
   sent: null,
   siteDirty: false,
   save: { target: { phase: 'idle' }, site: { phase: 'idle' } },
@@ -580,14 +748,21 @@ const ABSENT: Record<string, unknown> = {
   'robots.max_snippet': -1,
   'robots.max_image_preview': 'standard',
   'schema.type': 'WebPage',
+  // No ending of its own anywhere: the site name.
+  title_end: { fact: 'site' },
 };
 
 /**
- * Leaves chosen with a toggle, a select or a picker: an override equal to the
- * inherited value is not stored, so the control keeps following its source.
- * Text is exempt: "Start from default" copies an inherited pattern in.
+ * Leaves chosen with a toggle, a select, a picker or the ending's menu: an
+ * override equal to the inherited value is not stored, so the control keeps
+ * following its source. Other values are exempt: a link to a field's default
+ * source is stored, and typed text is the editor's own.
  */
 const FOLLOWS = Object.keys(ABSENT).concat('social.image');
+
+/** Equal as stored values: maps compared whatever their key order. */
+const same = (a: unknown, b: unknown) =>
+  JSON.stringify(sorted(a)) === JSON.stringify(sorted(b));
 
 /** The layers below the target's own values. */
 const below = (server: StatePayload): SeoValues =>
@@ -610,7 +785,7 @@ function settle(server: StatePayload, scope: Scope, values: SeoValues) {
   return prune(
     FOLLOWS.reduce(
       (out, path) =>
-        getPath(out, path) === inherited(server, scope, path)
+        same(getPath(out, path), inherited(server, scope, path))
           ? setPath(out, path, undefined)
           : out,
       values,
@@ -639,6 +814,7 @@ function tidy<S extends Scope>(
   return {
     identity: { ...EMPTY_IDENTITY, ...site.identity },
     values: settle(server, scope, site.values ?? {}),
+    currency: site.currency ?? '',
   } as Edits[S];
 }
 
@@ -675,6 +851,15 @@ const withValue = <S extends Scope>(
 ): Edits[S] =>
   tidy(state.server!, scope, setPath(state.edits[scope], path, value));
 
+/**
+ * The Undo that stays when the target moves on (another previewed node, a
+ * publish): one that would change the target's values goes.
+ */
+const undoKept = (state: State): State['undo'] =>
+  state.undo && canon(state.undo.edits.target) !== canon(state.edits.target)
+    ? null
+    : state.undo;
+
 export function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'loading':
@@ -686,6 +871,7 @@ export function reducer(state: State, action: Action): State {
           phase: 'refreshing',
           ctx: action.ctx,
           save: { ...state.save, target: { phase: 'idle' } },
+          undo: undoKept(state),
         };
       }
       return {
@@ -758,6 +944,12 @@ export function reducer(state: State, action: Action): State {
           site: state.siteDirty ? state.edits.site : payload.site,
         },
         sent: follow ? null : state.sent,
+        // Published (or discarded) meanwhile: an Undo would change what is
+        // now live.
+        undo:
+          state.server?.target?.has_draft && !payload.target?.has_draft
+            ? undoKept(state)
+            : state.undo,
       };
     }
 
@@ -769,20 +961,12 @@ export function reducer(state: State, action: Action): State {
         return state;
       }
       const { scope, path } = action;
-      let value =
+      const value =
         typeof action.value === 'string'
           ? wellFormed(action.value)
-          : action.value;
-      // Deleting one's words from a seeded page title returns to the inherited title.
-      if (
-        scope === 'target' &&
-        path === 'title' &&
-        state.ctx.kind === 'page' &&
-        typeof value === 'string' &&
-        value.trim() === seedTitle(below(state.server).title ?? '', '').trim()
-      ) {
-        value = undefined;
-      }
+          : isObj(action.value) && typeof action.value.text === 'string'
+            ? { text: wellFormed(action.value.text) }
+            : action.value;
       return commit(state, scope, withValue(state, scope, path, value), null);
     }
 
@@ -822,16 +1006,21 @@ export function reducer(state: State, action: Action): State {
             ...state,
             edits: { ...state.edits, site: state.server.site },
             siteDirty: false,
+            effect: null,
             errors: { ...state.errors, site: {} },
             save: { ...state.save, site: { phase: 'idle' } },
             undo: { text: 'Discarded', edits: state.edits },
           }
         : state;
 
+    case 'effect':
+      return { ...state, effect: action.effect };
+
     case 'siteSaved':
       return {
         ...state,
         server: action.payload,
+        effect: null,
         // Saving never edits the fields; only edits made meanwhile are unsaved.
         siteDirty: canon(state.edits.site) !== action.sent,
         errors: { ...state.errors, site: {} },
@@ -912,10 +1101,12 @@ export const robotsUnsent = (state: State): boolean => {
 // Derived values: computed with useMemo, never stored.
 
 export interface View {
-  /** Token map with Canvas's live, not yet saved title and description laid over it. */
-  tokens: Record<string, TokenInfo>;
-  /** The flat map name => value that fill() and texts() take. */
-  values: Record<string, string>;
+  /** The facts, with Canvas's live, not yet saved title and description laid over them. */
+  facts: StatePayload['facts'];
+  /** What values are resolved against. */
+  lookup: Lookup;
+  /** The text a value gives for the previewed item. */
+  text(value: Value): string;
   effective: SeoValues;
   texts: Texts;
   source(path: string): Source;
@@ -925,7 +1116,7 @@ export interface View {
   hiddenBy: Source | 'config' | null;
 }
 
-const serverTexts = (payload: StatePayload): Texts | null => {
+const serverTexts = (payload: StatePayload, own: Texts): Texts | null => {
   const head = payload.resolved?.head;
   if (!head) {
     return null;
@@ -937,25 +1128,45 @@ const serverTexts = (payload: StatePayload): Texts | null => {
     description: meta('name', 'description'),
     social_title: meta('property', 'og:title'),
     social_description: meta('property', 'og:description'),
+    // The parts are the dialog's own: the server's title is made of them.
+    title_main: own.title_main,
+    title_end: own.title_end,
   };
 };
 
+/** The values the dialog resolves against, from a state. */
+export function lookupOf(
+  server: StatePayload,
+  facts: StatePayload['facts'] = server.facts,
+  picked: Record<string, ShownImage> = {},
+): Lookup {
+  return {
+    facts,
+    sources: server.sources,
+    broken: server.broken,
+    media: { ...server.media, ...picked },
+    resolvable: !!server.preview,
+  };
+}
+
 /** The target scope as the dialog shows it. Null until the first state. */
-export function view(state: State): View | null {
+export function view(
+  state: State,
+  picked: Record<string, ShownImage> = {},
+): View | null {
   const server = state.server;
   if (!server) {
     return null;
   }
-  const tokens = { ...server.tokens };
+  const facts = { ...server.facts };
   for (const name of ['title', 'description'] as const) {
     const live = state.live[name];
-    if (tokens[name] && live !== undefined) {
-      tokens[name] = { ...tokens[name], value: live };
+    if (facts[name] && live !== undefined) {
+      facts[name] = { ...facts[name], value: live };
     }
   }
-  const values = Object.fromEntries(
-    Object.entries(tokens).map(([name, token]) => [name, token.value]),
-  );
+  const lookup = lookupOf(server, facts, picked);
+  const text = textOf(lookup);
   const layers = {
     target: state.edits.target,
     from_default: server.target?.from_default ?? {},
@@ -965,14 +1176,19 @@ export function view(state: State): View | null {
     merge(layers.from_default, layers.target),
     layers.site,
   );
-  let shown = texts(effective, values);
+  let shown = texts(
+    effective,
+    text,
+    server.separator,
+    server.site.values.title_end,
+  );
   // Once nothing is unsent and Canvas's inputs are what the server saw, the
   // server's text is the truth.
-  const resolved = serverTexts(server);
+  const resolved = serverTexts(server, shown);
   const settled =
     !unsent(state) &&
     (['title', 'description'] as const).every(
-      (name) => tokens[name]?.value === server.tokens[name]?.value,
+      (name) => facts[name]?.value === server.facts[name]?.value,
     );
   if (resolved && settled) {
     if (
@@ -996,8 +1212,9 @@ export function view(state: State): View | null {
     !noindex && !robotsUnsent(state) && /(^|,\s*)noindex\b/.test(robots ?? '');
   const from = (path: string) => source(path, layers);
   return {
-    tokens,
-    values,
+    facts,
+    lookup,
+    text,
     effective,
     texts: shown,
     source: from,
@@ -1121,8 +1338,9 @@ export function diff(
   const to = isObj(now) ? now : {};
   const out: Record<string, unknown> = {};
   for (const key of new Set([...Object.keys(from), ...Object.keys(to)])) {
-    const [a, b] = [pruned(from[key]), pruned(to[key])];
-    if (isObj(a) || isObj(b)) {
+    const [a, b] = [pruned(from[key], key), pruned(to[key], key)];
+    // A value (typed text, a fact, a media item, a link) is one leaf.
+    if ((isObj(a) && !isValue(a)) || (isObj(b) && !isValue(b))) {
       Object.assign(out, diff(a, b, `${prefix}${key}.`));
     } else if (JSON.stringify(a) !== JSON.stringify(b)) {
       out[`${prefix}${key}`] = b ?? null;
@@ -1161,7 +1379,9 @@ export function readPending(raw: string | null): Pending | null {
  * The entry for a working copy: its changes against the server values they
  * were first made against. Null when there is nothing to keep. With `only`,
  * the entry is limited to those paths (after a confirmed write: the refused
- * ones, whose typed text exists nowhere else).
+ * ones) and to what was typed, which exists nowhere else: a refused link,
+ * fact or image can be picked again, and kept it would be sent again on every
+ * opening.
  */
 export function pendingFor(
   previous: Pending | null,
@@ -1173,7 +1393,10 @@ export function pendingFor(
   const base = previous?.base ?? canon(server);
   const changes = Object.fromEntries(
     Object.entries(diff(JSON.parse(base), edits)).filter(
-      ([path]) => !only || only.includes(path),
+      ([path, value]) =>
+        !only ||
+        (only.includes(path) &&
+          !(isObj(value) && isValue(value) && !('text' in value))),
     ),
   );
   return Object.keys(changes).length
@@ -1217,7 +1440,7 @@ export function tabOf(scope: Scope, path: string): Tab {
 
 const LABELS: [RegExp, string][] = [
   [/^title$/, 'Title'],
-  [/^values\.title$/, 'Title pattern'],
+  [/^(values\.)?title_end$/, 'Title ending'],
   [/^description$/, 'Description'],
   [/^canonical$/, 'Canonical address'],
   [/^social\.title$/, 'Social title'],
@@ -1225,7 +1448,7 @@ const LABELS: [RegExp, string][] = [
   [/^social\.image$/, 'Image'],
   [/^(values\.)?robots\./, 'Search visibility'],
   [/^schema\.type$/, 'Page type'],
-  [/^schema\.custom$/, 'Custom JSON-LD'],
+  [/^schema\.custom$/, 'Your own JSON-LD'],
   [/^schema\./, 'Structured data'],
   [/^identity\.kind$/, 'This site represents'],
   [/^identity\.name$/, 'Name'],
@@ -1248,7 +1471,7 @@ export const fieldNames = (paths: string[]): string[] => [
 export const sitePaths = (fields: Record<string, string>) =>
   Object.fromEntries(
     Object.entries(fields).map(([path, message]) => [
-      path.startsWith('identity.') ? path : `values.${path}`,
+      path.startsWith('identity.') || path === 'currency' ? path : `values.${path}`,
       message,
     ]),
   );
@@ -1271,7 +1494,7 @@ export function previewNote(note: {
   const type = inSentence(note.label);
   const draftNode = note.template && !note.node;
   const unpublished = draftNode
-    ? `This ${type} isn't published yet. Values that only editors can see are left out.${
+    ? `This ${type} isn't published yet. Its fields are read with your access until visitors can see it.${
         note.published ? '' : ' The template is not in use yet.'
       }`
     : '';
@@ -1389,7 +1612,18 @@ export interface Footer {
   dot: 'gray' | 'blue' | 'spinner' | 'ok' | 'error' | 'info' | 'warn';
   text: string;
   actions: FooterAction[];
+  /** A button's own label, in place of its usual one. */
+  labels?: Partial<Record<FooterAction, string>>;
 }
+
+/** "Oak desk lamp, Membership and 2 more" */
+export const placesText = (effect: { count: number; places: string[] }) => {
+  const named = effect.places.slice(0, 25);
+  const more = effect.count - named.length;
+  return more > 0
+    ? `${named.join(', ')} and ${more} more`
+    : named.join(', ').replace(/, ([^,]*)$/, ' and $1');
+};
 
 const attention = (count: number) =>
   `${count} ${count === 1 ? 'field needs' : 'fields need'} attention`;
@@ -1421,6 +1655,17 @@ export function footer(state: State): Footer {
     }
     if (save.phase === 'error') {
       return { dot: 'error', text: save.message ?? '', actions: ['retry'] };
+    }
+    if (state.siteDirty && state.effect && state.effect.count > 0) {
+      // Where the save changes structured data, said before it does; the
+      // Currency field names the places.
+      const where = state.effect.count === 1 ? state.effect.places[0] : `${state.effect.count} places`;
+      return {
+        dot: 'blue',
+        text: `Also changes ${where}.`,
+        actions: dirty,
+        labels: { save: `Save and update ${where}` },
+      };
     }
     if (state.siteDirty) {
       return state.edits.site.values.robots?.noindex === true &&
@@ -1686,141 +1931,6 @@ export function strips(
   return out.slice(0, 2);
 }
 
-// Chips in the editor: the text holds {Label}; a chip is one unit.
-
-export interface Chip {
-  /** Offsets in the display text; `end` is after the closing brace. */
-  start: number;
-  end: number;
-  name: string;
-  label: string;
-}
-
-/** The chips of a display text: brace text that names a known value by its label. */
-export function chipsIn(text: string, tokens: Labelled): Chip[] {
-  const names = Object.fromEntries(
-    Object.entries(displayLabels(tokens)).map(([name, label]) => [label, name]),
-  );
-  return Array.from(text.matchAll(/\{([^{}]*)\}/g)).flatMap((match) =>
-    Object.hasOwn(names, match[1])
-      ? [
-          {
-            start: match.index,
-            end: match.index + match[0].length,
-            name: names[match[1]],
-            label: match[1],
-          },
-        ]
-      : [],
-  );
-}
-
-/** A selection grown so that it never ends inside a chip. A caret stays where it is. */
-export function wholeChips(
-  chips: Chip[],
-  start: number,
-  end: number,
-): [number, number] {
-  if (start === end) {
-    return [start, end];
-  }
-  for (const chip of chips) {
-    if (start > chip.start && start < chip.end) {
-      start = chip.start;
-    }
-    if (end > chip.start && end < chip.end) {
-      end = chip.end;
-    }
-  }
-  return [start, end];
-}
-
-/**
- * Backspace or Delete next to or inside a chip removes the whole chip. Null
- * when the key does what it always does.
- */
-export function removeChip(
-  text: string,
-  chips: Chip[],
-  caret: number,
-  key: 'Backspace' | 'Delete',
-): { text: string; caret: number; label: string } | null {
-  const chip = chips.find((item) =>
-    key === 'Backspace'
-      ? caret > item.start && caret <= item.end
-      : caret >= item.start && caret < item.end,
-  );
-  if (!chip) {
-    return null;
-  }
-  // One of the spaces around it goes too, so no double space is left behind.
-  // A last chip leaves its space: the next word typed must not run into the
-  // chip before it (resolved texts are trimmed, so it never reaches output).
-  const before = text.slice(0, chip.start);
-  const after = text.slice(chip.end);
-  const joined =
-    before.endsWith(' ') && after.startsWith(' ')
-      ? before.slice(0, -1)
-      : before;
-  return { text: joined + after, caret: joined.length, label: chip.label };
-}
-
-/**
- * Puts a chip in at the caret (never inside another chip). `brace`: the menu
- * was opened by typing "{", which the chip replaces. From the button, the chip
- * is set off from the words around it by spaces.
- */
-export function insertChip(
-  text: string,
-  chips: Chip[],
-  caret: number,
-  label: string,
-  brace: boolean,
-): { text: string; caret: number } {
-  const inside = chips.find((chip) => caret > chip.start && caret < chip.end);
-  let before = text.slice(0, inside ? inside.end : caret);
-  const after = text.slice(before.length);
-  if (brace && before.endsWith('{')) {
-    before = before.slice(0, -1);
-  } else if (!brace && before !== '' && !/\s$/.test(before)) {
-    before += ' ';
-  }
-  const chip = `{${label}}${after !== '' && !/^\s/.test(after) ? ' ' : ''}`;
-  return { text: before + chip + after, caret: before.length + chip.length };
-}
-
-/** Where the caret belongs after seedTitle(): behind what was typed. */
-export function seedCaret(
-  pattern: string,
-  typed: string,
-  tokens: Labelled,
-): number {
-  const at = pattern.indexOf('{title}');
-  return (
-    (at < 0 ? 0 : toDisplay(pattern.slice(0, at), tokens).length) + typed.length
-  );
-}
-
-/** The values a text template may use, grouped for the insert menu. */
-export function tokenGroups(
-  tokens: Record<string, TokenInfo>,
-  fields: boolean,
-): { label: string; names: string[] }[] {
-  const text = Object.keys(tokens).filter(
-    (name) => tokens[name].type !== 'image',
-  );
-  const site = ['site', 'sep'];
-  const field = (name: string) => name.startsWith('field.');
-  return [
-    {
-      label: 'PAGE',
-      names: text.filter((name) => !field(name) && !site.includes(name)),
-    },
-    { label: 'SITE', names: text.filter((name) => site.includes(name)) },
-    { label: 'FIELDS', names: fields ? text.filter(field) : [] },
-  ].filter((group) => group.names.length > 0);
-}
-
 // What the previews and rows say.
 
 /** A public address as a result shows it: host › segment › segment. */
@@ -1844,77 +1954,59 @@ export function breadcrumb(url: string): string {
 }
 
 /** An ISO date or date-time in words, as written: the time is the site's own. */
-export function dateText(value: string): string {
-  const match = value.match(/^(\d{4})-(\d\d)-(\d\d)(?:T(\d\d):(\d\d))?/);
-  if (!match) {
-    return value;
-  }
-  const [, year, month, day, hour, minute] = match;
-  const date = new Intl.DateTimeFormat('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-    timeZone: 'UTC',
-  }).format(new Date(Date.UTC(+year, +month - 1, +day)));
-  return hour ? `${date}, ${hour}:${minute}` : date;
-}
+export const dateText = (value: string): string => dateWords(value, 'en') ?? value;
 
 /** "a" or "an" for a type's label. */
 export const article = (label: string) =>
   /^[aeiou]/i.test(label) ? 'an' : 'a'; // cspell:disable-line
 
-export interface ShownImage {
-  name: string;
-  thumb: string;
-  width: number;
-  height: number;
-  /** The file itself, when the server has said where it is. */
-  url?: string;
-  bytes?: number;
-}
-
 /**
  * The social image as the working copy has it, without waiting for the
- * server: the image, and the words for where it comes from. `picked` holds
- * what the picker returned for images chosen in this session.
+ * server: the image, the words for where it comes from, and the state of a
+ * link that gives nothing for the previewed item.
  */
 export function socialImage(
   state: State,
   shown: View,
-  picked: Record<string, ShownImage>,
-): { image: ShownImage | null; from: string } {
+): { image: ShownImage | null; from: string; state?: 'empty' | 'hidden' | 'broken' } {
   const server = state.server!;
   const value = shown.effective.social?.image;
   const resolved = server.resolved?.image ?? null;
   // The server's answer describes the working copy once nothing is unsent.
   const settled = !unsent(state);
-  const token = value?.match(/^\{(.+)\}$/)?.[1];
-  if (
-    value &&
-    !token &&
-    settled &&
-    server.resolved &&
-    resolved?.source !== 'override'
-  ) {
-    // Chosen, but the server cannot emit it (not public, unpublished, gone):
-    // what is shown is what search engines and networks get instead.
-    return {
-      image: resolved,
-      from: `The chosen image can't be shown publicly · ${
-        resolved?.source === 'site'
-          ? 'using the site default'
-          : resolved
-            ? 'using the page image'
-            : 'no image'
-      }`,
-    };
-  }
-  if (value && !token) {
+  const site =
+    settled && resolved?.source === 'site'
+      ? resolved
+      : (shown.lookup.media[server.site.identity.default_image] ?? null);
+  const fallback = (): { image: ShownImage | null; from: string } => {
+    const own = resolve({ fact: 'image' }, 'image', shown.lookup);
+    if (own.image) {
+      return { image: own.image, from: 'Image' };
+    }
+    return site
+      ? { image: site, from: 'Site default image' }
+      : { image: null, from: 'No image' };
+  };
+  if (value && 'media' in value) {
+    if (settled && server.resolved && resolved?.source !== 'override') {
+      // Chosen, but the server cannot emit it (not public, unpublished,
+      // gone): what is shown is what is shared instead.
+      return {
+        image: resolved,
+        from: `The chosen image can't be shown publicly · ${
+          resolved?.source === 'site'
+            ? 'using the site default'
+            : resolved
+              ? 'using the page image'
+              : 'no image'
+        }`,
+      };
+    }
     return {
       image:
         settled && resolved?.source === 'override'
           ? resolved
-          : (picked[value] ?? server.media[value] ?? null),
+          : (shown.lookup.media[value.media] ?? null),
       from:
         shown.source('social.image') === 'default'
           ? `From the ${
@@ -1924,34 +2016,33 @@ export function socialImage(
           : 'Chosen here',
     };
   }
-  const info = shown.tokens[token ?? 'image'];
-  if (info?.image) {
+  if (value && 'source' in value) {
+    const link = resolve(value, 'image', shown.lookup);
+    if (link.image) {
+      return { image: link.image, from: rowOf(shown.lookup, value)?.label ?? '' };
+    }
+    // Empty, hidden or broken for this item: the default is used.
+    const instead = fallback();
     return {
-      image: info.image,
-      from:
-        token && token !== 'image'
-          ? `From ${info.label}`
-          : 'From the page image',
+      ...instead,
+      state: link.status === 'hidden' || link.status === 'broken' ? link.status : 'empty',
     };
   }
-  const site =
-    settled && resolved?.source === 'site'
-      ? resolved
-      : (picked[server.site.identity.default_image] ??
-        server.media[server.site.identity.default_image] ??
-        null);
-  return site
-    ? { image: site, from: 'Site default' }
-    : { image: null, from: 'No image' };
+  return fallback();
 }
 
 /** The Site working copy resolved for the page in context: what "Becomes:" shows there. */
 export function siteTexts(state: State, shown: View): Texts {
   const { identity, values } = state.edits.site;
-  return texts(cascade({}, values), {
-    ...shown.values,
+  const name = identity.name.trim();
+  return texts(
+    cascade({}, values),
+    (value) =>
+      name && 'fact' in value && value.fact === 'site' ? identity.name : shown.text(value),
     // As the server stores it.
-    sep: identity.separator.trim(),
-    ...(identity.name.trim() ? { site: identity.name } : {}),
-  });
+    identity.separator.trim(),
+    values.title_end,
+  );
 }
+
+export { sameValue };

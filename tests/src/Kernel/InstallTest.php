@@ -36,8 +36,8 @@ final class InstallTest extends CanvasKernelTestBase {
 
   private const EDITOR = '0b6c7f0e-6c1f-4a53-9f0b-1c2f3d4e5a6b';
   private const HEADING = '11111111-1111-4111-8111-111111111111';
-  private const VALUES = ['robots' => ['noindex' => TRUE], 'title' => '{title} {sep} Blog'];
-  private const ENCODED = '{"robots":{"noindex":true},"title":"{title} {sep} Blog"}';
+  private const VALUES = ['robots' => ['noindex' => TRUE], 'title_end' => ['text' => 'Blog']];
+  private const ENCODED = '{"robots":{"noindex":true},"title_end":{"text":"Blog"}}';
 
   /**
    * {@inheritdoc}
@@ -127,7 +127,8 @@ final class InstallTest extends CanvasKernelTestBase {
         'default_image' => '',
         'same_as' => [],
       ],
-      'values' => ['title' => '{title} {sep} {site}', 'robots' => ['max_image_preview' => 'large']],
+      // No ending: every title ends with the site name.
+      'values' => ['robots' => ['max_image_preview' => 'large']],
     ], $site);
     $typed = $this->container->get('config.typed')->createFromNameAndData('canvas_metatag.site', $this->config('canvas_metatag.site')->getRawData());
     self::assertCount(0, $typed->validate());
@@ -171,12 +172,12 @@ final class InstallTest extends CanvasKernelTestBase {
     // A page with a stored value and a draft that carries another.
     $page = $this->createPage(['canvas_metatag' => self::ENCODED]);
     $draft = clone $page;
-    $draft->set('canvas_metatag', '{"title":"Draft"}');
+    $draft->set('canvas_metatag', '{"title":{"text":"Draft"}}');
     $this->autoSave()->saveEntity($draft, self::EDITOR);
 
     // Stored setting, and a draft with layout work and a changed setting.
     $both = $this->createTemplate('article', self::VALUES);
-    $this->saveTemplateDraft($both, ['title' => 'Draft']);
+    $this->saveTemplateDraft($both, ['title_end' => ['text' => 'Draft']]);
     // No stored setting; a draft with layout work and a setting.
     $draft_only = $this->createTemplate('event');
     $this->saveTemplateDraft($draft_only, self::VALUES);

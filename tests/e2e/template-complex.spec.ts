@@ -34,6 +34,7 @@ import {
 test.describe.configure({ mode: 'serial' });
 
 const {
+  articleMixed,
   event,
   eventHidden,
   eventLong,
@@ -48,19 +49,27 @@ const {
   ending,
 } = COMPLEX;
 
-/** Opens the "Insert value" menu of the title field. */
-async function insertMenu(frame: FrameLocator) {
-  await button(frame, UI.action.insert).first().click();
-  const menu = frame.getByRole('menu', { name: 'Values' });
+/** The description's link menu. */
+const linkMenuOf = (frame: FrameLocator) => frame.getByRole('dialog', { name: `Link ${UI.field.description}` });
+
+/** Opens the link menu of the description, which follows its default. */
+async function linkMenu(frame: FrameLocator) {
+  await button(frame, UI.action.changeLink(UI.field.description)).click();
+  const menu = linkMenuOf(frame);
   await expect(menu).toBeVisible();
   return menu;
 }
+
+/** The box of a value that is linked or follows its default. */
+const box = (frame: FrameLocator, label: string) => frame.getByRole('combobox', { name: label, exact: true });
 
 /**
  * The open value menu is inside the dialog's frame, shows at least two
  * entries whole and, in a short frame, no keyboard hints.
  */
 async function expectMenuFits(page: Page, frame: FrameLocator) {
+  // Measured once it has grown in: its entrance scales it.
+  await frame.locator('.seo-menu').evaluate((menu) => Promise.all(menu.getAnimations({ subtree: true }).map((one) => one.finished)));
   const box = (await page.locator(SEO_IFRAME).boundingBox())!;
   const menu = (await frame.locator('.seo-menu').boundingBox())!;
   expect(menu.y).toBeGreaterThanOrEqual(box.y - 1);
@@ -69,7 +78,7 @@ async function expectMenuFits(page: Page, frame: FrameLocator) {
   expect(menu.x + menu.width).toBeLessThanOrEqual(box.x + box.width + 1);
   const whole = await frame.locator('.seo-menu-list').evaluate((list) => {
     const view = list.getBoundingClientRect();
-    return [...list.querySelectorAll('[role="menuitem"]')].filter((item) => {
+    return [...list.querySelectorAll('[role="option"]')].filter((item) => {
       const rect = item.getBoundingClientRect();
       return rect.top >= view.top - 0.5 && rect.bottom <= view.bottom + 0.5;
     }).length;
@@ -95,7 +104,7 @@ async function expectMenuFits(page: Page, frame: FrameLocator) {
   await expect(list).toHaveAttribute('data-more', '');
   const peek = await list.evaluate((element) => {
     const bottom = element.getBoundingClientRect().bottom;
-    const items = [...element.querySelectorAll('[role="menuitem"]')].map((item) => item.getBoundingClientRect());
+    const items = [...element.querySelectorAll('[role="option"]')].map((item) => item.getBoundingClientRect());
     const next = items.find((item) => item.bottom > bottom + 0.5);
     return {
       peek: next ? bottom - next.top : 0,
@@ -108,6 +117,24 @@ async function expectMenuFits(page: Page, frame: FrameLocator) {
   await expect(list).not.toHaveAttribute('data-more');
   await list.evaluate((element) => element.scrollTo({ top: 0 }));
   await expect(list).toHaveAttribute('data-more', '');
+}
+
+/**
+ * Waits until Canvas has fitted its dialog to a resized window: the frame's
+ * height has stopped changing. A menu opened before would close when the
+ * frame crosses 420 px.
+ */
+async function settled(frame: FrameLocator) {
+  let last = -1;
+  await expect
+    .poll(async () => {
+      const now = await frame.locator('body').evaluate(() => window.innerHeight);
+      const same = now === last;
+      last = now;
+      return same;
+    }, { intervals: [300] })
+    .toBe(true);
+  return last;
 }
 
 /** The entry the arrows make active is never under the list's end fade. */
@@ -152,22 +179,148 @@ test('the Event template opens on its draft and offers the type fields with thei
   // The draft, not what is live: its title ends in "Tickets".
   await expect(button(frame, 'Every Event')).toBeVisible();
   await expect(frame.getByText(/^Previewing/)).toContainText(event.title);
-  await expect(textbox(frame, UI.field.title)).toHaveValue(`{Page title} {Separator} ${ending.draft}`);
+  await expect(button(frame, UI.field.titleEnding)).toHaveAccessibleName(`Title ending: ${ending.draft}`);
   await expect(preview).toContainText(`${event.title} | ${ending.draft}`);
   await expect(status(frame)).toContainText(UI.footer.draftTemplate);
+  // Only the ending is set: the title's aside says so, and its Reset says
+  // what it clears and what it goes back to.
+  const titleField = frame.locator('.seo-field[data-path="title"]');
+  await titleField.hover();
+  await expect(titleField.locator('.seo-aside')).toContainText('Ending set for every Event');
+  const resetEnding = button(frame, 'Reset title ending');
+  await resetEnding.hover();
+  await expect(frame.locator('.rt-TooltipContent', { hasText: 'Back to the site ending' })).toBeVisible();
+  await page.mouse.move(0, 0);
 
-  // The Event's fields come first, each with the previewed event's value. A
-  // text field offers no images, and two values that share the label
-  // "Description" are told apart.
-  const menu = await insertMenu(frame);
-  const fields = menu.getByRole('group', { name: 'Event', exact: true });
-  await expect(fields.getByRole('menuitem', { name: /^Venue/ })).toContainText(event.venue);
-  await expect(fields.getByRole('menuitem', { name: /^Status/ })).toContainText(event.status);
-  await expect(fields.getByRole('menuitem', { name: /^Description \(field\.body\)/ })).toHaveCount(1);
-  await expect(menu.getByRole('menuitem', { name: /^Description \(description\)/ })).toHaveCount(1);
-  await expect(menu.getByRole('menuitem', { name: /^Poster/ })).toHaveCount(0);
+  // The Event's fields come first, each with the previewed event's value: a
+  // list gives its label, a reference is a level of its own. The Event's
+  // Description and the page's are both offered; an image is not text.
+  const menu = await linkMenu(frame);
+  await expect(menu.locator('.seo-menu-group')).toHaveText(['Event', 'Page']);
+  await expect(menu.getByRole('option', { name: /^Status, / })).toContainText(event.status);
+  await expect(menu.getByRole('option', { name: /^Description, / })).toHaveCount(2);
+  await menu.getByRole('textbox', { name: 'Find a field' }).fill('Poster › Image');
+  await expect(menu.getByRole('option', { name: /^Poster › Image, / })).toHaveAttribute('aria-disabled', 'true');
+  await menu.getByRole('textbox', { name: 'Find a field' }).fill('');
+  await menu.getByRole('option', { name: /^Venue, / }).click();
+  await expect(menu.getByRole('heading', { name: 'Venue' })).toBeVisible();
+  await expect(menu.getByRole('option', { name: /^Title, / })).toContainText(event.venue);
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
+  await expect(box(frame, UI.field.description)).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
+
+  // Opened by keyboard, it takes the side with room for three entries.
+  await box(frame, UI.field.description).focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect(menu).toBeVisible();
+  await menu.evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((one) => one.finished)));
+  const whole = await menu.locator('.seo-menu-list').evaluate((list) => {
+    const view = list.getBoundingClientRect();
+    return [...list.querySelectorAll('[role="option"]')].filter((item) => {
+      const rect = item.getBoundingClientRect();
+      return rect.top >= view.top - 0.5 && rect.bottom <= view.bottom + 0.5;
+    }).length;
+  });
+  expect(whole).toBeGreaterThanOrEqual(3);
+  await page.keyboard.press('Escape');
+  await expect(menu).toBeHidden();
+
+  // The pointer on the last rows of a list scrolled to its end never scrolls
+  // it: the row under the pointer stays the one a click links.
+  await box(frame, UI.field.title).click();
+  const titleMenu = frame.getByRole('dialog', { name: `Link ${UI.field.title}` });
+  await expect(titleMenu).toBeVisible();
+  const list = titleMenu.locator('.seo-menu-list');
+  await list.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
+  const scrolled = await list.evaluate((element) => element.scrollTop);
+  const options = titleMenu.getByRole('option');
+  const count = await options.count();
+  for (const at of [count - 1, count - 2, count - 3]) {
+    await options.nth(at).hover();
+  }
+  expect(await list.evaluate((element) => element.scrollTop)).toBe(scrolled);
+  await page.keyboard.press('Escape');
+  await expect(titleMenu).toBeHidden();
+  // What does not fit waits in the last row; it opens as a level with its
+  // reasons, and Left goes back.
+  await linkMenu(frame);
+  const fold = menu.getByRole('option', { name: /fields that (can't be linked here|aren't text)$/ });
+  await fold.click();
+  await expect(menu.getByRole('heading', { name: "Can't be linked here" })).toBeVisible();
+  await expect(menu.getByRole('option', { name: /^Poster › Image, An image, not text/ })).toHaveAttribute('aria-disabled', 'true');
+  await page.keyboard.press('ArrowLeft');
+  await expect(menu.getByRole('heading', { name: "Can't be linked here" })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  // Structured data: a linked date shows the event's date at rest, the menu
+  // tells Starts and Ends apart by their dates, and the status shows its
+  // label. A choice fits only its list field.
+  await tab(frame, UI.tab.schema).click();
+  const starts = box(frame, 'Starts');
+  await expect(starts).toContainText(/\d{4}/);
+  await frame.getByRole('tab', { name: UI.tab.schema }).focus();
+  await expect(starts).toContainText(/\d{4}/);
+  await starts.click();
+  const dates = frame.getByRole('dialog', { name: 'Link Starts' });
+  await expect(dates.getByRole('option', { name: /^Starts, .*\d{4}/ })).toHaveCount(1);
+  await expect(dates.getByRole('option', { name: /^Ends, .*\d{4}/ })).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(starts).toBeFocused();
+  const status_ = box(frame, 'Status');
+  await expect(status_).toContainText(event.status);
+  await status_.click();
+  const choices = frame.getByRole('dialog', { name: 'Link Status' });
+  await expect(choices.locator('[role="option"]:not([aria-disabled])').first()).toHaveAccessibleName(new RegExp(`^Status, ${event.status}`));
+  await expect(choices.getByRole('option', { name: /^Unlink, Choose an option instead/ })).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  // Low on the tab, the Status menu opens above its box and lists every
+  // entry, the fold row included, whole; at 600 px too.
+  for (const height of [900, 600]) {
+    await page.setViewportSize({ width: 1440, height });
+    await status_.scrollIntoViewIfNeeded();
+    await status_.click();
+    const listed = await choices.locator('.seo-menu-list').evaluate((list) => {
+      const view = list.getBoundingClientRect();
+      const options = [...list.querySelectorAll('[role="option"]')];
+      return [options.length, options.filter((item) => item.getBoundingClientRect().bottom <= view.bottom + 0.5 && item.getBoundingClientRect().top >= view.top - 0.5).length];
+    });
+    expect(listed[1], JSON.stringify(listed)).toBeGreaterThanOrEqual(Math.min(3, listed[0]));
+    await page.screenshot({ path: test.info().outputPath(`status-menu-1440x${height}.png`) });
+    await page.keyboard.press('Escape');
+  }
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  // Venue and Street address side by side: each box shows its path over its
+  // value, the path giving way from its start so the field it ends at stays
+  // whole, and focus never changes it.
+  const pair = [box(frame, 'Venue'), box(frame, 'Street address')];
+  for (const linked of pair) {
+    const tag = linked.locator('.seo-linked-tag');
+    await expect(tag).toContainText(/^Venue › /);
+    const leaf = tag.locator('.seo-linked-leaf');
+    expect(await leaf.evaluate((element) => [getComputedStyle(element).whiteSpace, element.scrollWidth <= element.clientWidth])).toEqual(['nowrap', true]);
+    const rest = (await linked.boundingBox())!.height;
+    await linked.focus();
+    expect((await linked.boundingBox())!.height).toBe(rest);
+  }
+  // Delete on Street address, then typing at once: the typed text.
+  await box(frame, 'Street address').press('Delete');
+  await page.keyboard.type('Main street 1');
+  await expect(textbox(frame, 'Street address')).toHaveValue('Main street 1');
+  await page.keyboard.press('Alt+ArrowDown');
+  await page.keyboard.type('Street address');
+  await page.keyboard.press('Enter');
+  await expect(box(frame, 'Street address')).toHaveAccessibleDescription(/^Linked to Event › Venue › Street address\. /);
+  // Street address opens in the Venue level, on its current entry; Back to
+  // Event returns to the top.
+  await box(frame, 'Street address').click();
+  const street = frame.getByRole('dialog', { name: 'Link Street address' });
+  await expect(street.getByRole('heading', { name: 'Venue' })).toBeVisible();
+  await expect(street.locator('[data-active]')).toHaveAccessibleName(/^Street address, /);
+  await street.getByRole('option', { name: 'Back to Event' }).click();
+  await expect(street.getByRole('option', { name: /^Venue, / })).toBeVisible();
+  await page.keyboard.press('ArrowRight');
+  await page.keyboard.press('Escape');
+  await tab(frame, UI.tab.search).click();
 
   // The template is among the changes to review; visitors get what is live.
   await expect(await reviewRows(page, /Event/)).toHaveCount(1);
@@ -192,20 +345,47 @@ test('the dialog follows the previewed event, also through hidden references and
   await previewNode(page, 'event', eventHidden);
   await expect(caption).toContainText(eventHidden.title);
   await expect(preview).toContainText(`${eventHidden.title} | ${ending.draft}`);
-  const menu = await insertMenu(frame);
-  await expect(menu.getByRole('menuitem', { name: /^Venue/ })).toContainText('Empty for this event');
+  const menu = await linkMenu(frame);
+  await menu.getByRole('option', { name: /^Venue, / }).click();
+  const venueTitle = menu.getByRole('option', { name: /^Title, / });
+  await expect(venueTitle).toContainText('Hidden from visitors for this event');
+  await expect(venueTitle).not.toHaveAttribute('aria-disabled');
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
+  // An image hidden for this event: the social image is linked to Poster ›
+  // Image, and this event's poster is unpublished. The row says so, and what
+  // is used instead; the Schema tab's image says the same.
+  await tab(frame, UI.tab.social).click();
+  const socialImage = frame.locator('.seo-field[data-path="social.image"]');
+  await expect(socialImage.locator('.seo-image-tag')).toHaveText('Poster › Image');
+  await expect(socialImage.locator('.seo-image-name > [data-state]')).toHaveText('Hidden from visitors for this event');
+  await expect(socialImage.locator('.seo-guide')).toHaveText(/^So .+ (is used|is shared)\.$/);
+  // Its link goes with its ×, as a box's does; there is no Reset beside it.
+  await expect(button(frame, 'Unlink image')).toBeVisible();
+  await tab(frame, UI.tab.schema).click();
+  const schemaImage = frame.locator('.seo-field[data-path="schema.props.image"]');
+  await expect(schemaImage.locator('.seo-image-tag')).toHaveText('Poster › Image');
+  await expect(schemaImage.locator('.seo-image-name > [data-state]')).toHaveText('Hidden from visitors for this event');
+  // A box linked through the hidden venue says so for this event, and the
+  // field says what that means once.
+  const street = frame.locator('.seo-field[data-path="schema.props.location_address_streetAddress"]');
+  await expect(street.locator('.seo-linked-value')).toHaveText('Hidden from visitors for this event');
+  await expect(street.locator('.seo-guide')).toHaveText('So the detail is left out.');
+  await page.screenshot({ path: test.info().outputPath('hidden-venue-schema.png'), fullPage: true });
+  // The read-back says what ships: a web page, not "Add".
+  await expect(frame.getByRole('region', { name: UI.schema.stage })).toContainText('a web page of');
+  await tab(frame, UI.tab.search).click();
+  // Checks say what visitors miss: the venue's name and street are hidden.
+  await button(frame, UI.tab.checks).click();
+  await expect(sheet(frame, 'Checks').getByText(/hidden from visitors/i).first()).toBeVisible({ timeout: 60_000 });
+  await button(frame, UI.action.back).click();
 
   // A title near the limit: Checks asks to shorten it.
   await previewNode(page, 'event', { id: eventLong.id, title: eventLong.title });
   await expect(caption).toContainText(eventLong.title);
   await button(frame, UI.tab.checks).click();
   await expect(sheet(frame, 'Checks').getByText(UI.checks.titleLong).first()).toBeVisible({ timeout: 60_000 });
-  // The event is withheld from structured data until a street address is
-  // set; the address is on the venue, which a value cannot reach.
   const checks = sheet(frame, 'Checks');
-  await expect(checks.getByText('Add Street address').first()).toBeVisible();
   // The node is named once, on one line, whole on hover; the issues say
   // "this event".
   const against = checks.locator('.seo-checks-against');
@@ -287,7 +467,8 @@ test('the dialog follows the previewed event, also through hidden references and
   await frame.locator('body').screenshot({ path: test.info().outputPath('preview-switch-at-once.png') });
   // Once the editor has stored the new node, the status is what it was, and
   // it never changed on the way.
-  await expect(frame.locator('.seo-field[data-path="title"] textarea')).toBeEnabled({ timeout: 30_000 });
+  // (On the Schema tab: the Search tab's ending is there, hidden.)
+  await expect(frame.locator('.seo-field[data-path="title"] .seo-ending-btn')).toBeEnabled({ timeout: 30_000 });
   await page.waitForTimeout(2_500);
   expect(await top()).toBe(settledTop);
   await frame.locator('body').screenshot({ path: test.info().outputPath('preview-switch-after-2.5s.png') });
@@ -299,77 +480,78 @@ test('the dialog follows the previewed event, also through hidden references and
   expect(await frame.locator(spoken).textContent()).toBe(before);
 
   // A change typed at once after a switch, before Canvas has stored the new
-  // node's draft, reaches the template's draft.
+  // node's draft, reaches the template's draft: a key typed on the box
+  // replaces the default with typed text.
   const draft = async () =>
     (await seoState(page, `entity_type=content_template&id=node.event.full&preview=${event.id}`)).target?.values
-      .description ?? '';
+      .description;
   await tab(frame, UI.tab.search).click();
-  const description = textbox(frame, UI.field.description);
-  const kept = await description.inputValue();
   await previewNode(page, 'event', event);
-  await description.fill('Typed during the switch');
-  await expect.poll(draft, { timeout: 30_000 }).toBe('Typed during the switch');
-  await description.fill(kept);
-  await expect.poll(draft, { timeout: 30_000 }).toBe(kept);
+  await box(frame, UI.field.description).press('A');
+  await page.keyboard.type(' change during the switch');
+  await expect(textbox(frame, UI.field.description)).toHaveValue('A change during the switch');
+  await expect.poll(draft, { timeout: 30_000 }).toEqual({ text: 'A change during the switch' });
+  await button(frame, `Reset ${UI.field.description}`).click();
+  await expect.poll(draft, { timeout: 30_000 }).toBeUndefined();
 });
 
-test('on a long event the value menu works by keyboard in a short window, long values stay short at rest', async ({
+test('on a long event the link menu works by keyboard in a short window, long values stay short at rest', async ({
   drupal,
   page,
 }) => {
   await drupal.login(USERS.editor);
   await openTemplate(page, eventLong.id, 'event');
   const frame = await openSeo(page);
-  const title = textbox(frame, UI.field.title);
-  await expect(title).toBeEnabled();
-  const stored = await title.inputValue();
-  expect(stored).toBe(`{Page title} {Separator} ${ending.draft}`);
+  const description = box(frame, UI.field.description);
+  // A long title gives way in the one-line box; its tag stays whole.
+  const titleTag = box(frame, UI.field.title).locator('.seo-linked-tag');
+  await expect(titleTag).toHaveText('Default');
+  expect(await titleTag.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await expect(button(frame, UI.field.titleEnding)).toHaveAccessibleName(`Title ending: ${ending.draft}`);
   await page.setViewportSize({ width: 1440, height: 350 });
+  expect(await settled(frame)).toBeLessThanOrEqual(420);
 
-  // The search preview cuts the long title as a result list would; the field
-  // keeps the pattern whole.
+  // The search preview cuts the long title as a result list would, ending
+  // and all: the head keeps the ending whole only past 255 characters.
   const shown = (await frame.getByTestId(TEST_ID.search).locator('.seo-result-title').innerText()).trim();
-  expect(shown.startsWith(eventLong.title)).toBe(true);
+  expect(shown.startsWith(eventLong.title.slice(0, 40))).toBe(true);
   expect(shown.endsWith('…')).toBe(true);
 
-  // A brace typed in the field opens the menu; the filter takes the keys.
-  await title.focus();
-  await page.keyboard.press('End');
-  await page.keyboard.type('{');
-  const menu = frame.getByRole('menu', { name: 'Values' });
+  // Alt+Down on the box opens its menu; the filter takes the keys.
+  await description.focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  const menu = linkMenuOf(frame);
   await expect(menu).toBeVisible();
-  // The menu covers the field in a short window: its filter names it.
-  const filter = frame.getByRole('textbox', { name: `Insert into ${UI.field.title}` });
+  const filter = menu.getByRole('textbox', { name: 'Find a field' });
   await expect(filter).toBeFocused();
   await page.keyboard.type('Desc');
-  // The arrows move through the two values named Description, the type's
-  // field first; the active one stays in sight.
+  // The arrows move through the matches, the type's fields first; the active
+  // one stays in sight.
   const active = () =>
     filter.evaluate((element) => {
       const id = element.getAttribute('aria-activedescendant');
       return id ? (element.ownerDocument.getElementById(id)?.firstElementChild?.textContent ?? '') : '';
     });
-  await expect.poll(active).toBe('Description (field.body)');
+  await expect.poll(active).toBe('Description');
   await page.keyboard.press('ArrowDown');
-  await expect.poll(active).toBe('Description (description)');
-  await expect(menu.getByRole('menuitem', { name: /^Description \(description\)/ })).toBeInViewport();
+  await expect.poll(active).toBe('Description › Summary');
+  await expect(menu.getByRole('option', { name: /^Description › Summary/ })).toBeInViewport();
 
-  // The 6 KB body is two lines at rest, the whole of it on hover; its name
-  // carries the label and at most 150 characters of it.
-  const entry = menu.getByRole('menuitem', { name: /^Description \(field\.body\)/ });
-  await expect(entry).toHaveAccessibleName(/^Description \(field\.body\) ?.{0,150}…$/su);
+  // The 6 KB body is read as a short excerpt; its name carries the label and
+  // at most 150 characters.
+  const entry = menu.getByRole('option', { name: /^Description, / }).first();
+  await expect(entry).toHaveAccessibleName(/^Description, .{0,150}…?$/su);
   const body = entry.locator('span').last();
   await expect(body).toHaveAttribute('title', /^Each work is introduced by the musicians who play it/);
-  expect(((await body.getAttribute('title')) ?? '').length).toBeGreaterThan(5000);
-  expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight + 1)).toBe(true);
+  expect(((await body.getAttribute('title')) ?? '').length).toBeLessThanOrEqual(160);
   expect(await body.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(2 * 16 + 1);
 
   // The menu stays inside the dialog's frame, in a window 350 px high.
-  const box = (await page.locator(SEO_IFRAME).boundingBox())!;
+  const frameBox = (await page.locator(SEO_IFRAME).boundingBox())!;
   const popover = (await frame.locator('.seo-menu').boundingBox())!;
-  expect(popover.y).toBeGreaterThanOrEqual(box.y - 1);
-  expect(popover.y + popover.height).toBeLessThanOrEqual(box.y + box.height + 1);
-  await page.screenshot({ path: test.info().outputPath('value-menu-1440x350.png') });
+  expect(popover.y).toBeGreaterThanOrEqual(frameBox.y - 1);
+  expect(popover.y + popover.height).toBeLessThanOrEqual(frameBox.y + frameBox.height + 1);
+  await page.screenshot({ path: test.info().outputPath('link-menu-1440x350.png') });
 
   // No serious accessibility violation with the menu open.
   const { violations } = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
@@ -379,168 +561,187 @@ test('on a long event the value menu works by keyboard in a short window, long v
       .map(({ id, nodes }) => `${id}: ${nodes.map(({ target }) => target.join(' ')).join(', ')}`),
   ).toEqual([]);
 
-  // Escape leaves the menu and the brace with it: back in the field, which
-  // holds what it held, and nothing is written.
+  // Escape leaves the menu: back on the box, which follows its default, and
+  // nothing is written.
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
-  await expect(title).toBeFocused();
-  await expect(title).toHaveValue(stored);
+  await expect(description).toBeFocused();
+  await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
   await expect(status(frame)).toContainText(UI.footer.draftTemplate);
 });
 
-test('in a short window the value menu shows its values', async ({ drupal, page }) => {
+test('in a short window the link menu shows its values', async ({ drupal, page }) => {
   await drupal.login(USERS.editor);
   await openTemplate(page, event.id, 'event');
   const frame = await openSeo(page);
-  const description = textbox(frame, UI.field.description);
+  const description = box(frame, UI.field.description);
   await expect(description).toBeEnabled();
-  const menu = frame.getByRole('menu', { name: 'Values' });
+  const menu = linkMenuOf(frame);
+  const frameHeight = () => frame.locator('body').evaluate(() => window.innerHeight);
   for (const height of [350, 420]) {
     await page.setViewportSize({ width: 1440, height });
+    expect(await settled(frame)).toBeLessThanOrEqual(420);
     await tab(frame, UI.tab.search).click();
-    // A brace typed in the description.
     await description.focus();
-    await page.keyboard.press('ControlOrMeta+End');
-    await page.keyboard.type('{');
+    await page.keyboard.press('Alt+ArrowDown');
     await expect(menu).toBeVisible();
     await expectMenuFits(page, frame);
-    // The menu covers the field: it names the field it fills.
-    await expect(frame.getByRole('dialog', { name: `Insert a value into ${UI.field.description}` })).toBeVisible();
-    // Its filter says so, on screen and to assistive technology alike.
-    await expect(frame.getByRole('textbox', { name: `Insert into ${UI.field.description}` })).toHaveAttribute(
-      'placeholder',
-      `Insert into ${UI.field.description}`,
-    );
-    await page.screenshot({ path: test.info().outputPath(`value-menu-description-1440x${height}.png`) });
+    // Its filter says what it finds, on screen and to assistive technology.
+    await expect(menu.getByRole('textbox', { name: 'Find a field' })).toHaveAttribute('placeholder', 'Find a field');
+    await page.screenshot({ path: test.info().outputPath(`link-menu-description-1440x${height}.png`) });
     // The arrows never leave the active entry under the fade.
     for (let step = 0; step < 3; step++) {
       await page.keyboard.press('ArrowDown');
       await expectActiveClear(frame);
     }
-    await page.screenshot({ path: test.info().outputPath(`value-menu-arrows-1440x${height}.png`) });
+    await page.screenshot({ path: test.info().outputPath(`link-menu-arrows-1440x${height}.png`) });
     await page.keyboard.press('Escape');
     await expect(menu).toBeHidden();
-    await expect(description).toHaveValue('');
-    // Keys typed at once after a choice, or after Escape, reach the field.
-    await page.keyboard.type('{Perfo');
+    await expect(description).toBeFocused();
+
+    // A link chosen by keyboard: the box takes the next keys at once.
+    // Backspace unlinks into an empty input; Reset returns to the default.
+    await page.keyboard.press('Alt+ArrowDown');
+    await page.keyboard.type('Perfo');
     await page.keyboard.press('Enter');
-    await page.keyboard.type(' AFTER');
-    await expect(description).toHaveValue('{Performers} AFTER');
-    await page.keyboard.press('ControlOrMeta+a');
+    await expect(menu).toBeHidden();
+    await expect(description).toBeFocused();
+    await expect(description).toHaveAccessibleDescription(/^Linked to Event › Performers › /);
     await page.keyboard.press('Backspace');
+    await expect(textbox(frame, UI.field.description)).toBeFocused();
+    await expect(textbox(frame, UI.field.description)).toHaveValue('');
+    // In the empty input, `{` opens the menu; Escape, then a key at once,
+    // types it.
     await page.keyboard.type('{');
     await expect(menu).toBeVisible();
     await page.keyboard.press('Escape');
     await page.keyboard.type('x');
-    await expect(description).toHaveValue('x');
+    await expect(textbox(frame, UI.field.description)).toHaveValue('x');
     await page.keyboard.press('Backspace');
-    await expect(description).toHaveValue('');
-    // The insert button of a field in the right-hand column.
+    await textbox(frame, UI.field.description).blur();
+    await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
+
+    // The link button of a field in the right-hand column. A double-click
+    // opens the menu and links nothing: an entry under a still pointer
+    // neither takes the second click nor becomes the active one.
     await tab(frame, UI.tab.schema).click();
-    await frame
-      .locator('.seo-field[data-path="schema.props.location_address_streetAddress"]')
-      .getByRole('button', { name: UI.action.insert })
-      .click();
-    await expect(menu).toBeVisible();
-    await expectMenuFits(page, frame);
-    await page.screenshot({ path: test.info().outputPath(`value-menu-street-1440x${height}.png`) });
-    await page.keyboard.press('Escape');
-    await expect(menu).toBeHidden();
-    // A double-click opens the menu and inserts nothing: the menu leaves the
-    // field's buttons uncovered, and an entry under a still pointer neither
-    // takes the second click nor becomes the active one.
     const street = frame.locator('.seo-field[data-path="schema.props.location_address_streetAddress"]');
-    await street.getByRole('button', { name: UI.action.insert }).dblclick();
-    await expect(menu).toBeVisible();
-    await page.waitForTimeout(300);
-    await expect(street.getByRole('textbox')).toHaveValue('');
-    await expect(menu.getByRole('menuitem').first()).toHaveAttribute('data-active', 'true');
-    await page.screenshot({ path: test.info().outputPath(`value-menu-street-dblclick-1440x${height}.png`) });
+    await street.locator('[data-link]').click();
+    await expect(menu.or(frame.getByRole('dialog', { name: 'Link Street address' }))).toBeVisible();
+    await expectMenuFits(page, frame);
+    await page.screenshot({ path: test.info().outputPath(`link-menu-street-1440x${height}.png`) });
     await page.keyboard.press('Escape');
-    await expect(menu).toBeHidden();
-    // The same on Venue, in the left-hand column, whose insert button the
-    // menu covers: the second click lands on the menu, which takes nothing,
-    // and the field holds what it held.
-    const left = frame.locator('.seo-field[data-path="schema.props.location_name"]');
-    const insert = left.getByRole('button', { name: UI.action.insert });
-    const held = await left.getByRole('textbox').inputValue();
-    const under = await insert.boundingBox();
-    await insert.dblclick();
-    await expect(menu).toBeVisible();
-    const over = (await frame.locator('.seo-menu').boundingBox())!;
-    expect(under!.x + under!.width / 2).toBeGreaterThan(over.x);
-    expect(under!.x + under!.width / 2).toBeLessThan(over.x + over.width);
+    await expect(frame.locator('.seo-menu')).toHaveCount(0);
+    const said = street.locator('.seo-linked > span[hidden]');
+    const linkedTo = await said.textContent();
+    await street.locator('[data-link]').dblclick();
+    await expect(frame.locator('.seo-menu')).toBeVisible();
     await page.waitForTimeout(300);
-    await expect(left.getByRole('textbox')).toHaveValue(held);
-    await expect(menu.getByRole('menuitem').first()).toHaveAttribute('data-active', 'true');
-    await page.screenshot({ path: test.info().outputPath(`value-menu-left-dblclick-1440x${height}.png`) });
+    await expect(said).toHaveText(linkedTo!);
+    await expect(frame.locator('.seo-menu [data-active]')).toHaveCount(1);
+    await page.screenshot({ path: test.info().outputPath(`link-menu-street-dblclick-1440x${height}.png`) });
     await page.keyboard.press('Escape');
-    await expect(menu).toBeHidden();
+    await expect(frame.locator('.seo-menu')).toHaveCount(0);
+    // The same on the box, as two presses of a still pointer: the menu that
+    // opens over it takes neither.
+    const streetBox = (await box(frame, 'Street address').boundingBox())!;
+    const [x, y] = [streetBox.x + streetBox.width / 2, streetBox.y + streetBox.height / 2];
+    await page.mouse.click(x, y);
+    await page.mouse.click(x, y);
+    await expect(frame.locator('.seo-menu')).toBeVisible();
+    await page.waitForTimeout(300);
+    await expect(said).toHaveText(linkedTo!);
+    await expect(frame.locator('.seo-menu [data-active]')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(frame.locator('.seo-menu')).toHaveCount(0);
   }
 
+  // In a window 1440 x 900: the filter says "Find a field" and typing does
+  // not move it; "Perfo" finds the performer's name first, Enter links it
+  // and Backspace at once unlinks. From the title's box, Escape and at once
+  // Alt+Down opens the menu again.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect(await settled(frame)).toBeGreaterThan(420);
+  await tab(frame, UI.tab.search).click();
+  await description.focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  const finder = menu.getByRole('textbox', { name: 'Find a field' });
+  await expect(finder).toHaveAttribute('placeholder', 'Find a field');
+  const filterTop = async () => (await finder.boundingBox())!.y;
+  // Once it has grown in: its entrance scales it.
+  await frame.locator('.seo-menu').evaluate((element) => Promise.all(element.getAnimations({ subtree: true }).map((one) => one.finished)));
+  const before = await filterTop();
+  await page.keyboard.type('Perfo');
+  await expect(menu.getByRole('option').first()).toHaveAccessibleName(/^Performers › Title, /);
+  expect(await filterTop()).toBe(before);
+  await page.keyboard.press('Enter');
+  await expect(description).toHaveAccessibleDescription(/^Linked to Event › Performers › Title\. /);
+  await page.keyboard.press('Backspace');
+  await expect(textbox(frame, UI.field.description)).toBeFocused();
+  await textbox(frame, UI.field.description).blur();
+  // Enter on the box opens its menu; Escape, then Backspace at once, reaches
+  // the box: an empty input in its place.
+  await description.focus();
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Backspace');
+  await expect(textbox(frame, UI.field.description)).toBeFocused();
+  await expect(textbox(frame, UI.field.description)).toHaveValue('');
+  await textbox(frame, UI.field.description).blur();
+  const titleBox = box(frame, UI.field.title);
+  await titleBox.click();
+  const titleMenu = frame.getByRole('dialog', { name: `Link ${UI.field.title}` });
+  await expect(titleMenu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(titleBox).toBeFocused();
+  await page.keyboard.press('Alt+ArrowDown');
+  await expect(titleMenu).toBeVisible();
+  await expect(titleMenu.getByRole('textbox', { name: 'Find a field' })).toBeFocused();
+  await page.keyboard.press('Escape');
+  // Opened again by Enter after an Escape, the menu takes the keys: the
+  // filter has focus and the box keeps its value.
+  await page.keyboard.press('Enter');
+  await expect(titleMenu.getByRole('textbox', { name: 'Find a field' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.type('s');
+  await expect(titleMenu.getByRole('textbox', { name: 'Find a field' })).toHaveValue('s');
+  await page.keyboard.press('Escape');
+  await expect(titleBox).toHaveAccessibleDescription(/^Follows the default: each event's title\./);
+
   // The menu's place is chosen once: a frame resized across 420 px while it
-  // is open closes it, back in the field, which holds what it held.
+  // is open closes it, back on the box, which holds what it held.
   await tab(frame, UI.tab.search).click();
   for (const [from, to] of [
     [350, 900],
     [900, 350],
   ]) {
     await page.setViewportSize({ width: 1440, height: from });
+    expect((await settled(frame)) <= 420).toBe(from <= 420);
     await description.focus();
-    await page.keyboard.type('{');
+    await page.keyboard.press('Alt+ArrowDown');
     await expect(menu).toBeVisible();
     await page.setViewportSize({ width: 1440, height: to });
-    // At once, with no exit animation left where it no longer fits.
+    // At once once the frame has crossed 420 px, with no exit animation
+    // left where it no longer fits.
+    await expect.poll(async () => (await frameHeight()) <= 420).toBe(to <= 420);
     await expect(menu).toBeHidden({ timeout: 1000 });
     await expect(description).toBeFocused();
-    await expect(description).toHaveValue('');
+    await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
   }
 
-  // A value chosen by keyboard hands the next keys to the field at once.
+  // From the link button of a field never focused, Escape hands focus back
+  // to the button.
   await page.setViewportSize({ width: 1440, height: 900 });
-  await tab(frame, UI.tab.search).click();
-
-  // From the insert button of a field never focused, Escape hands the next
-  // key to the field at its end, where a value would have gone.
-  const titleField = textbox(frame, UI.field.title);
-  const titleHeld = await titleField.inputValue();
   await frame.locator('.seo-scope').focus();
-  await button(frame, UI.action.insert).first().click();
+  const opener = button(frame, UI.action.changeLink(UI.field.description));
+  await opener.click();
   await expect(menu).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
-  await expect(titleField).toBeFocused();
-  await page.keyboard.type('x');
-  await expect(titleField).toHaveValue(`${titleHeld}x`);
-  await page.keyboard.press('Backspace');
-  await expect(titleField).toHaveValue(titleHeld);
-
-  await description.focus();
-  await page.keyboard.type('{Perfo');
-  await page.keyboard.press('Enter');
-  await page.keyboard.type(' AFTER');
-  await expect(description).toHaveValue('{Performers} AFTER');
-  await expect(description).toBeFocused();
-  // Back to what the template inherits.
-  await button(frame, `Reset ${UI.field.description}`).click();
-  await expect(description).toHaveValue('');
-  await expect(status(frame)).toContainText(UI.footer.draftTemplate, { timeout: 30_000 });
-
-  // By keyboard alone, with the caret never placed (Tab leaves it at the
-  // start), a value from the insert button goes at the end.
-  const title = textbox(frame, UI.field.title);
-  const stored = await title.inputValue();
-  await title.evaluate((element) => (element as HTMLTextAreaElement).setSelectionRange(0, 0));
-  await button(frame, UI.action.insert).first().focus();
-  await page.keyboard.press('Shift+Tab');
-  await expect(title).toBeFocused();
-  await page.keyboard.press('Tab');
-  await page.keyboard.press('Enter');
-  await expect(menu).toBeVisible();
-  await page.keyboard.press('Enter');
-  await expect(menu).toBeHidden();
-  expect(await title.inputValue()).toMatch(new RegExp(`^${stored.replace(/[{}|]/g, '\\$&')} \\{[^}]+\\}$`));
-  await frame.locator('.seo-field[data-path="title"]').screenshot({ path: test.info().outputPath('keyboard-insert-at-end.png') });
+  await expect(opener).toBeFocused();
+  // The last change, unlinking, keeps its Undo on offer; the draft is saved.
+  await expect(status(frame)).toContainText(new RegExp(`${UI.footer.draftTemplate}|^Unlinked`), { timeout: 30_000 });
 });
 
 test('a job posting: its group is named in the menu, its square logo makes a small card everywhere', async ({
@@ -587,9 +788,13 @@ test('a job posting: its group is named in the menu, its square logo makes a sma
   });
   await expect(checksButton.locator('.seo-checks-long')).toBeHidden();
 
-  // A group whose label has a space is named by it.
-  const menu = await insertMenu(frame);
-  await expect(menu.getByRole('group', { name: 'Job posting', exact: true })).toBeVisible();
+  // A group whose label has a space is named by it, on screen and to
+  // assistive technology: its options are told apart from the page's.
+  const menu = await linkMenu(frame);
+  await expect(menu.locator('.seo-menu-group', { hasText: 'Job posting' })).toBeVisible();
+  await expect(menu.getByRole('group', { name: 'Job posting' })).toBeVisible();
+  await expect(menu.getByRole('group', { name: 'Page' }).getByRole('option', { name: /^Description, / })).toHaveCount(1);
+  await expect(menu.getByRole('group', { name: 'Job posting' }).getByRole('option', { name: /^Description, / })).toHaveCount(1);
   const { violations } = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
   expect(
     violations
@@ -651,7 +856,7 @@ test('a job posting: its group is named in the menu, its square logo makes a sma
   expect(cut.every((overflow) => overflow === 'ellipsis')).toBe(true);
   expect(await shownWhole(caption)).toBe(true);
   await caption.screenshot({ path: test.info().outputPath('search-caption-zoom-200.png') });
-  const zoomed = await insertMenu(frame);
+  const zoomed = await linkMenu(frame);
   await expect(frame.locator('.seo-menu-hint')).toBeHidden();
   await page.screenshot({ path: test.info().outputPath('value-menu-zoom-200.png') });
   await page.keyboard.press('Escape');
@@ -664,16 +869,26 @@ test('a job posting: its group is named in the menu, its square logo makes a sma
   expect((await outputRows(frame))['twitter:card']).toBe('summary');
 });
 
-test('Checks on a product say why it is withheld and that its image has no alt text', async ({ drupal, page }) => {
+test('Checks on a product say that its image has no alt text, and its currency is a code', async ({ drupal, page }) => {
   await drupal.login(USERS.editor);
   await openTemplate(page, product.id, 'product');
   const frame = await openSeo(page);
   await expect(frame.getByTestId(TEST_ID.search)).toContainText(`${product.title} | ${SITE_NAME}`);
   await button(frame, UI.tab.checks).click();
   const panel = sheet(frame, 'Checks');
-  // The currency list gives its label, which is not a currency code.
-  await expect(panel.getByText('Add Currency').first()).toBeVisible({ timeout: 60_000 });
-  await expect(panel.getByText('The social image has no alt text').first()).toBeVisible();
+  await expect(panel.getByText('The social image has no alt text').first()).toBeVisible({ timeout: 60_000 });
+  // The currency list gives its key, a currency code: nothing to add.
+  await expect(panel.getByText('Add Currency')).toHaveCount(0);
+  await button(frame, UI.action.back).click();
+  // The inherited social description shows at most three lines at rest, as
+  // the search description does.
+  await tab(frame, UI.tab.social).click();
+  const inherited = frame.getByRole('tabpanel', { name: UI.tab.social }).getByRole('combobox', { name: UI.field.socialDescription, exact: true });
+  const [height, line] = await inherited.locator('.seo-linked-value').evaluate((element) => [
+    element.getBoundingClientRect().height,
+    parseFloat(getComputedStyle(element).lineHeight),
+  ]);
+  expect(height).toBeLessThanOrEqual(3 * line + 1);
 });
 
 test('a template that was never published previews its values; visitors keep core head', async ({
@@ -713,7 +928,8 @@ test('a node that is not published is named as such in the caption', async ({ dr
     .poll(() =>
       caption.evaluate((element) =>
         [...element.children]
-          .filter((part) => getComputedStyle(part).display !== 'none' && part.scrollWidth > part.clientWidth)
+          // Subpixel rounding may leave 1 px; the caption allows as much.
+          .filter((part) => getComputedStyle(part).display !== 'none' && part.scrollWidth > part.clientWidth + 1)
           .map((part) => part.tagName)
           .filter((tag) => tag !== 'EM'),
       ),
@@ -722,7 +938,7 @@ test('a node that is not published is named as such in the caption', async ({ dr
   await caption.screenshot({ path: test.info().outputPath('caption-unpublished-468.png') });
   await expect(frame.getByRole('button', { name: 'About this preview' })).toHaveAttribute(
     'aria-description',
-    /^This event isn't published yet\. Values that only editors can see are left out\. /,
+    /^This event isn't published yet\. Its fields are read with your access until visitors can see it\. /,
   );
   await expect(frame.locator('.seo-stage-cap-l', { hasText: 'Link preview' })).toContainText('Not published yet');
   // A click or a tap shows the sentence; a second one hides it, however
@@ -758,11 +974,11 @@ test('a node that is not published is named as such in the caption', async ({ dr
   await expect(tip).toBeVisible();
   // (Radix ignores the moves after leaving a tip that may be on their way
   // to the tip's text; a hand makes many.)
-  const insert = button(frame, UI.action.insert).first();
+  const linkButton = frame.locator('[data-link]').first();
   let moves = 0;
   await expect(async () => {
-    await insert.hover({ position: { x: 2 + (moves++ % 8), y: 6 } });
-    await expect(frame.getByRole('tooltip', { name: new RegExp(`^${UI.action.insert}`) })).toBeVisible({
+    await linkButton.hover({ position: { x: 2 + (moves++ % 8), y: 6 } });
+    await expect(frame.getByRole('tooltip', { name: /^(Link|Change the link for) / })).toBeVisible({
       timeout: 1000,
     });
   }).toPass();
@@ -802,23 +1018,38 @@ test('text takes its own direction: right to left in previews and inputs, labels
   expect(await direction(description)).toBe('rtl');
   await frame.getByTestId(TEST_ID.search).screenshot({ path: test.info().outputPath('search-preview-rtl.png') });
 
-  // A Hebrew value that starts with a digit is laid out right to left; the
-  // field's label is the dialog's own words.
+  // A linked value at rest takes its own direction too: the Arabic
+  // product's description, in its box.
+  const linkedValue = box(frame, UI.field.description).locator('.seo-linked-value');
+  await expect(linkedValue).toHaveAttribute('dir', 'auto');
+  expect(await direction(linkedValue)).toBe('rtl');
+  // So do the link menu's values.
+  await box(frame, UI.field.description).click();
+  const entry = linkMenuOf(frame).locator('.seo-menu-item[data-active] > span:last-child');
+  await expect(entry).toHaveAttribute('dir', 'auto');
+  await page.keyboard.press('Escape');
+
+  // The recipe's description is linked: its box keeps the value's
+  // direction; a key on it starts typed text, and a Hebrew value that starts
+  // with a digit is laid out right to left. The label is the dialog's own.
   await openTemplate(page, recipeRtl.id, 'recipe');
   frame = await openSeo(page);
+  const recipe = box(frame, UI.field.description);
+  expect(await direction(recipe.locator('.seo-linked-value'))).toBe('rtl');
+  await recipe.press('4');
   const input = textbox(frame, UI.field.description);
-  await input.fill('4 ביצים ברוטב');
+  await expect(input).toHaveValue('4');
+  await page.keyboard.type(' ביצים ברוטב');
   expect(await direction(input)).toBe('rtl');
   expect(await direction(frame.locator('label', { hasText: /^Description$/ }).first())).toBe('ltr');
   await frame.locator('body').screenshot({ path: test.info().outputPath('input-rtl.png') });
 
-  // An empty input takes the direction of the value it inherits: the social
+  // A default box takes the direction of the value it shows: the social
   // title of an Arabic name.
   await openTemplate(page, personOmar.id, 'person');
   frame = await openSeo(page);
   await tab(frame, UI.tab.social).click();
-  const social = textbox(frame, UI.field.socialTitle);
-  await expect(social).toHaveValue('');
+  const social = box(frame, UI.field.socialTitle).locator('.seo-linked-value');
   expect(await direction(social)).toBe('rtl');
   expect(await direction(frame.locator('.seo-field[data-path="social.title"] label').first())).toBe('ltr');
 });
@@ -830,40 +1061,41 @@ test('a type with no content shows its values read-only, until there is one to p
   const frame = await openSeo(page);
   await expect(button(frame, 'Every Announcement')).toBeVisible();
   await expect(frame.getByText(UI.template.nothingToPreview)).toBeVisible();
-  // The stored title, with its values as labels, and nothing to edit.
-  await expect(textbox(frame, UI.field.title)).toHaveValue(announcement.title);
-  await expect(textbox(frame, UI.field.title)).toBeDisabled();
+  // The stored ending, as text: no menu, no link, nothing offered to edit.
+  await expect(frame.locator('.seo-ending').first()).toContainText(announcement.ending);
+  await expect(button(frame, UI.field.titleEnding)).toHaveCount(0);
+  await expect(button(frame, UI.action.changeLink(UI.field.description))).toHaveCount(0);
   await expect(frame.getByTestId(TEST_ID.search)).toHaveCount(0);
   await expect(button(frame, UI.tab.checks)).toHaveCount(0);
   await expect(button(frame, UI.action.output)).toHaveCount(0);
   await expect(frame.getByText(UI.site.hint)).toHaveCount(0);
   await expect(frame.getByText(UI.site.otherTemplate)).toHaveCount(0);
-  // Nothing is filled in, so no value is flagged as empty; a field that
-  // inherits says what it inherits.
-  await expect(frame.locator('.seo-chip')).not.toHaveCount(0);
-  await expect(frame.locator('.seo-chip[data-empty]')).toHaveCount(0);
-  const description = frame.locator('.seo-field[data-path="description"] .seo-inherited');
-  await expect(description).toHaveText('{Description}');
-  // Also to assistive technology, which cannot focus the field.
-  await expect(textbox(frame, UI.field.description)).toHaveAttribute('aria-description', /: Description\.$/);
+  // A value that follows its default says which, and that there is no
+  // announcement to fill it from.
+  const atRest = (label: string) => frame.getByRole('group', { name: label, exact: true });
+  await expect(atRest(UI.field.description)).toHaveAccessibleDescription(
+    /^Follows the default: each announcement's description\. No announcement to preview\./,
+  );
+  await expect(atRest(UI.field.description)).toContainText('Default');
   // Settings are values at rest: no switch or menu that does not open.
   await expect(frame.getByRole('switch')).toHaveCount(0);
   await expect(frame.locator('.seo-row[data-path="robots.noindex"]')).toContainText('On');
   await button(frame, 'Advanced').click();
+  // No select, and no box that opens a menu.
   await expect(frame.getByRole('combobox')).toHaveCount(0);
   await expect(frame.locator('.seo-row[data-path="robots.nosnippet"]')).toContainText('Allowed');
+  // The social texts follow their defaults, with nothing to fill them from.
   await tab(frame, UI.tab.social).click();
-  await expect(frame.locator('.seo-field[data-path="social.title"] .seo-inherited')).toHaveText(
-    'Same as the search title',
-  );
-  await expect(textbox(frame, UI.field.socialTitle)).toHaveAttribute('aria-description', 'Same as the search title.');
-  // No type, and nothing to choose: "None", without the invitation.
+  await expect(atRest(UI.field.socialTitle)).toHaveAccessibleDescription(/^Follows the default: each announcement's title\. No announcement to preview\./);
+  await expect(atRest(UI.field.socialDescription)).toHaveAccessibleDescription(/^Follows the default: the description\. No announcement to preview\./);
+  await expect(atRest(UI.field.socialDescription)).toContainText('No announcement to preview');
+  // No kind of its own: what is output, a web page, with no sheet to open.
   await tab(frame, UI.tab.schema).click();
-  await expect(frame.getByRole('combobox', { name: 'Type', exact: true })).toHaveText('None');
-  await expect(frame.getByText(/^Helps search engines/)).toHaveCount(0);
-  // Custom JSON-LD is off and opens no empty editor.
-  await expect(frame.getByText('Custom JSON-LD')).toBeVisible();
-  await expect(button(frame, 'Custom JSON-LD')).toHaveCount(0);
+  await expect(frame.locator('.seo-field[data-path="schema.type"]')).toContainText('A web page');
+  await expect(button(frame, UI.schema.kind)).toHaveCount(0);
+  // Your own JSON-LD is not offered, and opens no empty editor.
+  await expect(button(frame, UI.schema.ownJsonLd)).toHaveCount(0);
+
   await tab(frame, UI.tab.search).click();
   // The scope menu names the state as the notice does.
   await button(frame, 'Every Announcement').click();
@@ -891,7 +1123,7 @@ test('a type with no content shows its values read-only, until there is one to p
     dispatchEvent(new PopStateEvent('popstate', { state: {} }));
   }, `/canvas/template/node/announcement/full/${id}`);
   await expect(frame.getByText(/^Previewing/)).toContainText('Doors open early');
-  await expect(textbox(frame, UI.field.title)).toBeEnabled();
+  await expect(box(frame, UI.field.description)).not.toHaveAccessibleDescription(/No announcement to preview/);
   await expect(frame.getByText(UI.template.nothingToPreview)).toHaveCount(0);
 });
 
@@ -928,4 +1160,55 @@ test('publishing the Event template makes its draft live for every event', async
   for (const node of [event, eventHidden]) {
     expect((await readHead(visitor, node.path)).titles).toEqual([`${node.title} | ${ending.draft}`]);
   }
+});
+
+test('a link to a field that no longer exists says so in its box, under it and in Checks', async ({ drupal, page }) => {
+  await drupal.login(USERS.editor);
+  await openTemplate(page, articleMixed.id, 'article');
+  const frame = await openSeo(page);
+  const description = box(frame, UI.field.description);
+  const field = frame.locator('.seo-field[data-path="description"]');
+
+  // The box names the field it was linked to, says why it gives nothing, and
+  // shows its ×; under it, what is used instead, and a way to link again.
+  await expect(description.locator('.seo-linked-tag')).toHaveText(articleMixed.gone);
+  await expect(description.locator('.seo-linked-value')).toHaveText('No longer exists');
+  await expect(button(frame, UI.action.unlink(UI.field.description))).toBeVisible();
+  await expect(field.locator('.seo-guide')).toContainText(`${articleMixed.gone} no longer exists, so each article uses its default description.`);
+  await expect(field.locator('.seo-guide').getByRole('button', { name: 'Link another field' })).toBeVisible();
+  // One Tab stop for the field: the box. Its link button is for the pointer.
+  await expect(button(frame, UI.action.changeLink(UI.field.description))).toHaveAttribute('tabindex', '-1');
+  await page.screenshot({ path: test.info().outputPath('broken-box.png') });
+
+  // Checks lists it to fix; its action puts focus in the field's link menu.
+  await button(frame, UI.tab.checks).click();
+  const checks = sheet(frame, 'Checks');
+  await expect(checks.getByText('Link the description again')).toBeVisible({ timeout: 60_000 });
+  await checks.getByRole('button', { name: 'Link another field' }).click();
+  const menu = linkMenuOf(frame);
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('textbox', { name: 'Find a field' })).toBeFocused();
+
+  // Linked to Summary: said at once; this article has none, and the field
+  // says what is used instead.
+  await page.keyboard.type('Summary');
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeHidden();
+  await expect(frame.getByRole('status').filter({ hasText: 'Description linked to Summary.' })).toHaveCount(1);
+  await expect(description.locator('.seo-linked-tag')).toHaveText('Summary');
+  await expect(description.locator('.seo-linked-value')).toHaveText('Empty for this article');
+  await expect(field.locator('.seo-guide')).toHaveText('This article has no Summary, so its Body summary, else the start of its Body is used.');
+  await expect(status(frame)).toContainText(new RegExp(`${UI.footer.draftTemplate}|^Linked to Summary`), { timeout: 30_000 });
+
+  // Undo goes back to the stored link: the server takes it, and the box
+  // names the field again.
+  const write = page.waitForResponse((response) => response.url().includes('/canvas-metatag/api/draft/content_template/') && response.request().method() === 'PUT');
+  await button(frame, UI.action.undo).click();
+  expect((await write).status()).toBe(200);
+  await expect(description.locator('.seo-linked-tag')).toHaveText(articleMixed.gone);
+  await expect(description.locator('.seo-linked-value')).toHaveText('No longer exists');
+  // The draft is the stored template again, and the session keeps nothing to
+  // send again.
+  await expect(status(frame)).toContainText('Matches the published template', { timeout: 30_000 });
+  expect(await frame.locator('body').evaluate(() => Object.keys(sessionStorage).filter((key) => key.startsWith('canvas_metatag:pending:')))).toEqual([]);
 });

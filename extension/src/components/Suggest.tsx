@@ -12,13 +12,12 @@ import { ApiError } from '../api';
 import { useApp } from '../App';
 import {
   AI_SENDS,
-  REGISTRY,
   aiError,
   article,
-  dateText,
-  inherited,
+  kindOfType,
   meter,
-  seedTitle,
+  proposalLossText,
+  removed,
   texts,
 } from '../model';
 import type {
@@ -103,12 +102,15 @@ export function SuggestButton(props: {
 /** What a request describes: the page as Checks already read it. */
 function usePage() {
   const { state, view } = useApp();
+  const end = view?.texts.title_end ?? '';
   return {
     langcode: state.server!.langcode,
     page: {
-      title: view?.values.title ?? '',
-      site: view?.values.site ?? '',
+      title: view?.facts.title?.value ?? '',
+      site: view?.facts.site?.value ?? '',
       text: (state.facts?.text ?? '').slice(0, 12000),
+      // What is added after the title's main part: its length counts.
+      ending: end ? `${state.server!.separator} ${end}` : '',
     },
   };
 }
@@ -238,29 +240,30 @@ export function TextSuggest(props: {
   const [refining, setRefining] = useState(false);
   const calls = useRef(0);
   const list = useRef<HTMLDivElement>(null);
-  const pattern = String(inherited(server, 'target', 'title') ?? '');
-
   /** The four texts as they would read with a variant applied. */
   const applied = (variant: Partial<Record<SuggestField, string>>): Texts =>
     texts(
       {
         ...view.effective,
-        ...(variant.title !== undefined
-          ? { title: seedTitle(pattern, variant.title) }
-          : {}),
+        // A title variant is the main part: the ending stays.
+        ...(variant.title !== undefined ? { title: { text: variant.title } } : {}),
         social: {
           ...view.effective.social,
           ...(variant['social.title'] !== undefined
-            ? { title: variant['social.title'] }
+            ? { title: { text: variant['social.title'] } }
             : {}),
           ...(variant['social.description'] !== undefined
-            ? { description: variant['social.description'] }
+            ? { description: { text: variant['social.description'] } }
             : {}),
         },
       },
-      variant.description !== undefined
-        ? { ...view.values, description: variant.description }
-        : view.values,
+      // A page's description is Canvas's own: its Description fact.
+      (value) =>
+        variant.description !== undefined && 'fact' in value && value.fact === 'description'
+          ? variant.description
+          : view.text(value),
+      server.separator,
+      server.site.values.title_end,
     );
 
   const ask = () => {
@@ -276,7 +279,11 @@ export function TextSuggest(props: {
         current: Object.fromEntries(
           props.fields.map((field) => [
             field,
-            view.texts[field.replace('.', '_') as keyof Texts],
+            // The title's ending is sent on its own (page.ending): the
+            // current title is its main part.
+            field === 'title'
+              ? view.texts.title_main
+              : view.texts[field.replace('.', '_') as keyof Texts],
           ]),
         ),
         hint: hint.trim(),
@@ -494,8 +501,8 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
   const [ticked, setTicked] = useState<string[]>([]);
   const [message, setMessage] = useState<Failure>(aiError(null));
   // Another type drops the details of the current one: asked first, as a
-  // change of type by hand is.
-  const [dropping, setDropping] = useState(0);
+  // change of type by hand is. The details it removes, named.
+  const [dropping, setDropping] = useState<string[]>([]);
   const calls = useRef(0);
 
   const ask = () => {
@@ -536,13 +543,25 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
     }
   }, [phase]);
 
-  const type = proposal ? REGISTRY[proposal.type] : undefined;
+  const server = state.server!;
+  const registry = server.registry;
+  const type = proposal ? registry[proposal.type] : undefined;
   const props_ = type?.props ?? [];
-  const keys = Object.keys(proposal?.props ?? {});
+  // Only what was found on the page is offered; the rest is counted.
+  const keys = Object.keys(proposal?.props ?? {}).filter((key) => !proposal?.unverified.includes(key));
+  const guesses = proposal?.unverified.length ?? 0;
+  // Facts the kind needs that are for people to fill in, not yet set.
+  const own = state.edits.target.schema?.props ?? {};
+  const yours = props_.filter(
+    (prop) => (prop.level === 'required' || type?.main?.includes(prop.key)) && (prop.kind !== 'text' || prop.ai === false) && prop.kind !== 'image' && own[prop.key] === undefined,
+  );
   const nothing = phase === 'ready' && (!type || !type.primary_type);
+  const kindName = (id: string) => {
+    const entry = registry[id];
+    return entry?.kind?.name ?? (entry ? `${article(entry.label)} ${entry.label.toLowerCase()}` : 'a web page');
+  };
 
-  const current =
-    REGISTRY[view?.effective.schema?.type ?? 'WebPage'] ?? REGISTRY.WebPage;
+  const currentName = kindName(kindOfType(registry, view?.effective.schema?.type));
   const use = (confirmed: boolean) => {
     if (!proposal || !type) {
       return;
@@ -553,10 +572,9 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
         props_.some((prop) => prop.key === key),
       ),
     );
-    const dropped =
-      Object.keys(schema.props ?? {}).length - Object.keys(kept).length;
-    if (dropped > 0 && !confirmed) {
-      setDropping(dropped);
+    const lost = removed(server, state.edits.target, proposal.type, server.ui);
+    if (lost.length > 0 && !confirmed) {
+      setDropping(lost);
       return;
     }
     const values: SeoValues = {
@@ -567,7 +585,7 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
         props: {
           ...kept,
           ...Object.fromEntries(
-            ticked.map((key) => [key, proposal.props[key]]),
+            ticked.map((key) => [key, { text: proposal.props[key] }]),
           ),
         },
       },
@@ -607,7 +625,7 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
       {nothing && (
         <>
           <p className="seo-tray-message">
-            This already looks right: {type?.label ?? 'Web page'}.
+            This already looks right: {type?.kind?.label ?? type?.label ?? 'A web page'}.
           </p>
           <div className="seo-tray-foot">
             <Btn variant="soft" onClick={props.onClose}>
@@ -618,9 +636,7 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
       )}
       {phase === 'ready' && proposal && type && !nothing && (
         <div className="seo-tray-proposal" ref={box}>
-          <p className="seo-tray-message">
-            This looks like {article(type.label)} {type.label}.
-          </p>
+          <p className="seo-tray-message">This looks like {kindName(proposal.type)}.</p>
           <CheckboxGroup.Root
             size="2"
             value={ticked}
@@ -634,33 +650,40 @@ export function SchemaSuggest(props: { opener: string; onClose(): void }) {
                 <CheckboxGroup.Item key={key} value={key}>
                   <span className="seo-proposal">
                     <b>{prop?.label ?? key}</b>
-                    <span lang={request.langcode}>
-                      {prop?.kind === 'date' ? dateText(value) : value}
-                    </span>
-                    {proposal.unverified.includes(key) && (
-                      <small>
-                        {prop?.kind === 'date'
-                          ? "Dates can't be checked against the page."
-                          : 'Not found on the page. Check before using.'}
-                      </small>
-                    )}
+                    <span lang={request.langcode}>{value}</span>
                   </span>
                 </CheckboxGroup.Item>
               );
             })}
           </CheckboxGroup.Root>
-          {dropping > 0 && (
+          {yours.length > 0 && (
+            <>
+              <ul className="seo-proposal-yours">
+                {yours.map((prop) => (
+                  <li key={prop.key}>
+                    <b>{prop.label}</b> · Add it yourself
+                  </li>
+                ))}
+              </ul>
+              <p className="seo-tray-note">AI doesn't fill in dates, prices or authors.</p>
+            </>
+          )}
+          {guesses > 0 && (
+            <p className="seo-tray-note">
+              {guesses === 1 ? "1 more guess wasn't found on the page." : `${guesses} more guesses weren't found on the page.`}
+            </p>
+          )}
+          {dropping.length > 0 && (
             <p className="seo-tray-note" data-tone="improve" role="alert">
-              Using this removes {dropping} {current.label}{' '}
-              {dropping === 1 ? 'detail' : 'details'}.
+              {proposalLossText(dropping)}
             </p>
           )}
           <div className="seo-tray-foot">
             <span className="seo-bar-actions">
               <Btn variant="soft" onClick={props.onClose}>
-                {dropping > 0 ? `Keep ${current.label}` : 'Dismiss'}
+                {dropping.length > 0 ? `Keep ${currentName}` : 'Dismiss'}
               </Btn>
-              <Btn variant="solid" onClick={() => use(dropping > 0)}>
+              <Btn variant="solid" onClick={() => use(dropping.length > 0)}>
                 Use selected
               </Btn>
             </span>

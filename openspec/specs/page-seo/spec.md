@@ -12,11 +12,12 @@ draft-writes; how they become the head is head-output.
 ### Requirement: Page values are stored with the page, per translation
 
 A Canvas page MUST store its SEO overrides in a translatable, revisionable
-field of its own, with no form widget. A page MAY set a title pattern, a
-canonical address, social title, description and image, robots directives and a
-structured data type with its details and custom JSON-LD. A page MUST NOT store
-a description: its description is Canvas's own description field, saved and
-published with Canvas's Page data (seo-dialog hands it over).
+field of its own, with no form widget. A page MAY set its title's main part as
+typed text, a title ending, a canonical address, social title, description and
+image, robots directives and a structured data type with its details and custom
+JSON-LD. A page MUST NOT store a description: its description is Canvas's own
+description field, saved and published with Canvas's Page data (seo-dialog
+hands it over).
 
 #### Scenario: A description sent for a page
 
@@ -27,6 +28,11 @@ published with Canvas's Page data (seo-dialog hands it over).
 
 - **WHEN** the module is installed on a site with pages and pending Canvas drafts
 - **THEN** no page MUST gain a value or a draft, and existing drafts MUST be unchanged
+
+#### Scenario: Only the page's own words
+
+- **WHEN** an editor types "Pricing plans" as a page's title on a site whose ending is the Site name
+- **THEN** the page MUST store only "Pricing plans" as its main part and no ending
 
 ### Requirement: Empty values are not stored
 
@@ -49,9 +55,10 @@ store nothing at all.
 A canonical MUST be a path that starts with exactly one slash, made of the
 characters an address path and query allow plus non-ASCII letters, or an
 absolute http(s) address with a host and without credentials, at most 2048
-characters, and MUST NOT contain a fragment. Titles and social titles MUST be at
-most 255 characters, social descriptions 1000. Control and bidi override
-characters MUST be removed from text; typed text MUST NOT be otherwise changed.
+characters, and MUST NOT contain a fragment. Titles, title endings and social
+titles MUST be at most 255 characters, social descriptions 1000. Control and
+bidi override characters MUST be removed from text; typed text MUST NOT be
+otherwise changed.
 
 #### Scenario: A fragment in the canonical
 
@@ -62,6 +69,11 @@ characters MUST be removed from text; typed text MUST NOT be otherwise changed.
 
 - **WHEN** the canonical is `//other.example.com/x`
 - **THEN** the system MUST refuse it
+
+#### Scenario: A long ending
+
+- **WHEN** a page's title ending has 256 characters
+- **THEN** the system MUST refuse `title_end`
 
 ### Requirement: Robots directives have fixed values
 
@@ -82,8 +94,8 @@ layer (head-output), with nothing from any content type template.
 
 #### Scenario: An Article template exists
 
-- **WHEN** the Article template sets a title pattern and a Canvas page sets nothing
-- **THEN** the page's title MUST follow the site pattern
+- **WHEN** the Article template sets a title ending and a Canvas page sets nothing
+- **THEN** the page's title MUST end with the site's ending, not the Article template's
 
 ### Requirement: Values go live when the page is published
 
@@ -138,9 +150,10 @@ with 404 `not_found`.
 A translation that is not the default one MUST inherit the robots directives,
 the social image and the structured data type of the default-language version
 until it sets its own; its own directives MUST win one by one. A draft-only
-translation MUST inherit from the stored default version. Canonical, title,
-social text and structured data details MUST NOT be inherited. The details of
-an inherited type MUST be the translation's own, validated against that type.
+translation MUST inherit from the stored default version. Canonical, both title
+parts, social text and structured data details MUST NOT be inherited. The
+details of an inherited type MUST be the translation's own, validated against
+that type.
 
 #### Scenario: Inherited visibility and type
 
@@ -156,6 +169,11 @@ an inherited type MUST be the translation's own, validated against that type.
 
 - **WHEN** the default version, which names no type, sends those details
 - **THEN** the system MUST refuse each of them
+
+#### Scenario: An ending set on the default version
+
+- **WHEN** the English version sets the title ending "Docs" and the French translation sets none
+- **THEN** the French title MUST end with the site's ending, not "Docs"
 
 ### Requirement: A duplicate does not keep the canonical
 
@@ -209,8 +227,8 @@ version's.
 
 #### Scenario: The same value as the default version
 
-- **WHEN** the English version stores the title `{title}` and nothing else, and a Spanish draft-only translation stores the same title and is published
-- **THEN** the stored Spanish translation MUST hold the title `{title}`
+- **WHEN** the English version stores the title `{"title":{"text":"Pricing"}}` and nothing else, and a Spanish draft-only translation stores the same title and is published
+- **THEN** the stored Spanish translation MUST hold the title `{"title":{"text":"Pricing"}}`
 
 #### Scenario: A different value
 

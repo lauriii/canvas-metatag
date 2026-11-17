@@ -24,10 +24,10 @@ import { type Api, ApiError, createApi } from './api';
 import { checks } from './checks';
 import { CHECKS_NOTE, ChecksSheet } from './components/ChecksSheet';
 import { Header, Sheet } from './components/Header';
-import { type ImageRequest, ImageSheet } from './components/MediaPicker';
+import { type ImageRequest, ImageSheet, PICKED } from './components/MediaPicker';
 import { OutputSheet, originNote } from './components/Output';
 import { SearchSkeleton } from './components/Previews';
-import { CustomJson, SchemaTab } from './components/SchemaTab';
+import { CustomJson, KindSheet, SchemaTab } from './components/SchemaTab';
 import { SearchTab } from './components/SearchTab';
 import { SiteView } from './components/SiteTab';
 import { SocialTab } from './components/SocialTab';
@@ -38,7 +38,6 @@ import {
   type Footer,
   type FooterAction,
   MESSAGES,
-  REGISTRY,
   type Strip,
   type View,
   applyChanges,
@@ -82,6 +81,7 @@ export type SheetState =
   | { kind: 'checks' }
   | { kind: 'output'; section?: 'schema' }
   | { kind: 'custom' }
+  | { kind: 'kinds' }
   | { kind: 'image'; request: ImageRequest };
 
 // What components get. One context, read with useApp().
@@ -101,12 +101,12 @@ export interface AppContext {
   /** A scope whose controls are disabled: values stay readable. */
   locked: Record<Scope, boolean>;
   /** The last jump: fields compare `field` and `seq` to take focus. */
-  jump: (Jump & { seq: number; suggest: boolean }) | null;
+  jump: (Jump & { seq: number; suggest: boolean; link?: boolean }) | null;
   /**
    * Closes any sheet, switches scope and tab, then names the field.
-   * `suggest`: open its suggestions.
+   * `suggest`: open its suggestions; `link`: open its link menu.
    */
-  goTo(jump: Jump, how?: { suggest?: boolean }): void;
+  goTo(jump: Jump, how?: { suggest?: boolean; link?: boolean }): void;
   /** The texts a suggestion is trying out: the previews show them. */
   trial: (Texts & { index?: number }) | null;
   setTrial(trial: (Texts & { index?: number }) | null): void;
@@ -573,6 +573,7 @@ export default function App() {
       await api.putSite({
         identity: edits.site.identity,
         values: prune(edits.site.values),
+        currency: edits.site.currency,
       });
       const payload = await api.getState(ctx, server.langcode);
       storage.set(pendingKey('site'), null);
@@ -596,6 +597,32 @@ export default function App() {
       }
     }
   }, [api, dispatch]);
+
+  // A site currency that changes structured data elsewhere says where,
+  // before it is saved.
+  const currency = state.edits.site.currency;
+  const savedCurrency = state.server?.site.currency;
+  useEffect(() => {
+    const { edits, server } = now.current;
+    if (!server?.can.site || currency === savedCurrency) {
+      if (now.current.effect) {
+        dispatch({ type: 'effect', effect: null });
+      }
+      return;
+    }
+    let gone = false;
+    const timer = setTimeout(() => {
+      api.siteEffect({ ...edits.site, values: prune(edits.site.values) }).then(
+        (result) => !gone && dispatch({ type: 'effect', effect: result.effect }),
+        // The save says what it can: without the effect, as before.
+        () => !gone && dispatch({ type: 'effect', effect: null }),
+      );
+    }, 300);
+    return () => {
+      gone = true;
+      clearTimeout(timer);
+    };
+  }, [api, currency, dispatch, savedCurrency]);
 
   // The editor's signals.
   useEffect(() => {
@@ -815,7 +842,7 @@ export default function App() {
 
   // Derived, never stored.
   const shownView = useMemo(
-    () => view(state),
+    () => view(state, PICKED),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [state.server, state.edits.target, state.live, state.sent],
   );
@@ -830,10 +857,15 @@ export default function App() {
       effective: shownView.effective,
       sources: shownView.source,
       texts: shownView.texts,
-      tokens: shownView.tokens,
+      lookup: shownView.lookup,
+      separator: server.separator,
       resolved: server.resolved,
       site: server.site,
-      registry: REGISTRY,
+      registry: server.registry,
+      rules: server.search_features,
+      home: `${server.origin.url}/`,
+      url: server.preview.url,
+      ui: server.ui,
       facts: state.facts,
       scope: server.target.scope,
       can: server.can,
@@ -878,6 +910,7 @@ export default function App() {
         setJump((last) => ({
           ...to,
           suggest: how.suggest ?? false,
+          link: how.link ?? false,
           seq: (last?.seq ?? 0) + 1,
         }));
       },
@@ -909,7 +942,12 @@ export default function App() {
       },
       sheet,
       openSheet(next) {
-        opener.current = document.activeElement as HTMLElement | null;
+        // From a sheet, the way back is to what opened the first one: the
+        // sheet and its button are gone once the next one is open.
+        const active = document.activeElement as HTMLElement | null;
+        if (!active?.closest('.seo-sheet') || !opener.current?.isConnected) {
+          opener.current = active;
+        }
         setSheet(next);
       },
       closeSheet(restore = true) {
@@ -1134,8 +1172,12 @@ const barOf = (state: State, shown: Footer) =>
 function Buttons(props: {
   actions: (keyof typeof BUTTONS)[];
   act: Act;
+  /** Labels of the bar's own, in place of the usual ones. */
+  labels?: Footer['labels'];
   /** Where focus goes when the pressed button is gone. */
   fallback(): HTMLElement | null | undefined;
+  /** After Undo: the control that made the change, while it is there. */
+  back?(): HTMLElement | null | undefined;
 }) {
   return props.actions.map((action) => (
     <Btn
@@ -1150,6 +1192,11 @@ function Buttons(props: {
         const group = pressed.parentElement;
         const after = [...(group?.children ?? [])].indexOf(pressed);
         flushSync(() => props.act(action));
+        const back = action === 'undo' ? props.back?.() : null;
+        if (back?.isConnected) {
+          back.focus();
+          return;
+        }
         // Most actions remove the button that was pressed. Focus must not
         // fall to the document: the button now in its place (or the last
         // one) of the same group takes it, else the fallback.
@@ -1163,7 +1210,7 @@ function Buttons(props: {
         (left[Math.min(after, left.length - 1)] ?? props.fallback())?.focus();
       }}
     >
-      {BUTTONS[action].label}
+      {props.labels?.[action as FooterAction] ?? BUTTONS[action].label}
     </Btn>
   ));
 }
@@ -1262,6 +1309,17 @@ function Ready(props: {
       '.seo-body [data-path] :is(textarea, input, button[role], button)',
     );
   const trigger = () => document.querySelector<HTMLElement>('.seo-scope');
+  // The control focused before the bar: where Undo returns.
+  const beforeBar = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const note = (event: FocusEvent) => {
+      if (event.target instanceof HTMLElement && !event.target.closest('.seo-bar')) {
+        beforeBar.current = event.target;
+      }
+    };
+    document.addEventListener('focusin', note);
+    return () => document.removeEventListener('focusin', note);
+  }, []);
   const actions = shown.actions.filter((action) => BAR.includes(action));
 
   return (
@@ -1378,6 +1436,8 @@ function Ready(props: {
                   actions={actions as (keyof typeof BUTTONS)[]}
                   act={props.act}
                   fallback={trigger}
+                  back={() => beforeBar.current}
+                  labels={shown.labels}
                 />
               </span>
             )}
@@ -1451,11 +1511,17 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
       </Sheet>
     );
   }
+  if (sheet.kind === 'kinds') {
+    return (
+      // The sheet is the kinds' own: its confirm is its foot.
+      <KindSheet onDone={() => closeSheet()} onClose={onClose} />
+    );
+  }
   if (sheet.kind === 'custom') {
     const set = !!state.edits.target.schema?.custom;
     return (
       <Sheet
-        title="Custom JSON-LD"
+        title="Add your own JSON-LD"
         // A read-only editor cannot take focus: Back does, so Esc works.
         focusBack={state.readonly !== 'no'}
         end={
@@ -1469,7 +1535,7 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
                   scope: 'target',
                   values: {
                     ...state.edits.target,
-                    schema: { ...state.edits.target.schema, custom: undefined },
+                    schema: { ...state.edits.target.schema, custom: undefined, skip: undefined },
                   },
                   undo: 'Removed custom JSON-LD',
                 })

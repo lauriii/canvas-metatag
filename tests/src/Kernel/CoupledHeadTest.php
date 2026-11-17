@@ -154,7 +154,7 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
     // Everything the head depends on invalidates the cached page.
     $changes = [
       'site settings' => function (): void {
-        $this->config('canvas_metatag.site')->set('values.title', '{title} {sep} Shop')->save();
+        $this->config('canvas_metatag.site')->set('values.title_end', ['text' => 'Shop'])->save();
       },
       'the page' => static function () use ($page): void {
         Page::load($page->id())?->set('title', 'Prices')->save();
@@ -248,10 +248,26 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
     // A template that is not enabled does not render the article: the head
     // is core's, with its canonical and shortlink.
     $template = $this->createTemplate(FALSE, [
-      'description' => '{field.field_summary}',
-      'schema' => ['props' => ['author_name' => '{field.field_byline}'], 'type' => 'BlogPosting'],
-      'social' => ['image' => '{field.field_hero}'],
-      'title' => '{title} {sep} Blog',
+      'description' => [
+        'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_summary␞␟value', 'sourceType' => 'entity-field'],
+      ],
+      'schema' => [
+        'props' => [
+          'author_name' => [
+            'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'],
+          ],
+        ],
+        'type' => 'BlogPosting',
+      ],
+      'social' => [
+        'image' => [
+          'source' => [
+            'expression' => 'ℹ︎␜entity:node:article␝field_hero␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}',
+            'sourceType' => 'entity-field',
+          ],
+        ],
+      ],
+      'title_end' => ['text' => 'Blog'],
     ]);
     $head = self::readHead($this->get($path));
     self::assertSame(['Hello | Example'], $head['titles']);
@@ -300,12 +316,16 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
 
     // Saving the template and saving the node invalidate.
     $template = ContentTemplate::load('node.article.full');
-    $template?->setThirdPartySetting('canvas_metatag', 'values', ['title' => '{field.field_byline}: {title}'])->save();
+    $template?->setThirdPartySetting('canvas_metatag', 'values', [
+      'title' => [
+        'source' => ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'],
+      ],
+    ])->save();
     $response = $this->get($path);
     self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
-    self::assertSame(['Grace Hopper: Hello'], self::readHead($response)['titles']);
+    self::assertSame(['Grace Hopper | Example'], self::readHead($response)['titles']);
     Node::load($node->id())?->set('field_byline', 'Ada Lovelace')->save();
-    self::assertSame(['Ada Lovelace: Hello'], self::readHead($this->get($path))['titles']);
+    self::assertSame(['Ada Lovelace | Example'], self::readHead($this->get($path))['titles']);
 
     // The form's order decides which image is the page image: moving a
     // field on the form invalidates the page.

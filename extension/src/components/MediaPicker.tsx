@@ -1,19 +1,24 @@
 import {
   CheckIcon,
+  Cross2Icon,
   ImageIcon,
+  Link2Icon,
+  LinkBreak2Icon,
   MagnifyingGlassIcon,
 } from '@radix-ui/react-icons';
 import { useEffect, useRef, useState } from 'react';
 
 import { useApp } from '../App';
+import { rankImages } from '../checks';
 import {
   dimensions,
   imageSize,
   inSentence,
   type ShownImage,
 } from '../model';
-import type { MediaItem } from '../types';
-import { Btn, Sk } from './ui';
+import type { MediaItem, Value } from '../types';
+import { keyOf, sameValue } from '../values';
+import { Btn, IconBtn, Sk } from './ui';
 
 /** What the picker returned for images chosen in this session, by UUID: shown before the server knows. */
 export const PICKED: Record<string, ShownImage> = {};
@@ -53,11 +58,11 @@ export function ImageName(props: { name: string }) {
 export interface ImageRequest {
   /** Images narrower than this say "Too small". */
   minWidth: number;
-  /** The UUID stored here, when one is. */
-  chosen?: string;
-  /** Template scope: the content type's image fields, as `{field.x}` values. */
-  fields?: { value: string; label: string; image?: ShownImage | null }[];
-  onPick(value: string): void;
+  /** The value stored here, when one is. */
+  chosen?: Value;
+  /** Template scope: the content type's image fields, as links. */
+  fields?: { value: Value; label: string; image?: ShownImage | null }[];
+  onPick(value: Value): void;
 }
 
 /**
@@ -72,8 +77,17 @@ export function ImageRow(
     noun?: string;
     /** The row's name line, instead of the image's: "From each Article's Hero image field". */
     name?: string;
+    /**
+     * Where the image comes from, as a box's tag says it, above the image's
+     * name: a link ("Poster › Image") or the default it follows.
+     */
+    tag?: { text: string; look: 'linked' | 'default' | 'broken' };
+    /** Instead of the image's name: why the link gives none ("Hidden from visitors for this event"). */
+    state?: string;
     disabled?: boolean;
     onClear?(): void;
+    /** Removes the link, as a box's ×. */
+    onUnlink?(): void;
   },
 ) {
   const { openSheet } = useApp();
@@ -88,12 +102,28 @@ export function ImageRow(
           <ImageIcon aria-hidden />
         </span>
       )}
-      <div className="seo-image-name">
-        <div title={props.name ?? image?.name}>
-          {props.name ?? (image ? <ImageName name={image.name} /> : 'No image')}
+      {props.tag ? (
+        // As a box: its source over its value; the name over its size, as at every scope.
+        <div className="seo-image-name" data-tagged="">
+          <span className="seo-image-tag" data-look={props.tag.look} title={props.tag.text}>
+            {props.tag.look === 'broken' ? <LinkBreak2Icon aria-hidden /> : props.tag.look === 'linked' ? <Link2Icon aria-hidden /> : null}
+            <span dir="auto">{props.tag.text}</span>
+          </span>
+          {props.state ? (
+            <div data-state="">{props.state}</div>
+          ) : (
+            <div title={image?.name}>{image ? <ImageName name={image.name} /> : 'No image'}</div>
+          )}
+          {!props.state && image && <small>{imageSize(image)}</small>}
         </div>
-        {image && <small>{imageSize(image)}</small>}
-      </div>
+      ) : (
+        <div className="seo-image-name">
+          <div title={props.name ?? image?.name}>
+            {props.name ?? (image ? <ImageName name={image.name} /> : 'No image')}
+          </div>
+          {image && <small>{imageSize(image)}</small>}
+        </div>
+      )}
       {!props.disabled && (
         <div className="seo-image-actions">
           <Btn
@@ -116,7 +146,16 @@ export function ImageRow(
           >
             {image ? 'Change' : 'Choose image'}
           </Btn>
-          {props.onClear && props.chosen && (
+          {props.onUnlink && (
+            <IconBtn label={`Unlink ${noun}`} data-unlink="" onClick={() => {
+              props.onUnlink!();
+              // The × goes with the link; focus stays on the row.
+              requestAnimationFrame(() => button.current?.focus());
+            }}>
+              <Cross2Icon aria-hidden />
+            </IconBtn>
+          )}
+          {props.onClear && props.chosen && 'media' in props.chosen && (
             <Btn
               variant="ghost"
               aria-label={`Remove ${noun}`}
@@ -184,15 +223,12 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
   }, [query]);
   useEffect(() => search.current?.focus({ preventScroll: true }), []);
 
-  const pick = (value: string) => {
+  const pick = (value: Value) => {
     request.onPick(value);
     props.onDone();
   };
-  // Picked in this session first.
-  const picked = Object.keys(PICKED);
-  const sorted = [...items].sort(
-    (a, b) => Number(picked.includes(b.uuid)) - Number(picked.includes(a.uuid)),
-  );
+  const chosen = request.chosen && 'media' in request.chosen ? request.chosen.media : undefined;
+  const sorted = rankImages(items, state.facts?.images ?? [], Object.keys(PICKED));
 
   return (
     <>
@@ -214,18 +250,22 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
           <p className="seo-subhead">From each {target?.label ?? 'page'}</p>
           {request.fields.map((field) => (
             <button
-              key={field.value}
+              key={keyOf(field.value)}
               type="button"
               className="seo-fieldpick"
-              aria-label={`Use the ${field.label} field`}
-              aria-pressed={request.chosen === field.value}
+              aria-label={`Use ${field.label}`}
+              aria-pressed={sameValue(request.chosen, field.value)}
               onClick={() => pick(field.value)}
             >
+              {field.image ? (
+                <Thumb src={field.image.thumb} />
+              ) : (
+                <span>
+                  <ImageIcon aria-hidden />
+                </span>
+              )}
               <span>
-                <ImageIcon aria-hidden />
-              </span>
-              <span>
-                <b>{field.label} field</b>
+                <b>{field.label}</b>
                 {field.image && (
                   <small aria-hidden>
                     This {target ? inSentence(target.label) : 'page'}:{' '}
@@ -234,7 +274,7 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
                   </small>
                 )}
               </span>
-              {request.chosen === field.value && <CheckIcon aria-hidden />}
+              {sameValue(request.chosen, field.value) && <CheckIcon aria-hidden />}
             </button>
           ))}
           <p className="seo-subhead">Media library</p>
@@ -249,16 +289,16 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
               key={item.uuid}
               type="button"
               className="seo-tile"
-              aria-pressed={item.uuid === request.chosen}
+              aria-pressed={item.uuid === chosen}
               aria-description={`${size}${small ? ', too small' : ''}`}
               onClick={() => {
                 PICKED[item.uuid] = item;
-                pick(item.uuid);
+                pick({ media: item.uuid });
               }}
             >
               <span className="seo-tile-image">
                 <Thumb src={item.thumb} />
-                {item.uuid === request.chosen && (
+                {item.uuid === chosen && (
                   <span className="seo-tile-badge">
                     <CheckIcon aria-hidden width="12" height="12" />
                   </span>

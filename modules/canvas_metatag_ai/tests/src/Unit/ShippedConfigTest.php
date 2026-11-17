@@ -58,6 +58,8 @@ final class ShippedConfigTest extends UnitTestCase {
       // The fence and the answer shape are added in code, never shipped.
       $this->assertStringNotContainsString('<page_content>', $prompt['prompt']);
       $this->assertStringNotContainsString('Answer with JSON', $prompt['prompt']);
+      // So is the title ending rule.
+      $this->assertStringNotContainsString('counts toward its length', $prompt['prompt']);
 
       // Uninstalling the submodule removes them (PromptsTest uninstalls).
       foreach ([$type, $prompt] as $config) {

@@ -90,14 +90,14 @@ describe('requests', () => {
     const fake = fakeFetch({
       'session/token': [token('csrf-1')],
       'api/draft': [
-        json({ values: { title: 'T' } }),
+        json({ values: { title: { text: 'T' } } }),
         json({ values: {} }),
         json({ values: {} }),
       ],
     });
     const api = createApi('/', fake.fetchFn);
-    expect(await api.putDraft(PAGE, { title: 'T' }, 'en', EDITOR)).toEqual({
-      values: { title: 'T' },
+    expect(await api.putDraft(PAGE, { title: { text: 'T' } }, 'en', EDITOR)).toEqual({
+      values: { title: { text: 'T' } },
     });
     const call = fake.calls[1];
     expect(call.url).toBe('/canvas-metatag/api/draft/canvas_page/8');
@@ -109,7 +109,7 @@ describe('requests', () => {
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': 'csrf-1' },
     });
     expect(JSON.parse(call.init.body as string)).toEqual({
-      values: { title: 'T' },
+      values: { title: { text: 'T' } },
       langcode: 'en',
       client_instance_id: 'client-1',
       auto_saves: EDITOR.autoSaves,
@@ -156,7 +156,8 @@ describe('requests', () => {
         default_image: '',
         same_as: [],
       },
-      values: { title: '{title}' },
+      values: { title_end: { text: 'Example Co' } },
+      currency: 'EUR',
     };
     await api.putSite(site);
     expect(JSON.parse(fake.calls[1].init.body as string)).toEqual(site);
@@ -205,11 +206,11 @@ describe('CSRF token', () => {
   it('is fetched again once, and the write retried, after a 403 without a JSON body', async () => {
     const fake = fakeFetch({
       'session/token': [token('stale'), token('fresh')],
-      'api/draft': [html(403), json({ values: { title: 'T' } })],
+      'api/draft': [html(403), json({ values: { title: { text: 'T' } } })],
     });
     const api = createApi('/', fake.fetchFn);
-    expect(await api.putDraft(PAGE, { title: 'T' }, 'en', EDITOR)).toEqual({
-      values: { title: 'T' },
+    expect(await api.putDraft(PAGE, { title: { text: 'T' } }, 'en', EDITOR)).toEqual({
+      values: { title: { text: 'T' } },
     });
     expect(fake.urls()).toEqual([
       '/session/token',

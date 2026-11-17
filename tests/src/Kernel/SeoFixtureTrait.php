@@ -8,6 +8,7 @@ use Drupal\canvas\Entity\Component;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Resolver;
+use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\PageCache\ChainRequestPolicy;
@@ -18,6 +19,7 @@ use Drupal\file\Entity\File;
 use Drupal\media\Entity\Media;
 use Drupal\media\MediaInterface;
 use Drupal\node\Entity\NodeType;
+use Drupal\taxonomy\Entity\Vocabulary;
 use Drupal\Tests\media\Traits\MediaTypeCreationTrait;
 use Drupal\user\Entity\Role;
 use Drupal\user\Entity\User;
@@ -212,6 +214,74 @@ trait SeoFixtureTrait {
       'label' => $label,
       'settings' => $settings,
     ])->save();
+  }
+
+  /**
+   * Gives the Article type the fields a template links to.
+   *
+   * A summary, a byline, a body with a summary, a writer (a reference to a
+   * Person node), tags, a hero (image media), a date,
+   * a link, a price and a field visitors may not view (field_test refuses
+   * `view` on field_no_view_access). The test class must enable taxonomy,
+   * install the taxonomy_term schema,
+   * text, datetime, link, options and field_test.
+   */
+  protected function createArticleFields(): void {
+    NodeType::create(['type' => 'person', 'name' => 'Person'])->save();
+    Vocabulary::create(['vid' => 'tags', 'name' => 'Tags'])->save();
+    $this->createField('field_summary', 'string_long', 'Summary');
+    $this->createField('field_byline', 'string', 'Byline');
+    $this->createField('field_body', 'text_with_summary', 'Body');
+    $this->createField('field_writer', 'entity_reference', 'Writer', ['target_type' => 'node'], [
+      'handler' => 'default:node',
+      'handler_settings' => ['target_bundles' => ['person' => 'person']],
+    ]);
+    $this->createField('field_tags', 'entity_reference', 'Tags', ['target_type' => 'taxonomy_term'], [
+      'handler' => 'default:taxonomy_term',
+      'handler_settings' => ['target_bundles' => ['tags' => 'tags']],
+    ], -1);
+    $this->createField('field_hero', 'entity_reference', 'Hero', ['target_type' => 'media'], [
+      'handler' => 'default:media',
+      'handler_settings' => ['target_bundles' => ['image' => 'image']],
+    ]);
+    $this->createField('field_when', 'datetime', 'When', ['datetime_type' => 'datetime']);
+    $this->createField('field_more', 'link', 'More');
+    $this->createField('field_price', 'decimal', 'Price', ['precision' => 10, 'scale' => 2]);
+    $this->createField('field_no_view_access', 'string', 'Notes');
+    // The form's order is the menu's.
+    $display = $this->container->get('entity_display.repository')->getFormDisplay('node', 'article');
+    foreach ([
+      'field_summary',
+      'field_byline',
+      'field_body',
+      'field_writer',
+      'field_tags',
+      'field_hero',
+      'field_when',
+      'field_more',
+      'field_price',
+      'field_no_view_access',
+    ] as $weight => $name) {
+      $display->setComponent($name, ['weight' => $weight]);
+    }
+    $display->save();
+  }
+
+  /**
+   * A link to an Article field, as the link menu offers it.
+   *
+   * @param string $label
+   *   The entry's label, its path joined: "Writer › Name".
+   * @param string $kind
+   *   The kind of value it is linked as.
+   */
+  protected function linkTo(string $label, string $kind = 'text'): array {
+    foreach ($this->container->get(Sources::class)->vocabulary('article') as $expression => $row) {
+      if ($row['label'] === $label && in_array($kind, $row['kinds'], TRUE)) {
+        return ['source' => ['expression' => $expression, 'sourceType' => 'entity-field']];
+      }
+    }
+    throw new \LogicException("No source $label of the kind $kind.");
   }
 
   /**

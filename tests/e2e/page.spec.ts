@@ -1,6 +1,6 @@
 import type { Locator, Page } from '@playwright/test';
 
-import { PAGES, SITE_NAME, TEST_ID, UI, USERS } from './constants';
+import { IMAGES, PAGES, SITE_NAME, TEST_ID, UI, USERS } from './constants';
 import {
   button,
   caretAfter,
@@ -19,6 +19,7 @@ import {
   publishAll,
   readHead,
   reviewRows,
+  scope,
   selectComponent,
   seoState,
   sheet,
@@ -56,59 +57,91 @@ test.beforeEach(async ({ drupal }) => {
   await drupal.login(USERS.editor);
 });
 
-test('an untouched title is inherited; typing keeps the site suffix; reset returns to it', async ({ page }) => {
+test('a page title is its own words and an ending; braces are text; reset removes both', async ({ page }) => {
   const frame = await open(page);
   const title = textbox(frame, UI.field.title);
+  const ending = frame.getByRole('button', { name: UI.field.titleEnding });
   const preview = frame.getByTestId(TEST_ID.search);
 
-  // Nothing is stored: field and preview show the site's pattern, resolved.
-  // Where it comes from is said on hover or focus.
-  await title.hover();
-  await expect(frame.getByText(UI.source.site, { exact: true }).first()).toBeVisible();
-  await expect.poll(() => shown(title)).toBe(inherited);
+  // Nothing is stored: the page's title shows in gray, the ending is the
+  // site's, and the preview joins them.
+  await expect(title).toHaveAttribute('placeholder', pricing.title);
+  await expect(title).toHaveValue('');
+  await expect(ending).toHaveAccessibleName(`Title ending: ${SITE_NAME}`);
+  await expect(ending).toHaveAccessibleDescription('Added after the separator |.');
   await expect(preview).toContainText(inherited);
   await expect(preview).toContainText(pricing.description);
   await expect(status(frame)).toContainText(UI.footer.matchesPage);
   // Without the AI submodule there is no AI control (see ai.spec.ts).
   await expect(frame.getByRole('button', { name: /^Suggest/ })).toHaveCount(0);
+  // A page's title is never linked.
+  await expect(frame.getByRole('button', { name: UI.action.link(UI.field.title) })).toHaveCount(0);
 
-  // Typing replaces the page's part of the pattern and keeps the rest.
-  await title.pressSequentially('Pricing plans');
-  await expect(title).toHaveValue('Pricing plans {Separator} {Site name}');
+  // Typing stores only the typed words; braces are text, never filled.
+  await title.pressSequentially('Pricing plans {site}');
+  await expect(preview).toContainText(`Pricing plans {site} | ${SITE_NAME}`);
+  await expect.poll(() => stored(page, pricing.id)).toBe('Pricing plans {site}');
   await expect(frame.getByText(UI.source.page, { exact: true })).toBeVisible();
-  // The preview, in sight above the field, shows what the chips become.
-  await expect(preview).toContainText('Pricing plans | Example');
 
-  // A value from the menu is one chip; Backspace next to it removes all of it.
-  await caretAfter(title, 'Pricing plans');
-  await button(frame, UI.action.insert).click();
-  await frame.getByRole('menuitem', { name: /^Page title/ }).click();
-  await expect(title).toHaveValue(/Pricing plans ?\{Page title\} \{Separator\} \{Site name\}/);
-  await caretAfter(title, '{Page title}');
-  await title.press('Backspace');
-  await expect(title).not.toHaveValue(/Page title/);
-
-  // Typing "{" opens the same menu at the caret.
-  await caretAfter(title, 'Pricing plans');
-  await page.keyboard.type(' by {');
-  await expect(frame.getByRole('menu')).toBeVisible();
-  // The menu's filter takes the keys that follow once it has focus.
-  await expect(frame.getByRole('textbox', { name: `Insert into ${UI.field.title}` })).toBeFocused();
-  // A choice hands the next keys to the field at once, after the value.
-  await page.keyboard.type('Page t');
+  // No ending: the title is the main part alone, with no separator.
+  await ending.click();
+  const menu = frame.getByRole('dialog', { name: 'Title ending' });
+  await expect(menu.getByRole('textbox', { name: 'Type an ending' })).toBeFocused();
+  await menu.getByRole('option', { name: /^No ending/ }).click();
+  await expect(ending).toBeFocused();
+  await expect(ending).toHaveAccessibleName('Title ending: No ending');
+  await expect(preview).toContainText('Pricing plans {site}');
+  await expect(preview).not.toContainText(`{site} | ${SITE_NAME}`);
+  // A typed ending, from the menu's filter.
+  await ending.click();
+  await page.keyboard.type('Docs');
   await page.keyboard.press('Enter');
-  await page.keyboard.type(' AFTER');
-  await expect(title).toHaveValue('Pricing plans by {Page title} AFTER {Separator} {Site name}');
-  await expect(preview).toContainText('Pricing plans by Pricing AFTER | Example');
-  await expect.poll(() => stored(page, pricing.id)).toContain('{title} AFTER');
+  await expect(ending).toHaveAccessibleName('Title ending: Docs');
+  await expect(preview).toContainText('Pricing plans {site} | Docs');
 
-  // Reset removes the override, and with it the draft.
+  // Reset removes both parts, and with them the draft.
   await button(frame, `Reset ${UI.field.title}`).click();
+  // Beside Undo, where the title now comes from.
+  await expect(frame.getByText(`Reset · ${UI.source.site} ·`)).toBeVisible();
   await expect(button(frame, UI.action.undo)).toBeVisible();
-  await expect.poll(() => shown(title)).toBe(inherited);
+  await expect(title).toHaveValue('');
+  await expect(ending).toHaveAccessibleName(`Title ending: ${SITE_NAME}`);
   await expect(preview).toContainText(inherited);
   await expect(status(frame)).toContainText(UI.footer.matchesPage, { timeout: 30_000 });
   expect(await draftTitle(page, pricing.id)).toBeUndefined();
+});
+
+test("Edit beside an inherited ending leads to the site's ending, by keyboard", async ({ drupal, page }) => {
+  await drupal.logout();
+  await drupal.login(USERS.admin);
+  const frame = await open(page);
+  const edit = button(frame, `Edit the site default for ${UI.field.title}`);
+  await edit.focus();
+  await page.keyboard.press('Enter');
+  const siteEnding = frame.locator('#seo-site-title-end');
+  await expect(siteEnding).toBeFocused();
+  await expect(siteEnding).toBeInViewport();
+  // The page's ending menu says where the separator is set, and an
+  // administrator may go and edit it from there.
+  await scope(frame, UI.scope.page);
+  await button(frame, UI.field.titleEnding).click();
+  const endingMenu = frame.getByRole('dialog', { name: 'Title ending' });
+  await expect(endingMenu.locator('.seo-menu-foot')).toContainText('is set for the whole site');
+  await endingMenu.locator('.seo-menu-foot').getByRole('button', { name: 'Edit', exact: true }).click();
+  await expect(frame.getByRole('dialog', { name: 'Title ending' })).toHaveCount(0);
+  await expect(frame.locator('.seo-field[data-path="identity.separator"]')).toBeInViewport();
+});
+
+test('after Reset the social image says where it now comes from, beside Undo', async ({ page }) => {
+  const frame = await open(page);
+  await tab(frame, UI.tab.social).click();
+  await button(frame, UI.action.chooseImage).click();
+  await sheet(frame, 'Choose image').getByRole('button', { name: IMAGES.small.name, exact: true }).click();
+  await expect(sheet(frame, 'Choose image')).toHaveCount(0);
+  await button(frame, 'Reset Image').click();
+  const aside = frame.locator('.seo-field[data-path="social.image"] .seo-aside');
+  await expect(aside).toHaveText(/^Reset · (From the Image field|Site default image|No image) ·Undo$/);
+  await expect(status(frame)).toContainText(UI.footer.matchesPage, { timeout: 30_000 });
 });
 
 test("an override is saved into the page draft and survives the editor's own saves", async ({ page }) => {
@@ -140,11 +173,11 @@ test("an override is saved into the page draft and survives the editor's own sav
   expect(await editorConflict(page)).toBe(false);
 
   // The override is still in the draft, next to Canvas's new page title.
-  await expect.poll(() => draftTitle(page, pricing.id)).toBe('Pricing plans {sep} {site}');
+  await expect.poll(() => draftTitle(page, pricing.id)).toBe('Pricing plans');
   const state = await seoState(page, pageQuery(pricing.id));
   expect(state.target?.has_draft).toBe(true);
-  expect(state.tokens.title.value).toBe('Pricing and plans');
-  await expect(title).toHaveValue('Pricing plans {Separator} {Site name}');
+  expect(state.facts.title.value).toBe('Pricing and plans');
+  await expect(title).toHaveValue('Pricing plans');
   await expect(frame.getByTestId(TEST_ID.search)).toContainText('Pricing plans | Example');
 });
 
@@ -201,7 +234,7 @@ test("the description is Canvas's own field, handed over once when the field is 
   await expect.poll(() => saves.length, { timeout: 30_000 }).toBeGreaterThan(1);
 });
 
-test('the action bar keeps the end of the view, or the field in use, in sight', async ({ page }) => {
+test('a Reset keeps the end of the view, or the field in use, in sight, with its Undo beside it', async ({ page }) => {
   const frame = await open(page);
   await page.setViewportSize({ width: 1440, height: 500 });
   await tab(frame, UI.tab.social).click();
@@ -209,40 +242,37 @@ test('the action bar keeps the end of the view, or the field in use, in sight', 
   const bar = frame.locator('.seo-bar');
   const socialTitle = textbox(frame, UI.field.socialTitle);
   const socialDescription = textbox(frame, UI.field.socialDescription);
-  await socialTitle.fill('{Page title} shared');
-  await socialDescription.fill('{Page title} words');
+  await socialTitle.fill('Shared title');
+  await socialDescription.fill('Shared words');
   await expect(status(frame)).toContainText(UI.footer.draftPage, { timeout: 30_000 });
   await expect(bar).toHaveCount(0);
   expect(await view.evaluate((element) => element.scrollHeight > element.clientHeight + 40)).toBe(true);
   /**
-   * Removes the field's value by keyboard, without scrolling the view to it:
-   * "Removed Page title" comes in the bar.
+   * Resets a field without scrolling the view to it: its Undo comes beside
+   * it, not in the bar.
    */
-  const removeValue = async (field: Locator) => {
-    await field.evaluate((element: HTMLTextAreaElement) => {
-      element.focus({ preventScroll: true });
-      const after = element.value.indexOf('}') + 1;
-      element.setSelectionRange(after, after);
-    });
-    await page.keyboard.press('Backspace');
-    await expect(bar).toBeVisible({ timeout: 30_000 });
+  const removeValue = async (name: string) => {
+    await button(frame, `Reset ${name}`)
+      .last()
+      .evaluate((element: HTMLElement) => element.click());
+    await expect(frame.getByText(/^Reset · .+ ·$/)).toBeVisible({ timeout: 30_000 });
+    await expect(bar).toHaveCount(0);
   };
 
   // At the end of the view when the bar comes: still at its end, above it.
   await view.evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
-  await removeValue(socialDescription);
-  await expect(socialDescription).toHaveValue(/^ ?words$/);
+  await removeValue(UI.field.socialDescription);
+  await expect(socialDescription).toHaveValue('');
   await expect
     .poll(() => view.evaluate((element) => element.scrollTop >= element.scrollHeight - element.clientHeight - 2))
     .toBe(true);
   expect(await view.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
-  await frame.locator('body').screenshot({ path: test.info().outputPath('bar-at-end.png') });
-  await expect(bar).toHaveCount(0, { timeout: 30_000 });
+  await frame.locator('body').screenshot({ path: test.info().outputPath('reset-at-end.png') });
 
   // Mid-view, the field in use at the view's lower edge: the field and its
-  // message stay in sight above the bar.
+  // Undo stay in sight.
   const field = frame.locator('.seo-field[data-path="social.title"]');
   await field.evaluate((element) => {
     const scroller = element.closest('.seo-body')!;
@@ -252,23 +282,20 @@ test('the action bar keeps the end of the view, or the field in use, in sight', 
   expect(
     await view.evaluate((element) => element.scrollTop < element.scrollHeight - element.clientHeight - 2),
   ).toBe(true);
-  await removeValue(socialTitle);
-  await expect(socialTitle).toHaveValue(/^ ?shared$/);
+  await removeValue(UI.field.socialTitle);
+  await expect(socialTitle).toHaveValue('');
   await expect
     .poll(() =>
       field.evaluate((element) => {
         const box = element.getBoundingClientRect();
         const view = element.closest('.seo-body')!.getBoundingClientRect();
-        const top = element.ownerDocument.querySelector('.seo-bar')!.getBoundingClientRect().top;
-        return box.top >= view.top - 0.5 && box.bottom <= top + 0.5;
+        return box.top >= view.top - 0.5 && box.bottom <= view.bottom + 0.5;
       }),
     )
     .toBe(true);
-  await frame.locator('body').screenshot({ path: test.info().outputPath('bar-mid-view.png') });
+  await frame.locator('body').screenshot({ path: test.info().outputPath('reset-mid-view.png') });
   // Nothing of this test is left for the next ones.
   await page.setViewportSize({ width: 1440, height: 900 });
-  await button(frame, `Reset ${UI.field.socialTitle}`).last().click();
-  await button(frame, `Reset ${UI.field.socialDescription}`).last().click();
   await expect
     .poll(async () => (await seoState(page, pageQuery(pricing.id))).target?.values.social, { timeout: 30_000 })
     .toBeUndefined();
@@ -312,8 +339,14 @@ test('Checks lists what is wrong, leads to the field and fixes what is certain',
   // The same fix also sits under the field, behind the sheet.
   await panel.getByRole('button', { name: UI.checks.removeRepeat, exact: true }).click();
   await expect(panel.getByText(UI.checks.siteTwice)).toHaveCount(0);
+  // The bar names what was done, with its Undo.
+  await expect(frame.locator('.seo-bar')).toContainText('Repeat removed');
+  await expect(frame.locator('.seo-bar').getByRole('button', { name: UI.action.undo, exact: true })).toBeVisible();
   await expect(panel.getByText(UI.checks.titleLong).first()).toBeVisible();
-  await expect.poll(() => stored(page, checks.id), { timeout: 30_000 }).not.toContain(SITE_NAME);
+  // The title's own words name the site: the fix drops the ending.
+  await expect
+    .poll(async () => (await seoState(page, pageQuery(checks.id))).target?.values.title_end, { timeout: 30_000 })
+    .toEqual({ text: '' });
 });
 
 test('rapid edits in Page data and in the dialog do not lose each other', async ({ page }) => {
@@ -321,39 +354,39 @@ test('rapid edits in Page data and in the dialog do not lose each other', async 
   const title = textbox(frame, UI.field.title);
   for (const round of [1, 2, 3]) {
     await page.locator(canvasTitle).fill(`Pricing round ${round}`);
-    await title.fill(`Race ${round} {Separator} {Site name}`);
+    await title.fill(`Race ${round}`);
   }
 
-  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 60_000 }).toBe('Race 3 {sep} {site}');
+  await expect.poll(() => draftTitle(page, pricing.id), { timeout: 60_000 }).toBe('Race 3');
   await expect(status(frame)).toContainText(UI.footer.draftPage, { timeout: 30_000 });
   // Let a trailing editor save land before reading both values back.
   await page.waitForTimeout(3_000);
   const state = await seoState(page, pageQuery(pricing.id));
-  expect(state.target?.values.title).toBe('Race 3 {sep} {site}');
-  expect(state.tokens.title.value).toBe('Pricing round 3');
+  expect(state.target?.values.title).toEqual({ text: 'Race 3' });
+  expect(state.facts.title.value).toBe('Pricing round 3');
   expect(await editorConflict(page)).toBe(false);
   await expect(frame.getByText(UI.strip.conflict)).toHaveCount(0);
-  await expect(title).toHaveValue('Race 3 {Separator} {Site name}');
+  await expect(title).toHaveValue('Race 3');
 });
 
 test('closing mid-edit, a discard in Canvas and a page switch never lose or misplace a change', async ({ page }) => {
   let frame = await open(page);
 
   await test.step('closed inside the save delay: saved, and not announced as restored', async () => {
-    await textbox(frame, UI.field.title).fill('Closed early {Separator} {Site name}');
+    await textbox(frame, UI.field.title).fill('Closed early');
     await closeSeo(page);
-    await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Closed early {sep} {site}');
+    await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Closed early');
 
     frame = await openSeo(page);
-    await expect(textbox(frame, UI.field.title)).toHaveValue('Closed early {Separator} {Site name}');
+    await expect(textbox(frame, UI.field.title)).toHaveValue('Closed early');
     await expect(status(frame)).toContainText(UI.footer.draftPage);
     await expect(frame.getByText(UI.strip.offer)).toHaveCount(0);
   });
 
   await test.step('discarded in "Review changes": offered, not written', async () => {
-    await textbox(frame, UI.field.title).fill('Discarded later {Separator} {Site name}');
+    await textbox(frame, UI.field.title).fill('Discarded later');
     await closeSeo(page);
-    await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Discarded later {sep} {site}');
+    await expect.poll(() => draftTitle(page, pricing.id), { timeout: 30_000 }).toBe('Discarded later');
 
     const row = (await reviewRows(page, /Pricing/)).first();
     await row.getByRole('button', { name: 'More options' }).click();
@@ -374,14 +407,14 @@ test('closing mid-edit, a discard in Canvas and a page switch never lose or misp
   });
 
   await test.step('the editor moves to another page: the change goes to the page it was made on', async () => {
-    await textbox(frame, UI.field.title).fill('Before the switch {Separator} {Site name}');
+    await textbox(frame, UI.field.title).fill('Before the switch');
     await switchPage(page, PAGES.about.id);
     // Another page is a new target, and the dialog says so.
     await expect(status(frame)).toContainText(`Now editing ${PAGES.about.title}`);
     await expect(frame.getByTestId(TEST_ID.search)).toContainText(PAGES.about.title);
     await expect
       .poll(() => draftTitle(page, pricing.id), { timeout: 30_000 })
-      .toBe('Before the switch {sep} {site}');
+      .toBe('Before the switch');
     await page.waitForTimeout(2_000);
     const about = await seoState(page, pageQuery(PAGES.about.id));
     expect(about.target?.has_draft).toBe(false);
@@ -412,10 +445,10 @@ test('closing mid-edit, a discard in Canvas and a page switch never lose or misp
 
 test('publishing puts the override into the page head, once, and Output shows the same', async ({ page, visitor }) => {
   const frame = await open(page);
-  await textbox(frame, UI.field.title).fill('Plans for every team {Separator} {Site name}');
+  await textbox(frame, UI.field.title).fill('Plans for every team');
   await expect
     .poll(() => draftTitle(page, pricing.id), { timeout: 30_000 })
-    .toBe('Plans for every team {sep} {site}');
+    .toBe('Plans for every team');
   await expect(status(frame)).toContainText(UI.footer.draftPage, { timeout: 30_000 });
   await publishAll(page);
   await expect(status(frame)).toContainText(UI.footer.matchesPage, { timeout: 30_000 });
@@ -466,7 +499,7 @@ test('publishing puts the override into the page head, once, and Output shows th
     await new Promise((done) => setTimeout(done, 1500));
     await route.continue();
   });
-  await textbox(frame, UI.field.title).fill('Plans and prices {Separator} {Site name}');
+  await textbox(frame, UI.field.title).fill('Plans and prices');
   await frame.locator('body').evaluate((body, words) => {
     const seen: { region?: number; words?: number } = {};
     Object.assign(window, { seen });
@@ -492,4 +525,45 @@ test('publishing puts the override into the page head, once, and Output shows th
   await expect(rows).not.toHaveAttribute('aria-busy');
   expect((await outputRows(frame)).title).toBe('Plans and prices | Example');
   await page.unrouteAll();
+});
+
+test("an Article page's dates follow its own, and a key on a date box finds a field", async ({ page }) => {
+  const frame = await open(page, PAGES.stored.id);
+  const draft = async () => (await seoState(page, pageQuery(PAGES.stored.id))).target?.values.schema;
+  const before = await draft();
+  await tab(frame, UI.tab.schema).click();
+  await button(frame, UI.schema.kind).click();
+  await frame.getByRole('radio', { name: UI.schema.article }).check();
+  await button(frame, 'Change to an article').click();
+  const more = button(frame, 'More details');
+  if ((await more.getAttribute('aria-expanded')) !== 'true') {
+    await more.click();
+  }
+  // A date detail follows the page's own date: a default box.
+  const published = frame.getByRole('combobox', { name: 'Published', exact: true });
+  await expect(published.locator('.seo-linked-tag')).toHaveText('Default · First published');
+  // The image follows the page's image, its only choice: nothing to link.
+  await expect(frame.locator('.seo-field[data-path="schema.props.image"] [data-link]')).toHaveCount(0);
+  // A key on a date box never writes a date: it opens the menu, filtered.
+  await published.press('2');
+  const menu = frame.getByRole('dialog', { name: 'Link Published' });
+  await expect(menu.getByRole('textbox', { name: 'Find a field' })).toHaveValue('2');
+  await page.keyboard.press('Escape');
+  await expect(published).toBeFocused();
+  await expect.poll(async () => ((await draft()) as { props?: Record<string, unknown> } | undefined)?.props?.datePublished).toBeUndefined();
+  // Linked to the page's last update instead: stored as that fact.
+  await published.click();
+  await menu.getByRole('option', { name: /^Last updated, / }).click();
+  await expect(published).toBeFocused();
+  await expect(published.locator('.seo-linked-tag')).toHaveText('Last updated');
+  await expect
+    .poll(async () => ((await draft()) as { props?: Record<string, unknown> } | undefined)?.props?.datePublished)
+    .toEqual({ fact: 'modified' });
+  await button(frame, 'Unlink Published').click();
+  // Back to the kind it had: Undo.
+  await button(frame, UI.schema.kind).click();
+  await frame.getByRole('radio', { name: UI.schema.webPage }).check();
+  await button(frame, 'Change to a web page').click();
+  await expect.poll(draft, { timeout: 30_000 }).toEqual(before);
+
 });

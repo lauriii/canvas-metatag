@@ -12,6 +12,7 @@ use Drupal\canvas_headless\PreviewAssertionFactory;
 use Drupal\canvas_metatag\Controller\ApiController;
 use Drupal\canvas_metatag\Hook\CanvasMetatagHooks;
 use Drupal\canvas_metatag\Resolver;
+use Drupal\canvas_metatag\Sources;
 use Drupal\consumers\Entity\Consumer;
 use Drupal\Core\Cache\CacheableJsonResponse;
 use Drupal\Core\Cache\CacheableMetadata;
@@ -101,123 +102,99 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
   }
 
   /**
-   * Each field type is offered with its kind; base fields are not.
+   * Each field is offered by Canvas with its kinds.
+   *
+   * Title, owner and dates only as facts.
    */
   public function testFieldDiscovery(): void {
-    $common = [
-      'title' => 'text',
-      'description' => 'text',
-      'site' => 'text',
-      'sep' => 'text',
-      'url' => 'url',
-      'author' => 'text',
-      'published' => 'datetime',
-      'modified' => 'datetime',
-      'image' => 'image',
-    ];
     $expected = [
-      'venue' => [
-        'body' => 'text',
-        'field_street' => 'text',
-        'field_postal_code' => 'text',
-        'field_locality' => 'text',
-        // A text list.
-        'field_country' => 'text',
-      ],
-      'person' => [
-        'body' => 'text',
-        'field_role' => 'text',
-        // A reference to image media is an image.
-        'field_photo' => 'image',
-        'field_links' => 'url',
-      ],
+      'venue' => ['body', 'field_street', 'field_postal_code', 'field_locality', 'field_country'],
+      'person' => ['body', 'field_role', 'field_photo', 'field_links'],
       'event' => [
-        'body' => 'text',
-        'field_starts' => 'datetime',
-        'field_ends' => 'datetime',
-        // A reference to a node gives its label.
-        'field_venue' => 'text',
-        'field_performers' => 'text',
-        'field_tickets' => 'url',
-        'field_poster' => 'image',
-        'field_event_status' => 'text',
+        'body',
+        'field_starts',
+        'field_ends',
+        'field_venue',
+        'field_performers',
+        'field_tickets',
+        'field_poster',
+        'field_event_status',
       ],
-      'product' => [
-        'body' => 'text',
-        'field_price' => 'number',
-        'field_currency' => 'text',
-        'field_sku' => 'text',
-        'field_gallery' => 'image',
-        'field_category' => 'text',
-      ],
-      'recipe' => [
-        'body' => 'text',
-        // A core image field.
-        'field_image' => 'image',
-        'field_ingredients' => 'text',
-        'field_steps' => 'text',
-        'field_prep_minutes' => 'number',
-        'field_cook_minutes' => 'number',
-        'field_yield' => 'text',
-        'field_diet' => 'text',
-      ],
+      // The gallery's text and address rows are offered; Canvas does not
+      // match a multi-value media field as one image.
+      'product' => ['body', 'field_price', 'field_currency', 'field_sku', 'field_gallery', 'field_category'],
       'job_posting' => [
-        'body' => 'text',
-        'field_salary' => 'number',
-        'field_salary_unit' => 'text',
-        'field_employment_type' => 'text',
-        // Date only.
-        'field_valid_through' => 'datetime',
-        'field_location' => 'text',
-        'field_image' => 'image',
-        // Offered; its value is empty wherever visitors may not view it.
-        'field_no_view_access' => 'text',
+        'body',
+        'field_salary',
+        'field_salary_unit',
+        'field_employment_type',
+        'field_valid_through',
+        'field_location',
+        'field_image',
+        'field_no_view_access',
       ],
-      'announcement' => ['body' => 'text'],
+      'announcement' => ['body'],
     ];
-    $resolver = $this->resolver();
+    $sources = $this->container->get(Sources::class);
     foreach ($expected as $bundle => $fields) {
-      $types = $resolver->tokenTypes('node', $bundle);
-      // The values every entity has come first; the fields follow in the
-      // order of the type's form.
-      self::assertSame($common, array_slice($types, 0, count($common)), $bundle);
-      $fields = array_combine(array_map(static fn (string $name): string => "field.$name", array_keys($fields)), $fields);
-      self::assertSame($fields, array_slice($types, count($common)), $bundle);
+      $rows = $sources->vocabulary($bundle);
+      // In the order of the type's form; nothing of the owner, the dates or
+      // the title of the type itself.
+      self::assertSame($fields, array_values(array_unique(array_column($rows, 'field'))), $bundle);
     }
+    $kinds = static fn (string $bundle, string $field): array => array_values(array_unique(array_merge(...array_column(array_filter($sources->vocabulary($bundle), static fn (array $row): bool => $row['field'] === $field), 'kinds'))));
+    self::assertSame(['date'], $kinds('event', 'field_starts'));
+    self::assertSame(['date'], $kinds('job_posting', 'field_valid_through'));
+    self::assertSame(['number'], $kinds('product', 'field_price'));
+    self::assertContains('address', $kinds('event', 'field_tickets'));
+    self::assertContains('image', $kinds('person', 'field_photo'));
+    // A reference is a level: the venue's fields, through Venue.
+    $venue = array_filter($sources->vocabulary('event'), static fn (array $row): bool => $row['field'] === 'field_venue');
+    self::assertContains('Venue › Street address', array_column($venue, 'label'));
 
     // A field taken off the form follows the fields on it.
     $this->container->get('entity_display.repository')->getFormDisplay('node', 'venue')->removeComponent('body')->save();
-    self::assertSame(
-      ['field.field_street', 'field.field_postal_code', 'field.field_locality', 'field.field_country', 'field.body'],
-      array_slice(array_keys($resolver->tokenTypes('node', 'venue')), count($common)),
-    );
+    $this->container->get('cache.static')->deleteAll();
+    self::assertSame([
+      'field_street',
+      'field_postal_code',
+      'field_locality',
+      'field_country',
+      'body',
+    ], array_values(array_unique(array_column($sources->vocabulary('venue'), 'field'))));
 
-    // Labels are the fields' own. Two values share the label "Description"
-    // on the Event type: the dialog tells them apart by their names.
-    $tokens = $resolver->tokens(NULL, 'node', 'event', new CacheableMetadata());
-    self::assertSame('Description', $tokens['description']['label']);
-    self::assertSame('Description', $tokens['field.body']['label']);
-    self::assertSame('Venue', $tokens['field.field_venue']['label']);
-    self::assertSame(['label' => 'Poster', 'type' => 'image', 'value' => '', 'image' => NULL], $tokens['field.field_poster']);
+    // The Event type's Description field and the Description fact share a
+    // label: the link menu tells them apart by their group.
+    self::assertContains('Description', array_column($sources->vocabulary('event'), 'label'));
+    self::assertSame('Description', $this->resolver()->facts(NULL, new CacheableMetadata())['description']['label']);
   }
 
   /**
-   * Field values per node: references, lists, media, empty and hidden ones.
+   * What a field gives per node: references, lists, media, empty and hidden.
    */
   public function testValuesPerNode(): void {
+    $sources = $this->container->get(Sources::class);
+    // The source a whole field gave before sources: the field's own value,
+    // else the referenced entity's label.
+    $link = function (string $key, string $field, string $kind = 'text') use ($sources): string|array|null {
+      $node = $this->node($key);
+      $source = $sources->sourceFor($node->bundle(), $field, $kind);
+      self::assertNotNull($source, "$key: $field");
+      return $this->resolver()->link($source, $node, $kind, new CacheableMetadata())[1];
+    };
+    $fact = fn (string $key, string $name): mixed => $this->resolver()->facts($this->node($key), new CacheableMetadata())[$name][$name === 'image' ? 'image' : 'value'];
     $values = [
       'event_full' => [
         // A summary wins over the text.
         'description' => self::EVENT_SUMMARY,
-        'field.body' => self::EVENT_SUMMARY,
-        'field.field_starts' => '2027-06-19T19:00:00+03:00',
-        'field.field_ends' => '2027-06-19T22:30:00+03:00',
-        'field.field_venue' => 'Lakeside Concert Hall',
+        'field_starts' => ['2027-06-19T19:00:00+03:00', 'date'],
+        'field_ends' => ['2027-06-19T22:30:00+03:00', 'date'],
+        'field_venue' => 'Lakeside Concert Hall',
         // The first of two performers.
-        'field.field_performers' => 'Mira Kallio',
-        'field.field_tickets' => 'https://tickets.example.com/midsummer',
-        // A text list gives its label.
-        'field.field_event_status' => 'On as planned',
+        'field_performers' => 'Mira Kallio',
+        'field_tickets' => ['https://tickets.example.com/midsummer', 'address'],
+        // A text list gives its key.
+        'field_event_status' => 'EventScheduled',
         'author' => 'Rosa Martín',
         'url' => 'http://localhost/complex/events/midsummer-night-concert',
         'published' => '2026-05-04T11:00:00+03:00',
@@ -228,152 +205,139 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
         'description' => 'Bring your own instrument. 🎶',
         // An unpublished venue, and a first performer who is unpublished:
         // nothing, never the second performer.
-        'field.field_venue' => '',
-        'field.field_performers' => '',
-        'field.field_ends' => '',
-        'field.field_tickets' => '',
-        'field.field_event_status' => 'Moved to a later date',
+        'field_venue' => NULL,
+        'field_performers' => NULL,
+        'field_ends' => [NULL, 'date'],
+        'field_tickets' => [NULL, 'address'],
+        'field_event_status' => 'EventPostponed',
       ],
       'event_long' => [
         // An internal link is put on the public base.
-        'field.field_tickets' => 'http://localhost/complex/venues/lakeside-concert-hall',
+        'field_tickets' => ['http://localhost/complex/venues/lakeside-concert-hall', 'address'],
       ],
       'product_lamp' => [
         // The scale the field stores.
-        'field.field_price' => '89.00',
-        'field.field_currency' => 'Euro (€)',
-        'field.field_sku' => 'LAMP-OAK-01',
-        'field.field_category' => 'Lamps',
+        'field_price' => ['89.00', 'number'],
+        'field_currency' => 'EUR',
+        'field_sku' => 'LAMP-OAK-01',
+        'field_category' => 'Lamps',
       ],
       'product_rtl' => [
         'title' => 'مصباح مكتب',
-        'field.field_price' => '1200.50',
-        'field.field_currency' => 'US dollar ($)',
-        'field.field_category' => 'Desks & tables',
+        'field_price' => ['1200.50', 'number'],
+        'field_currency' => 'USD',
+        'field_category' => 'Desks & tables',
       ],
       'product_empty' => [
         'description' => '',
-        'field.body' => '',
-        'field.field_price' => '',
-        'field.field_currency' => '',
-        'field.field_sku' => '',
-        'field.field_category' => '',
+        'field_price' => [NULL, 'number'],
+        'field_currency' => NULL,
+        'field_sku' => NULL,
+        'field_category' => NULL,
       ],
       'product_archived' => [
-        'field.field_price' => '149.00',
-        // An unpublished term: its label is hidden from visitors.
-        'field.field_category' => '',
+        'field_price' => ['149.00', 'number'],
+        // An unpublished term is hidden from visitors.
+        'field_category' => NULL,
       ],
       'recipe_bread' => [
         'title' => 'Ruisleipä (Finnish rye bread)',
         // Multi-value fields give their first item; formatted text is plain.
-        'field.field_ingredients' => '500 g rye flour',
-        'field.field_steps' => 'Mix the flour, water and starter; leave overnight.',
-        'field.field_prep_minutes' => '20',
-        'field.field_yield' => '1 loaf',
-        'field.field_diet' => 'Vegan',
+        'field_ingredients' => '500 g rye flour',
+        'field_prep_minutes' => ['20', 'number'],
+        'field_yield' => '1 loaf',
+        'field_diet' => 'vegan',
       ],
       'job_developer' => [
         'description' => 'Build editorial tools with a small team.',
-        'field.field_salary' => '5200.00',
-        'field.field_salary_unit' => 'per month',
-        'field.field_employment_type' => 'Full time',
+        'field_salary' => ['5200.00', 'number'],
+        'field_salary_unit' => 'MONTH',
+        'field_employment_type' => 'FULL_TIME',
         // A date-only field stays a date.
-        'field.field_valid_through' => '2027-01-31',
-        'field.field_location' => 'Example office',
+        'field_valid_through' => ['2027-01-31', 'date'],
+        'field_location' => 'Example office',
         // A field visitors may not view.
-        'field.field_no_view_access' => '',
+        'field_no_view_access' => NULL,
       ],
       'job_expired' => [
-        'field.field_salary' => '',
-        'field.field_location' => '',
-        'field.field_valid_through' => '2026-01-15',
+        'field_salary' => [NULL, 'number'],
+        'field_location' => NULL,
+        'field_valid_through' => ['2026-01-15', 'date'],
       ],
       'person_mira' => [
         'description' => 'Conductor of new music.',
-        'field.field_role' => 'Conductor',
+        'field_role' => 'Conductor',
         // The first of two profiles.
-        'field.field_links' => 'https://mira.example.org',
+        'field_links' => ['https://mira.example.org', 'address'],
       ],
       'person_omar' => [
         'title' => 'عمر حداد',
-        'field.field_role' => 'ملحن',
-        'field.field_links' => 'https://omar.example.org',
+        'field_role' => 'ملحن',
+        'field_links' => ['https://omar.example.org', 'address'],
       ],
       'person_empty' => [
         'description' => '',
-        'field.field_role' => '',
-        'field.field_links' => '',
+        'field_role' => NULL,
+        'field_links' => [NULL, 'address'],
       ],
     ];
-    $actual = [];
     foreach ($values as $key => $expected) {
-      $node = $this->node($key);
-      $tokens = $this->resolver()->tokens($node, 'node', $node->bundle(), new CacheableMetadata());
-      $actual[$key] = array_intersect_key(array_map(static fn (array $token): string => $token['value'], $tokens), $expected);
-      // In the order of the expectation.
-      $actual[$key] = array_merge(array_intersect_key($expected, $actual[$key]), $actual[$key]);
+      foreach ($expected as $name => $value) {
+        [$value, $kind] = is_array($value) ? $value : [$value, 'text'];
+        $actual = str_starts_with($name, 'field_') ? $link($key, $name, $kind) : $fact($key, $name);
+        self::assertSame($value, $actual, "$key: $name");
+      }
     }
-    self::assertSame($values, $actual);
+    // Canvas offers no multi-value formatted text as one text.
+    self::assertNull($sources->sourceFor('recipe', 'field_steps', 'text'));
 
     // A long body without a summary: its text, cut at a word boundary within
     // 160 characters.
-    $node = $this->node('event_long');
-    $tokens = $this->resolver()->tokens($node, 'node', 'event', new CacheableMetadata());
-    $text = $tokens['field.body']['value'];
-    $description = $tokens['description']['value'];
-    self::assertStringStartsWith('Each work is introduced by the musicians who play it', $text);
+    $description = $fact('event_long', 'description');
+    self::assertStringStartsWith('Each work is introduced by the musicians who play it', $description);
     self::assertLessThanOrEqual(160, mb_strlen($description));
     self::assertGreaterThan(100, mb_strlen($description));
-    self::assertStringStartsWith($description, $text);
-    self::assertMatchesRegularExpression('/^[^\pL\pN]/u', mb_substr($text, mb_strlen($description), 1));
 
     // Long HTML: plain text with entities decoded, no markup, and nothing of
-    // the script at its end.
+    // the script at its end. The heading, the list items and the table rows
+    // end their sentences.
     $node = $this->node('product_lamp');
-    $tokens = $this->resolver()->tokens($node, 'node', 'product', new CacheableMetadata());
-    $body = $tokens['field.body']['value'];
-    // The heading, the list items and the table rows end their sentences.
+    $body = (string) $this->resolver()->link([
+      'expression' => 'ℹ︎␜entity:node:product␝body␞␟value',
+      'sourceType' => 'entity-field',
+    ], $node, 'text', new CacheableMetadata())[1];
     self::assertStringStartsWith('Made to last. Solid oak, turned by hand & finished with natural oil.', $body);
-    self::assertStringEndsWith('Warm 2700 K light. Dimmable. Fabric cable, 2 m. Height 45 cm. Weight 1.2 kg. Questions? Ask us 💡', $body);
     self::assertStringNotContainsString('<', $body);
-    foreach (['field.body', 'description'] as $name) {
-      self::assertStringNotContainsString('alert(1)', $tokens[$name]['value'], $name);
-    }
+    self::assertStringNotContainsString('alert(1)', $body);
+    self::assertStringNotContainsString('alert(1)', $fact('product_lamp', 'description'));
 
     // Images: media and core image fields, as an anonymous visitor sees them.
     $images = [
       // Media with alt text; the image is the original with its size.
-      'event_full' => ['field.field_poster', 'poster', 1600, 900, 'An orchestra on an open-air stage at dusk'],
-      // The first item of a gallery, without alt text.
-      'product_lamp' => ['field.field_gallery', 'lamp_front', 1200, 1200, ''],
+      'event_full' => ['field_poster', 'poster', 1600, 900, 'An orchestra on an open-air stage at dusk'],
       // Alt text from right to left.
-      'person_omar' => ['field.field_photo', 'omar', 800, 1000, 'صورة عمر حداد'],
+      'person_omar' => ['field_photo', 'omar', 800, 1000, 'صورة عمر حداد'],
       // A core image field, with the size its file has.
-      'recipe_bread' => ['field.field_image', 'rye_bread', 1200, 800, 'A dark rye loaf on a board'],
-      'recipe_rtl' => ['field.field_image', 'shakshuka', 1000, 750, ''],
-      'job_developer' => ['field.field_image', 'logo', 400, 400, ''],
+      'recipe_bread' => ['field_image', 'rye_bread', 1200, 800, 'A dark rye loaf on a board'],
+      'recipe_rtl' => ['field_image', 'shakshuka', 1000, 750, ''],
+      'job_developer' => ['field_image', 'logo', 400, 400, ''],
     ];
-    foreach ($images as $key => [$token, $file, $width, $height, $alt]) {
-      $node = $this->node($key);
-      $tokens = $this->resolver()->tokens($node, 'node', $node->bundle(), new CacheableMetadata());
+    foreach ($images as $key => [$field, $file, $width, $height, $alt]) {
       $expected = ['url' => $this->fileUrl($file), 'width' => $width, 'height' => $height, 'alt' => $alt];
-      self::assertSame($expected, array_intersect_key($tokens[$token]['image'] ?? [], $expected), $key);
-      // {image} is the first image field that resolves: here the only one.
-      self::assertSame($tokens[$token]['image'], $tokens['image']['image'], $key);
+      self::assertSame($expected, array_intersect_key($link($key, $field, 'image') ?? [], $expected), $key);
+      // The Image fact is the first image field that resolves: here the only
+      // one.
+      self::assertSame($expected, array_intersect_key($fact($key, 'image') ?? [], $expected), $key);
     }
-    // No image, or one visitors cannot see: an unpublished first gallery
-    // item gives nothing, never the second item.
-    $missing = [
-      'event_hidden_refs' => 'field.field_poster',
-      'product_rtl' => 'field.field_gallery',
-      'product_empty' => 'field.field_gallery',
-    ];
-    foreach ($missing as $key => $token) {
-      $node = $this->node($key);
-      $tokens = $this->resolver()->tokens($node, 'node', $node->bundle(), new CacheableMetadata());
-      self::assertNull($tokens[$token]['image'], $key);
-      self::assertNull($tokens['image']['image'], $key);
+    // A gallery is several images: Canvas offers no one image of it, and the
+    // Image fact is its first item.
+    self::assertNull($sources->sourceFor('product', 'field_gallery', 'image'));
+    self::assertSame($this->fileUrl('lamp_front'), $fact('product_lamp', 'image')['url'] ?? NULL);
+    // An image visitors cannot see (an unpublished poster) gives nothing; an
+    // unpublished first gallery item gives nothing, never the second item.
+    self::assertNull($link('event_hidden_refs', 'field_poster', 'image'));
+    foreach (['event_hidden_refs', 'product_rtl', 'product_empty'] as $key) {
+      self::assertNull($fact($key, 'image'), $key);
     }
   }
 
@@ -411,16 +375,19 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       $expected = $this->resolver()->resolve($this->node($key))['head'];
       self::assertSame([$expected['title']], $head['titles'], $key);
       self::assertSame($expected['meta'], $head['meta'], $key);
-      self::assertSame([['rel' => 'canonical', 'href' => 'http://localhost' . $this->complex['path'][$key]]], $head['links'], $key);
+      self::assertSame([[
+        'rel' => 'canonical',
+        'href' => 'http://localhost' . $this->complex['path'][$key],
+      ],
+      ], $head['links'], $key);
       self::assertSame([$expected['script'][0]['textContent']], $head['json_ld'], $key);
       $heads[$key] = $expected;
     }
     // Served again from the page cache.
     self::assertSame('HIT', $this->get($this->complex['path']['event_full'])->headers->get('X-Drupal-Cache'));
 
-    // An event: the poster is the social image; the event itself is withheld,
-    // because its street address is on the venue, which a value of one
-    // level cannot reach.
+    // An event: the poster is the social image; the street address is linked
+    // to the venue's street, so the event itself ships.
     $poster = ['url' => $this->fileUrl('poster'), 'width' => 1600, 'height' => 900];
     self::assertSame([
       'description' => self::EVENT_SUMMARY,
@@ -438,49 +405,45 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     ], self::meta($heads['event_full']));
     self::assertSame('Midsummer Night Concert | Events', $heads['event_full']['title']);
     $graph = self::graph($heads['event_full']);
-    self::assertSame(['identity', 'website', 'webpage', 'primaryimage'], array_keys($graph));
+    self::assertSame(['identity', 'website', 'webpage', 'primaryimage', 'primary'], array_keys($graph));
     self::assertSame('WebPage', $graph['webpage']['@type']);
-    self::assertArrayNotHasKey('mainEntity', $graph['webpage']);
+    self::assertArrayHasKey('mainEntity', $graph['webpage']);
+    self::assertSame([
+      'Lakeside Concert Hall',
+      'Mannerheimintie 13e',
+    ], [$graph['primary']['location']['name'], $graph['primary']['location']['address']['streetAddress']]);
+    self::assertSame('https://schema.org/EventScheduled', $graph['primary']['eventStatus']);
     self::assertSame('An orchestra on an open-air stage at dusk', $graph['primaryimage']['caption']);
+    // What withholds the main node, and the values that do not fit.
     $reports = [
-      'event_full' => [TRUE, ['location_address_streetAddress'], []],
-      // No end, no venue for visitors, no poster.
-      'event_hidden_refs' => [TRUE, ['location_address_streetAddress'], ['endDate', 'location_name', 'image']],
-      // A text list gives its label, which is not a currency code.
-      'product_lamp' => [TRUE, ['offers_priceCurrency'], ['offers_availability']],
-      'product_rtl' => [TRUE, ['offers_priceCurrency'], ['image', 'offers_availability']],
-      'product_empty' => [
-        TRUE,
-        ['offers_price', 'offers_priceCurrency'],
-        ['description', 'image', 'offers_availability'],
-      ],
-      'person_mira' => [FALSE, [], []],
-      'person_empty' => [FALSE, [], ['description']],
+      'event_full' => [NULL, []],
+      // No venue for visitors: no street address.
+      'event_hidden_refs' => [['location_address_streetAddress'], []],
+      // A text list gives its key, a currency code.
+      'product_lamp' => [NULL, []],
+      'product_rtl' => [NULL, []],
+      'product_empty' => [['offers_price'], []],
+      'person_mira' => [NULL, []],
+      'person_empty' => [NULL, []],
       // No structured data type: nothing to withhold.
-      'job_developer' => [FALSE, [], []],
+      'job_developer' => [NULL, []],
     ];
-    foreach ($reports as $key => [$withheld, $required, $recommended]) {
-      self::assertSame(
-        ['withheld' => $withheld, 'missing_required' => $required, 'missing_recommended' => $recommended],
-        $this->resolver()->resolve($this->node($key))['schema'],
-        $key,
-      );
+    foreach ($reports as $key => [$missing, $dropped]) {
+      $schema = $this->resolver()->resolve($this->node($key))['schema'];
+      self::assertSame([$missing, $dropped], [$schema['withheld']['missing'] ?? NULL, $schema['dropped']], $key);
     }
 
-    // A long title is cut at the last word within 255 characters, and the
-    // separator the cut leaves goes with it.
-    $long = (string) $this->node('event_long')->label();
-    self::assertStringEndsWith('first performed', $heads['event_long']['title']);
-    self::assertSame($long, $heads['event_long']['title']);
+    // A long title keeps its ending whole and loses the last words of its
+    // main part, cut at a word within 255 characters.
+    self::assertStringEndsWith('rehearsed and first | Events', $heads['event_long']['title']);
+    self::assertLessThanOrEqual(255, mb_strlen($heads['event_long']['title']));
 
-    // A product: its description is its whole body as plain text, cut at
-    // the last word within the description's limit; a gallery whose first
-    // image has no alt text gives the image without one.
+    // A product: its description is its Description fact, the start of its
+    // body cut at a word within 160 characters; a gallery whose first image
+    // has no alt text gives the image without one.
     $meta = self::meta($heads['product_lamp']);
-    $body = $this->resolver()->tokens($this->node('product_lamp'), 'node', 'product', new CacheableMetadata())['field.body']['value'];
-    self::assertLessThanOrEqual(1000, mb_strlen($meta['description']));
-    self::assertGreaterThanOrEqual(900, mb_strlen($meta['description']));
-    self::assertStringStartsWith($meta['description'] . ' ', $body);
+    self::assertLessThanOrEqual(160, mb_strlen($meta['description']));
+    self::assertStringStartsWith('Made to last. Solid oak, turned by hand & finished with natural oil.', $meta['description']);
     self::assertSame($this->fileUrl('lamp_front'), $meta['og:image']);
     self::assertArrayNotHasKey('og:image:alt', $meta);
     self::assertArrayNotHasKey('caption', self::graph($heads['product_lamp'])['primaryimage']);
@@ -528,7 +491,12 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     // A square logo makes a small card, as the dialog's link preview shows.
     self::assertSame('summary', $meta['twitter:card']);
     self::assertArrayNotHasKey('og:image:alt', $meta);
-    self::assertSame(['identity', 'website', 'webpage', 'primaryimage'], array_keys(self::graph($heads['job_developer'])));
+    self::assertSame([
+      'identity',
+      'website',
+      'webpage',
+      'primaryimage',
+    ], array_keys(self::graph($heads['job_developer'])));
 
     // Emoji, joiners and flags survive the script element and the title.
     self::assertSame('Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮 | Events', $heads['event_hidden_refs']['title']);
@@ -542,11 +510,33 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $event = ContentTemplate::load('node.event.full');
     self::assertInstanceOf(ContentTemplate::class, $event);
     $values = $event->getThirdPartySetting('canvas_metatag', 'values');
-    $event->setThirdPartySetting('canvas_metatag', 'values', ['title' => '{title} at {field.field_venue}'] + $values)->save();
+    $event->setThirdPartySetting('canvas_metatag', 'values', [
+      'title_end' => [
+        'source' => [
+          'expression' => 'ℹ︎␜entity:node:event␝field_venue␞␟entity␜␜entity:node␝title␞␟value',
+          'sourceType' => 'entity-field',
+        ],
+      ],
+      'social' => [
+        'title' => [
+          'source' => [
+            'expression' => 'ℹ︎␜entity:node:event␝field_performers␞␟entity␜␜entity:node␝title␞␟value',
+            'sourceType' => 'entity-field',
+          ],
+        ],
+      ] + ($values['social'] ?? []),
+    ] + $values)->save();
     $product = ContentTemplate::load('node.product.full');
     self::assertInstanceOf(ContentTemplate::class, $product);
     $values = $product->getThirdPartySetting('canvas_metatag', 'values');
-    $product->setThirdPartySetting('canvas_metatag', 'values', ['description' => '{field.field_category}'] + $values)->save();
+    $product->setThirdPartySetting('canvas_metatag', 'values', [
+      'description' => [
+        'source' => [
+          'expression' => 'ℹ︎␜entity:node:product␝field_category␞␟entity␜␜entity:taxonomy_term␝name␞␟value',
+          'sourceType' => 'entity-field',
+        ],
+      ],
+    ] + $values)->save();
 
     // The head depends on what it reads through the references.
     $tags = $this->resolver()->resolve($this->node('event_full'))['cacheability']->getCacheTags();
@@ -605,18 +595,25 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
 
     $url = $this->fileUrl('poster');
     $alt = 'An orchestra on an open-air stage at dusk';
-    $hall = 'Midsummer Night Concert at Lakeside Concert Hall';
-    $renamed = 'Midsummer Night Concert at Lakeside Hall';
+    $hall = 'Midsummer Night Concert | Lakeside Concert Hall';
+    $renamed = 'Midsummer Night Concert | Lakeside Hall';
     self::assertSame([
       'before' => ['MISS', $hall, $alt, $url, 'MISS', 'Lamps'],
       'again' => ['HIT', $hall, $alt, $url, 'HIT', 'Lamps'],
       'venue renamed' => ['MISS', $renamed, $alt, $url, 'HIT', 'Lamps'],
       'poster alt changed' => ['MISS', $renamed, 'The stage at dusk', $url, 'HIT', 'Lamps'],
       'term renamed' => ['HIT', $renamed, 'The stage at dusk', $url, 'MISS', 'Table lamps'],
-      // A value that is no longer visible is empty; the event has no other
-      // image field and the site no default image.
-      'venue unpublished' => ['MISS', 'Midsummer Night Concert at', 'The stage at dusk', $url, 'HIT', 'Table lamps'],
-      'poster unpublished' => ['MISS', 'Midsummer Night Concert at', NULL, NULL, 'HIT', 'Table lamps'],
+      // A link that is no longer visible gives its default; the event has no
+      // other image field and the site no default image.
+      'venue unpublished' => [
+        'MISS',
+        'Midsummer Night Concert | Example',
+        'The stage at dusk',
+        $url,
+        'HIT',
+        'Table lamps',
+      ],
+      'poster unpublished' => ['MISS', 'Midsummer Night Concert | Example', NULL, NULL, 'HIT', 'Table lamps'],
     ], $seen);
   }
 
@@ -631,14 +628,20 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     self::assertInstanceOf(ContentTemplate::class, $event);
     $values = $event->getThirdPartySetting('canvas_metatag', 'values');
     $event->setThirdPartySetting('canvas_metatag', 'values', [
-      'title' => '{title} at {field.field_venue}',
-      'description' => '{field.field_performers}',
+      'title_end' => [
+        'source' => [
+          'expression' => 'ℹ︎␜entity:node:event␝field_venue␞␟entity␜␜entity:node␝title␞␟value',
+          'sourceType' => 'entity-field',
+        ],
+      ],
+      'description' => [
+        'source' => [
+          'expression' => 'ℹ︎␜entity:node:event␝field_performers␞␟entity␜␜entity:node␝title␞␟value',
+          'sourceType' => 'entity-field',
+        ],
+      ],
     ] + $values)->save();
-    $product = ContentTemplate::load('node.product.full');
-    self::assertInstanceOf(ContentTemplate::class, $product);
-    $values = $product->getThirdPartySetting('canvas_metatag', 'values');
-    $product->setThirdPartySetting('canvas_metatag', 'values', ['social' => ['image' => '{field.field_gallery}']] + $values)->save();
-
+    // The product's image is its Image fact: the first item of its gallery.
     $event_path = $this->complex['path']['event_hidden_refs'];
     $product_path = '/node/' . $this->complex['node']['product_rtl'];
     $read = function () use ($event_path, $product_path): array {
@@ -674,17 +677,18 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $this->forgetAccess();
     $seen['venue deleted'] = $read();
 
-    $title = 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮 at';
-    // With no performer to show, the description is the node's own.
+    $title = 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮';
+    // With a performer hidden, the description is the node's own.
     $own = 'Bring your own instrument. 🎶';
     $image = $this->fileUrl('lamp_prototype');
     self::assertSame([
-      'before' => ['MISS', $title, $own, 'MISS', NULL],
-      'again' => ['HIT', $title, $own, 'HIT', NULL],
-      'venue published' => ['MISS', "$title Rehearsal Room B", $own, 'HIT', NULL],
-      'first performer published' => ['MISS', "$title Rehearsal Room B", 'Unannounced guest', 'HIT', NULL],
-      'first gallery image published' => ['HIT', "$title Rehearsal Room B", 'Unannounced guest', 'MISS', $image],
-      'venue deleted' => ['MISS', $title, 'Unannounced guest', 'HIT', $image],
+      'before' => ['MISS', "$title | Example", $own, 'MISS', NULL],
+      'again' => ['HIT', "$title | Example", $own, 'HIT', NULL],
+      'venue published' => ['MISS', "$title | Rehearsal Room B", $own, 'HIT', NULL],
+      'first performer published' => ['MISS', "$title | Rehearsal Room B", 'Unannounced guest', 'HIT', NULL],
+      // The same media item is the event's poster: its head is built again.
+      'first gallery image published' => ['MISS', "$title | Rehearsal Room B", 'Unannounced guest', 'MISS', $image],
+      'venue deleted' => ['MISS', "$title | Example", 'Unannounced guest', 'HIT', $image],
     ], $seen);
   }
 
@@ -709,15 +713,26 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $state = $this->state('node.event.full', 'event_full');
     $target = $state['target'];
     self::assertSame(['Event', TRUE, TRUE], [$target['label'], $target['published'], $target['has_draft']]);
-    self::assertSame('{title} {sep} Tickets', $state['target']['values']['title']);
-    self::assertSame('{field.field_poster}', $state['target']['values']['social']['image']);
+    self::assertSame(['text' => 'Tickets'], $state['target']['values']['title_end']);
+    self::assertSame([
+      'source' => [
+        'expression' => 'ℹ︎␜entity:node:event␝field_poster␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}',
+        'sourceType' => 'entity-field',
+      ],
+    ], $state['target']['values']['social']['image']);
     self::assertSame('Midsummer Night Concert', $state['preview']['label']);
     self::assertSame('Midsummer Night Concert | Tickets', $state['resolved']['head']['title']);
-    self::assertSame('Lakeside Concert Hall', $state['tokens']['field.field_venue']['value']);
+    self::assertSame('Lakeside Concert Hall', array_column($state['sources'], 'value', 'label')['Venue › Title']);
     // Another event to preview with: its own values.
     $state = $this->state('node.event.full', 'event_hidden_refs');
     self::assertSame('Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮 | Tickets', $state['resolved']['head']['title']);
-    self::assertSame('', $state['tokens']['field.field_venue']['value']);
+    self::assertSame([
+      'hidden',
+      '',
+    ], [
+      array_column($state['sources'], 'status', 'label')['Venue › Title'],
+      array_column($state['sources'], 'value', 'label')['Venue › Title'],
+    ]);
 
     // A template that was never published previews with its values; for
     // visitors the recipe keeps core's head.
@@ -732,16 +747,27 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $teaser = ContentTemplate::load('node.product.teaser');
     self::assertInstanceOf(ContentTemplate::class, $teaser);
     $response = $this->request(Request::create(self::STATE . '?entity_type=content_template&id=node.product.teaser&preview=' . $this->complex['node']['product_lamp']));
-    self::assertSame([404, 'not_found'], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
-    $response = $this->putTemplate($teaser, ['title' => '{title}']);
-    self::assertSame([404, 'not_found'], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
+    self::assertSame([
+      404,
+      'not_found',
+    ], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
+    $response = $this->putTemplate($teaser, ['title' => ['text' => 'Teaser']]);
+    self::assertSame([
+      404,
+      'not_found',
+    ], [$response->getStatusCode(), self::decodeResponse($response)['error']['code']]);
     self::assertTrue($this->container->get(AutoSaveManager::class)->getAutoSaveEntity($teaser, TRUE)->isEmpty());
 
     // Someone who may use Canvas but not edit templates gets what is live.
-    $this->setUpCurrentUser(permissions: ['access content', 'view media', Page::EDIT_PERMISSION, 'edit canvas metatag']);
+    $this->setUpCurrentUser(permissions: [
+      'access content',
+      'view media',
+      Page::EDIT_PERMISSION,
+      'edit canvas metatag',
+    ]);
     $state = $this->state('node.event.full', 'event_full');
     self::assertFalse($state['target']['has_draft']);
-    self::assertSame('{title} {sep} Events', $state['target']['values']['title']);
+    self::assertSame(['text' => 'Events'], $state['target']['values']['title_end']);
     self::assertSame('Midsummer Night Concert | Events', $state['resolved']['head']['title']);
 
     // Visitors get the live template, and core's head for the recipe.
@@ -765,7 +791,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $template = ContentTemplate::load('node.event.full');
     self::assertInstanceOf(ContentTemplate::class, $template);
     self::assertTrue($template->status());
-    self::assertSame('{title} {sep} Tickets', $template->getThirdPartySetting('canvas_metatag', 'values')['title']);
+    self::assertSame(['text' => 'Tickets'], $template->getThirdPartySetting('canvas_metatag', 'values')['title_end']);
     self::assertTrue($this->container->get(AutoSaveManager::class)->getAutoSaveEntity($template)->isEmpty());
     self::assertFalse(ContentTemplate::load('node.recipe.full')?->status());
     $this->container->get(AccountProxyInterface::class)->setAccount(new AnonymousUserSession());
@@ -776,38 +802,51 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
   }
 
   /**
-   * A field a value is bound to is deleted: that part is empty.
+   * A field a value is linked to is deleted.
+   *
+   * The link is broken, the default is used, the template is left alone.
    */
   public function testBoundFieldDeleted(): void {
     $path = $this->complex['path']['event_full'];
     self::assertSame($this->fileUrl('poster'), self::meta(self::readHead($this->get($path)))['og:image']);
 
     FieldConfig::loadByName('node', 'event', 'field_poster')?->delete();
+    // Canvas keeps its matches for the rest of a request.
+    $this->container->get('cache.static')->deleteAll();
     $response = $this->get($path);
     self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
     $head = self::readHead($response);
-    // The social image and the event image are bound to it, and the event
+    // The social image and the event image are linked to it, and the event
     // has no other image field: no image anywhere.
     self::assertSame(['Midsummer Night Concert | Events'], $head['titles']);
     $meta = self::meta($head);
     self::assertArrayNotHasKey('og:image', $meta);
     self::assertSame('summary', $meta['twitter:card']);
-    self::assertSame(['identity', 'website', 'webpage'], array_keys(self::graph(['script' => [['textContent' => $head['json_ld'][0]]]])));
-    $event = $this->node('event_full');
     self::assertSame([
-      'withheld' => TRUE,
-      'missing_required' => ['location_address_streetAddress'],
-      'missing_recommended' => ['image'],
-    ], $this->resolver()->resolve($event)['schema']);
+      'identity',
+      'website',
+      'webpage',
+      'primary',
+    ], array_keys(self::graph(['script' => [['textContent' => $head['json_ld'][0]]]])));
+    $event = $this->node('event_full');
+    $schema = $this->resolver()->resolve($event)['schema'];
+    self::assertSame([NULL, []], [$schema['withheld'], $schema['dropped']]);
+    self::assertArrayNotHasKey('image', self::graph($this->resolver()->resolve($event)['head'])['primary']);
 
     // The template keeps its values and stays valid and in use; the field is
     // no longer offered.
     $template = ContentTemplate::load('node.event.full');
     self::assertInstanceOf(ContentTemplate::class, $template);
     self::assertTrue($template->status());
-    self::assertSame('{field.field_poster}', $template->getThirdPartySetting('canvas_metatag', 'values')['social']['image']);
+    self::assertSame([
+      'source' => [
+        'expression' => 'ℹ︎␜entity:node:event␝field_poster␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}',
+        'sourceType' => 'entity-field',
+      ],
+    ], $template->getThirdPartySetting('canvas_metatag', 'values')['social']['image']);
     self::assertEntityIsValid($template);
-    self::assertArrayNotHasKey('field.field_poster', $this->resolver()->tokenTypes('node', 'event'));
+    $this->container->get('cache.static')->deleteAll();
+    self::assertNotContains('field_poster', array_column($this->container->get(Sources::class)->vocabulary('event'), 'field'));
 
     // The dialog shows the stored value; a new use of the field is refused,
     // while sending the stored value back keeps it.
@@ -818,15 +857,46 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       'edit canvas metatag',
     ]);
     $state = $this->state('node.event.full', 'event_full');
-    self::assertSame('{field.field_poster}', $state['target']['values']['social']['image']);
-    self::assertArrayNotHasKey('field.field_poster', $state['tokens']);
+    self::assertSame([
+      'source' => [
+        'expression' => 'ℹ︎␜entity:node:event␝field_poster␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}',
+        'sourceType' => 'entity-field',
+      ],
+    ], $state['target']['values']['social']['image']);
+    self::assertSame(['field' => 'field_poster', 'reason' => 'missing'], $state['broken']['social.image']);
+    self::assertNotContains('field_poster', array_column($state['sources'], 'field'));
     $values = $state['target']['values'];
-    $response = $this->putTemplate($template, ['title' => '{title} {field.field_poster}'] + $values);
+    $response = $this->putTemplate($template, [
+      'title' => [
+        'source' => ['expression' => 'ℹ︎␜entity:node:event␝field_poster␞␟value', 'sourceType' => 'entity-field'],
+      ],
+    ] + $values);
     self::assertSame(Response::HTTP_UNPROCESSABLE_ENTITY, $response->getStatusCode());
-    self::assertSame(['title'], array_keys(self::decodeResponse($response)['error']['fields']));
-    $response = $this->putTemplate($template, ['title' => '{title} {sep} Concerts'] + $values);
+    self::assertSame(['title' => 'Choose a field from the list.'], self::decodeResponse($response)['error']['fields']);
+    $response = $this->putTemplate($template, ['title_end' => ['text' => 'Concerts']] + $values);
     self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
-    self::assertSame('{field.field_poster}', self::decodeResponse($response)['values']['social']['image']);
+    $poster = [
+      'source' => [
+        'expression' => 'ℹ︎␜entity:node:event␝field_poster␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}',
+        'sourceType' => 'entity-field',
+      ],
+    ];
+    self::assertSame($poster, self::decodeResponse($response)['values']['social']['image']);
+
+    // A template with a broken link publishes: the link is kept, as stored.
+    $this->setUpCurrentUser(permissions: [
+      'access content',
+      'view media',
+      ContentTemplate::ADMIN_PERMISSION,
+      AutoSaveManager::PUBLISH_PERMISSION,
+      'edit canvas metatag',
+    ]);
+    $response = $this->makePublishAllRequest();
+    self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+    $template = ContentTemplate::load('node.event.full');
+    self::assertInstanceOf(ContentTemplate::class, $template);
+    self::assertSame(['text' => 'Concerts'], $template->getThirdPartySetting('canvas_metatag', 'values')['title_end']);
+    self::assertSame($poster, $template->getThirdPartySetting('canvas_metatag', 'values')['social']['image']);
   }
 
   /**
@@ -845,7 +915,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       self::assertSame([['rel' => 'canonical', 'href' => self::FRONTEND . $path]], $head['link'], $key);
       self::assertSame(self::FRONTEND . $path . '#webpage', self::graph($head)['webpage']['@id'], $key);
       if ($key === 'event_hidden_refs') {
-        // No poster, and no image elsewhere.
+        // No poster visitors may see, and no image elsewhere.
         self::assertArrayNotHasKey('og:image', self::meta($head));
         continue;
       }
@@ -957,7 +1027,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
   private function putTemplate(ContentTemplate $template, array $values): Response {
     $auto_save = $this->container->get(AutoSaveManager::class);
     return $this->request(Request::create('/canvas-metatag/api/draft/content_template/' . $template->id(), 'PUT', content: (string) json_encode([
-      'values' => $values,
+      'values' => (object) $values,
       'client_instance_id' => self::CLIENT,
       'auto_saves' => [AutoSaveManager::getAutoSaveKey($template) => $auto_save->getClientAutoSaveData($template)],
     ])));
@@ -966,15 +1036,22 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
   /**
    * A hidden reference that becomes visible, or is deleted, updates the head.
    *
-   * Apart from testHeadless(), whose preview tokens read the Event template
-   * as the fixture leaves it.
+   * Apart from testHeadless(), whose preview credentials read the Event
+   * template as the fixture leaves it.
    */
   public function testHeadlessHiddenReferences(): void {
     $this->enableHeadless();
     $event = ContentTemplate::load('node.event.full');
     self::assertInstanceOf(ContentTemplate::class, $event);
     $values = $event->getThirdPartySetting('canvas_metatag', 'values');
-    $event->setThirdPartySetting('canvas_metatag', 'values', ['title' => '{title} at {field.field_venue}'] + $values)->save();
+    $event->setThirdPartySetting('canvas_metatag', 'values', [
+      'title_end' => [
+        'source' => [
+          'expression' => 'ℹ︎␜entity:node:event␝field_venue␞␟entity␜␜entity:node␝title␞␟value',
+          'sourceType' => 'entity-field',
+        ],
+      ],
+    ] + $values)->save();
     $path = $this->complex['path']['event_hidden_refs'];
     $read = function () use ($path): array {
       $response = $this->content($path);
@@ -991,12 +1068,12 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $this->forgetAccess();
     $seen['venue deleted'] = $read();
 
-    $title = 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮 at';
+    $title = 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮';
     self::assertSame([
-      'before' => ['MISS', $title],
-      'again' => ['HIT', $title],
-      'venue published' => ['MISS', "$title Rehearsal Room B"],
-      'venue deleted' => ['MISS', $title],
+      'before' => ['MISS', "$title | Example"],
+      'again' => ['HIT', "$title | Example"],
+      'venue published' => ['MISS', "$title | Rehearsal Room B"],
+      'venue deleted' => ['MISS', "$title | Example"],
     ], $seen);
   }
 
@@ -1012,7 +1089,11 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $this->installEntitySchema('consumer');
     $this->installEntitySchema('oauth2_token');
     $this->installConfig(['simple_oauth', 'canvas_headless']);
-    $this->config('canvas_headless.settings')->set('frontends', [['url' => self::FRONTEND, 'components' => []]])->save();
+    $this->config('canvas_headless.settings')->set('frontends', [[
+      'url' => self::FRONTEND,
+      'components' => [],
+    ],
+    ])->save();
   }
 
   /**

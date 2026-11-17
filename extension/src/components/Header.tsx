@@ -97,7 +97,7 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
   const translation =
     !!target.default_langcode && target.default_langcode !== server.langcode;
   const siteName =
-    state.edits.site.identity.name.trim() || server.tokens.site?.value || '';
+    state.edits.site.identity.name.trim() || server.facts.site?.value || '';
   const unsavedSite = state.siteDirty && state.scope !== 'site';
 
   return (
@@ -456,6 +456,8 @@ export function Sheet(props: {
   end?: ReactNode;
   /** Back takes focus on open (else the sheet's own content does). */
   focusBack?: boolean;
+  /** Under the scroller, never over it: a confirm that stays in sight. */
+  foot?: ReactNode;
   onClose(): void;
   children: ReactNode;
 }) {
@@ -498,6 +500,7 @@ export function Sheet(props: {
       >
         {props.children}
       </div>
+      {props.foot && <div className="seo-sheet-foot">{props.foot}</div>}
     </section>
   );
 }

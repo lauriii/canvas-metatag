@@ -8,8 +8,10 @@ use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Controller\AutoSaveValidateTrait;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
+use Drupal\canvas_metatag\RegistryStrings;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\SchemaGraph;
+use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Component\Uuid\Uuid;
@@ -26,8 +28,11 @@ use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Url;
+use Drupal\locale\StringStorageInterface;
 use Drupal\media\Plugin\media\Source\Image;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
@@ -39,7 +44,9 @@ use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
  */
 final class ApiController implements ContainerInjectionInterface {
 
-  use AutowireTrait;
+  use AutowireTrait {
+    create as private autowired;
+  }
   // Canvas's own conflict rule; @internal, pinned by PageDraftTest. The trait
   // reads $this->autoSaveManager, so the property must have exactly that name.
   use AutoSaveValidateTrait;
@@ -47,6 +54,26 @@ final class ApiController implements ContainerInjectionInterface {
   private const MAX_BODY = 131072;
 
   private const PAGE_SIZE = 24;
+
+  /**
+   * The places a site save names before it counts the rest.
+   */
+  private const NAMED = 25;
+
+  /**
+   * Registry and rules keys whose strings the dialog shows.
+   */
+  private const SHOWN = ['label', 'name', 'variants', 'earn', 'not_for', 'for', 'where', 'need', 'reason', 'why'];
+
+  /**
+   * Registry and rules keys that hold only strings the dialog shows.
+   */
+  private const ALL_SHOWN = ['option_labels', 'say', 'confirm'];
+
+  /**
+   * Locale storage, when the locale module is installed: it is optional.
+   */
+  private ?StringStorageInterface $localeStorage = NULL;
 
   public function __construct(
     private readonly AutoSaveManager $autoSaveManager,
@@ -57,10 +84,22 @@ final class ApiController implements ContainerInjectionInterface {
     private readonly LanguageManagerInterface $languageManager,
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly AccountInterface $currentUser,
+    private readonly Sources $sources,
   ) {}
 
   /**
-   * Everything the dialog needs to open: settings, tokens and the output.
+   * {@inheritdoc}
+   */
+  public static function create(ContainerInterface $container): static {
+    $controller = self::autowired($container);
+    // Looked up, not autowired: a site without locale has no service to wire,
+    // and older cores refuse a missing service even for a nullable argument.
+    $controller->localeStorage = $container->has('locale.storage') ? $container->get('locale.storage') : NULL;
+    return $controller;
+  }
+
+  /**
+   * Everything the dialog needs to open: settings, facts, links and output.
    *
    * The context is a page, a content template with the node it is previewed
    * with (or without one, when its type has no content yet), or nothing.
@@ -86,7 +125,7 @@ final class ApiController implements ContainerInjectionInterface {
     if ($context instanceof JsonResponse) {
       return $context;
     }
-    ['target' => $target, 'entity' => $entity, 'draft' => $draft, 'vocabulary' => [$entity_type_id, $bundle]] = $context;
+    ['target' => $target, 'entity' => $entity, 'draft' => $draft, 'vocabulary' => [, $bundle]] = $context;
 
     // The edit copy is what is stored, not what a configuration override
     // makes of it; the resolver keeps reading with overrides.
@@ -99,10 +138,17 @@ final class ApiController implements ContainerInjectionInterface {
     $media = $this->describeMedia([
       $identity['logo'],
       $identity['default_image'],
-      $target['values']['social']['image'] ?? '',
-      $target['from_default']['social']['image'] ?? '',
-      ...array_values($target['values']['schema']['props'] ?? []),
+      $target['values']['social']['image']['media'] ?? '',
+      $target['from_default']['social']['image']['media'] ?? '',
+      ...array_column($target['values']['schema']['props'] ?? [], 'media'),
     ]);
+    $template = ($target['scope'] ?? NULL) === 'template';
+    $ui = $this->languageManager->getCurrentLanguage()->getId();
+    // The strings the dialog shows, and which sentences have a translation:
+    // built and read once for the registry and the rules.
+    $strings = RegistryStrings::all();
+    $translated = array_flip($this->translatedSentences($ui));
+    $broken = $template ? $this->broken($target['values'], $bundle) : [];
     if ($target !== NULL) {
       // An empty map is an object in JSON.
       $target['values'] = (object) $target['values'];
@@ -110,6 +156,7 @@ final class ApiController implements ContainerInjectionInterface {
     }
 
     return new JsonResponse([
+      'ui' => $ui,
       'langcode' => $entity !== NULL && $entity->getEntityTypeId() === Page::ENTITY_TYPE_ID
         ? $entity->language()->getId()
         : $this->languageManager->getDefaultLanguage()->getId(),
@@ -123,7 +170,11 @@ final class ApiController implements ContainerInjectionInterface {
       'site' => [
         'identity' => $identity,
         'values' => (object) Values::clean($config->get('values') ?? [], 'site', NULL)[0],
+        'currency' => Values::currency($config->get('currency'))[0],
       ],
+      'registry' => self::shown(SchemaGraph::types(), $strings, $translated, $ui),
+      // The path maps are data: their members are named like shown ones.
+      'search_features' => self::shown(array_diff_key(SchemaGraph::searchFeatures(), ['props' => TRUE, 'site' => TRUE]), $strings, $translated, $ui) + SchemaGraph::searchFeatures(),
       'target' => $target,
       'preview' => $entity === NULL ? NULL : [
         'entity_type' => $entity->getEntityTypeId(),
@@ -136,33 +187,48 @@ final class ApiController implements ContainerInjectionInterface {
           ? $target['published']
           : !$entity instanceof EntityPublishedInterface || $entity->isPublished(),
       ],
-      'tokens' => $this->resolver->tokens($entity, $entity_type_id, $bundle, $cacheability),
+      'facts' => $this->resolver->facts($entity, $cacheability),
+      'separator' => $this->resolver->separator($cacheability),
+      // Only a template links fields; read with its preview node.
+      'sources' => $template ? $this->resolver->sourceRows($entity, $bundle, $cacheability) : [],
+      'broken' => (object) $broken,
       'media' => (object) $media,
-      'resolved' => $entity === NULL ? NULL : array_diff_key($this->resolver->resolve($entity, $draft), ['cacheability' => TRUE]),
+      'resolved' => $entity === NULL ? NULL : array_diff_key($this->resolver->report($entity, $draft), ['cacheability' => TRUE]),
     ]);
   }
 
   /**
-   * Saves the site identity and the site-wide defaults. Last save wins.
+   * Saves the site identity, the site-wide defaults and the currency.
+   *
+   * Last save wins. With `dry_run` nothing is saved: the answer says where
+   * the save would change structured data (effect()).
    */
   public function putSite(Request $request): JsonResponse {
-    $body = self::body($request);
-    if ($body === NULL || !self::isMap($body['identity'] ?? NULL) || !self::isMap($body['values'] ?? NULL)) {
+    $body = self::body($request, ['identity', 'values']);
+    if ($body === NULL || !is_bool($body['dry_run'] ?? FALSE)) {
       return self::badRequest();
     }
     [$identity, $identity_errors] = Values::cleanIdentity($body['identity']);
-    // The site pattern accepts the tokens every entity has.
-    [$values, $errors] = Values::clean($body['values'], 'site', $this->resolver->tokenTypes(Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID));
+    [$values, $errors] = Values::clean($body['values'], 'site', static fn (): bool => FALSE);
     $config = $this->configFactory->getEditable('canvas_metatag.site');
     if ($errors) {
       $stored = $config->get('values');
       [$values, $errors] = self::carry($body['values'], $values, $errors, Values::clean(is_array($stored) ? $stored : [], 'site', NULL)[0], 'site');
     }
+    $stored_currency = Values::currency($config->get('currency'))[0];
+    [$currency, $currency_error] = Values::currency($body['currency'] ?? $stored_currency);
+    if ($currency_error !== NULL) {
+      $errors['currency'] = $currency_error;
+    }
     if ($errors + $identity_errors) {
       return self::error(422, 'invalid', 'Some values need attention.', $errors + $identity_errors);
     }
-    $config->set('identity', $identity)->set('values', $values)->save();
-    return new JsonResponse(['site' => ['identity' => $identity, 'values' => (object) $values]]);
+    if ($body['dry_run'] ?? FALSE) {
+      return new JsonResponse(['effect' => $currency === $stored_currency ? NULL : $this->effect()]);
+    }
+    $config->set('identity', $identity)->set('values', $values)->set('currency', $currency)->save();
+    $site = ['identity' => $identity, 'values' => (object) $values, 'currency' => $currency];
+    return new JsonResponse(['site' => $site]);
   }
 
   /**
@@ -249,7 +315,7 @@ final class ApiController implements ContainerInjectionInterface {
         $keep = array_diff_key($props, array_column(SchemaGraph::types()[$type]['props'] ?? [], 'key', 'key'));
       }
     }
-    return $this->putDraft($page, 'page', $this->resolver->tokenTypes('canvas_page', 'canvas_page'), $body, $type, $keep);
+    return $this->putDraft($page, 'page', static fn (): bool => FALSE, $body, $type, $keep);
   }
 
   /**
@@ -268,7 +334,8 @@ final class ApiController implements ContainerInjectionInterface {
     if (!$template instanceof ContentTemplate || $template->getTargetEntityTypeId() !== 'node' || $template->getMode() !== 'full') {
       return self::error(404, 'not_found', 'SEO settings exist only for the full content template of a content type.');
     }
-    return $this->putDraft($template, 'template', $this->resolver->tokenTypes('node', $template->getTargetBundle()), $body);
+    $bundle = $template->getTargetBundle();
+    return $this->putDraft($template, 'template', fn (array $source, string $kind): bool => $this->sources->accepts($bundle, $source, $kind), $body);
   }
 
   /**
@@ -282,8 +349,8 @@ final class ApiController implements ContainerInjectionInterface {
    *   is never saved.
    * @param string $scope
    *   Either 'page' or 'template'.
-   * @param array<string, string> $tokens
-   *   Token name => type.
+   * @param callable(array, string): bool $accepts
+   *   Whether a source may be stored for a value of a kind.
    * @param array<string, mixed> $body
    *   The request body, as draftBody() returned it.
    * @param string $type
@@ -292,10 +359,12 @@ final class ApiController implements ContainerInjectionInterface {
    *   Structured-data details written besides the values and never echoed:
    *   those of a page translation's published type (putPage()).
    */
-  private function putDraft(Page|ContentTemplate $entity, string $scope, array $tokens, array $body, string $type = 'WebPage', array $keep = []): JsonResponse {
-    [$clean, $errors] = Values::clean($body['values'], $scope, $tokens, $type);
-    if ($errors) {
-      $current = $this->autoSaveManager->getAutoSaveEntity($entity, bypass_cache: TRUE)->entity ?? $entity;
+  private function putDraft(Page|ContentTemplate $entity, string $scope, callable $accepts, array $body, string $type = 'WebPage', array $keep = []): JsonResponse {
+    [$clean, $errors] = Values::clean($body['values'], $scope, $accepts, $type);
+    // A refused value sent back exactly as the draft or the stored entity has
+    // it is kept: an Undo back to the stored value while a draft exists.
+    $draft = $errors ? $this->autoSaveManager->getAutoSaveEntity($entity, bypass_cache: TRUE)->entity : NULL;
+    foreach ($errors ? array_filter([$draft, $entity]) : [] as $current) {
       $current = Values::clean(match (TRUE) {
         $current instanceof Page => Values::decode($current->get('canvas_metatag')->value),
         $current instanceof ContentTemplate => (array) $current->getThirdPartySetting('canvas_metatag', 'values', []),
@@ -337,6 +406,37 @@ final class ApiController implements ContainerInjectionInterface {
   }
 
   /**
+   * The template's links that cannot be read, by dotted path.
+   *
+   * @return array<string, array{field: string, reason: string}>
+   *   The machine name of the field each starts from, and why: `missing`,
+   *   `kind` or `error`.
+   */
+  private function broken(array $values, string $bundle): array {
+    $kinds = [
+      'title' => 'text',
+      'title_end' => 'text',
+      'description' => 'text',
+      'social.title' => 'text',
+      'social.description' => 'text',
+      'social.image' => 'image',
+    ];
+    $props = array_column(SchemaGraph::types()[$values['schema']['type'] ?? 'WebPage']['props'] ?? [], 'kind', 'key');
+    foreach ($props as $key => $kind) {
+      $kinds["schema.props.$key"] = Values::KINDS[$kind];
+    }
+    $broken = [];
+    foreach ($kinds as $path => $kind) {
+      $source = NestedArray::getValue($values, [...explode('.', $path), 'source']);
+      $reason = is_array($source) ? $this->sources->problem($bundle, $source, $kind) : NULL;
+      if ($reason !== NULL) {
+        $broken[$path] = ['field' => (string) Sources::machineName($source), 'reason' => $reason];
+      }
+    }
+    return $broken;
+  }
+
+  /**
    * Carries forward each refused value that was sent back exactly as stored.
    *
    * Also when its vocabulary has changed since: read mode keeps it, and every
@@ -349,7 +449,7 @@ final class ApiController implements ContainerInjectionInterface {
    * @param array<string, string> $errors
    *   What write mode refused, by dotted path.
    * @param array $current
-   *   The values as stored (or in the draft), cleaned in read mode.
+   *   The values in the draft or as stored, cleaned in read mode.
    * @param string $scope
    *   Either 'page', 'template' or 'site'.
    * @param string $type
@@ -406,11 +506,9 @@ final class ApiController implements ContainerInjectionInterface {
    *   the editor's client id.
    */
   private static function draftBody(Request $request): ?array {
-    $body = self::body($request);
+    $body = self::body($request, ['values', 'auto_saves']);
     $valid = $body !== NULL
-      && self::isMap($body['values'] ?? NULL)
       && is_string($body['client_instance_id'] ?? NULL) && $body['client_instance_id'] !== ''
-      && self::isMap($body['auto_saves'] ?? NULL)
       && !array_filter($body['auto_saves'], static fn (mixed $entry): bool => !is_array($entry));
     return $valid ? $body : NULL;
   }
@@ -418,20 +516,27 @@ final class ApiController implements ContainerInjectionInterface {
   /**
    * The request body, or NULL when it is too large or not a JSON object.
    *
+   * @param \Symfony\Component\HttpFoundation\Request $request
+   *   The request.
+   * @param list<string> $objects
+   *   Members that must be JSON objects. Told from the raw JSON: decoded to
+   *   arrays, an empty object and an empty list are alike.
+   *
    * @return array<string, mixed>|null
    *   The decoded object.
    */
-  private static function body(Request $request): ?array {
+  private static function body(Request $request, array $objects = []): ?array {
     $content = $request->getContent();
-    $body = strlen($content) > self::MAX_BODY ? NULL : json_decode($content, TRUE);
-    return self::isMap($body) ? $body : NULL;
-  }
-
-  /**
-   * Whether a decoded JSON value is an object.
-   */
-  private static function isMap(mixed $value): bool {
-    return is_array($value) && ($value === [] || !array_is_list($value));
+    $raw = strlen($content) > self::MAX_BODY ? NULL : json_decode($content);
+    if (!$raw instanceof \stdClass) {
+      return NULL;
+    }
+    foreach ($objects as $member) {
+      if (!($raw->{$member} ?? NULL) instanceof \stdClass) {
+        return NULL;
+      }
+    }
+    return json_decode($content, TRUE);
   }
 
   /**
@@ -584,6 +689,113 @@ final class ApiController implements ContainerInjectionInterface {
       }
     }
     return $described;
+  }
+
+  /**
+   * The published places whose structured data follows the site currency.
+   *
+   * Those that state a price and no currency of their own: pages, and
+   * enabled content templates ("Every Product") whose currency is unset or
+   * linked to a field, which follow it wherever that field is empty.
+   *
+   * @return array{count: int, places: list<string>}
+   *   How many, and the names of the first NAMED.
+   */
+  private function effect(): array {
+    $priced = static function (array $values): bool {
+      $schema = Values::clean($values, 'template', NULL)[0]['schema'] ?? [];
+      return in_array($schema['type'] ?? '', [
+        'Product',
+        'Service',
+      ], TRUE) && isset($schema['props']['offers_price']) && !isset($schema['props']['offers_priceCurrency']['text']);
+    };
+    $count = 0;
+    $places = [];
+    $add = static function (string $name) use (&$count, &$places): void {
+      $count++;
+      if (count($places) < self::NAMED) {
+        $places[] = $name;
+      }
+    };
+    $node_types = $this->entityTypeManager->getStorage('node_type');
+    foreach ($this->entityTypeManager->getStorage(ContentTemplate::ENTITY_TYPE_ID)->loadMultiple() as $template) {
+      $type = $template instanceof ContentTemplate && $template->getTargetEntityTypeId() === 'node' && $template->getMode() === 'full' && $template->status()
+        ? $node_types->load($template->getTargetBundle())
+        : NULL;
+      if ($type !== NULL && $priced((array) $template->getThirdPartySetting('canvas_metatag', 'values', []))) {
+        // Plain text for the dialog: the label is not escaped.
+        $add(strtr((string) new TranslatableMarkup('Every @type'), ['@type' => (string) $type->label()]));
+      }
+    }
+    // Pages in small batches: only their values are read, none is kept.
+    $pages = $this->entityTypeManager->getStorage(Page::ENTITY_TYPE_ID);
+    $ids = $pages->getQuery()->accessCheck(TRUE)->condition('status', 1)->condition('canvas_metatag', '%offers_price%', 'LIKE')->sort('changed', 'DESC')->execute();
+    foreach (array_chunk($ids, 50) as $chunk) {
+      foreach ($pages->loadMultiple($chunk) as $page) {
+        if ($priced(Values::decode($page->get('canvas_metatag')->value))) {
+          $add((string) $page->label());
+        }
+      }
+      $pages->resetCache($chunk);
+    }
+    return ['count' => $count, 'places' => $places];
+  }
+
+  /**
+   * The registry or the rules, with what the dialog shows in its language.
+   *
+   * A type's sentences are NULL as a whole when one has no translation in
+   * the language, as locale storage records it: the dialog then lists the
+   * facts instead of mixing languages.
+   *
+   * @param array $data
+   *   The registry or the rules.
+   * @param array<string, \Drupal\Core\StringTranslation\TranslatableMarkup> $strings
+   *   RegistryStrings::all().
+   * @param array<string, int> $translated
+   *   The sentences with a translation, as keys (translatedSentences()).
+   * @param string $langcode
+   *   The dialog's language.
+   */
+  private static function shown(array $data, array $strings, array $translated, string $langcode): array {
+    $walk = static function (array $data, bool $shown) use (&$walk, $strings, $translated, $langcode): array {
+      foreach ($data as $key => $value) {
+        if (is_array($value)) {
+          $data[$key] = $walk($value, $shown || in_array($key, self::ALL_SHOWN, TRUE));
+          if ($key === 'say' && $langcode !== 'en' && array_diff_key(array_flip(array_merge(...$value)), $translated) !== []) {
+            $data[$key] = NULL;
+          }
+        }
+        elseif (($shown || in_array($key, self::SHOWN, TRUE)) && is_string($value) && isset($strings[$value])) {
+          $data[$key] = (string) $strings[$value];
+        }
+      }
+      return $data;
+    };
+    return $walk($data, FALSE);
+  }
+
+  /**
+   * The registry sentences that have a translation in a language.
+   *
+   * One query of locale storage, not one per sentence.
+   *
+   * @return list<string>
+   *   Their English source texts.
+   */
+  private function translatedSentences(string $langcode): array {
+    if ($langcode === 'en' || $this->localeStorage === NULL) {
+      return [];
+    }
+    $strings = $this->localeStorage->getTranslations([
+      'language' => $langcode,
+      'context' => 'canvas_metatag:schema',
+      'translated' => TRUE,
+    ]);
+    return array_values(array_map(
+      static fn (object $string): string => $string->source,
+      array_filter($strings, static fn (object $string): bool => $string->isTranslation()),
+    ));
   }
 
   /**

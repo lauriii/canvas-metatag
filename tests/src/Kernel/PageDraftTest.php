@@ -48,8 +48,8 @@ final class PageDraftTest extends CanvasKernelTestBase {
 
   private const EDITOR = '0b6c7f0e-6c1f-4a53-9f0b-1c2f3d4e5a6b';
   private const OTHER = '9d2e4c1a-3b5f-4e7a-8c6d-0f1a2b3c4d5e';
-  private const VALUES = ['robots' => ['noindex' => TRUE], 'title' => 'Plans {sep} {site}'];
-  private const ENCODED = '{"robots":{"noindex":true},"title":"Plans {sep} {site}"}';
+  private const VALUES = ['robots' => ['noindex' => TRUE], 'title' => ['text' => 'Plans']];
+  private const ENCODED = '{"robots":{"noindex":true},"title":{"text":"Plans"}}';
 
   /**
    * {@inheritdoc}
@@ -119,11 +119,11 @@ final class PageDraftTest extends CanvasKernelTestBase {
     // A write of ours still lands, and the editor carries it.
     $page = $this->createPage();
     $layout = $this->getLayout($page);
-    self::assertSame(Response::HTTP_OK, $this->put($page, ['title' => 'Other'], self::EDITOR)->getStatusCode());
+    self::assertSame(Response::HTTP_OK, $this->put($page, ['title' => ['text' => 'Other']], self::EDITOR)->getStatusCode());
     $layout['entity_form_fields']['title[0][value]'] = 'Renamed';
     self::assertSame(Response::HTTP_OK, $this->postLayout($page, $layout, self::EDITOR)->getStatusCode());
     $draft = $this->draft($page);
-    self::assertSame('{"title":"Other"}', $draft?->get('canvas_metatag')->value);
+    self::assertSame('{"title":{"text":"Other"}}', $draft?->get('canvas_metatag')->value);
     self::assertSame('Renamed', $draft->label());
   }
 
@@ -139,7 +139,7 @@ final class PageDraftTest extends CanvasKernelTestBase {
     self::assertNull($layout['autoSaves'][$key]['hash']);
 
     // Sent in another order, to prove the response order is canonical.
-    $response = $this->put($page, ['title' => 'Plans {sep} {site}', 'robots' => ['noindex' => TRUE]], self::EDITOR, $layout['autoSaves']);
+    $response = $this->put($page, ['title' => ['text' => 'Plans'], 'robots' => ['noindex' => TRUE]], self::EDITOR, $layout['autoSaves']);
     self::assertSame(Response::HTTP_OK, $response->getStatusCode());
     self::assertSame('{"values":' . self::ENCODED . '}', $response->getContent());
 
@@ -184,15 +184,15 @@ final class PageDraftTest extends CanvasKernelTestBase {
     self::assertSame(Response::HTTP_OK, $this->put($page, self::VALUES, self::EDITOR)->getStatusCode());
 
     // Another client with the hash from before the draft existed.
-    $response = $this->put($page, ['title' => 'Mine'], self::OTHER, $stale);
+    $response = $this->put($page, ['title' => ['text' => 'Mine']], self::OTHER, $stale);
     self::assertSame(Response::HTTP_CONFLICT, $response->getStatusCode());
     self::assertSame('conflict', self::decodeResponse($response)['error']['code']);
     self::assertArrayNotHasKey('fields', self::decodeResponse($response)['error']);
     // Another client that sends no entry for this page at all.
-    self::assertSame(Response::HTTP_CONFLICT, $this->put($page, ['title' => 'Mine'], self::OTHER, ['canvas_page:999:en' => $stale[$key]])->getStatusCode());
+    self::assertSame(Response::HTTP_CONFLICT, $this->put($page, ['title' => ['text' => 'Mine']], self::OTHER, ['canvas_page:999:en' => $stale[$key]])->getStatusCode());
     // The same client is held to the starting point.
     $moved = [$key => ['autoSaveStartingPoint' => '0-0', 'hash' => NULL]];
-    self::assertSame(Response::HTTP_CONFLICT, $this->put($page, ['title' => 'Mine'], self::EDITOR, $moved)->getStatusCode());
+    self::assertSame(Response::HTTP_CONFLICT, $this->put($page, ['title' => ['text' => 'Mine']], self::EDITOR, $moved)->getStatusCode());
     $entry = $this->autoSave()->getAutoSaveEntity($page, TRUE);
     self::assertSame(self::EDITOR, $entry->clientId);
     self::assertSame(self::ENCODED, $this->draft($page)?->get('canvas_metatag')->value);
@@ -204,11 +204,11 @@ final class PageDraftTest extends CanvasKernelTestBase {
     $current = $this->getLayout($page)['autoSaves'];
     self::assertSame(['autoSaveStartingPoint', 'hash'], array_keys($current[$key]));
     self::assertIsString($current[$key]['hash']);
-    self::assertSame(Response::HTTP_CONFLICT, $this->put($page, ['title' => 'Mine'], self::OTHER, [$key => array_reverse($current[$key], TRUE)])->getStatusCode());
-    self::assertSame(Response::HTTP_OK, $this->put($page, ['title' => 'Mine'], self::OTHER, $current)->getStatusCode());
+    self::assertSame(Response::HTTP_CONFLICT, $this->put($page, ['title' => ['text' => 'Mine']], self::OTHER, [$key => array_reverse($current[$key], TRUE)])->getStatusCode());
+    self::assertSame(Response::HTTP_OK, $this->put($page, ['title' => ['text' => 'Mine']], self::OTHER, $current)->getStatusCode());
     $entry = $this->autoSave()->getAutoSaveEntity($page, TRUE);
     self::assertSame(self::OTHER, $entry->clientId);
-    self::assertSame('{"title":"Mine"}', $this->draft($page)?->get('canvas_metatag')->value);
+    self::assertSame('{"title":{"text":"Mine"}}', $this->draft($page)?->get('canvas_metatag')->value);
   }
 
   /**
@@ -237,7 +237,7 @@ final class PageDraftTest extends CanvasKernelTestBase {
     self::assertNull($this->draft($page));
 
     $page = $this->createPage(['canvas_metatag' => self::ENCODED]);
-    self::assertSame(Response::HTTP_OK, $this->put($page, ['title' => 'Other'], self::EDITOR)->getStatusCode());
+    self::assertSame(Response::HTTP_OK, $this->put($page, ['title' => ['text' => 'Other']], self::EDITOR)->getStatusCode());
     self::assertNotNull($this->draft($page));
     // Key order does not matter: the encoding is canonical.
     self::assertSame(Response::HTTP_OK, $this->put($page, array_reverse(self::VALUES, TRUE), self::EDITOR)->getStatusCode());
@@ -249,7 +249,7 @@ final class PageDraftTest extends CanvasKernelTestBase {
    * Publish stores the value in a new revision, for any publisher.
    */
   public function testPublish(): void {
-    $page = $this->createPage(['canvas_metatag' => '{"title":"Before"}']);
+    $page = $this->createPage(['canvas_metatag' => '{"title":{"text":"Before"}}']);
     $revision = $page->getRevisionId();
     self::assertSame(Response::HTTP_OK, $this->put($page, self::VALUES, self::EDITOR)->getStatusCode());
 
@@ -267,14 +267,14 @@ final class PageDraftTest extends CanvasKernelTestBase {
     self::assertInstanceOf(RevisionableStorageInterface::class, $storage);
     $previous = $storage->loadRevision($revision);
     self::assertInstanceOf(Page::class, $previous);
-    self::assertSame('{"title":"Before"}', $previous->get('canvas_metatag')->value);
+    self::assertSame('{"title":{"text":"Before"}}', $previous->get('canvas_metatag')->value);
   }
 
   /**
    * Each translation has its own value, draft and auto-save key.
    */
   public function testTranslations(): void {
-    $page = $this->createPage(['canvas_metatag' => '{"canonical":"/pricing","robots":{"noindex":true},"title":"English"}']);
+    $page = $this->createPage(['canvas_metatag' => '{"canonical":"/pricing","robots":{"noindex":true},"title":{"text":"English"}}']);
     self::assertTrue($page->getFieldDefinition('canvas_metatag')?->isTranslatable());
 
     // Core copies every translatable field into a new translation; ours
@@ -286,13 +286,13 @@ final class PageDraftTest extends CanvasKernelTestBase {
 
     $page = $this->stored($page);
     $french = $page->getTranslation('fr');
-    $response = $this->put($french, ['title' => 'Tarifs {sep} {site}'], self::EDITOR, langcode: 'fr');
+    $response = $this->put($french, ['title' => ['text' => 'Tarifs']], self::EDITOR, langcode: 'fr');
     self::assertSame(Response::HTTP_OK, $response->getStatusCode());
     self::assertNull($this->draft($page));
     $draft = $this->draft($french);
     self::assertSame('fr', $draft?->language()->getId());
-    self::assertSame('{"title":"Tarifs {sep} {site}"}', $draft->get('canvas_metatag')->value);
-    self::assertStringContainsString('"title":"English"', (string) $draft->getTranslation('en')->get('canvas_metatag')->value);
+    self::assertSame('{"title":{"text":"Tarifs"}}', $draft->get('canvas_metatag')->value);
+    self::assertStringContainsString('"title":{"text":"English"}', (string) $draft->getTranslation('en')->get('canvas_metatag')->value);
     self::assertTrue($this->stored($page)->getTranslation('fr')->get('canvas_metatag')->isEmpty());
 
     // A translation that does not exist.
@@ -331,7 +331,7 @@ final class PageDraftTest extends CanvasKernelTestBase {
     self::assertSame('Precios', $state['preview']['label']);
 
     // The details of the inherited Product type are the translation's own.
-    $values = ['schema' => ['props' => ['name' => 'Escritorio']], 'title' => 'Precios {sep} {site}'];
+    $values = ['schema' => ['props' => ['name' => ['text' => 'Escritorio']]], 'title' => ['text' => 'Precios']];
     $response = $this->put($spanish, $values, self::EDITOR, langcode: 'es');
     self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
     $draft = $this->draft($spanish);
@@ -359,7 +359,7 @@ final class PageDraftTest extends CanvasKernelTestBase {
    * drafts together.
    */
   public function testTranslationKeepsDetailsOfThePublishedType(): void {
-    $props = ['offers_price' => '25', 'offers_priceCurrency' => 'EUR'];
+    $props = ['offers_price' => ['text' => '25'], 'offers_priceCurrency' => ['text' => 'EUR']];
     $page = $this->createPage(['canvas_metatag' => '{"schema":{"type":"Product"}}']);
     $page->addTranslation('fr', ['title' => 'Tarifs'] + $page->toArray())
       ->set('canvas_metatag', Values::encode(['schema' => ['props' => $props]]))
@@ -369,9 +369,9 @@ final class PageDraftTest extends CanvasKernelTestBase {
       self::assertSame(Response::HTTP_OK, $this->put($this->stored($page), $values, self::EDITOR)->getStatusCode());
     };
     $french = function (string $title) use ($page): void {
-      $response = $this->put($this->stored($page)->getTranslation('fr'), ['title' => $title], self::EDITOR, langcode: 'fr');
+      $response = $this->put($this->stored($page)->getTranslation('fr'), ['title' => ['text' => $title]], self::EDITOR, langcode: 'fr');
       // The echo is what the dialog shows.
-      self::assertSame('{"values":{"title":' . json_encode($title) . '}}', $response->getContent());
+      self::assertSame('{"values":{"title":{"text":' . json_encode($title) . '}}}', $response->getContent());
     };
     $stored = fn (): array => Values::decode($this->stored($page)->getTranslation('fr')->get('canvas_metatag')->value);
 
@@ -380,8 +380,8 @@ final class PageDraftTest extends CanvasKernelTestBase {
     $english(['schema' => ['type' => 'Article']]);
     self::assertSame([], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
     $french('Tarifs');
-    self::assertSame(['schema' => ['props' => $props], 'title' => 'Tarifs'], Values::decode($this->draft($this->stored($page)->getTranslation('fr'))?->get('canvas_metatag')->value));
-    self::assertSame(['title' => 'Tarifs'], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
+    self::assertSame(['schema' => ['props' => $props], 'title' => ['text' => 'Tarifs']], Values::decode($this->draft($this->stored($page)->getTranslation('fr'))?->get('canvas_metatag')->value));
+    self::assertSame(['title' => ['text' => 'Tarifs']], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
 
     // Discarding the type change discards the French draft with it.
     $response = $this->request(Request::create("/canvas/api/v0/auto-saves/canvas_page/{$page->id()}", 'DELETE'));
@@ -393,11 +393,11 @@ final class PageDraftTest extends CanvasKernelTestBase {
     // shown again and publish with the French title.
     $english(['schema' => ['type' => 'Article']]);
     $french('Tarifs');
-    $english(['schema' => ['type' => 'Product'], 'title' => 'Plans {sep} {site}']);
-    self::assertSame(['schema' => ['props' => $props], 'title' => 'Tarifs'], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
+    $english(['schema' => ['type' => 'Product'], 'title' => ['text' => 'Plans']]);
+    self::assertSame(['schema' => ['props' => $props], 'title' => ['text' => 'Tarifs']], self::decodeResponse($this->request(Request::create($query)))['target']['values']);
     $response = $this->makePublishAllRequest();
     self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
-    self::assertSame(['schema' => ['props' => $props], 'title' => 'Tarifs'], $stored());
+    self::assertSame(['schema' => ['props' => $props], 'title' => ['text' => 'Tarifs']], $stored());
     self::assertSame('25', $this->product($this->stored($page)->getTranslation('fr'))['offers']['price'] ?? NULL);
 
     // Once the Article is published, the French head has no Product, and
@@ -405,8 +405,8 @@ final class PageDraftTest extends CanvasKernelTestBase {
     $english(['schema' => ['type' => 'Article']]);
     self::assertSame(Response::HTTP_OK, $this->makePublishAllRequest()->getStatusCode());
     self::assertNull($this->product($this->stored($page)->getTranslation('fr')));
-    $french('Tarifs {sep} {site}');
-    self::assertSame('{"title":"Tarifs {sep} {site}"}', $this->draft($this->stored($page)->getTranslation('fr'))?->get('canvas_metatag')->value);
+    $french('Tarifs');
+    self::assertSame('{"title":{"text":"Tarifs"}}', $this->draft($this->stored($page)->getTranslation('fr'))?->get('canvas_metatag')->value);
   }
 
   /**
@@ -422,12 +422,14 @@ final class PageDraftTest extends CanvasKernelTestBase {
       ->set('canvas_metatag', Values::encode([
         'schema' => [
           'type' => 'Event',
-          'props' => ['startDate' => '2026-05-01', 'location_name' => 'Concert hall'],
+          'props' => ['startDate' => ['text' => '2026-05-01'], 'location_name' => ['text' => 'Concert hall']],
         ],
       ]))
       ->save();
     $page->addTranslation('de', ['title' => 'Prices'] + $page->toArray())
-      ->set('canvas_metatag', Values::encode(['schema' => ['props' => ['name' => 'Lamp', 'offers_price' => '25']]]))
+      ->set('canvas_metatag', Values::encode([
+        'schema' => ['props' => ['name' => ['text' => 'Lamp'], 'offers_price' => ['text' => '25']]],
+      ]))
       ->save();
     $draft = fn (string $langcode): array => Values::decode($this->draft($this->stored($page)->getTranslation($langcode))?->get('canvas_metatag')->value);
     $put = function (string $langcode, array $values) use ($page): void {
@@ -439,7 +441,7 @@ final class PageDraftTest extends CanvasKernelTestBase {
     self::assertSame(Response::HTTP_OK, $this->put($this->stored($page), ['schema' => ['type' => 'Article']], self::EDITOR)->getStatusCode());
 
     // The French Event loses its venue, in the draft and once published.
-    $event = ['schema' => ['type' => 'Event', 'props' => ['startDate' => '2026-05-01']]];
+    $event = ['schema' => ['type' => 'Event', 'props' => ['startDate' => ['text' => '2026-05-01']]]];
     $put('fr', $event);
     self::assertEquals($event, $draft('fr'));
 
@@ -463,7 +465,7 @@ final class PageDraftTest extends CanvasKernelTestBase {
   public function testPublishingNewTranslationEqualToDefault(): void {
     ConfigurableLanguage::createFromLangcode('es')->save();
     ConfigurableLanguage::createFromLangcode('de')->save();
-    $english = '{"title":"{title}"}';
+    $english = '{"title":{"text":"{title}"}}';
     $cases = [
       'es' => [$english, $english],
       'de' => ['{"robots":{"noindex":true}}', '{"robots":{"noindex":true}}'],
@@ -506,12 +508,12 @@ final class PageDraftTest extends CanvasKernelTestBase {
    * A duplicated page keeps its overrides, except the canonical.
    */
   public function testDuplicate(): void {
-    $page = $this->createPage(['canvas_metatag' => '{"canonical":"/pricing","robots":{"noindex":true},"title":"English"}']);
+    $page = $this->createPage(['canvas_metatag' => '{"canonical":"/pricing","robots":{"noindex":true},"title":{"text":"English"}}']);
     $page->addTranslation('fr', ['title' => 'Tarifs'] + $page->toArray())
       ->set('canvas_metatag', '{"canonical":"https://www.example.com/fr/tarifs"}')
       ->save();
     $copy = $this->stored($page)->createDuplicate();
-    self::assertSame('{"robots":{"noindex":true},"title":"English"}', $copy->get('canvas_metatag')->value);
+    self::assertSame('{"robots":{"noindex":true},"title":{"text":"English"}}', $copy->get('canvas_metatag')->value);
     self::assertTrue($copy->getTranslation('fr')->get('canvas_metatag')->isEmpty());
     self::assertStringContainsString('canonical', (string) $this->stored($page)->get('canvas_metatag')->value);
   }
@@ -549,14 +551,18 @@ final class PageDraftTest extends CanvasKernelTestBase {
     $response = $this->request(Request::create("/canvas-metatag/api/draft/canvas_page/{$page->id()}", 'PUT', content: '{"values":'));
     self::assertSame(Response::HTTP_BAD_REQUEST, $response->getStatusCode());
 
-    $response = $this->put($page, ['title' => '{nope}', 'canonical' => 'pricing', 'description' => 'x'], self::EDITOR);
+    $response = $this->put($page, [
+      'title' => ['fact' => 'nope'],
+      'canonical' => 'pricing',
+      'description' => ['text' => 'x'],
+    ], self::EDITOR);
     self::assertSame(Response::HTTP_UNPROCESSABLE_ENTITY, $response->getStatusCode());
     self::assertSame([
       'error' => [
         'code' => 'invalid',
         'message' => 'Some values need attention.',
         'fields' => [
-          'title' => '"{nope}" is not a value SEO knows. Choose one from the list.',
+          'title' => 'This setting is not available here.',
           'canonical' => 'Enter a full address that starts with https://, or a path that starts with /.',
           'description' => 'This setting is not available here.',
         ],

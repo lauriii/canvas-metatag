@@ -30,15 +30,16 @@
     "schema": {
         "type": "Article"
     },
-    "tokens": {
+    "facts": {
         "title": "Hello",
         "description": "A first post.",
         "author": "Ada Writer",
         "published": "2026-03-02T09:00:00+02:00",
         "modified": "2026-03-04T11:30:00+02:00"
     },
+    "links": [],
     "images": {
-        "{image}": {
+        "image": {
             "url": "https://cms.example.com/sites/default/files/hello.jpg",
             "width": 1200,
             "height": 630,
@@ -46,9 +47,57 @@
         }
     },
     "report": {
-        "withheld": false,
-        "missing_required": [],
-        "missing_recommended": []
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "headline": "default",
+            "description": "default",
+            "image": "default",
+            "datePublished": "default",
+            "dateModified": "default",
+            "author_name": "default"
+        },
+        "gates": [],
+        "type": "Article",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#logo",
+                "type": "ImageObject",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/blog/hello#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/blog/hello#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 4
+            },
+            {
+                "id": "https://www.example.com/blog/hello#primary",
+                "type": "Article",
+                "origin": "main",
+                "at": 5
+            }
+        ]
     },
     "graph": {
         "@context": "https://schema.org",

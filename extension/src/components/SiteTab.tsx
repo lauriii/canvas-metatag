@@ -1,15 +1,15 @@
-import { SegmentedControl } from '@radix-ui/themes';
+import { SegmentedControl, Select } from '@radix-ui/themes';
 import { Fragment } from 'react';
 
 import { useApp } from '../App';
 import { identityGaps } from '../checks';
-import { aiOffText, siteTexts } from '../model';
+import { aiOffText, currencyChoices, placesText, siteTexts } from '../model';
 import { Field, useHeld } from './Field';
 import { ImageRow, PICKED, Thumb } from './MediaPicker';
 import { Stage } from './Previews';
 import { Visibility } from './SearchTab';
-import { TemplateInput } from './TemplateInput';
-import { InfoTip } from './ui';
+import { TitleField } from './Value';
+import { InfoTip, reveal } from './ui';
 
 const SEPARATORS = ['|', '·', '–', '—'];
 /** What a screen reader says for each: punctuation is often skipped. */
@@ -54,13 +54,14 @@ const breakable = (text: string) =>
 export function SiteView() {
   const { state, dispatch, view } = useApp();
   const server = state.server!;
-  const { identity, values } = state.edits.site;
+  const { identity } = state.edits.site;
   const edit = (path: string, value: unknown) =>
     dispatch({ type: 'edit', scope: 'site', path, value });
   const image = (uuid: string) => PICKED[uuid] ?? server.media[uuid] ?? null;
-  const gaps = identityGaps(state.edits.site, view?.tokens ?? {});
+  const gaps = identityGaps(state.edits.site, view?.facts.site?.value ?? '');
   const ai = server.capabilities.ai;
-  const name = identity.name.trim() || view?.tokens.site?.value || '';
+  const currencies = currencyChoices(server.ui, [state.edits.site.currency, server.site.currency]);
+  const name = identity.name.trim() || view?.facts.site?.value || '';
   const profiles = useHeld(
     identity.same_as.join('\n'),
     (text) =>
@@ -72,12 +73,6 @@ export function SiteView() {
           .filter(Boolean),
       ),
     true,
-  );
-  // Everything an entity has; a content type's fields do not exist site-wide.
-  const tokens = Object.fromEntries(
-    Object.entries(view?.tokens ?? {}).filter(
-      ([token]) => !token.startsWith('field.'),
-    ),
   );
   const separators = SEPARATORS.includes(identity.separator)
     ? SEPARATORS
@@ -148,7 +143,7 @@ export function SiteView() {
             className="seo-input"
             dir="auto"
             value={identity.name}
-            placeholder={view?.tokens.site?.value}
+            placeholder={view?.facts.site?.value}
             disabled={field.disabled}
             aria-invalid={field.invalid || undefined}
             aria-describedby={field.describedBy}
@@ -164,8 +159,8 @@ export function SiteView() {
             noun="logo"
             disabled={field.disabled}
             minWidth={112}
-            chosen={identity.logo}
-            onPick={(uuid) => edit('identity.logo', uuid)}
+            chosen={identity.logo ? { media: identity.logo } : undefined}
+            onPick={(picked) => 'media' in picked && edit('identity.logo', picked.media)}
             onClear={() => edit('identity.logo', '')}
           />
         )}
@@ -187,42 +182,17 @@ export function SiteView() {
       </Field>
 
       <h3 className="seo-group-title">Titles</h3>
-      <Field
+      <TitleField
         scope="site"
-        path="values.title"
-        label="Title pattern"
         note={
           view && (
             <>
-              For {view.values.title ?? ''}:{' '}
+              For {view.facts.title?.value || 'About us'}:{' '}
               <span className="seo-guide-example">{example}</span>
             </>
           )
         }
-      >
-        {(field) => (
-          <TemplateInput
-            id={field.id}
-            describedBy={field.describedBy}
-            invalid={field.invalid}
-            disabled={field.disabled}
-            lang={server.langcode}
-            value={values.title ?? ''}
-            onChange={(value) => edit('values.title', value)}
-            tokens={{
-              ...tokens,
-              // The chips show the working copy's own separator and name.
-              ...(tokens.sep
-                ? { sep: { ...tokens.sep, value: identity.separator } }
-                : {}),
-              ...(tokens.site && identity.name.trim()
-                ? { site: { ...tokens.site, value: identity.name } }
-                : {}),
-            }}
-            insert="always"
-          />
-        )}
-      </Field>
+      />
       <Field
         scope="site"
         path="identity.separator"
@@ -270,10 +240,51 @@ export function SiteView() {
             noun="default image"
             disabled={field.disabled}
             minWidth={600}
-            chosen={identity.default_image}
-            onPick={(uuid) => edit('identity.default_image', uuid)}
+            chosen={identity.default_image ? { media: identity.default_image } : undefined}
+            onPick={(picked) => 'media' in picked && edit('identity.default_image', picked.media)}
             onClear={() => edit('identity.default_image', '')}
           />
+        )}
+      </Field>
+
+      <h3 className="seo-group-title">Prices</h3>
+      <Field
+        scope="site"
+        path="currency"
+        label="Currency"
+        fallback="Not set"
+        note={
+          state.effect?.count
+            ? `Goes live on ${placesText(state.effect)}. ${state.effect.count === 1 ? 'Its merchant listing' : 'Their merchant listings'} may change.`
+            : "Used for every price that doesn't name its own."
+        }
+      >
+        {(field) => (
+          <Select.Root
+            value={state.edits.site.currency || 'none'}
+            disabled={field.disabled}
+            onValueChange={(value) => {
+              edit('currency', value === 'none' ? '' : value);
+              // The bar comes with the change: the field stays in sight above it.
+              requestAnimationFrame(() => reveal(document.getElementById(field.id)?.closest<HTMLElement>('.seo-field') ?? null));
+            }}
+          >
+            <Select.Trigger id={field.id} className="seo-select-box" aria-describedby={field.describedBy} />
+            <Select.Content position="popper" className="seo-select-content seo-select-fit">
+              <Select.Item value="none">Not set</Select.Item>
+              {currencies.common.map(([code, name]) => (
+                <Select.Item key={code} value={code}>
+                  {name}
+                </Select.Item>
+              ))}
+              <Select.Separator />
+              {currencies.rest.map(([code, name]) => (
+                <Select.Item key={code} value={code}>
+                  {name}
+                </Select.Item>
+              ))}
+            </Select.Content>
+          </Select.Root>
         )}
       </Field>
 

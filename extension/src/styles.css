@@ -32,7 +32,6 @@ body {
   --seo-icon-btn: 24px;
   --seo-row-h: 44px;
 
-  --seo-radius-chip: 4px;
   --seo-radius-control: 6px;
   --seo-radius-card: 10px;
   --seo-radius-surface: 12px;
@@ -56,9 +55,12 @@ body {
   --seo-fix: var(--red-11);
   --seo-fix-dot: var(--red-9);
   --seo-ok: var(--green-11);
-  --seo-chip-bg: var(--blue-2);
-  --seo-chip-line: var(--blue-a5);
-  --seo-chip-ink: var(--blue-11);
+  /* The tag of a value linked here, of one that follows its default, and of
+     a link that broke: its only colour. The box itself is drawn as an input. */
+  --seo-link-ink: var(--blue-11);
+  --seo-default-ink: var(--gray-11);
+  --seo-broken-line: var(--red-a7);
+  --seo-broken-ink: var(--red-11);
   --seo-preview-link: var(--indigo-11);
   --seo-preview-text: #4d5156;
 
@@ -134,14 +136,15 @@ body {
 .seo-dot[data-tone="ok"] {
   background: var(--green-9);
 }
-.seo-app :focus-visible {
+/* The proof is portaled out of .seo-app: it wears the same ring. */
+:is(.seo-app, .seo-proof) :focus-visible {
   outline: none;
   box-shadow: var(--seo-ring);
 }
 /* Labels, headings and panels take focus for jumps and screen readers only:
    they are not controls, so they never wear a ring. */
-.seo-app [tabindex="-1"]:focus:not(:focus-visible),
-.seo-app :is(h2, h3, label, .seo-label, .seo-panel, .seo-glyph)[tabindex="-1"]:focus {
+:is(.seo-app, .seo-proof) [tabindex="-1"]:focus:not(:focus-visible),
+:is(.seo-app, .seo-proof) :is(h2, h3, label, .seo-label, .seo-panel, .seo-glyph, .seo-match)[tabindex="-1"]:focus {
   outline: none;
   box-shadow: none;
 }
@@ -667,6 +670,11 @@ h2.seo-scope {
   border-radius: var(--seo-radius-surface);
   background: var(--seo-stage-bg);
   box-shadow: inset 0 0 0 1px var(--gray-a3);
+  /* On the tinted stage the step-11 inks fall just short of 4.5:1: a touch
+     of step 12 keeps their hue and clears AA in both themes. */
+  --seo-ok: color-mix(in oklab, var(--green-11), var(--green-12) 20%);
+  --seo-improve: color-mix(in oklab, var(--amber-11), var(--amber-12) 20%);
+  --seo-fix: color-mix(in oklab, var(--red-11), var(--red-12) 20%);
 }
 .seo-stage-cap {
   display: flex;
@@ -732,6 +740,522 @@ h2.seo-scope {
 }
 .seo-stage-cap-btns .seo-btn[data-size="24"] {
   color: var(--seo-ink);
+}
+
+/* ── Schema: what search engines read ── */
+.seo-schema-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: var(--seo-field-gap);
+}
+.seo-stage-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+}
+.seo-stage-caption h3,
+.seo-stage-sub {
+  margin: 0;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.seo-stage-sub {
+  margin-top: 4px;
+}
+.seo-caption-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: -6px;
+}
+.seo-caption-tools .seo-btn svg {
+  width: 14px;
+  height: 14px;
+}
+.seo-readback p {
+  margin: 0;
+  color: var(--seo-ink);
+  font-size: 15px;
+  line-height: 22px;
+  overflow-wrap: anywhere;
+}
+.seo-readback p + p {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 18px;
+}
+/* A fact: a part of the sentence that leads to where it is set. */
+.seo-fact {
+  all: unset;
+  /* The ring keeps clear of the glyphs and their descenders, inside its
+     own 2 px: it never runs over the words or the mark beside it. */
+  margin: -2px -2px;
+  padding: 2px 2px;
+  border-radius: 3px;
+  text-decoration: underline dotted var(--gray-a8);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.seo-fact:hover {
+  background: var(--seo-hover);
+  text-decoration-color: var(--seo-ink);
+}
+.seo-fact:focus-visible {
+  box-shadow: var(--seo-ring-inset);
+}
+/* Hand-added text nobody can see: the to-fix colour of Checks. */
+.seo-fact[data-tone="fix"],
+.seo-match[data-tone="fix"] {
+  color: var(--seo-fix);
+}
+/* The match line in the tone of its Checks row. */
+.seo-match[data-tone="improve"] {
+  color: var(--seo-improve);
+}
+.seo-nowrap {
+  white-space: nowrap;
+}
+.seo-nowrap > .seo-fact {
+  white-space: normal;
+}
+.seo-readback-list {
+  display: grid;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  gap: 2px 12px;
+  margin: 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+.seo-readback-list > div {
+  display: contents;
+}
+.seo-readback-list dt {
+  color: var(--seo-ink-2);
+}
+.seo-readback-list dd {
+  margin: 0;
+}
+.seo-features {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.seo-feature {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.seo-feature > [data-radix-popper-content-wrapper] {
+  flex: none;
+}
+.seo-feature-line {
+  all: unset;
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 12px;
+  min-width: 0;
+  margin: 0 -6px;
+  padding: 4px 6px;
+  border-radius: var(--seo-radius-control);
+  color: var(--seo-ink);
+  font-size: 13px;
+  line-height: 18px;
+  cursor: pointer;
+}
+span.seo-feature-line {
+  cursor: default;
+}
+button.seo-feature-line:hover {
+  background: var(--seo-hover);
+}
+.seo-feature-line:focus-visible {
+  box-shadow: var(--seo-ring);
+}
+.seo-feature-words {
+  font-weight: 500;
+}
+.seo-feature[data-verdict="needs"] .seo-feature-words {
+  color: var(--seo-improve);
+}
+.seo-feature[data-verdict="ready"] .seo-feature-words,
+.seo-feature[data-verdict="complete"] .seo-feature-words {
+  color: var(--seo-ok);
+}
+/* Doesn't fit, retired, no feature: gray, never amber. */
+.seo-feature[data-quiet] .seo-feature-line,
+.seo-feature[data-verdict="unanswered"] .seo-feature-words {
+  color: var(--seo-ink-2);
+}
+.seo-match {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  /* Its actions sit 8 px under the sentence when they wrap. */
+  gap: 8px 4px;
+  margin: 0;
+  padding-top: 8px;
+  box-shadow: inset 0 1px 0 var(--seo-line-soft);
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-chip {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  vertical-align: 1px;
+}
+.seo-input.seo-kind-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+.seo-kind-trigger > span:first-of-type {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.seo-kind-trigger > svg,
+.seo-kind-value > svg {
+  flex: none;
+  color: var(--seo-icon);
+}
+.seo-kind-value {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: var(--seo-control-h);
+  color: var(--seo-ink);
+  font-size: 14px;
+}
+.seo-kind-variant {
+  display: block;
+  margin: 4px 0 0;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-kind-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin-top: 8px;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-kind-hint > p {
+  margin: 0;
+}
+.seo-kinds {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 0;
+  border: 0;
+}
+.seo-kind {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: var(--seo-radius-card);
+  box-shadow: inset 0 0 0 1px var(--seo-line);
+  cursor: pointer;
+}
+.seo-kind:hover {
+  background: var(--seo-hover-row);
+}
+/* Chosen: a tinted fill. Only focus wears the ring. */
+.seo-kind:has(input:checked) {
+  background: var(--seo-selected);
+}
+.seo-kind:has(input:focus-visible) {
+  box-shadow: var(--seo-ring);
+}
+/* The card wears the ring, not the radio inside it. */
+.seo-kind input:focus-visible {
+  box-shadow: none;
+}
+.seo-kind input {
+  margin: 3px 0 0;
+  accent-color: var(--blue-10);
+}
+.seo-kind-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.seo-kind-label {
+  color: var(--seo-ink);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+.seo-kind small {
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-kind-not {
+  display: block;
+}
+.seo-kinds:disabled .seo-kind {
+  cursor: default;
+}
+/* A sheet's foot (the confirm of a change of kind): under the scroller, so
+   it never covers what it asks about, and above the dialog's own bar. */
+.seo-sheet-foot {
+  flex: none;
+  padding: 8px var(--seo-gutter);
+  background: var(--color-panel-solid);
+  box-shadow: 0 -1px 0 var(--seo-line-soft);
+}
+.seo-app:has(> .seo-bar) .seo-sheet-foot {
+  padding-bottom: calc(var(--seo-bar-h, 44px) + 16px);
+}
+.seo-app .seo-sheet:has(> .seo-sheet-foot) > .seo-body {
+  padding-bottom: var(--seo-4);
+  scroll-padding-bottom: var(--seo-4);
+}
+/* Too short a frame for a list and a foot (the foot alone takes some 120
+   px): the sheet scrolls as one, and the confirm follows the list instead
+   of crowding it. */
+@media (max-height: 400px) {
+  .seo-sheet:has(> .seo-sheet-foot) {
+    overflow-y: auto;
+  }
+  .seo-sheet:has(> .seo-sheet-foot) > .seo-body {
+    flex: none;
+    overflow: visible;
+  }
+}
+.seo-proof {
+  /* Within the frame at any height or zoom: its inside scrolls rather than
+     leave it, and its padding frames the cut edge. */
+  display: flex;
+  flex-direction: column;
+  min-width: min(var(--radix-popover-trigger-width), var(--radix-popover-content-available-width));
+  max-width: min(380px, var(--radix-popover-content-available-width));
+  max-height: var(--radix-popover-content-available-height);
+  overflow: hidden;
+  color: var(--seo-ink);
+  font-size: 13px;
+  line-height: 18px;
+}
+.seo-proof-scroll {
+  min-height: 0;
+  /* Room for a focus ring at the scrolled edges. */
+  margin: -3px;
+  padding: 3px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  /* A shadow at an edge with more beyond it: covers that scroll with the
+     content hide it at either end. */
+  background:
+    linear-gradient(var(--color-panel-solid) 30%, transparent) center top / 100% 24px no-repeat local,
+    linear-gradient(transparent, var(--color-panel-solid) 70%) center bottom / 100% 24px no-repeat local,
+    linear-gradient(var(--gray-a5), transparent) center top / 100% 8px no-repeat scroll,
+    linear-gradient(transparent, var(--gray-a5)) center bottom / 100% 8px no-repeat scroll;
+}
+.seo-proof-title {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.seo-proof p {
+  margin: 0 0 8px;
+}
+.seo-proof h4 {
+  margin: 12px 0 4px;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.seo-proof-facts {
+  display: grid;
+  /* A label never takes the value's room: past two fifths it wraps. */
+  grid-template-columns: fit-content(40%) minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 8px 0;
+}
+.seo-proof-facts > div {
+  display: contents;
+}
+.seo-proof-facts dt {
+  color: var(--seo-ink-2);
+}
+.seo-proof-facts dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.seo-proof ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.seo-proof-helps .seo-btn {
+  margin-left: 4px;
+}
+.seo-proof ul + .seo-proof-foot {
+  margin-top: 12px;
+}
+.seo-proof-foot {
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-proof .seo-proof-foot:last-child {
+  margin-bottom: 0;
+}
+/* A price and its currency share a row while both fit, else they stack. */
+.seo-pair.seo-price {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+/* ── Output: the graph as an outline ── */
+.seo-outline {
+  display: flex;
+  flex-direction: column;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+.seo-outline-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 8px 0;
+  box-shadow: inset 0 1px 0 var(--seo-line-soft);
+  font-size: 13px;
+  line-height: 18px;
+}
+.seo-outline-row[data-left-out] {
+  color: var(--seo-ink-2);
+}
+.seo-outline-type {
+  min-width: 0;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.seo-outline-name {
+  font-weight: 400;
+}
+.seo-outline-row > .seo-chip {
+  margin-left: 0;
+}
+.seo-outline-id,
+.seo-outline-reason {
+  flex: 1 1 100%;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+.seo-outline-id {
+  font-family: var(--code-font-family, ui-monospace, monospace);
+  font-size: 11px;
+}
+.seo-out-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0 0 12px -6px;
+}
+/* What a button said comes after them all: one gap between buttons. */
+.seo-out-actions > [role="status"] {
+  order: 1;
+}
+
+/* ── Your own JSON-LD: what each item gives ── */
+.seo-hand {
+  margin-top: 16px;
+}
+.seo-hand h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.seo-hand ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.seo-hand-item {
+  padding: 8px 0;
+  box-shadow: inset 0 1px 0 var(--seo-line-soft);
+}
+.seo-hand-name {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}
+.seo-hand-item > .seo-meta {
+  margin: 2px 0 0;
+}
+.seo-hand-line {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-hand-line[data-tone="fix"] .seo-hand-text {
+  color: var(--seo-fix);
+}
+.seo-hand-line[data-tone="improve"] .seo-hand-text {
+  color: var(--seo-improve);
+}
+.seo-hand-text {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.seo-hand-line .seo-btn,
+.seo-hand-item > .seo-btn {
+  margin: 2px 8px 0 0;
+}
+/* A ghost button's text, not its fill, sits on the column. */
+.seo-hand-line .seo-btn[data-variant="ghost"],
+.seo-hand-item > .seo-btn[data-variant="ghost"] {
+  margin-left: -6px;
+}
+/* On the rows' own inset, as the proposed details and the note are. */
+.seo-proposal-yours {
+  margin: 8px 0 0;
+  padding: 0 10px;
+  list-style: none;
+  font-size: 13px;
+  line-height: 18px;
 }
 
 /* The search result, imitated. */
@@ -1150,8 +1674,9 @@ h2.seo-scope {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* An example, not a link: in the ink of a resolved value. */
 .seo-guide-example {
-  color: var(--seo-preview-link);
+  color: var(--seo-ink);
 }
 .seo-guide .seo-btn {
   margin: -4px 0 -4px 2px;
@@ -1161,6 +1686,12 @@ h2.seo-scope {
 .seo-guide .seo-btn:hover {
   color: var(--blue-12);
 }
+/* An action on a line of its own: its words line up with the sentence's. */
+.seo-guide .seo-btn[data-own-line] {
+  display: flex;
+  width: fit-content;
+  margin: 2px 0 -4px -6px;
+}
 .seo-pair {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 112px;
@@ -1169,6 +1700,13 @@ h2.seo-scope {
 }
 .seo-pair[data-even] {
   grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+}
+/* In a cell, an aside stays inside it. */
+.seo-pair > .seo-field > .seo-aside:has(> .seo-btn:last-child) {
+  right: 0;
+}
+.seo-pair .seo-aside .seo-btn[data-accent] {
+  margin-left: 0;
 }
 .seo-inline {
   display: flex;
@@ -1183,7 +1721,6 @@ h2.seo-scope {
 
 /* Inputs: one box. */
 .seo-input,
-.seo-template-box,
 .seo-select-box.rt-SelectTrigger {
   position: relative;
   min-height: var(--seo-control-h);
@@ -1219,24 +1756,20 @@ textarea.seo-input {
   opacity: 1;
 }
 .seo-input:hover,
-.seo-template-box:hover,
 .seo-select-box.rt-SelectTrigger:hover {
   box-shadow: inset 0 0 0 1px var(--seo-control-border-hover);
 }
 .seo-input:focus,
 .seo-input:focus-visible,
-.seo-template-box:focus-within,
 .seo-select-box.rt-SelectTrigger:focus-visible,
 .seo-select-box.rt-SelectTrigger[data-state="open"] {
   outline: none;
   box-shadow: var(--seo-ring);
 }
-.seo-input[aria-invalid="true"],
-.seo-template-box[data-invalid] {
+.seo-input[aria-invalid="true"] {
   box-shadow: inset 0 0 0 1px var(--red-9), 0 0 0 3px rgba(229, 72, 77, 0.12);
 }
 .seo-input:disabled,
-.seo-template-box[data-disabled],
 .seo-select-box.rt-SelectTrigger:disabled {
   background: var(--gray-a2);
   box-shadow: inset 0 0 0 1px var(--gray-a4);
@@ -1354,121 +1887,246 @@ textarea.seo-input {
   line-height: 16px;
 }
 
-/* Template fields: a native textarea over a mirror that paints the chips. */
-.seo-template {
+/* Typed values; a menu hangs from the whole control. */
+.seo-template,
+.seo-typed {
   position: relative;
-}
-.seo-template-box {
-  display: grid;
-  --seo-trail: 12px;
-}
-.seo-template-box[data-trail="1"] {
-  --seo-trail: 40px;
-}
-.seo-template-box[data-trail="2"] {
-  --seo-trail: 64px;
 }
 .seo-template-anchor {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
-.seo-template-mirror,
-.seo-template-box textarea {
-  grid-area: 1 / 1;
+/* One line that grows with its text; Enter never breaks it. */
+textarea.seo-textarea:not([data-multiline]) {
+  min-height: var(--seo-control-h);
+}
+
+/* A linked value: a box, drawn as an input, that names its source and
+   shows the previewed item's value. Its tag alone has colour: blue linked
+   here, gray the default; a broken link's line is red too. */
+.seo-linked {
+  position: relative;
+  --seo-box-line: var(--seo-control-border);
+  --seo-box-line-hover: var(--seo-control-border-hover);
+  --seo-box-ink: var(--seo-link-ink);
+}
+.seo-linked[data-look="default"] {
+  --seo-box-ink: var(--seo-default-ink);
+}
+.seo-linked[data-look="broken"] {
+  --seo-box-line: var(--seo-broken-line);
+  --seo-box-line-hover: var(--red-a8);
+  --seo-box-ink: var(--seo-broken-ink);
+}
+.seo-linked-box {
+  all: unset;
   box-sizing: border-box;
-  min-width: 0;
-  margin: 0;
-  padding: 6px var(--seo-trail) 6px 12px;
-  border: 0;
-  font-family: var(--default-font-family);
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 20px;
-  letter-spacing: normal;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.seo-template-box[data-multiline] .seo-template-mirror,
-.seo-template-box[data-multiline] textarea {
-  min-height: 52px;
-}
-.seo-template-mirror {
-  color: var(--seo-ink);
-  pointer-events: none;
-}
-.seo-template-box[data-disabled] .seo-template-mirror {
-  color: var(--seo-ink-2);
-}
-.seo-template-box textarea {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   width: 100%;
-  height: 100%;
-  overflow: hidden;
-  resize: none;
-  outline: none;
-  background: transparent;
-  color: transparent;
-  caret-color: var(--blue-10);
-}
-.seo-template-box textarea:focus-visible {
-  box-shadow: none;
-}
-.seo-template-box textarea::placeholder {
-  color: transparent;
-}
-.seo-template-box textarea::selection {
-  background: var(--focus-a5);
-}
-.seo-inherited {
-  color: var(--seo-ink-2);
-}
-.seo-inherited .seo-chip {
-  background: var(--gray-a2);
-  box-shadow: inset 0 0 0 1px var(--gray-a5);
-  color: var(--seo-ink-2);
-}
-/* A chip shares every metric with the textarea's text, so the caret lines up:
-   the transparent braces are its padding. */
-.seo-chip {
-  /* The text's own metrics (the caret is the textarea's), 20 px tall. */
-  padding: 1.5px 0;
-  border-radius: var(--seo-radius-chip);
-  background: var(--seo-chip-bg);
-  box-shadow: inset 0 0 0 1px var(--seo-chip-line);
-  color: var(--seo-chip-ink);
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
-}
-.seo-chip[data-empty] {
-  background: transparent;
-  box-shadow: inset 0 0 0 1px var(--amber-9);
-  color: var(--amber-11);
-}
-/* Read-only, a chip is a neutral label, at full contrast. */
-.seo-template-box[data-disabled] .seo-chip {
-  background: var(--gray-a2);
-  box-shadow: inset 0 0 0 1px var(--gray-a5);
-  color: var(--seo-ink-2);
-}
-.seo-brace {
-  color: transparent;
-}
-.seo-chip-tip {
-  position: absolute;
-  z-index: 5;
-  max-width: 280px;
-  padding: 5px 8px;
-  overflow: hidden;
+  min-height: var(--seo-control-h);
+  padding: 4px 12px;
   border-radius: var(--seo-radius-control);
-  background: var(--gray-12);
-  color: var(--gray-1);
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--seo-box-line);
+  cursor: pointer;
+  transition: box-shadow var(--seo-fast) var(--seo-ease);
+}
+.seo-linked-box[data-x] {
+  padding-right: 36px;
+}
+.seo-linked-box:hover {
+  box-shadow: inset 0 0 0 1px var(--seo-box-line-hover);
+}
+.seo-linked-box:focus-visible,
+.seo-linked-box[aria-expanded="true"] {
+  box-shadow: var(--seo-ring);
+}
+.seo-linked-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--seo-box-ink);
   font-size: 12px;
+  font-weight: 500;
   line-height: 16px;
+}
+.seo-linked-tag > svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.seo-linked-tag > span {
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  pointer-events: none;
-  transform: translateY(calc(-100% - 4px));
+}
+/* A path gives way from its start: the field it ends at stays in sight. */
+.seo-linked-path {
+  flex: 0 1000 auto;
+  min-width: 0;
+}
+.seo-linked-leaf {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* The value at rest: its lines, never wrapped mid-word; all of it on
+   keyboard focus. Hover shows it as a tooltip: nothing moves under the
+   pointer. */
+.seo-linked-value {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--seo-ink);
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+.seo-linked-box[data-lines="3"] .seo-linked-value {
+  -webkit-line-clamp: 3;
+}
+/* Never shorter than the input it turns into; its tag line is its own. */
+.seo-linked-box[data-lines="3"] {
+  min-height: 52px;
+}
+.seo-linked-box:focus-visible .seo-linked-value {
+  -webkit-line-clamp: unset;
+}
+/* A one-line value (a title) is one control high: its source before its
+   value, on one line, focused or not. */
+.seo-linked-box[data-inline] {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+  height: var(--seo-control-h);
+  padding-block: 0;
+}
+.seo-linked-box[data-inline] .seo-linked-tag {
+  /* Never squeezed by a long value: the value is what gives way. */
+  flex: 0 0 auto;
+  max-width: 40%;
+}
+/* There the field it ends at is enough; the whole path is in its description. */
+.seo-linked-box[data-inline] .seo-linked-path {
+  display: none;
+}
+/* Beside its neighbour a detail keeps its two lines, the same focused or
+   not: the path, cut from its start so the field it ends at stays, then the
+   value, cut at its end. */
+.seo-linked-box[data-inline] .seo-linked-value,
+.seo-pair .seo-linked-box .seo-linked-value,
+.seo-pair .seo-linked-box:focus-visible .seo-linked-value {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-linked-value:not([data-state="ok"]) {
+  color: var(--seo-ink-2);
+  font-style: italic;
+}
+/* Words that say why a link gives nothing are read whole, beside a
+   neighbour too. */
+.seo-pair .seo-linked-box .seo-linked-value:not([data-state="ok"]) {
+  white-space: normal;
+}
+.seo-linked[data-look="default"] .seo-linked-value {
+  color: var(--seo-ink-2);
+}
+.seo-linked > [data-unlink] {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+/* The link button by the label: gray, red when the link is broken. */
+.seo-label [data-link][data-look="broken"] {
+  color: var(--seo-broken-ink);
+}
+
+/* The title: its main part, then its ending. */
+.seo-title-parts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 6px;
+}
+.seo-title-main {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.seo-ending {
+  position: relative;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+}
+.seo-ending-btn {
+  all: unset;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  min-height: var(--seo-control-h);
+  padding: 0 8px 0 10px;
+  border-radius: var(--seo-radius-control);
+  box-shadow: inset 0 0 0 1px var(--seo-control-border);
+  color: var(--seo-ink-2);
+  font-size: 14px;
+  line-height: 20px;
+  cursor: pointer;
+}
+.seo-ending-btn[data-set] {
+  color: var(--seo-ink);
+}
+/* Nothing to preview: the ending at rest, not a control. */
+.seo-ending-btn[data-static] {
+  cursor: default;
+}
+.seo-ending-btn > span:not(.seo-ending-sep) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-ending-sep {
+  color: var(--seo-ink-2);
+}
+.seo-ending-btn > svg {
+  flex: none;
+  color: var(--seo-icon);
+}
+/* A linked ending that gives nothing for the item still says it is linked. */
+.seo-ending-btn > .seo-ending-link {
+  width: 12px;
+  height: 12px;
+  color: var(--seo-link-ink);
+}
+.seo-ending-btn > .seo-ending-link[data-look="broken"] {
+  color: var(--seo-broken-ink);
+}
+/* Site's ending is a control of its own, as wide as the others. */
+.seo-ending[data-wide] {
+  display: block;
+}
+.seo-ending[data-wide] .seo-ending-btn {
+  display: flex;
+  width: 100%;
+}
+.seo-ending[data-wide] .seo-ending-btn > svg {
+  margin-left: auto;
+}
+.seo-ending-btn:hover {
+  box-shadow: inset 0 0 0 1px var(--seo-control-border-hover);
+}
+.seo-ending-btn:focus-visible,
+.seo-ending-btn[aria-expanded="true"] {
+  box-shadow: var(--seo-ring);
 }
 .seo-trail {
   position: absolute;
@@ -1503,6 +2161,11 @@ textarea.seo-input {
   overflow: hidden;
   border-radius: var(--seo-radius-surface);
   box-shadow: var(--seo-shadow-pop);
+}
+/* Above its field, opened by a key, it keeps the room it has: the filter
+   never moves. */
+.seo-menu.rt-PopoverContent[data-fixed] {
+  height: min(360px, var(--radix-popover-content-available-height));
 }
 /* Closed by a resize: gone at once. */
 .seo-menu.rt-PopoverContent[data-gone] {
@@ -1551,6 +2214,10 @@ textarea.seo-input {
   font-weight: 500;
   line-height: 16px;
 }
+.seo-menu-sep {
+  margin: 6px 10px;
+  border-top: 1px solid var(--gray-a3);
+}
 .seo-menu-item {
   display: flex;
   flex-direction: column;
@@ -1565,7 +2232,7 @@ textarea.seo-input {
 .seo-menu-item > :first-child {
   flex: none;
 }
-.seo-menu-item > :last-child {
+.seo-menu-item > :nth-child(2) {
   /* The value under its label, over the menu's width: two lines at most. */
   display: -webkit-box;
   overflow: hidden;
@@ -1582,12 +2249,81 @@ textarea.seo-input {
 .seo-menu-item[data-active] {
   background: var(--seo-selected);
 }
-.seo-menu-none {
-  margin: 0;
-  padding: 10px;
+.seo-menu-item > :first-child {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.seo-menu-item > :first-child > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-menu-item > :first-child > svg {
+  flex: none;
+  color: var(--seo-icon);
+}
+/* The fold of entries that do not fit: last, and quiet. */
+.seo-menu-item[data-quiet] > :first-child {
+  color: var(--seo-ink-2);
+  font-size: 12px;
+}
+.seo-menu-item[data-kind="level"] > :first-child > svg:last-child {
+  margin-left: auto;
+}
+.seo-menu-item[data-disabled] > :first-child {
+  color: var(--seo-ink-2);
+}
+.seo-menu-item[data-kind="back"] {
+  min-height: 28px;
+  color: var(--seo-ink-2);
+}
+/* In a level, the way back stays in sight at the top of the list. */
+.seo-menu-list > .seo-menu-item[data-kind="back"] {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--color-panel-solid);
+  box-shadow: 0 0 0 6px var(--color-panel-solid);
+}
+.seo-menu-list > .seo-menu-item[data-kind="back"][data-active] {
+  background: linear-gradient(var(--seo-selected), var(--seo-selected)), var(--color-panel-solid);
+}
+.seo-menu-list:has(> .seo-menu-item[data-kind="back"]) {
+  scroll-padding-top: 34px;
+}
+.seo-menu-level {
+  flex: none;
+  padding: 8px 16px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.seo-menu-foot {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 36px;
+  padding: 4px 8px 4px 14px;
+  box-shadow: inset 0 1px 0 var(--gray-a3);
   color: var(--seo-ink-2);
   font-size: 12px;
   line-height: 16px;
+}
+.seo-menu-none {
+  flex: none;
+  margin: 0;
+  padding: 10px 16px;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+/* A live region, there before it speaks: empty, it takes no room. */
+.seo-menu-none:empty {
+  padding: 0;
 }
 .seo-menu-hint {
   display: flex;
@@ -1846,6 +2582,40 @@ button.seo-row:focus-visible {
 }
 .seo-midcut > :last-child {
   flex: none;
+}
+/* A linked or default image: its source over its name, as a box's tag. */
+.seo-image-tag {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--seo-link-ink);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.seo-image-tag[data-look="default"] {
+  color: var(--seo-default-ink);
+}
+.seo-image-tag[data-look="broken"] {
+  color: var(--seo-broken-ink);
+}
+.seo-image-tag > svg {
+  flex: none;
+  width: 12px;
+  height: 12px;
+}
+.seo-image-tag > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Why the link gives no image: in words, on as many lines as it takes. */
+.seo-image-name[data-tagged] > div[data-state] {
+  display: block;
+  color: var(--seo-ink-2);
+  font-style: italic;
+  white-space: normal;
 }
 .seo-image-name > small {
   display: block;
@@ -2263,6 +3033,10 @@ button.seo-row:focus-visible {
 .seo-check-actions:empty {
   display: none;
 }
+/* No sentence under the title: its actions follow it closely. */
+.seo-check-title + .seo-check-actions {
+  margin-top: 4px;
+}
 /* A ghost button's text, not its padding, lines up with the title. */
 .seo-check-actions > .seo-btn[data-variant="ghost"]:first-child {
   margin-left: -8px;
@@ -2525,12 +3299,14 @@ button.seo-row:focus-visible {
     font-size: 16px;
     line-height: 22px;
   }
-  /* The value menu hangs from the frame's top edge (TemplateInput). */
-  .seo-menu.rt-PopoverContent {
-    max-height: min(
+  /* The link menu hangs from the frame's top edge (LinkMenu). */
+  .seo-menu.rt-PopoverContent,
+  .seo-menu.rt-PopoverContent[data-fixed] {
+    height: min(
       calc(100vh - 16px),
       var(--radix-popover-content-available-height)
     );
+    max-height: none;
   }
   .seo-menu-hint {
     display: none;
@@ -2685,20 +3461,13 @@ button.seo-row:focus-visible {
 }
 
 @media (forced-colors: active) {
-  .seo-template-box textarea {
-    forced-color-adjust: none;
-    caret-color: CanvasText;
-  }
-  .seo-chip {
-    outline: 1px solid CanvasText;
-    outline-offset: -1px;
-  }
-  .seo-template-box,
+  .seo-linked-box,
+  .seo-ending-btn,
   .seo-stage,
   .seo-list {
     border: 1px solid CanvasText;
   }
-  .seo-app :focus-visible {
+  :is(.seo-app, .seo-proof) :focus-visible {
     outline: 2px solid Highlight;
   }
   .seo-app .rt-SwitchThumb {
@@ -2714,6 +3483,16 @@ button.seo-row:focus-visible {
   flex: 1;
   min-width: 0;
 }
+/* Where a price and its currency stack, the kind takes the whole row and
+   Suggest goes under it: neither wraps its words to fit beside the other. */
+@container (max-width: 332px) {
+  .seo-type-row {
+    flex-wrap: wrap;
+  }
+  .seo-type-row > :first-child {
+    flex-basis: 100%;
+  }
+}
 .seo-json-wrap {
   margin-top: 16px;
 }
@@ -2726,39 +3505,6 @@ button.seo-row:focus-visible {
 }
 .seo-json.seo-input {
   field-sizing: content;
-}
-/* The textarea keeps caret and selection; the mirror under it paints the
-   text, with chips, exactly where the textarea would. */
-.seo-json-box {
-  display: grid;
-}
-.seo-json-box > * {
-  grid-area: 1 / 1;
-  min-width: 0;
-}
-.seo-json-mirror {
-  box-sizing: border-box;
-  padding: 6px 12px;
-  color: var(--seo-ink);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  pointer-events: none;
-}
-.seo-json-mirror .seo-chip {
-  padding: 0;
-}
-.seo-json-box > textarea.seo-input {
-  background: transparent;
-  color: transparent;
-  caret-color: var(--seo-ink);
-}
-.seo-json-box > textarea.seo-input:disabled {
-  background: transparent;
-}
-.seo-json-box:has(> textarea:disabled) > .seo-json-mirror {
-  border-radius: var(--seo-radius-control);
-  background: var(--gray-a2);
-  color: var(--seo-ink-2);
 }
 .seo-more-details > * + * {
   margin-top: var(--seo-field-gap);

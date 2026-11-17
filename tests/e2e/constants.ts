@@ -28,8 +28,10 @@ export const PAGES = {
   // No main heading, a small image, and a stored title that is too long and
   // names the site twice.
   checks: { id: 4, title: 'Checks', path: './checks' },
-  // Its published SEO title is "Published title {sep} {site}".
-  stored: { id: 5, title: 'Stored', path: './stored', seoTitle: 'Published title {sep} {site}' },
+  // Its published SEO title's main part is "Published title".
+  stored: { id: 5, title: 'Stored', path: './stored', seoTitle: 'Published title' },
+  /** Described as a Recipe, which the registry does not have. */
+  oldRecipe: { id: 6, title: 'Rye bread', path: './rye-bread' },
 } as const;
 
 /** Image media, by name. The file is the lower-cased, hyphenated name. */
@@ -104,9 +106,14 @@ export const COMPLEX = {
   recipeRtl: { id: 20, title: 'שקשוקה' },
   /** Its image is a 400 × 400 logo: a small card. */
   job: { id: 21, title: 'Senior Drupal developer' },
-  /** The Announcement type has no content; its template stores this title. */
-  announcement: { title: '{Page title} {Separator} News' },
-  /** What the Event template's live and draft title patterns end with. */
+  /**
+   * An article with no summary. The Article template's stored description
+   * links to `gone`, a field that no longer exists.
+   */
+  articleMixed: { id: 24, gone: 'field_gone' },
+  /** The Announcement type has no content; its template stores this ending. */
+  announcement: { ending: 'News' },
+  /** What the Event template's live and draft titles end with. */
   ending: { live: 'Events', draft: 'Tickets' },
 } as const;
 
@@ -142,7 +149,7 @@ export const UI = {
   },
   field: {
     title: 'Title',
-    titlePattern: 'Title pattern',
+    titleEnding: /^Title ending: /,
     description: 'Description',
     canonical: 'Canonical address',
     // In the Social tab: scope with getByRole('tabpanel', { name: 'Social' }).
@@ -161,11 +168,13 @@ export const UI = {
     heroField: 'From the Hero image field',
   },
   action: {
-    insert: 'Insert value',
+    // The link button by a field's label, and the box of a linked value.
+    link: (field: string) => `Link ${field} to a field`,
+    changeLink: (field: string) => `Change the link for ${field}`,
+    unlink: (field: string) => `Unlink ${field}`,
     undo: 'Undo',
-    startFromDefault: 'Use the site pattern',
     chooseImage: /^(Choose|Change) image$/,
-    useHeroField: 'Use the Hero image field',
+    useHeroField: /^Use Hero image › .+$/,
     output: 'View output',
     back: 'Back',
     copy: /^Copy (tags|structured data)$/,
@@ -251,6 +260,24 @@ export const UI = {
     sends: "Sends this page's text to the AI service.",
     // Typed into Refine, it trips the site guardrail the AI setup adds.
     policyMarker: '#policy',
-    notFound: 'Not found on the page. Check before using.',
+    guesses: /^\d+ more guess(es)? (wasn't|weren't) found on the page\.$/,
+    // The start date is the person's to set.
+    yourself: 'Starts · Add it yourself',
+    reserved: "AI doesn't fill in dates, prices or authors.",
+  },
+  schema: {
+    stage: 'Understood as',
+    kind: 'What this page is',
+    kinds: 'What is this page?',
+    product: 'A product people buy',
+    service: 'Plans for a service',
+    article: 'An article',
+    event: 'An event people attend in person',
+    webPage: 'A web page',
+    toService: 'Change to plans for a service',
+    ownJsonLd: 'Add your own JSON-LD',
+    moved: 'Custom JSON-LD moved to Code › Add your own JSON-LD',
+    code: 'Code',
+    proofFoot: 'Meeting these makes a result possible. Search engines decide whether to show it.',
   },
 } as const;

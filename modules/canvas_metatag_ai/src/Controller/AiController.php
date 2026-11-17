@@ -130,7 +130,7 @@ final class AiController implements ContainerInjectionInterface {
   /**
    * Checks the request body and cuts every text to its cap.
    *
-   * @return array{task: 'text'|'schema', langcode: string, page: array{title: string, site: string, text: string}, fields?: list<string>, count?: int, current?: array<string, string>, hint?: string}
+   * @return array{task: 'text'|'schema', langcode: string, page: array{title: string, site: string, text: string, ending?: string}, fields?: list<string>, count?: int, current?: array<string, string>, hint?: string}
    *   The request, safe to hand to the assistant.
    *
    * @throws \InvalidArgumentException
@@ -158,6 +158,11 @@ final class AiController implements ContainerInjectionInterface {
     ];
     if ($task === 'schema') {
       return $input;
+    }
+    // What is added after a title: the separator and the ending. Only when
+    // the caller says it; '' is "no ending".
+    if (array_key_exists('ending', $page)) {
+      $input['page']['ending'] = self::cut($page['ending'], self::MAX_NAME);
     }
 
     $fields = $body['fields'] ?? NULL;

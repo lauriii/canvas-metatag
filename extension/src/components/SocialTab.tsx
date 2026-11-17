@@ -1,15 +1,15 @@
 import { useId, useState } from 'react';
 
 import { useApp } from '../App';
-import { socialImage, texts, tokensIn } from '../model';
-import { Field } from './Field';
-import { ImageRow, PICKED } from './MediaPicker';
+import { socialImage, texts } from '../model';
+import { entriesFor } from '../values';
+import { ImageRow } from './MediaPicker';
 import { SocialPreview } from './Previews';
 import { SuggestButton, TextSuggest } from './Suggest';
-import { TemplateInput } from './TemplateInput';
+import { ValueField } from './Value';
 
 export function SocialTab() {
-  const { state, dispatch, ...app } = useApp();
+  const { state, dispatch, openSheet, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
   const target = server.target!;
@@ -20,22 +20,32 @@ export function SocialTab() {
   const [suggesting, setSuggesting] = useState(false);
   const suggestId = useId();
 
-  const { image, from } = socialImage(state, view, PICKED);
+  const { image, from, state: link } = socialImage(state, view);
   // What the text fields show while nothing is stored for them.
-  const unset = texts({ ...view.effective, social: {} }, view.values);
+  const unset = texts(
+    { ...view.effective, social: {} },
+    view.text,
+    server.separator,
+    server.site.values.title_end,
+  );
+  // The type's image fields, for "From each Article".
   const fields = page
     ? undefined
-    : Object.entries(view.tokens)
-        .filter(
-          ([name, token]) =>
-            token.type === 'image' && name.startsWith('field.'),
-        )
-        .map(([name, token]) => ({
-          value: `{${name}}`,
-          label: token.label,
-          image: token.image,
-        }));
-  const bound = social.image?.match(/^\{(field\..+)\}$/)?.[1];
+    : entriesFor('social.image', 'image', 'template', view.lookup, target.label)
+        .filter((entry) => entry.group !== 'Page' && !entry.disabled)
+        .map((entry) => ({ value: entry.value, label: entry.full, image: entry.image }));
+  const value = social.image;
+  const linked = !!value && 'source' in value;
+  const library = () =>
+    openSheet({
+      kind: 'image',
+      request: {
+        minWidth: 600,
+        chosen: value,
+        fields,
+        onPick: (picked) => edit('social.image', picked),
+      },
+    });
 
   return (
     <>
@@ -66,8 +76,10 @@ export function SocialTab() {
                 ...state.edits.target,
                 social: {
                   ...social,
-                  title: variant['social.title'],
-                  description: variant['social.description'],
+                  title: variant['social.title'] ? { text: variant['social.title'] } : undefined,
+                  description: variant['social.description']
+                    ? { text: variant['social.description'] }
+                    : undefined,
                 },
               },
             });
@@ -76,100 +88,82 @@ export function SocialTab() {
         />
       )}
 
-      <Field
-        scope="target"
+      <ValueField
         path="social.image"
         label="Image"
+        kind="image"
+        linkable={!page}
         group
+        library={library}
         source={
           // The model's words, in the aside's family of source words.
           from === 'Chosen here'
             ? page
               ? 'Set on this page'
               : `Set for every ${target.label}`
-            : from === 'From the page image'
-              ? 'From the Image field'
-              : from === 'Site default'
-                ? 'Site default image'
-                : from.replace(/^From (?!the )(.+)$/, 'From the $1 field')
+            : linked && !link
+              ? `From each ${target.label}`
+              : from === 'Image'
+                ? 'From the Image field'
+                : from
         }
         resetTip="the default image"
-      >
-        {(field) => (
+        instead={
+          link &&
+          (from === 'Image'
+            ? 'its Image field is used'
+            : from === 'Site default image'
+              ? 'the site default image is used'
+              : 'no image is shared')
+        }
+        image={(field, row) => (
           <ImageRow
             describedBy={field.describedBy}
             image={image}
-            name={
-              bound && view.tokens[bound]
-                ? `From each ${target.label}'s ${view.tokens[bound].label} field`
-                : undefined
+            // The link, and what it gives for the previewed item; at template
+            // scope the default it follows, as a box's tag.
+            tag={
+              row.imageTag ??
+              (!page && !value && (from === 'Image' || from === 'Site default image')
+                ? { text: `Default · ${from}`, look: 'default' }
+                : undefined)
             }
+            state={row.imageState}
+            onUnlink={row.linked && !row.disabled ? () => row.unlink() : undefined}
             disabled={field.disabled}
             minWidth={600}
-            chosen={social.image}
+            chosen={value}
             fields={fields}
-            onPick={(value) => edit('social.image', value)}
+            onPick={(picked) => edit('social.image', picked)}
           />
         )}
-      </Field>
+      />
 
-      <Field
-        scope="target"
+      <ValueField
         path="social.title"
         label="Title"
-        fallback="Same as search title"
-        resetTip="the search title"
-        resolved={
-          tokensIn(social.title ?? '').length ? view.texts.social_title : undefined
-        }
-      >
-        {(field) => (
-          <TemplateInput
-            id={field.id}
-            describedBy={field.describedBy}
-            invalid={field.invalid}
-            disabled={field.disabled}
-            lang={server.langcode}
-            value={social.title ?? ''}
-            onChange={(value) => edit('social.title', value)}
-            inherited={unset.social_title}
-            inheritedFrom="the search title"
-            tokens={view.tokens}
-            fields={!page}
-            insert={page ? 'focus' : 'always'}
-          />
-        )}
-      </Field>
-      <Field
-        scope="target"
+        kind="text"
+        linkable={!page}
+        byDefault={{ fact: 'title' }}
+        oneLine
+        instead="its Title is used"
+        fallback={page ? 'From the page title' : `From each ${target.label}'s title`}
+        resetTip="the page title"
+        placeholder={unset.social_title}
+      />
+      <ValueField
         path="social.description"
         label="Description"
+        kind="text"
+        linkable={!page}
+        defaultWords={{ tag: 'Description', text: unset.social_description }}
+        instead="the description is used"
         fallback="Same as description"
         resetTip="the description"
-        resolved={
-          tokensIn(social.description ?? '').length
-            ? view.texts.social_description
-            : undefined
-        }
-      >
-        {(field) => (
-          <TemplateInput
-            id={field.id}
-            describedBy={field.describedBy}
-            invalid={field.invalid}
-            disabled={field.disabled}
-            lang={server.langcode}
-            value={social.description ?? ''}
-            onChange={(value) => edit('social.description', value)}
-            inherited={unset.social_description}
-            inheritedFrom="the description"
-            tokens={view.tokens}
-            fields={!page}
-            multiline
-            insert={page ? 'focus' : 'always'}
-          />
-        )}
-      </Field>
+        multiline
+        lines={3}
+        placeholder={unset.social_description}
+      />
     </>
   );
 }

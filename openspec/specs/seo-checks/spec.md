@@ -38,10 +38,15 @@ its own.
 - **WHEN** "Every Event"'s description holds {Performers} and the previewed event has no performers
 - **THEN** the issue MUST say "Performers is empty for this event", not "Fill in Performers", and be good to know, not counted in the Checks button; the same MUST hold for a value the title or the social texts use
 
+#### Scenario: A description linked to a field empty for the previewed node
+
+- **WHEN** "Every Product"'s description is linked to SKU and the previewed product has no SKU and no description of its own
+- **THEN** "SKU is empty for this product" MUST be listed as good to know, and "Add a description" MUST NOT be listed or counted
+
 #### Scenario: A structured data property linked to a field empty for the previewed node
 
 - **WHEN** "Every Event" links its Ends property to the field Ends and the previewed event has no end
-- **THEN** the issue MUST say "Ends is empty for this event", be good to know, not counted, and "Event is missing: Ends." MUST NOT be listed
+- **THEN** the issue MUST say "Ends is empty for this event", be good to know, not counted, and "Also helps the event result: Ends." MUST NOT be listed
 
 #### Scenario: Shown in search, not saved yet
 
@@ -144,21 +149,21 @@ SEO site settings. An issue about the page's content MUST NOT lead to a field.
 
 ### Requirement: One-click fixes only where the result is certain
 
-A fix MUST be offered only for a value set on the target itself, and only while
-the target can be written. Applying it MUST be an ordinary edit: saved like
-typing, and undoable from the action bar, which names what was done. After a
-fix in the sheet, focus MUST move to the next row's first button, else to the
-summary.
+A fix MUST be offered only for a value set on the target itself, or by setting
+the target's own title ending, and only while the target can be written.
+Applying it MUST be an ordinary edit: saved like typing, and undoable from the
+action bar, which names what was done. After a fix in the sheet, focus MUST
+move to the next row's first button, else to the summary.
 
 #### Scenario: Remove the repeat
 
-- **WHEN** the page's own title is "Example pricing {sep} {site}" and the site is named "Example"
-- **THEN** "Remove the repeat" MUST change it to "pricing {sep} {site}", the row MUST go away, and the bar MUST say "Repeat removed" with Undo
+- **WHEN** the page's own title is "Example pricing", its ending is the inherited Site name, and the site is named "Example"
+- **THEN** "Remove the repeat" MUST set the page's title ending to "No ending", the row MUST go away, and the bar MUST say "Repeat removed" with Undo
 
 #### Scenario: Separators left behind
 
-- **WHEN** "Remove the repeat" is applied to "Pricing | Example | {site}"
-- **THEN** the title MUST become "Pricing | {site}"
+- **WHEN** "Remove the repeat" has been applied to that page
+- **THEN** the title MUST be "Example pricing", with no separator at its end
 
 #### Scenario: Show in search results
 
@@ -182,7 +187,7 @@ summary.
 
 #### Scenario: A repeat that comes from a dynamic value
 
-- **WHEN** the site name is repeated only because the page title contains it
+- **WHEN** the site name is repeated only because a template's main part is linked to the Title fact and the previewed node's title contains the site name
 - **THEN** the issue MUST NOT offer a fix
 
 #### Scenario: Read-only
@@ -230,7 +235,8 @@ a field at rest.
 
 The checks MUST judge the resolved search title: whether it exists, says
 something, repeats the site name, matches the main heading, and fits. Comparing
-text MUST ignore case and punctuation.
+text MUST ignore case and punctuation. When the title may be cut off inside its
+ending, the detail MUST say that the ending is the part that gets lost.
 
 #### Scenario: No title
 
@@ -282,22 +288,10 @@ text MUST ignore case and punctuation.
 - **WHEN** the dialog cannot measure text
 - **THEN** "Shorten the title" MUST NOT be listed
 
-### Requirement: Empty dynamic values are reported once
+#### Scenario: The ending is cut off
 
-When the title, description, social title or social description uses a dynamic
-text value that is empty for the page, the checks MUST list "Fill in <value> or
-remove it" to improve, once per value, leading to the first field that uses it.
-Image values and names outside the page's vocabulary MUST NOT be reported.
-
-#### Scenario: One value in two fields
-
-- **WHEN** the page title is empty and both the title and the social title use it
-- **THEN** exactly one "Fill in Page title or remove it" MUST be listed, leading to Title
-
-#### Scenario: A deleted field
-
-- **WHEN** a title uses a field the content type no longer has
-- **THEN** it MUST NOT be reported
+- **WHEN** the title may be cut off after its main part, inside the ending "Journal"
+- **THEN** the detail of "Shorten the title" MUST say "The ending “Journal” is the part that gets lost."
 
 ### Requirement: Description rules
 
@@ -438,34 +432,63 @@ row MUST say "Content checks need the page preview, which cannot be read here."
 
 ### Requirement: Structured data rules
 
-The checks MUST judge the page's structured data: required and recommended
-details the server reports missing, dates in the wrong order, and typed text
-that is not on the page.
+The checks MUST judge the page's structured data with the verdicts' own words
+(search-features): a withheld main node (also when a required detail is linked
+to a field the previewed item has empty), a feature that needs a fact, dates in
+the wrong order, facts that are not on the page, an unknown stored type, and
+a page's product or service named after its title.
 
 #### Scenario: A required detail is missing
 
 - **WHEN** an Event has no start date
-- **THEN** "Add Starts" MUST be listed to fix, saying Event details are left out until it is filled in, and leading to that detail in the Schema tab
+- **THEN** "Add a start date" MUST be listed to fix, saying the event is left out until it is filled in, and leading to that detail in the Schema tab
+
+#### Scenario: A required detail linked to a field this item has empty
+
+- **WHEN** "Every Event" links Starts to a field and the previewed event has no start
+- **THEN** "Starts is empty for this event" MUST be listed to fix, saying the event is left out for this event, not "Add a start date"
+
+#### Scenario: A feature needs a fact
+
+- **WHEN** a product bought here has no image
+- **THEN** "Add an image for merchant listings" MUST be listed to improve, with "Choose an image" and "Show"
 
 #### Scenario: Recommended details are missing
 
-- **WHEN** an Event has no end date and no venue
-- **THEN** one row "Event is missing: Ends, Venue." MUST be listed to improve
+- **WHEN** an Event has no end date and no venue name
+- **THEN** one row "Also helps the event result: Ends, Venue." MUST be listed as good to know, naming the facts in the form's order, with the reason "Adding them gives the event result more to show."
 
 #### Scenario: Dates in the wrong order
 
-- **WHEN** an article's "Updated" is before its "Published", or an event's "Ends" before its "Starts", after dynamic values are filled in
+- **WHEN** an article's "Updated" is before its "Published", or an event's "Ends" before its "Starts", after linked values are resolved
 - **THEN** that MUST be listed to improve
 
 #### Scenario: A venue that is not on the page
 
 - **WHEN** an Event's venue is typed as "The New Mill" and the page never mentions it
-- **THEN** "Check Venue" MUST be listed to improve
+- **THEN** "Couldn't find “The New Mill” on this page" MUST be listed to improve
+
+#### Scenario: A linked value that is not on the page
+
+- **WHEN** an article's author is linked to the field Byline, whose value "Ada Lovelace" the page never shows
+- **THEN** "Couldn't find “Ada Lovelace” on this page" MUST be listed to improve, saying that it comes from Byline
 
 #### Scenario: What is not compared with the page
 
-- **WHEN** a detail is bound to a dynamic value, has a fixed format such as a currency, or is not text
+- **WHEN** a detail has a fixed format such as a currency, an identifier or a code
 - **THEN** it MUST NOT be compared with the page's text
+
+### Requirement: What a structured data rule counts
+
+A fact set in site settings MUST be listed only for those who may change
+them, and a rule's words MUST come from its own feature. "Doesn't fit",
+"Only if people buy it here", retired features and "No search feature" MUST
+be good to know and never counted.
+
+#### Scenario: A recurring price
+
+- **WHEN** a product's merchant listing reads "Doesn't fit: a recurring price"
+- **THEN** Checks MUST list it as good to know, and the count MUST NOT change
 
 ### Requirement: Site identity is reported only to those who can fix it
 
@@ -499,3 +522,110 @@ description.
 
 - **WHEN** the Checks sheet lists three issues that each lead to the description
 - **THEN** their Show buttons MUST each be named "Show description" and MUST each be described by a different issue
+
+### Requirement: A broken link is listed to fix
+
+A value linked to a field that no longer exists or no longer fits MUST be
+listed to fix as "Link the ‹field› again", with a detail that names the lost
+field's machine name and says that each item uses its default until another
+field is linked. Its action MUST be "Link another field", which leads to the
+field and opens its link menu.
+
+#### Scenario: A deleted summary field
+
+- **WHEN** the Article template's description is linked to `field_summary` and that field was deleted
+- **THEN** "Link the description again" MUST be listed to fix, its detail MUST name `field_summary`, and "Link another field" MUST put focus in the description and open its link menu
+
+### Requirement: A link hidden from visitors is listed to improve
+
+A value linked to a field that anonymous visitors may not view MUST be listed
+to improve as "‹Source› is hidden from visitors", with Show and a detail that
+says what is used instead. Links hidden by one reference MUST be one row,
+"‹Reference› is hidden from visitors for this ‹type›", that names the affected
+values ("and N more" after two) and advises to publish it or preview another
+item. A link that is only empty for the previewed item MUST NOT be listed.
+
+#### Scenario: A hidden field
+
+- **WHEN** the Article template links the description to a field that anonymous visitors may not view
+- **THEN** "Notes is hidden from visitors" MUST be listed to improve, for a field labelled Notes, leading to Description
+
+### Requirement: Required details hidden by a reference are said once
+
+When a required structured data detail is among the links one reference hides,
+the row MUST say once that the type's details are left out for this item and
+why, instead of naming each detail.
+
+#### Scenario: A hidden venue
+
+- **WHEN** "Every Event" links Venue name, Street address, City and Postal code through Venue, and the previewed event's venue is unpublished
+- **THEN** one row "Venue is hidden from visitors for this event" MUST be listed to improve, saying "Event details are left out for this event, because visitors can't see its venue. Publish the venue or preview another event.", and no "Add Street address" row MUST be listed
+
+#### Scenario: Empty for this article
+
+- **WHEN** the description is linked to Summary and the previewed article has no summary
+- **THEN** no issue about the link MUST be listed
+
+### Requirement: Hand-added text nobody can see is to fix
+
+Text in a hand-added item that is not on the page MUST be listed to fix,
+saying that search engines ask that structured data only describes what
+visitors can see and that pages that break this can lose their search
+features. It MUST offer "Leave it out until it's on the page", while the
+JSON-LD still holds the item, and "Check again", and MUST never delete
+anything by itself.
+
+#### Scenario: A question that is not on the page
+
+- **WHEN** a hand-added FAQ asks "Is the shade dimmable?" and the page never shows it
+- **THEN** "Couldn't find the question “Is the shade dimmable?” on this page" MUST be listed to fix
+
+#### Scenario: Checking again
+
+- **WHEN** the editor presses "Check again" and the question is still not on the page
+- **THEN** the bar MUST say "Still not on the page"; once it is there, the row MUST go and the bar MUST say "Found on the page"
+
+#### Scenario: Leaving it out
+
+- **WHEN** the editor presses "Leave it out until it's on the page"
+- **THEN** the item MUST be left out of the graph, the row MUST go away, and the custom JSON-LD MUST be unchanged, from Checks as from the sheet; in Checks, focus MUST move to the next row's sentence, never onto the same action there
+
+### Requirement: Reviews of your own organization are reported
+
+Over the whole graph, a review or an aggregate rating whose subject is the
+site's identity, or an organization of any type (a restaurant or a hotel
+is one; a page or a product is not) whose address or profiles match the
+identity's, MUST be listed to fix with "No review stars for reviews of your
+own organization." An employer rating, or a rating of
+any other organization, MUST NOT be. A rating value or count that is not on
+the page MUST be listed to improve.
+
+#### Scenario: A rating on the identity
+
+- **WHEN** the home address is `https://example.com/` and a hand-added `Review` has `itemReviewed` `{"@id": "https://example.com/#identity"}`
+- **THEN** the row MUST be listed to fix with that sentence
+
+#### Scenario: A copy of the site's organization
+
+- **WHEN** a hand-added `AggregateRating` reviews an `Organization` whose `url` is the identity's
+- **THEN** the row MUST be listed to fix with that sentence
+
+#### Scenario: A rating of a restaurant at the site's address
+
+- **WHEN** a hand-added `Restaurant` whose `url` is the identity's has an `aggregateRating`
+- **THEN** the row MUST be listed to fix with that sentence
+
+#### Scenario: A rating of another company
+
+- **WHEN** a hand-added `EmployerAggregateRating` or `AggregateRating` reviews an `Organization` named "Acme Logistics" with its own `url`
+- **THEN** no review-of-yourself row MUST be listed
+
+#### Scenario: A rating not on the page
+
+- **WHEN** a hand-added aggregate rating says 4.8 and the page never shows 4.8
+- **THEN** "Couldn't find the rating 4.8 on this page" MUST be listed to improve
+
+#### Scenario: A rating written oddly
+
+- **WHEN** a hand-added rating's value is "(4.5"
+- **THEN** it MUST be looked for as written, and the dialog MUST keep working

@@ -7,9 +7,6 @@ namespace Drupal\canvas_metatag;
 use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas_headless\FrontendUrl;
-use Drupal\Component\Utility\Html;
-use Drupal\Component\Utility\Unicode;
-use Drupal\Component\Uuid\Uuid;
 use Drupal\Core\Access\AccessibleInterface;
 use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheableMetadata;
@@ -25,13 +22,12 @@ use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\File\FileUrlGeneratorInterface;
+use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\Core\Site\Settings;
 use Drupal\Core\StreamWrapper\StreamWrapperManager;
-use Drupal\Core\TypedData\OptionsProviderInterface;
 use Drupal\Core\Url;
 use Drupal\file\FileInterface;
-use Drupal\link\LinkItemInterface;
 use Drupal\media\MediaInterface;
 use Drupal\media\Plugin\media\Source\Image;
 use Drupal\path_alias\AliasManagerInterface;
@@ -47,21 +43,6 @@ use Symfony\Component\HttpFoundation\RequestStack;
 final class Resolver {
 
   /**
-   * The tokens every entity has: name => type.
-   */
-  private const TOKENS = [
-    'title' => 'text',
-    'description' => 'text',
-    'site' => 'text',
-    'sep' => 'text',
-    'url' => 'url',
-    'author' => 'text',
-    'published' => 'datetime',
-    'modified' => 'datetime',
-    'image' => 'image',
-  ];
-
-  /**
    * From this size an image makes a large card.
    *
    * The dialog's link preview uses the same rule (`smallCard()` in model.ts).
@@ -69,41 +50,17 @@ final class Resolver {
   private const LARGE_CARD = ['width' => 600, 'height' => 157];
 
   /**
-   * What the dialog calls them.
+   * What the dialog calls the facts.
    */
   private const LABELS = [
-    'title' => 'Page title',
+    'title' => 'Title',
     'description' => 'Description',
     'site' => 'Site name',
-    'sep' => 'Separator',
     'url' => 'Page address',
     'author' => 'Author',
     'published' => 'First published',
     'modified' => 'Last updated',
-    'image' => 'Page image',
-  ];
-
-  /**
-   * Field type => token type, for {field.NAME}.
-   */
-  private const FIELD_TYPES = [
-    'string' => 'text',
-    'string_long' => 'text',
-    'email' => 'text',
-    'telephone' => 'text',
-    'list_string' => 'text',
-    'text' => 'text',
-    'text_long' => 'text',
-    'text_with_summary' => 'text',
-    'integer' => 'number',
-    'decimal' => 'number',
-    'float' => 'number',
-    'datetime' => 'datetime',
-    'daterange' => 'datetime',
-    'timestamp' => 'datetime',
-    'link' => 'url',
-    'image' => 'image',
-    'entity_reference' => 'text',
+    'image' => 'Image',
   ];
 
   /**
@@ -117,7 +74,7 @@ final class Resolver {
   private \WeakMap $resolved;
 
   /**
-   * The account every access check runs for.
+   * The account every access check of a fact runs for.
    */
   private readonly AnonymousUserSession $anonymous;
 
@@ -130,6 +87,7 @@ final class Resolver {
     private readonly EntityFieldManagerInterface $entityFieldManager,
     private readonly FileUrlGeneratorInterface $fileUrlGenerator,
     private readonly AliasManagerInterface $aliasManager,
+    private readonly Sources $sources,
   ) {
     $this->resolved = new \WeakMap();
     $this->anonymous = new AnonymousUserSession();
@@ -168,7 +126,7 @@ final class Resolver {
    *   default one: the three language-neutral settings of the default one.
    */
   public function layers(ContentEntityInterface $entity, bool $draft, CacheableMetadata $cacheability): array {
-    $layers = $this->site($cacheability) + ['target' => [], 'from_default' => []];
+    $layers = array_diff_key($this->site($cacheability), ['currency' => TRUE]) + ['target' => [], 'from_default' => []];
 
     if ($entity->getEntityTypeId() === 'canvas_page') {
       $read = static fn (ContentEntityInterface $page, string $type = 'WebPage'): array => Values::clean(Values::decode($page->get('canvas_metatag')->value), 'page', NULL, $type)[0];
@@ -212,131 +170,145 @@ final class Resolver {
   }
 
   /**
-   * The token vocabulary of a bundle, for write-mode validation.
-   *
-   * A Canvas page has the tokens every entity has. Any other bundle adds one
-   * {field.NAME} per configurable field of a supported type, in the order of
-   * the bundle's form: fields not on the form follow, by name.
-   *
-   * @return array<string, string>
-   *   Token name => type: text, number, datetime, url or image.
-   */
-  public function tokenTypes(string $entityTypeId, string $bundle): array {
-    $types = self::TOKENS;
-    if ($entityTypeId === 'canvas_page') {
-      return $types;
-    }
-    $display = $this->entityTypeManager->getStorage('entity_form_display')->load("$entityTypeId.$bundle.default");
-    $fields = [];
-    foreach ($this->entityFieldManager->getFieldDefinitions($entityTypeId, $bundle) as $name => $definition) {
-      $type = self::FIELD_TYPES[$definition->getType()] ?? NULL;
-      if ($type !== NULL && !$definition->getFieldStorageDefinition()->isBaseField()) {
-        $weight = $display instanceof EntityFormDisplayInterface ? $display->getComponent($name)['weight'] ?? NULL : NULL;
-        $fields[$name] = [
-          $weight === NULL ? 1 : 0,
-          (int) $weight,
-          $name,
-          $this->referencesImageMedia($definition) ? 'image' : $type,
-        ];
-      }
-    }
-    // On the form by weight, then the rest; a tie by name.
-    uasort($fields, static fn (array $a, array $b): int => array_slice($a, 0, 3) <=> array_slice($b, 0, 3));
-    foreach ($fields as $name => $field) {
-      $types["field.$name"] = $field[3];
-    }
-    return $types;
-  }
-
-  /**
-   * The tokens of an entity with their values.
+   * The facts of an entity, with their values.
    *
    * Every value is what an anonymous visitor may see.
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface|null $entity
-   *   The entity, or NULL for the vocabulary with empty values.
-   * @param string $entityTypeId
-   *   The entity type the vocabulary is for.
-   * @param string $bundle
-   *   Its bundle.
+   *   The entity, or NULL for the facts with empty values.
    * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
    *   Collects what the values depend on.
    *
-   * @return array<string, array{label: string, type: string, value: string, image?: ?array}>
-   *   Token name => description. An image token has an empty `value` and an
-   *   `image` member: the image array without `source`, or NULL.
+   * @return array<string, array{label: string, kind: string, value: string, image?: ?array, via?: string}>
+   *   Name => fact. The Image fact has an empty `value` and an `image`: the
+   *   image array without `source`, or NULL. `via`: the label of the field
+   *   a node's Description or Image fact is taken from.
    */
-  public function tokens(?ContentEntityInterface $entity, string $entityTypeId, string $bundle, CacheableMetadata $cacheability): array {
-    $definitions = $entityTypeId === 'canvas_page' ? [] : $this->entityFieldManager->getFieldDefinitions($entityTypeId, $bundle);
-    $tokens = [];
-    foreach ($this->tokenTypes($entityTypeId, $bundle) as $name => $type) {
-      $tokens[$name] = [
-        'label' => self::LABELS[$name] ?? (string) $definitions[substr($name, 6)]->getLabel(),
-        'type' => $type,
-        'value' => '',
-      ] + ($type === 'image' ? ['image' => NULL] : []);
+  public function facts(?ContentEntityInterface $entity, CacheableMetadata $cacheability): array {
+    $facts = [];
+    foreach (Values::FACTS as $name => $kind) {
+      $facts[$name] = ['label' => self::LABELS[$name], 'kind' => $kind, 'value' => ''] + ($kind === 'image' ? ['image' => NULL] : []);
     }
+    $identity = $this->site($cacheability)['identity'];
+    // With their overrides: a translated site name varies by language.
+    $cacheability->addCacheableDependency($this->configFactory->get('system.site'));
+    $facts['site']['value'] = $identity['name'] !== '' ? $identity['name'] : (string) $this->configFactory->get('system.site')->get('name');
     if ($entity === NULL) {
-      return $tokens;
+      return $facts;
     }
 
     $langcode = $entity->language()->getId();
-    $identity = $this->site($cacheability)['identity'];
-    // With their overrides: a translated site name varies by language.
-    $cacheability
-      ->addCacheableDependency($this->configFactory->get('system.site'))
-      ->addCacheableDependency($this->configFactory->get('system.date'));
-    if ($entityTypeId !== 'canvas_page') {
-      // A field added to the type, or a media type that changes its source,
-      // changes the vocabulary; the form's order decides which field is first.
-      // Creating a form display invalidates only the list tag.
-      $display = $this->entityTypeManager->getStorage('entity_form_display')->load("$entityTypeId.$bundle.default");
-      $cacheability->addCacheTags([
-        'entity_field_info',
-        'config:media_type_list',
-        ...($display ? $display->getCacheTags() : $this->entityTypeManager->getDefinition('entity_form_display')->getListCacheTags()),
-      ]);
-    }
-    $tokens['title']['value'] = (string) $entity->label();
-    $tokens['site']['value'] = $identity['name'] !== '' ? $identity['name'] : (string) $this->configFactory->get('system.site')->get('name');
-    $tokens['sep']['value'] = $identity['separator'];
-    $tokens['url']['value'] = $this->url($entity, $cacheability);
-    $tokens['author']['value'] = $this->label($entity instanceof EntityOwnerInterface ? $entity->getOwner() : NULL, $langcode, $cacheability);
+    $cacheability->addCacheableDependency($this->configFactory->get('system.date'));
+    $facts['title']['value'] = (string) $entity->label();
+    $facts['url']['value'] = $this->url($entity, $cacheability);
+    $facts['author']['value'] = $this->label($entity instanceof EntityOwnerInterface ? $entity->getOwner() : NULL, $langcode, $cacheability);
     foreach (['published' => 'created', 'modified' => 'changed'] as $name => $field) {
-      $tokens[$name]['value'] = $entity->hasField($field) ? $this->date($entity->get($field)->value) : '';
+      $facts[$name]['value'] = $entity->hasField($field) ? $this->date($entity->get($field)->value) : '';
     }
 
-    if ($entityTypeId === 'canvas_page') {
-      $tokens['description']['value'] = (string) $entity->get('description')->value;
-      $tokens['image']['image'] = $this->mediaImage($entity->get('image')->entity, $langcode, $cacheability);
-      return $tokens;
+    if ($entity->getEntityTypeId() === 'canvas_page') {
+      $facts['description']['value'] = (string) $entity->get('description')->value;
+      $facts['image']['image'] = $this->mediaImage($entity->get('image')->entity, $langcode, $cacheability);
+      return $facts;
     }
 
-    $described = FALSE;
-    foreach ($tokens as $name => $token) {
-      if (!str_starts_with($name, 'field.')) {
+    // The first formatted text with a summary, and the first image that
+    // resolves, in the order of the form.
+    foreach ($this->formFields($entity->getEntityTypeId(), $entity->bundle(), $cacheability) as $name => $definition) {
+      $type = $definition->getType();
+      $image = $type === 'image' || $this->referencesImageMedia($definition);
+      if (($type !== 'text_with_summary' || isset($facts['description']['via'])) && (!$image || $facts['image']['image'] !== NULL)) {
         continue;
       }
-      $items = $entity->get(substr($name, 6));
-      // A field the visitor may not view resolves to empty. Only delta 0.
+      $items = $entity->get($name);
+      // A field the visitor may not view gives nothing. Only delta 0.
       $item = $this->allowed($items, 'view', $cacheability) ? $items->first() : NULL;
-      $value = $item === NULL ? NULL : $this->fieldValue($item, $token['type'], $langcode, $cacheability);
-      if ($token['type'] === 'image') {
-        $tokens[$name]['image'] = is_array($value) ? $value : NULL;
-        // {image} is the first image that resolves, in the form's order.
-        $tokens['image']['image'] ??= $tokens[$name]['image'];
+      if ($image) {
+        $facts['image']['via'] ??= (string) $definition->getLabel();
+        $found = match (TRUE) {
+          $item === NULL => NULL,
+          $type === 'image' => $this->usable($item, $cacheability) ? $this->fileImage($item, Values::plain((string) $item->get('alt')->getValue(), 255) ?: NULL) : NULL,
+          default => $this->mediaImage($item->get('entity')->getValue(), $langcode, $cacheability),
+        };
+        if ($found !== NULL) {
+          $facts['image'] = ['image' => $found, 'via' => (string) $definition->getLabel()] + $facts['image'];
+        }
         continue;
       }
-      $tokens[$name]['value'] = is_string($value) ? $value : '';
-      // {description} is the first formatted text with a summary: the
-      // summary, else the text cut at a word boundary.
-      if (!$described && $items->getFieldDefinition()->getType() === 'text_with_summary') {
-        $described = TRUE;
-        $summary = self::text((string) $item?->get('summary')->getValue());
-        $tokens['description']['value'] = $summary !== '' ? $summary : rtrim(Values::whole($tokens[$name]['value'], Unicode::truncate($tokens[$name]['value'], 160, TRUE)));
-      }
+      $facts['description']['via'] = (string) $definition->getLabel();
+      // The summary, else the text cut at a word boundary.
+      $summary = Values::fromHtml((string) $item?->get('summary')->getValue());
+      $text = Values::fromHtml((string) $item?->get('value')->getValue());
+      $facts['description']['value'] = $summary !== '' ? $summary : Values::excerpt($text);
     }
-    return $tokens;
+    return $facts;
+  }
+
+  /**
+   * The separator between the title's parts.
+   */
+  public function separator(CacheableMetadata $cacheability): string {
+    return $this->site($cacheability)['identity']['separator'];
+  }
+
+  /**
+   * The sources a template may link to, with the previewed node's values.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface|null $node
+   *   The node the template is previewed with, if any.
+   * @param string $bundle
+   *   The template's bundle.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the values depend on.
+   *
+   * @return list<array{source: array, label: string, path: list<string>, field: string, hop: bool, kinds: list<string>, status: string, value: string, image?: ?array, list?: true, shown?: string}>
+   *   In the order of the form. `status`: ok, empty, hidden, or none without
+   *   a node. A hidden entry has no value. `list`: a list field, whose value
+   *   is a key and `shown` its label.
+   */
+  public function sourceRows(?ContentEntityInterface $node, string $bundle, CacheableMetadata $cacheability): array {
+    $rows = [];
+    foreach ($this->sources->vocabulary($bundle) as $expression => $row) {
+      $source = ['expression' => $expression, 'sourceType' => 'entity-field'];
+      // One kind per row; SourcesTest::testVocabulary pins it.
+      $kind = $row['kinds'][0];
+      [$status, $value] = $node === NULL ? ['none', NULL] : $this->link($source, $node, $kind, $cacheability);
+      $out = ['source' => $source] + array_diff_key($row, ['html' => TRUE, 'scale' => TRUE, 'shown' => TRUE]) + [
+        'status' => $status,
+        'value' => is_string($value) ? $value : '',
+      ];
+      if ($kind === 'image') {
+        $out['image'] = is_array($value) ? $value : NULL;
+      }
+      if (isset($row['shown'])) {
+        $out['list'] = TRUE;
+      }
+      if (isset($row['shown']) && $status === 'ok' && $node !== NULL) {
+        $out['shown'] = (string) $this->sources->shown($source, $node, $cacheability);
+      }
+      $rows[] = $out;
+    }
+    return $rows;
+  }
+
+  /**
+   * What a template's stored source gives for a node.
+   *
+   * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: string|array|null}
+   *   The status, and text or an image array. An address is absolute
+   *   http(s) on the public base, or nothing; an image a public file.
+   */
+  public function link(array $source, ContentEntityInterface $node, string $kind, CacheableMetadata $cacheability): array {
+    [$status, $value] = $this->sources->evaluate($source, $node, $kind, $cacheability);
+    if ($status !== 'ok') {
+      return [$status, NULL];
+    }
+    $value = match ($kind) {
+      'address' => $this->address((string) $value, $node->language(), $cacheability),
+      'image' => $this->uriImage($value, $cacheability),
+      default => $value,
+    };
+    return [$value === NULL || $value === '' ? 'empty' : 'ok', $value];
   }
 
   /**
@@ -432,9 +404,11 @@ final class Resolver {
    * @param bool $draft
    *   Read the content template's Canvas draft for the type layer.
    *
-   * @return array{head: array{title: string, meta: list<array<string, string>>, link: list<array<string, string>>, script: list<array{type: string, textContent: array}>}, image: ?array, schema: array{withheld: bool, missing_required: list<string>, missing_recommended: list<string>}, cacheability: \Drupal\Core\Cache\CacheableMetadata}
-   *   The head in emission order, the effective social image, the report of
-   *   the structured data and everything the result depends on.
+   * @return array{head: array{title: string, meta: list<array<string, string>>, link: list<array<string, string>>, script: list<array{type: string, textContent: array}>}, image: ?array, schema: array, cacheability: \Drupal\Core\Cache\CacheableMetadata}
+   *   The head in emission order, the effective social image, what building
+   *   the structured data reported (SchemaGraph::build(), without the graph)
+   *   and everything the result depends on. Nothing only the dialog shows is
+   *   computed here: see report().
    */
   public function resolve(ContentEntityInterface $entity, bool $draft = FALSE): array {
     // Kept for the rest of the request: the coupled adapter asks twice.
@@ -450,17 +424,30 @@ final class Resolver {
     $layers = $this->layers($entity, $draft, $cacheability);
     $identity = $layers['identity'];
     $effective = Values::cascade(array_replace_recursive($layers['from_default'], $layers['target']), $layers['site']);
+    $facts = $this->facts($entity, $cacheability);
 
-    $tokens = $this->tokens($entity, $entity->getEntityTypeId(), $entity->bundle(), $cacheability);
-    $map = array_map(static fn (array $token): string => $token['value'], $tokens);
-    $fill = static fn (string $template, bool $keep = FALSE): string => Values::fill($template, $map, $keep);
-    $texts = Values::texts($effective, $map);
-    $site_name = Values::plain($map['site'], 255);
+    // What a value gives for this entity, by kind; each value is read once.
+    $memo = [];
+    $value = function (array $value, string $kind) use ($entity, $facts, $cacheability, &$memo): string|array|null {
+      $key = json_encode([$value, $kind]);
+      if (!array_key_exists($key, $memo)) {
+        $memo[$key] = match (array_key_first($value)) {
+          'text' => $value['text'],
+          'fact' => $kind === 'image' ? $facts[$value['fact']]['image'] ?? NULL : $facts[$value['fact']]['value'] ?? '',
+          'media' => $this->image($value['media'], $cacheability),
+          'source' => $entity->getEntityTypeId() === 'node' ? $this->link($value['source'], $entity, $kind, $cacheability)[1] : NULL,
+          default => NULL,
+        };
+      }
+      return $memo[$key];
+    };
+    $texts = Values::texts($effective, static fn (array $v): string => (string) (is_string($found = $value($v, 'text')) ? $found : ''), $identity['separator'], $layers['site']['title_end'] ?? NULL);
+    $site_name = Values::plain($facts['site']['value'], 255);
 
     // The canonical may point elsewhere. The entity's own URL stays the
     // identity of its structured data.
     $origin = $this->origin($cacheability);
-    $own = $map['url'];
+    $own = $facts['url']['value'];
     $canonical = $effective['canonical'] ?? '';
     $canonical = match (TRUE) {
       $canonical === '' => $own,
@@ -481,22 +468,18 @@ final class Resolver {
       $directives[] = 'max-image-preview:' . $robots['max_image_preview'];
     }
 
-    // A media UUID or an image token => the image, or NULL.
-    $find = function (string $reference) use ($tokens, $cacheability): ?array {
-      return preg_match(Values::TOKEN, $reference, $m) && $m[0] === $reference
-        ? $tokens[$m[1]]['image'] ?? NULL
-        : $this->image($reference, $cacheability);
-    };
+    // The social image (a media item: an override; the Image fact or a
+    // linked field: the entity's), the Image fact, the site default.
     $image = NULL;
     $chain = [
-      [$effective['social']['image'] ?? '', NULL],
-      ['{image}', 'entity'],
-      [$identity['default_image'], 'site'],
+      [$effective['social']['image'] ?? NULL, isset($effective['social']['image']['media']) ? 'override' : 'entity'],
+      [['fact' => 'image'], 'entity'],
+      [$identity['default_image'] === '' ? NULL : ['media' => $identity['default_image']], 'site'],
     ];
     foreach ($chain as [$reference, $source]) {
-      $image = $reference === '' ? NULL : $find($reference);
-      if ($image !== NULL) {
-        $image['source'] = $source ?? (Uuid::isValid($reference) ? 'override' : 'entity');
+      $image = $reference === NULL ? NULL : $value($reference, 'image');
+      if (is_array($image)) {
+        $image['source'] = $source;
         break;
       }
     }
@@ -505,16 +488,25 @@ final class Resolver {
       'home' => $origin['url'] . '/',
       'url' => $own,
       'langcode' => $entity->language()->isLocked() ? '' : $entity->language()->getId(),
-      'title' => Values::plain($map['title'], 255),
+      'title' => Values::plain($facts['title']['value'], 255),
       'description' => $texts['description'],
-      'published' => $map['published'],
-      'modified' => $map['modified'],
+      'published' => $facts['published']['value'],
+      'modified' => $facts['modified']['value'],
       'timezone' => $this->timezone(),
+      'currency' => $this->site($cacheability)['currency'],
       'identity' => ['kind' => $identity['kind'], 'name' => $site_name, 'same_as' => $identity['same_as']],
       'logo' => $identity['logo'] === '' ? NULL : $this->image($identity['logo'], $cacheability),
       'image' => $image,
-    ], $effective['schema'] ?? [], $fill, $find);
+      'facts' => ['sep' => $identity['separator'], 'image' => $facts['image']['image']['url'] ?? '']
+      + array_map(static fn (array $fact): string => $fact['value'], array_diff_key($facts, ['image' => TRUE])),
+    ], $effective['schema'] ?? [], $value);
     $og_type = SchemaGraph::types()[$effective['schema']['type'] ?? 'WebPage']['og_type'] ?? 'website';
+    // Where the front page's identity and website nodes are judged, and the
+    // addresses report() judges them with.
+    // The front page in the entity's language, with its prefix.
+    $report['front'] = $own === $this->publicUrl(Url::fromRoute('<front>', [], ['language' => $entity->language()]), $cacheability);
+    $report['home'] = $origin['url'] . '/';
+    $report['url'] = $own;
     $article = $og_type === 'article';
 
     $meta = [
@@ -529,8 +521,8 @@ final class Resolver {
       ['property' => 'og:image:width', 'content' => (string) (($image['width'] ?? 0) ?: '')],
       ['property' => 'og:image:height', 'content' => (string) (($image['height'] ?? 0) ?: '')],
       ['property' => 'og:image:alt', 'content' => $image['alt'] ?? ''],
-      ['property' => 'article:published_time', 'content' => $article ? $map['published'] : ''],
-      ['property' => 'article:modified_time', 'content' => $article ? $map['modified'] : ''],
+      ['property' => 'article:published_time', 'content' => $article ? $facts['published']['value'] : ''],
+      ['property' => 'article:modified_time', 'content' => $article ? $facts['modified']['value'] : ''],
       // A literal protocol token. Nothing else of that family is emitted;
       // consumers fall back to the Open Graph values.
       [
@@ -571,10 +563,39 @@ final class Resolver {
   }
 
   /**
-   * The site layer and the identity, read with configuration overrides.
+   * What only the dialog shows: the head, with verdicts and graph rules.
    *
-   * @return array{site: array, identity: array}
-   *   Both cleaned in read mode.
+   * Never called while a visitor's head is built (DeliveryPathTest): the
+   * search features and the rules run for the dialog's state alone.
+   *
+   * @return array
+   *   resolve()'s result, its `schema` with `features`
+   *   (SchemaGraph::features()) and `rules` (SchemaGraph::rules()).
+   */
+  public function report(ContentEntityInterface $entity, bool $draft = FALSE): array {
+    $result = $this->resolve($entity, $draft);
+    $graph = $result['head']['script'][0]['textContent'];
+    $schema = $result['schema'];
+    $home = $schema['home'];
+    $result['schema']['features'] = SchemaGraph::features($graph, [
+      'home' => $home,
+      'url' => $schema['url'],
+      'front' => $schema['front'],
+      'type' => $schema['type'],
+      'gates' => $schema['gates'],
+      // A withheld main node is judged as it would ship, so the dialog says
+      // what it needs.
+      'extra' => isset($schema['withheld']['node']) ? [$schema['withheld']['node']] : [],
+    ]);
+    $result['schema']['rules'] = SchemaGraph::rules($graph, ['home' => $home], $schema['nodes']);
+    return $result;
+  }
+
+  /**
+   * The site layer, the identity and the currency, read with overrides.
+   *
+   * @return array{site: array, identity: array, currency: string}
+   *   Cleaned in read mode.
    */
   private function site(CacheableMetadata $cacheability): array {
     $config = $this->configFactory->get('canvas_metatag.site');
@@ -584,7 +605,38 @@ final class Resolver {
     return [
       'site' => Values::clean(is_array($values) ? $values : [], 'site', NULL)[0],
       'identity' => Values::cleanIdentity(is_array($identity) ? $identity : [])[0],
+      'currency' => Values::currency($config->get('currency'))[0],
     ];
+  }
+
+  /**
+   * The configurable fields of a bundle in the order of its form.
+   *
+   * Fields not on the form follow, by machine name. The head depends on the
+   * fields and on that order, also when they change without a save of the
+   * node or the template.
+   *
+   * @return array<string, \Drupal\Core\Field\FieldDefinitionInterface>
+   *   By machine name.
+   */
+  private function formFields(string $entityTypeId, string $bundle, CacheableMetadata $cacheability): array {
+    $display = $this->entityTypeManager->getStorage('entity_form_display')->load("$entityTypeId.$bundle.default");
+    // Creating a form display invalidates only the list tag.
+    $cacheability->addCacheTags([
+      'entity_field_info',
+      'config:media_type_list',
+      ...($display ? $display->getCacheTags() : $this->entityTypeManager->getDefinition('entity_form_display')->getListCacheTags()),
+    ]);
+    $fields = [];
+    foreach ($this->entityFieldManager->getFieldDefinitions($entityTypeId, $bundle) as $name => $definition) {
+      if (!$definition->getFieldStorageDefinition()->isBaseField()) {
+        $weight = $display instanceof EntityFormDisplayInterface ? $display->getComponent($name)['weight'] ?? NULL : NULL;
+        $fields[$name] = [$weight === NULL ? 1 : 0, (int) $weight, $name, $definition];
+      }
+    }
+    // On the form by weight, then the rest; a tie by name.
+    uasort($fields, static fn (array $a, array $b): int => array_slice($a, 0, 3) <=> array_slice($b, 0, 3));
+    return array_map(static fn (array $field): FieldDefinitionInterface => $field[3], $fields);
   }
 
   /**
@@ -609,46 +661,47 @@ final class Resolver {
   }
 
   /**
-   * The value of one field item: text, or an image array, or NULL.
+   * A linked address as an absolute http(s) URL on the public base, or ''.
+   *
+   * A link field stores an external address, or `internal:`, `entity:` or
+   * `route:` for one of the site; a computed URL may be a path.
    */
-  private function fieldValue(FieldItemInterface $item, string $type, string $langcode, CacheableMetadata $cacheability): string|array|null {
-    $definition = $item->getFieldDefinition();
-    $property = $definition->getFieldStorageDefinition()->getMainPropertyName();
-    $value = $property === NULL ? NULL : $item->get($property)->getValue();
-    $reference = $definition->getType() === 'entity_reference' ? $item->get('entity')->getValue() : NULL;
-    return match ($definition->getType()) {
-      'list_string' => (string) ($item instanceof OptionsProviderInterface ? $item->getPossibleOptions()[$value] ?? $value : $value),
-      // HTML by definition, so tags go here and nowhere else.
-      'text', 'text_long' => self::text((string) $value),
-      'text_with_summary' => self::text((string) $item->get('summary')->getValue()) ?: self::text((string) $value),
-      // Stored in UTC. A date-only field stays date-only.
-      'datetime', 'daterange' => $definition->getSetting('datetime_type') === 'date'
-        ? (string) $value
-        : $this->date(strtotime($value . ' UTC') ?: NULL),
-      'timestamp' => $this->date($value),
-      // With the digits the field stores, whatever the database hands back.
-      'decimal' => number_format((float) $value, (int) $definition->getSetting('scale'), '.', ''),
-      'link' => $item instanceof LinkItemInterface ? $this->link($item, $cacheability) : '',
-      // Named by its alt text, as a media item by its label; else the file.
-      'image' => $this->usable($item, $cacheability) ? $this->fileImage($item, Values::plain((string) $item->get('alt')->getValue(), 255) ?: NULL) : NULL,
-      'entity_reference' => $type === 'image'
-        ? $this->mediaImage($reference, $langcode, $cacheability)
-        : $this->label($reference, $langcode, $cacheability),
-      default => (string) $value,
-    };
-  }
-
-  /**
-   * The absolute http(s) URL of a link field item, or ''.
-   */
-  private function link(LinkItemInterface $item, CacheableMetadata $cacheability): string {
+  private function address(string $value, LanguageInterface $language, CacheableMetadata $cacheability): string {
+    // In the node's language, as url() builds the node's own address.
+    $options = ['language' => $language];
     try {
-      $url = $this->publicUrl($item->getUrl(), $cacheability);
+      $url = match (TRUE) {
+        (bool) preg_match('/^(?:internal|entity|route):/', $value) => $this->publicUrl(Url::fromUri($value, $options), $cacheability),
+        str_starts_with($value, '/') && !str_starts_with($value, '//') => $this->publicUrl(Url::fromUserInput($value, $options), $cacheability),
+        default => $value,
+      };
     }
     catch (\InvalidArgumentException) {
       return '';
     }
     return Values::isHttpUrl($url) ? $url : '';
+  }
+
+  /**
+   * A linked image read through its file, as the image array, or NULL.
+   *
+   * Canvas has checked access to the file on the way. Only a public file is
+   * ever emitted.
+   */
+  private function uriImage(mixed $value, CacheableMetadata $cacheability): ?array {
+    $uri = is_array($value) ? (string) ($value['uri'] ?? '') : '';
+    if (StreamWrapperManager::getScheme($uri) !== 'public') {
+      return NULL;
+    }
+    $files = $this->entityTypeManager->getStorage('file')->loadByProperties(['uri' => $uri]);
+    $file = reset($files);
+    if (!$file instanceof FileInterface) {
+      return NULL;
+    }
+    // Image URLs are built on the request host, also on a headless site.
+    $cacheability->addCacheableDependency($file)->addCacheContexts(['url.site']);
+    $alt = Values::plain((string) $value['alt'], 1000);
+    return $this->fileArray($file, (int) $value['width'], (int) $value['height'], $alt, Values::plain($alt, 255) ?: (string) $file->getFilename());
   }
 
   /**
@@ -706,15 +759,21 @@ final class Resolver {
 
   /**
    * The image array of an image field item, without any access check.
+   */
+  private function fileImage(FieldItemInterface $item, ?string $name = NULL): ?array {
+    $file = $item->get('entity')->getValue();
+    return $file instanceof FileInterface
+      ? $this->fileArray($file, (int) $item->get('width')->getValue(), (int) $item->get('height')->getValue(), Values::plain((string) $item->get('alt')->getValue(), 1000), $name ?? (string) $file->getFilename())
+      : NULL;
+  }
+
+  /**
+   * The image array of a file.
    *
    * The original file with its real dimensions: no image style. `name` and
    * `thumb` are for the dialog and are never emitted.
    */
-  private function fileImage(FieldItemInterface $item, ?string $name = NULL): ?array {
-    $file = $item->get('entity')->getValue();
-    if (!$file instanceof FileInterface) {
-      return NULL;
-    }
+  private function fileArray(FileInterface $file, int $width, int $height, string $alt, string $name): ?array {
     $uri = (string) $file->getFileUri();
     $url = $this->fileUrlGenerator->generateAbsoluteString($uri);
     // Every emitted URL is absolute http(s), or there is no image.
@@ -727,12 +786,12 @@ final class Resolver {
     $style = $styles['medium'] ?? $styles['thumbnail'] ?? NULL;
     return [
       'url' => $url,
-      'width' => (int) $item->get('width')->getValue(),
-      'height' => (int) $item->get('height')->getValue(),
-      'alt' => Values::plain((string) $item->get('alt')->getValue(), 1000),
+      'width' => $width,
+      'height' => $height,
+      'alt' => $alt,
       'bytes' => (int) $file->getSize(),
       'mime' => (string) $file->getMimeType(),
-      'name' => $name ?? (string) $file->getFilename(),
+      'name' => $name,
       'thumb' => $style !== NULL && $style->supportsUri($uri)
         ? $this->fileUrlGenerator->transformRelative($style->buildUrl($uri))
         : $this->fileUrlGenerator->generateString($uri),
@@ -776,45 +835,6 @@ final class Resolver {
     return $langcode !== NULL && $entity instanceof TranslatableInterface && $entity->hasTranslation($langcode)
       ? $entity->getTranslation($langcode)
       : $entity;
-  }
-
-  /**
-   * Formatted text as plain text.
-   *
-   * The content of elements that never display (script, style, template,
-   * also nested templates) removed, then tags stripped, entities decoded
-   * once, whitespace collapsed. A heading, list item, definition, table row
-   * or caption ends a sentence, as does the text before a list or a heading:
-   * a full stop follows it unless it ends in a stop, an ellipsis, a question
-   * or exclamation mark, a colon, semicolon or comma, or their equivalents in
-   * other scripts (closing quotes and brackets after it included). Such an
-   * element with no text of its own still ends the text before it. An opening
-   * tag may hold ">" in a quoted attribute. Should a markup pattern fail, the
-   * text is kept as it was; text that is not valid UTF-8 gives an empty
-   * string.
-   */
-  private static function text(string $html): string {
-    if (!mb_check_encoding($html, 'UTF-8')) {
-      return '';
-    }
-    // The end of a sentence. Entities never decode to a control character,
-    // so only the text's own need removing.
-    $end = "\x01";
-    $html = str_replace($end, '', $html);
-    $attributes = '(?:"[^"]*+"|\'[^\']*+\'|[^\'">]++)*+';
-    $html = preg_replace('~<(script|style)\b' . $attributes . '>(?:[^<]++|<(?!/\1\s*>))*+(?:</\1\s*>|\z)~i', ' ', $html) ?? $html;
-    $html = preg_replace('~<template\b' . $attributes . '>(?:[^<]++|(?R)|<(?!/?template\b))*+(?:</template\s*>|\z)~i', ' ', $html) ?? $html;
-    $html = preg_replace('~</(?:h[1-6]|li|dd|tr|caption)\s*>|<(?:ul|ol|dl|h[1-6])(?=[\s\/>])~i', $end . '$0', $html) ?? $html;
-    // A space keeps the words of neighboring blocks apart; inline markup
-    // joins its words as written.
-    $html = preg_replace('~<(?=/?(?:p|div|br|li|ul|ol|h[1-6]|td|th|tr|blockquote|pre|hr|dt|dd|section|article|figure|figcaption)[\s\/>])~i', ' <', $html) ?? $html;
-    $text = Html::decodeEntities(strip_tags($html));
-    // Nested ends are one end; after a sentence or clause mark, or with
-    // nothing before it, an end adds nothing; else a full stop.
-    $ends = '[.!?…:;,。！？、，．：；｡؟۔।॥،؛][\p{Pe}\p{Pf}"\'»]*';
-    // Should this fail, no mark is left in the text.
-    $text = preg_replace(['/\s*\x01(?:\s*\x01)*/u', "/(^|$ends)\x01/u", '/\x01/'], [$end, '$1', '.'], $text) ?? str_replace($end, ' ', $text);
-    return trim((string) preg_replace('/\s+/u', ' ', $text));
   }
 
   /**
