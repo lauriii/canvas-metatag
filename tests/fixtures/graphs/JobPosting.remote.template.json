@@ -1,0 +1,227 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/complex/jobs/translator",
+        "langcode": "en",
+        "title": "Part-time translator (Arabic, Hebrew)",
+        "description": "Translate concert notes.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "template",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "JobPosting",
+        "props": {
+            "description": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:job_posting␝body␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "employmentType": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:job_posting␝field_employment_type␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "hiringOrganization": {
+                "fact": "identity"
+            },
+            "work": {
+                "text": "remote"
+            },
+            "applicantLocationRequirements": {
+                "text": "FI,SE,EE"
+            },
+            "validThrough": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:job_posting␝field_valid_through␞␟value",
+                    "sourceType": "entity-field"
+                }
+            }
+        }
+    },
+    "facts": {
+        "title": "Part-time translator (Arabic, Hebrew)",
+        "description": "Translate concert notes.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/complex/jobs/translator"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": {
+        "ℹ︎␜entity:node:job_posting␝body␞␟value": "<p>Translate concert notes from Arabic and Hebrew into English.</p>",
+        "ℹ︎␜entity:node:job_posting␝field_employment_type␞␟value": [
+            "PART_TIME"
+        ],
+        "ℹ︎␜entity:node:job_posting␝field_valid_through␞␟value": "2026-01-15"
+    },
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "title": "default",
+            "description": "set",
+            "datePosted": "default",
+            "validThrough": "set",
+            "employmentType": "set",
+            "hiringOrganization": "set",
+            "work": "set",
+            "applicantLocationRequirements": "set"
+        },
+        "gates": {
+            "work": "remote"
+        },
+        "type": "JobPosting",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/complex/jobs/translator#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/complex/jobs/translator#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/complex/jobs/translator#primary",
+                "type": "JobPosting",
+                "origin": "main",
+                "at": 4
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [],
+        "refs_inline": [],
+        "defaults": [],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "https://www.example.com/complex/jobs/translator#webpage",
+                "url": "https://www.example.com/complex/jobs/translator",
+                "name": "Part-time translator (Arabic, Hebrew)",
+                "description": "Translate concert notes.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/complex/jobs/translator#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/complex/jobs/translator#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/complex/jobs/translator#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            },
+            {
+                "@type": "JobPosting",
+                "@id": "https://www.example.com/complex/jobs/translator#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/complex/jobs/translator#webpage"
+                },
+                "title": "Part-time translator (Arabic, Hebrew)",
+                "description": "<p>Translate concert notes from Arabic and Hebrew into English.</p>",
+                "datePosted": "2026-05-04T11:00:00+03:00",
+                "validThrough": "2026-01-15",
+                "employmentType": "PART_TIME",
+                "hiringOrganization": {
+                    "@id": "https://www.example.com/#identity"
+                },
+                "applicantLocationRequirements": [
+                    {
+                        "@type": "Country",
+                        "name": "FI"
+                    },
+                    {
+                        "@type": "Country",
+                        "name": "SE"
+                    },
+                    {
+                        "@type": "Country",
+                        "name": "EE"
+                    }
+                ],
+                "jobLocationType": "TELECOMMUTE"
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": "job-posting",
+            "node": "https://www.example.com/complex/jobs/translator#primary",
+            "verdict": "closed",
+            "date": "2026-01-15"
+        }
+    ]
+}

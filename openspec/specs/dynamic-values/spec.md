@@ -140,17 +140,23 @@ field that resolves. "First" MUST follow the order of the type's form.
 
 ### Requirement: Field values are plain values of the first item
 
-A field link MUST give the value of the field's first item. Formatted text MUST
-become plain text: script, style and template content removed, tags removed,
-entities decoded, whitespace collapsed, a space between blocks. A heading, list
-item, definition, table row or caption, and the text before a list or a
-heading, MUST end in a full stop unless it ends in a sentence or clause mark.
-Text typed into a plain text field MUST NOT be stripped.
+A field link MUST give the value of the field's first item, or every item in
+field order on a list property. Formatted text MUST become plain text: script,
+style and template content removed, tags removed, entities decoded, whitespace
+collapsed, a space between blocks. A heading, list item, definition, table row
+or caption, and the text before a list or a heading, MUST end in a full stop
+unless it ends in a sentence or clause mark. Text typed into a plain text field
+MUST NOT be stripped.
 
 #### Scenario: A field with several values
 
 - **WHEN** a byline field holds "Ada" and "Grace" and a value links to it
 - **THEN** the value MUST be "Ada"
+
+#### Scenario: Several values on a list property
+
+- **WHEN** an article's author list links to a Writers field holding Ada and Grace
+- **THEN** the value MUST be Ada and Grace, in that order
 
 #### Scenario: Formatted text
 
@@ -453,3 +459,45 @@ published node MUST NOT vary by user or by permissions.
 
 - **WHEN** a visitor and an editor request a published article whose head uses linked fields
 - **THEN** both MUST get the same cached head
+
+### Requirement: One long text gives its own list items
+
+On a text list property, one long text field MUST give one item per list item
+when it is formatted and has list items, otherwise one per paragraph, and one
+per line when it is plain text; its link menu MUST note it "Each list item,
+in order" or "Each line, in order". Each item MUST be plain text. A heading
+is not an item, an item gets no full stop of its own, and formatted text
+with neither list items nor paragraphs is one item. The module MUST NOT
+split text in any other way.
+
+#### Scenario: A method with list items
+
+- **WHEN** a list property links to a formatted field holding `<p>Intro</p><ul><li>Mix</li><li>Bake</li></ul>`
+- **THEN** the items MUST be "Mix" and "Bake"
+
+#### Scenario: Paragraphs
+
+- **WHEN** the field holds `<p>Mix</p><p>Bake</p>`
+- **THEN** the items MUST be "Mix" and "Bake"
+
+#### Scenario: A heading and a paragraph
+
+- **WHEN** the field holds `<h2>Made to last</h2><p>Solid oak.</p>`
+- **THEN** the one item MUST be "Solid oak."
+
+#### Scenario: Lines of plain text
+
+- **WHEN** a list property links to a plain long text field holding "Mix", a line break and "Bake"
+- **THEN** the items MUST be "Mix" and "Bake"
+
+### Requirement: Decimal fields can be linked as numbers
+
+A number value MUST be linkable to a decimal field of the type, read as its
+exact digits without trailing zeros and never through floating point. A
+test MUST fail when Canvas starts offering decimal fields itself, so the
+module's own entries are removed.
+
+#### Scenario: A price
+
+- **WHEN** a price links to a decimal field holding 49.90
+- **THEN** the value MUST be `49.9`

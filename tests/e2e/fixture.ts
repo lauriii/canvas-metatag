@@ -60,6 +60,7 @@ const FLAGS: Record<string, string> = {
   headless: 'CANVAS_METATAG_E2E_HEADLESS=1',
   ai: 'CANVAS_METATAG_E2E_AI=1',
   complex: 'CANVAS_METATAG_E2E_COMPLEX=1',
+  'schema-templates': 'CANVAS_METATAG_E2E_COMPLEX=1 CANVAS_METATAG_E2E_COURSES=1',
 };
 
 /**

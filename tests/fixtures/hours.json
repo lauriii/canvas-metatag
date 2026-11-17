@@ -1,0 +1,44 @@
+{
+  "valid": [
+    {
+      "text": "Mo-Fr 09:00-17:00; 2026-12-24 closed",
+      "nodes": [
+        { "@type": "OpeningHoursSpecification", "dayOfWeek": ["https://schema.org/Monday", "https://schema.org/Tuesday", "https://schema.org/Wednesday", "https://schema.org/Thursday", "https://schema.org/Friday"], "opens": "09:00", "closes": "17:00" },
+        { "@type": "OpeningHoursSpecification", "validFrom": "2026-12-24", "validThrough": "2026-12-24", "opens": "00:00", "closes": "00:00" }
+      ]
+    },
+    {
+      "text": "Mo,We 09:00-13:00,14:00-18:00; Tu 09:00-17:00; Sa-Su 00:00-23:59",
+      "nodes": [
+        { "@type": "OpeningHoursSpecification", "dayOfWeek": ["https://schema.org/Monday", "https://schema.org/Wednesday"], "opens": "09:00", "closes": "13:00" },
+        { "@type": "OpeningHoursSpecification", "dayOfWeek": ["https://schema.org/Monday", "https://schema.org/Wednesday"], "opens": "14:00", "closes": "18:00" },
+        { "@type": "OpeningHoursSpecification", "dayOfWeek": ["https://schema.org/Tuesday"], "opens": "09:00", "closes": "17:00" },
+        { "@type": "OpeningHoursSpecification", "dayOfWeek": ["https://schema.org/Saturday", "https://schema.org/Sunday"], "opens": "00:00", "closes": "23:59" }
+      ]
+    },
+    {
+      "text": "Mo 10:00-16:00; Tu 10:00-16:00",
+      "nodes": [
+        { "@type": "OpeningHoursSpecification", "dayOfWeek": ["https://schema.org/Monday", "https://schema.org/Tuesday"], "opens": "10:00", "closes": "16:00" }
+      ]
+    },
+    {
+      "text": "2026-01-01 closed; 2026-12-24 10:00-14:00",
+      "today": "2026-11-16",
+      "nodes": [
+        { "@type": "OpeningHoursSpecification", "validFrom": "2026-12-24", "validThrough": "2026-12-24", "opens": "10:00", "closes": "14:00" }
+      ]
+    }
+  ],
+  "invalid": [
+    "Monday 9 to 5",
+    "Mo 09:00-13:00,12:00-17:00",
+    "Mo 17:00-09:00",
+    "Mo 09:00-17:00; Mo 10:00-12:00",
+    "Mo closed",
+    "Fr-Mo 09:00-17:00",
+    "2026-02-30 closed",
+    "Mo 24:00-25:00",
+    ""
+  ]
+}

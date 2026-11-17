@@ -52,6 +52,13 @@ final class Sources {
     'text' => [['type' => 'string'], 'text'],
     'texts' => [['type' => 'array', 'items' => ['type' => 'string']], 'text'],
     'html' => [['type' => 'string', 'contentMediaType' => 'text/html', 'x-formatting-context' => 'block'], 'text'],
+    'htmls' => [
+      [
+        'type' => 'array',
+        'items' => ['type' => 'string', 'contentMediaType' => 'text/html', 'x-formatting-context' => 'block'],
+      ],
+      'text',
+    ],
     'address' => [['type' => 'string', 'format' => 'uri-reference'], 'address'],
     'addresses' => [['type' => 'array', 'items' => ['type' => 'string', 'format' => 'uri-reference']], 'address'],
     'datetime' => [['type' => 'string', 'format' => 'date-time'], 'date'],
@@ -108,12 +115,14 @@ final class Sources {
    *   What uses the result: while Canvas cannot suggest, it may be kept only
    *   until the next try.
    *
-   * @return array<string, array{label: string, path: list<string>, field: string, hop: bool, kinds: list<string>, html?: true, scale?: int, shown?: string, names?: true}>
+   * @return array<string, array{label: string, path: list<string>, field: string, hop: bool, kinds: list<string>, html?: true, decimal?: true, shown?: string, names?: true, many?: true, lines?: true}>
    *   By expression. `path`: the labels of the hops, entity type hops left
    *   out. `hop`: the source follows a reference. `html`: the value is
-   *   formatted text. `scale`: the digits a decimal keeps. `shown`: the
+   *   formatted text. `decimal`: the module's own row for a decimal field,
+   *   read as its stored digits. `shown`: the
    *   expression whose value names a stored list key. `names`: it is the
-   *   referenced item's own name.
+   *   referenced item's own name. `many`: a field of several values.
+   *   `lines`: one long plain text, which gives its lines to a list.
    *
    * @throws \Throwable
    *   With $strict, when Canvas could not suggest: an update that converts
@@ -254,22 +263,77 @@ final class Sources {
    * current user's access (a node being built previews its fields); such a
    * head is only ever shown to users who may view it.
    *
+   * @param array $source
+   *   The stored source.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $host
+   *   The node.
+   * @param string $kind
+   *   The kind of value wanted.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the value depends on.
+   * @param bool $list
+   *   Every item in field order, instead of the first. One formatted text
+   *   gives its own list items, else its paragraphs; one plain text its
+   *   lines.
+   *
    * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: string|array|null}
    *   The status and the value: a string, for an image the array
-   *   {uri, alt, width, height}. Addresses are returned as stored; the
-   *   resolver puts them on the public base.
+   *   {uri, alt, width, height}, for formatted text (the html kind) the
+   *   stored markup; with $list a list of those. Addresses are returned as
+   *   stored; the resolver puts them on the public base. The ref kind gives
+   *   the list of referenced entities (targets()).
    */
-  public function evaluate(array $source, ContentEntityInterface $host, string $kind, CacheableMetadata $cacheability): array {
+  public function evaluate(array $source, ContentEntityInterface $host, string $kind, CacheableMetadata $cacheability, bool $list = FALSE): array {
     $row = self::wellShaped($source) ? $this->vocabulary($host->bundle(), FALSE, $cacheability)[$source['expression']] ?? NULL : NULL;
     if ($row === NULL || !in_array($kind, $row['kinds'], TRUE)) {
       return ['broken', NULL];
+    }
+    if ($kind === 'ref') {
+      return $this->targets($row['field'], $host, $cacheability);
     }
     [$status, $value] = $this->read($source['expression'], $host, $cacheability);
     if ($status !== 'ok') {
       return [$status, NULL];
     }
-    $value = $this->normalize($value, $kind, $row);
-    return [$value === NULL || $value === '' ? 'empty' : 'ok', $value];
+    if (!$list) {
+      $value = $this->normalize($value, $kind, $row);
+      return [$value === NULL || $value === '' ? 'empty' : 'ok', $value];
+    }
+    $items = array_values(array_filter(is_array($value) && array_is_list($value) ? $value : [$value], static fn (mixed $item): bool => $item !== NULL && $item !== '' && $item !== []));
+    // Only one long text is split: a field of several values that holds one
+    // gives it whole, as it would with two. Text that is not valid UTF-8
+    // gives nothing.
+    if ($kind === 'text' && count($items) === 1 && is_scalar($items[0]) && (isset($row['lines']) || (isset($row['html']) && !isset($row['many'])))) {
+      $items = isset($row['html']) ? Values::items((string) $items[0]) : (preg_split('/\R+/u', trim((string) $items[0])) ?: []);
+      $row = array_diff_key($row, ['html' => TRUE]);
+    }
+    $items = array_values(array_filter(array_map(fn (mixed $item): string|array|null => $this->normalize($item, $kind, $row, TRUE), $items), static fn (mixed $item): bool => $item !== NULL && $item !== ''));
+    return [$items === [] ? 'empty' : 'ok', $items];
+  }
+
+  /**
+   * The entities a host's reference field holds.
+   *
+   * The field is read as an anonymous visitor whatever the host. Each
+   * target's translation and access are Resolver::target()'s: a page a
+   * visitor may not see is never named.
+   *
+   * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: list<\Drupal\Core\Entity\EntityInterface>|null}
+   *   The status and the targets in field order.
+   */
+  public function targets(string $field, ContentEntityInterface $host, CacheableMetadata $cacheability): array {
+    if (!$host->hasField($field)) {
+      return ['broken', NULL];
+    }
+    $items = $host->get($field);
+    $anonymous = new AnonymousUserSession();
+    $access = $items->access('view', $anonymous, TRUE);
+    $cacheability->addCacheableDependency($access);
+    if (!$access->isAllowed()) {
+      return ['hidden', NULL];
+    }
+    $targets = array_values(array_filter(array_map(static fn (object $item): mixed => $item->entity ?? NULL, iterator_to_array($items))));
+    return [$targets === [] ? 'empty' : 'ok', $targets];
   }
 
   /**
@@ -374,10 +438,30 @@ final class Sources {
           'hop' => FALSE,
           'kinds' => ['number'],
           'weight' => [$order[$name], count($rows)],
-          'scale' => (int) $definition->getSetting('scale'),
+          'decimal' => TRUE,
         ];
       }
     }
+
+    foreach ($rows as $expression => &$row) {
+      // Formatted text also gives its markup, for a job description; a
+      // reference to content, by its own name, also gives the page it is.
+      if (isset($row['html'])) {
+        $row['kinds'][] = 'html';
+      }
+      if (isset($row['names']) && preg_match('/␞␟entity␜␜entity:(?:node|canvas_page)[␝:]/u', $expression)) {
+        $row['kinds'][] = 'ref';
+      }
+      // A field of several values gives each on a list; one long plain text
+      // its lines.
+      if (($definitions[$row['field']] ?? NULL)?->getFieldStorageDefinition()->getCardinality() !== 1) {
+        $row['many'] = TRUE;
+      }
+      elseif (!$row['hop'] && ($definitions[$row['field']] ?? NULL)?->getType() === 'string_long') {
+        $row['lines'] = TRUE;
+      }
+    }
+    unset($row);
 
     // The form's order, as Canvas uses it: Canvas has ordered each prop's
     // suggestions by the form, and a field keeps its first place.
@@ -521,8 +605,17 @@ final class Sources {
 
   /**
    * Canvas's value as a value of the module's kind.
+   *
+   * @param mixed $value
+   *   What Canvas gave.
+   * @param string $kind
+   *   The kind of value wanted.
+   * @param array $row
+   *   The source's row.
+   * @param bool $whole
+   *   An item of a list: formatted text gives all its text, not its start.
    */
-  private function normalize(mixed $value, string $kind, array $row): string|array|null {
+  private function normalize(mixed $value, string $kind, array $row, bool $whole = FALSE): string|array|null {
     // A list gives its first item that is not empty.
     while (is_array($value) && array_is_list($value)) {
       $value = array_values(array_filter($value, static fn (mixed $item): bool => $item !== NULL && $item !== '' && $item !== []))[0] ?? NULL;
@@ -540,25 +633,27 @@ final class Sources {
     }
     $value = is_bool($value) ? ($value ? '1' : '0') : (string) $value;
     return match ($kind) {
-      // Formatted text gives its start, as the Description fact does.
-      'text' => isset($row['html']) ? Values::excerpt(Values::fromHtml($value)) : $value,
+      // Formatted text gives its start, as the Description fact does; an
+      // item of a list all its text; a job description its markup.
+      'text' => isset($row['html']) ? ($whole ? Values::fromHtml($value) : Values::excerpt(Values::fromHtml($value))) : $value,
+      'html' => $value,
       'date' => $this->date($value),
-      'number' => isset($row['scale']) ? self::digits($value, $row['scale']) : $value,
+      'number' => isset($row['decimal']) ? self::digits($value) : $value,
       default => $value,
     };
   }
 
   /**
-   * A stored decimal with the digits of its scale, never through a float.
+   * A stored decimal as its exact digits, never through a float.
    *
-   * A database may give "49.9" for a stored 49.90: the fraction is padded,
-   * never cut.
+   * Trailing zeros go: a database may give "89.990000" or "89.99" for the
+   * same stored price, which is 89.99.
    */
-  private static function digits(string $value, int $scale): ?string {
+  private static function digits(string $value): ?string {
     if (!preg_match('/^(-?\d+)(?:\.(\d*))?$/D', $value, $match)) {
       return is_numeric($value) ? $value : NULL;
     }
-    $fraction = str_pad($match[2] ?? '', $scale, '0');
+    $fraction = rtrim($match[2] ?? '', '0');
     return $fraction === '' ? $match[1] : "$match[1].$fraction";
   }
 

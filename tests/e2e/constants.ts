@@ -30,8 +30,8 @@ export const PAGES = {
   checks: { id: 4, title: 'Checks', path: './checks' },
   // Its published SEO title's main part is "Published title".
   stored: { id: 5, title: 'Stored', path: './stored', seoTitle: 'Published title' },
-  /** Described as a Recipe, which the registry does not have. */
-  oldRecipe: { id: 6, title: 'Rye bread', path: './rye-bread' },
+  /** Described as a Movie, which the registry does not have. */
+  unknownKind: { id: 6, title: 'Night at the cinema', path: './night-at-the-cinema' },
 } as const;
 
 /** Image media, by name. The file is the lower-cased, hyphenated name. */
@@ -115,6 +115,10 @@ export const COMPLEX = {
   announcement: { ending: 'News' },
   /** What the Event template's live and draft titles end with. */
   ending: { live: 'Events', draft: 'Tickets' },
+  /** A job whose closing date has passed. */
+  jobExpired: { id: 22 },
+  /** Project schema-templates: five courses, four with a summary. */
+  courseList: { id: 30, title: 'All courses', complete: 4 },
 } as const;
 
 const user = (username: string) => ({ username, password: username });

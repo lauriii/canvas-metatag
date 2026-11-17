@@ -63,7 +63,20 @@ final class ApiController implements ContainerInjectionInterface {
   /**
    * Registry and rules keys whose strings the dialog shows.
    */
-  private const SHOWN = ['label', 'name', 'variants', 'earn', 'not_for', 'for', 'where', 'need', 'reason', 'why'];
+  private const SHOWN = [
+    'label',
+    'name',
+    'variants',
+    'earn',
+    'not_for',
+    'for',
+    'where',
+    'need',
+    'reason',
+    'why',
+    'short',
+    'elsewhere',
+  ];
 
   /**
    * Registry and rules keys that hold only strings the dialog shows.
@@ -171,8 +184,12 @@ final class ApiController implements ContainerInjectionInterface {
         'identity' => $identity,
         'values' => (object) Values::clean($config->get('values') ?? [], 'site', NULL)[0],
         'currency' => Values::currency($config->get('currency'))[0],
+        // The site's default country: the country a picker suggests first,
+        // never a value of its own.
+        'country' => in_array($country = (string) $this->configFactory->get('system.date')->get('country.default'), SchemaGraph::codes('country'), TRUE) ? $country : '',
       ],
       'registry' => self::shown(SchemaGraph::types(), $strings, $translated, $ui),
+      'codes' => ['country' => SchemaGraph::codes('country')],
       // The path maps are data: their members are named like shown ones.
       'search_features' => self::shown(array_diff_key(SchemaGraph::searchFeatures(), ['props' => TRUE, 'site' => TRUE]), $strings, $translated, $ui) + SchemaGraph::searchFeatures(),
       'target' => $target,
@@ -421,9 +438,9 @@ final class ApiController implements ContainerInjectionInterface {
       'social.description' => 'text',
       'social.image' => 'image',
     ];
-    $props = array_column(SchemaGraph::types()[$values['schema']['type'] ?? 'WebPage']['props'] ?? [], 'kind', 'key');
-    foreach ($props as $key => $kind) {
-      $kinds["schema.props.$key"] = Values::KINDS[$kind];
+    // As saving and the head read it: a job description is formatted text.
+    foreach (SchemaGraph::types()[$values['schema']['type'] ?? 'WebPage']['props'] ?? [] as $prop) {
+      $kinds["schema.props.{$prop['key']}"] = Values::kindOf($prop);
     }
     $broken = [];
     foreach ($kinds as $path => $kind) {

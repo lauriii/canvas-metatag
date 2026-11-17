@@ -289,10 +289,12 @@ test('the Event template opens on its draft and offers the type fields with thei
     await page.keyboard.press('Escape');
   }
   await page.setViewportSize({ width: 1600, height: 1000 });
-  // Venue and Street address side by side: each box shows its path over its
-  // value, the path giving way from its start so the field it ends at stays
-  // whole, and focus never changes it.
-  const pair = [box(frame, 'Venue'), box(frame, 'Street address')];
+  // The venue's name and street, in its sheet: each box shows its path over
+  // its value, the path giving way from its start so the field it ends at
+  // stays whole, and focus never changes it.
+  await frame.locator('.seo-group[data-path="schema.props.location"] .seo-group-box').click();
+  const venueSheet = sheet(frame, 'Venue');
+  const pair = [venueSheet.getByRole('combobox', { name: 'Name', exact: true }), box(frame, 'Street address')];
   for (const linked of pair) {
     const tag = linked.locator('.seo-linked-tag');
     await expect(tag).toContainText(/^Venue › /);
@@ -320,6 +322,7 @@ test('the Event template opens on its draft and offers the type fields with thei
   await expect(street.getByRole('option', { name: /^Venue, / })).toBeVisible();
   await page.keyboard.press('ArrowRight');
   await page.keyboard.press('Escape');
+  await button(frame, UI.action.back).click();
   await tab(frame, UI.tab.search).click();
 
   // The template is among the changes to review; visitors get what is live.
@@ -367,11 +370,13 @@ test('the dialog follows the previewed event, also through hidden references and
   await expect(schemaImage.locator('.seo-image-tag')).toHaveText('Poster › Image');
   await expect(schemaImage.locator('.seo-image-name > [data-state]')).toHaveText('Hidden from visitors for this event');
   // A box linked through the hidden venue says so for this event, and the
-  // field says what that means once.
+  // field says what that means once, in the venue's sheet.
+  await frame.locator('.seo-group[data-path="schema.props.location"] .seo-group-box').click();
   const street = frame.locator('.seo-field[data-path="schema.props.location_address_streetAddress"]');
   await expect(street.locator('.seo-linked-value')).toHaveText('Hidden from visitors for this event');
   await expect(street.locator('.seo-guide')).toHaveText('So the detail is left out.');
   await page.screenshot({ path: test.info().outputPath('hidden-venue-schema.png'), fullPage: true });
+  await button(frame, UI.action.back).click();
   // The read-back says what ships: a web page, not "Add".
   await expect(frame.getByRole('region', { name: UI.schema.stage })).toContainText('a web page of');
   await tab(frame, UI.tab.search).click();
@@ -625,6 +630,7 @@ test('in a short window the link menu shows its values', async ({ drupal, page }
     // opens the menu and links nothing: an entry under a still pointer
     // neither takes the second click nor becomes the active one.
     await tab(frame, UI.tab.schema).click();
+    await frame.locator('.seo-group[data-path="schema.props.location"] .seo-group-box').click();
     const street = frame.locator('.seo-field[data-path="schema.props.location_address_streetAddress"]');
     await street.locator('[data-link]').click();
     await expect(menu.or(frame.getByRole('dialog', { name: 'Link Street address' }))).toBeVisible();
@@ -654,6 +660,7 @@ test('in a short window the link menu shows its values', async ({ drupal, page }
     await expect(frame.locator('.seo-menu [data-active]')).toHaveCount(1);
     await page.keyboard.press('Escape');
     await expect(frame.locator('.seo-menu')).toHaveCount(0);
+    await button(frame, UI.action.back).click();
   }
 
   // In a window 1440 x 900: the filter says "Find a field" and typing does

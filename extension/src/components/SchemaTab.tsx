@@ -4,9 +4,11 @@ import {
   CubeIcon,
   FileIcon,
   LayersIcon,
+  Link2Icon,
   PersonIcon,
   ReaderIcon,
 } from '@radix-ui/react-icons';
+import { ChevronRightIcon } from '@radix-ui/react-icons';
 import { Popover, Select } from '@radix-ui/themes';
 import {
   type KeyboardEvent,
@@ -18,7 +20,7 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
-import { leftOutText, retiredText, stageMatch } from '../checks';
+import { QUIET, groupGap, leftOutText, lineName, notYetText, retiredText, stageMatch, verdictText } from '../checks';
 import {
   andList,
   catchingUp,
@@ -27,20 +29,25 @@ import {
   currencyChoices,
   dateText,
   featureLabel,
+  IN_PLACE_PARTS,
   inSentence,
   kindOfType,
   kinds,
   leaveOut,
+  offered,
   optionText,
   removed,
+  setPath,
   stageVerdicts,
   typeOf,
   withKind,
 } from '../model';
 import { type ReadFact, dateWords, itemKind, itemName, judged, readback, valueAt } from '../readback';
-import type { GraphNode, Registry, SchemaProp, StatePayload, Value, Verdict } from '../types';
-import { PROP_KINDS, factsFor, resolve, sameValue, tagOf } from '../values';
-import { Field, useField, useHeld } from './Field';
+import { choicesOf, controlFor, durationText, groupLine, hoursLine, missingParts, parseHours, partNoun, plainText } from '../controls';
+import type { GraphNode, Registry, SchemaProp, SchemaType, Value, Verdict } from '../types';
+import { factsFor, propKind, resolve, sameValue, tagOf } from '../values';
+import { CheckRows, DurationInput, Picker, WeekEditor } from './Controls';
+import { Field, Guide, useField, useHeld } from './Field';
 import { useRecheck } from './ChecksSheet';
 import { Sheet } from './Header';
 import { ImageRow } from './MediaPicker';
@@ -68,47 +75,6 @@ const DEFAULTS: Record<string, string> = {
 /** The stage's lines as last said, by target: drawn again, they are not said again. */
 const lastSaid = new Map<string, Map<string, string>>();
 
-/** The words of a verdict: "Needs an image", "Doesn't fit: a recurring price". */
-export function verdictText(server: StatePayload, verdict: Verdict, emptyFor?: (prop: string) => string | null): string {
-  const rules = server.search_features;
-  const feature = verdict.feature ? rules.features[verdict.feature] : undefined;
-  switch (verdict.verdict) {
-    case 'ready':
-      return 'Can show';
-    case 'complete':
-      return 'Complete';
-    case 'unanswered':
-      return 'Only if people buy it here';
-    case 'not_fit':
-      return `Doesn't fit: ${feature?.not_for?.find((one) => one.id === verdict.reason)?.reason ?? verdict.reason}`;
-    case 'not_here':
-      return 'Not shown here';
-    case 'retired':
-      return retiredText(feature?.since, server.ui);
-    case 'none':
-      return 'No search feature';
-    default: {
-      const first = verdict.missing?.[0];
-      if (!first) {
-        return 'Needs more';
-      }
-      // A linked detail the previewed item has empty: said for the item.
-      const empty = first.prop ? emptyFor?.(first.prop) : null;
-      if (empty) {
-        return `Needs ${empty}`;
-      }
-      const rule = first.rule === undefined ? undefined : feature?.rules?.[first.rule];
-      const need = rule?.need ?? rules.facts[first.path]?.need ?? first.path;
-      const more = (verdict.missing?.length ?? 1) - 1;
-      return `Needs ${need}${more ? ` and ${more} more` : ''}`;
-    }
-  }
-}
-
-/** A feature line in words: "Merchant listing doesn't fit: a recurring price". */
-export const lineName = (label: string, words: string) =>
-  words.startsWith("Doesn't fit") ? `${label} doesn't fit${words.slice(11)}` : `${label}: ${words}`;
-
 /** The current type: stored, inherited, or the web page. */
 function useType() {
   const { state, ...app } = useApp();
@@ -129,7 +95,8 @@ function HeldInput(props: InputProps & { kind: 'text' | 'url' | 'number'; label:
       className="seo-input"
       dir={props.kind === 'text' ? 'auto' : undefined}
       inputMode={props.kind === 'url' ? 'url' : props.kind === 'number' ? 'decimal' : undefined}
-      placeholder={props.placeholder ?? (props.kind === 'url' ? 'https://' : props.kind === 'number' ? '0.00' : undefined)}
+      // A number has no sample: "0.00" would read as a free price.
+      placeholder={props.placeholder ?? (props.kind === 'url' ? 'https://' : undefined)}
       aria-required={props.required || undefined}
       aria-invalid={props.invalid || undefined}
       aria-describedby={props.describedBy}
@@ -173,40 +140,32 @@ function DateInput(props: InputProps & { label: string }) {
   );
 }
 
-/** A select of options, or of currencies; "Not set" first. */
+/**
+ * A select of options; "Not set" first. A choice with a default ("Other
+ * local business") reads as that default, and has no "Not set": choosing
+ * the default stores nothing.
+ */
 function OptionInput(props: InputProps & { prop: SchemaProp; none: string }) {
-  const { state } = useApp();
-  const server = state.server!;
-  const currencies = props.prop.kind === 'currency' ? currencyChoices(server.ui, [props.value, server.site.currency]) : null;
-  const options = currencies
-    ? currencies.rest
-    : (props.prop.options ?? []).map((option) => [option, optionText(props.prop, option)] as const);
-  // A value stored before the list was what it is ("RMB") is shown as it is.
-  const kept = props.value && !options.some(([value]) => value === props.value) && !currencies?.common.some(([value]) => value === props.value) ? [[props.value, props.value] as const] : [];
+  const options = (props.prop.options ?? []).map((option) => [option, optionText(props.prop, option)] as const);
+  // A value stored before the list was what it is is shown as it is.
+  const kept = props.value && !options.some(([value]) => value === props.value) ? [[props.value, props.value] as const] : [];
+  const fallback = props.prop.default && 'text' in props.prop.default ? props.prop.default.text : undefined;
   return (
     <Select.Root
-      value={props.value || 'none'}
+      value={props.value || fallback || 'none'}
       disabled={props.disabled}
-      onValueChange={(value) => props.set(value === 'none' ? undefined : value)}
+      onValueChange={(value) => props.set(value === 'none' || value === fallback ? undefined : value)}
     >
       <Select.Trigger
         id={props.id}
         className="seo-select-box"
+        // "Not set" in gray, as every empty box reads.
+        data-unset={!props.value && !fallback ? '' : undefined}
         aria-describedby={props.describedBy}
         onKeyDown={props.onKeyDown}
       />
-      <Select.Content position="popper" className="seo-select-content seo-select-fit">
-        <Select.Item value="none">{props.none}</Select.Item>
-        {currencies && (
-          <>
-            {currencies.common.map(([value, label]) => (
-              <Select.Item key={value} value={value}>
-                {label}
-              </Select.Item>
-            ))}
-            <Select.Separator />
-          </>
-        )}
+      <Select.Content position="popper" className="seo-select-content seo-select-fit" aria-label={props.prop.label}>
+        {!fallback && <Select.Item value="none">{props.none}</Select.Item>}
         {[...kept, ...options].map(([value, label]) => (
           <Select.Item key={value} value={value}>
             {label}
@@ -217,15 +176,39 @@ function OptionInput(props: InputProps & { prop: SchemaProp; none: string }) {
   );
 }
 
+/** Who a reference is, as one choice: the site, someone else, or nobody yet. */
+interface Who {
+  choice: 'none' | 'site' | 'other';
+  choose(next: 'none' | 'site' | 'other'): void;
+  /** Moves focus to someone else's name. */
+  focusName(): void;
+  /** The keys of the group's own parts (name, website). */
+  parts: string[];
+  /** What nobody set gives, when it is someone: "Ada Lovelace (the page's author)". */
+  byDefault?: string;
+}
+
+/**
+ * The currencies, common ones first; a code stored before the list was what
+ * it is ("RMB") is kept, as it is.
+ */
+function currencyList(ui: string, site: string, stored: string) {
+  const { common, rest } = currencyChoices(ui, [site]);
+  const all = [...common, ...rest];
+  const kept = stored && !all.some(([value]) => value === stored) ? [[stored, stored] as const] : [];
+  return [...kept, ...all].map(([value, label]) => ({ value, label, also: [value] }));
+}
+
 /** One detail of the chosen type, by its kind. A stored value overrides the default. */
-function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean }) {
-  const { prop } = props;
+function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean; who?: Who; inSheet?: boolean; shortLabel?: string }) {
+  const { prop, who } = props;
   const { state, dispatch, openSheet, goTo, ...app } = useApp();
   const view = app.view!;
   const server = state.server!;
   const template = server.target!.scope === 'template';
   const path = `schema.props.${prop.key}`;
-  const kind = PROP_KINDS[prop.kind];
+  const kind = propKind(prop);
+  const control = controlFor(prop, server.target!.scope);
   const stored = state.edits.target.schema?.props?.[prop.key];
   const fact = prop.default && 'fact' in prop.default ? prop.default.fact : undefined;
   // On a page, addresses, dates and images may link to the page's facts;
@@ -260,8 +243,10 @@ function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean }) {
   };
   // What a feature needs it for, said at rest while it is empty.
   const report = server.resolved?.schema;
+  // A choice of who is asked for by any of its parts: an employer's name.
+  const asks = (key?: string) => key === prop.key || (!!who && !!key && who.parts.includes(key));
   const needed = report?.type === props.type
-    ? [...new Set(report.features.filter((verdict) => verdict.missing?.some((one) => one.prop === prop.key)).map((verdict) => server.search_features.features[verdict.feature!]?.for ?? ''))].filter(Boolean)
+    ? [...new Set(report.features.filter((verdict) => verdict.missing?.some((one) => asks(one.prop))).map((verdict) => server.search_features.features[verdict.feature!]?.for ?? ''))].filter(Boolean)
     : [];
   const title = view.lookup.facts.title?.value ?? '';
   const named = view.effective.schema?.props?.name;
@@ -280,27 +265,64 @@ function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean }) {
     ['Product', 'Service'].includes(props.type) &&
     title !== '' &&
     (named === undefined ? true : 'text' in named && named.text.trim().toLowerCase() === title.trim().toLowerCase());
-  // A detail whose absence points at the site: "Organizer" names the site.
-  const ref = Object.values(typeOf(server.registry, props.type).refs ?? {}).find((one) => typeof one !== 'string' && one.unless === prop.key && one.to === 'identity');
+  // A reference whose absence is the site on a Canvas page: "Organizer"
+  // names the site until it is touched.
   const siteName = view.lookup.facts.site?.value || server.site.identity.name;
-  const bySite = !!ref && stored === undefined && siteName !== '';
+  const groupSet = !!prop.group && Object.keys(state.edits.target.schema?.props ?? {}).some((key) => key === prop.group || key.startsWith(`${prop.group}_`));
+  const bySite = !!prop.page_default && !template && !groupSet && siteName !== '';
 
   return (
     <ValueField
       path={path}
       label={prop.label}
       kind={kind}
-      linkable={linkable}
+      // Who is chosen, or linked to a reference field on a template; the
+      // site is a choice of its own, never a row of the link menu.
+      linkable={who ? template : linkable}
       lookup={lookup}
-      typing={prop.kind === 'text' && !prop.pattern}
-      choices={prop.kind === 'enum' ? prop.options : undefined}
+      // A jump to a part not shown lands on the choice.
+      also={who && who.choice !== 'other' ? who.parts.map((key) => `schema.props.${key}`) : undefined}
+      typing={(prop.kind === 'text' || prop.kind === 'ref') && !prop.pattern && control !== 'link' && !who}
+      // Only a field of the codes fills a choice: a list field with one code
+      // fills a list of them too.
+      choices={prop.kind === 'enum' ? (prop.codes ? server.codes?.[prop.codes] : prop.options) : undefined}
+      // The site is the first row of a reference's menu, as it is a choice
+      // of who; chosen, it reads as the choice, never as a link.
+      noSite={prop.kind === 'ref' && !prop.site}
+      who={!!who}
+      shortLabel={props.shortLabel}
+      // In a sheet, what the group misses is said once, under "Reads as".
+      quiet={props.inSheet}
+      // A linked duration in its unit: "20 min"; a choice by its option's
+      // words, its default too ("Other local business").
+      format={
+        control === 'duration' && stored && 'source' in stored
+          ? (text) => (/^\d+(\.\d+)?$/.test(text) ? durationText(String(Math.round(Number(text) * ((stored.unit ?? prop.unit) === 'hour' ? 60 : 1)))) || text : text)
+          : prop.kind === 'enum' && !prop.list && prop.options
+            ? (text) => (prop.options!.includes(text) ? optionText(prop, text) : text)
+            : undefined
+      }
+      after={
+        // A linked duration: what its field counts, asked once and kept
+        // with the link.
+        control === 'duration' && stored && 'source' in stored && (prop.units?.length ?? 0) > 1 ? (
+          <UnitQuestion
+            label={prop.label}
+            units={prop.units!}
+            value={stored.unit ?? prop.unit!}
+            disabled={app.locked.target}
+            set={(unit) => edit({ ...stored, unit })}
+          />
+        ) : undefined
+      }
+      items={prop.list || prop.join ? 'list' : 'one'}
       byDefault={prop.default ?? null}
       instead={fact ? `its ${view.facts[fact]?.label ?? fact} is used` : 'the detail is left out'}
       required={prop.level === 'required' || needed.length > 0}
       missing={
-        stored === undefined && unset?.status !== 'ok' && needed.length ? (
+        props.inSheet ? undefined : stored === undefined && unset?.status !== 'ok' && needed.length && !(who && who.choice !== 'none') ? (
           `Needed for ${needed.join(' and ')}`
-        ) : prop.level === 'required' && stored === undefined && !prop.default ? (
+        ) : prop.level === 'required' && stored === undefined && !prop.default && !who ? (
           `Needed for ${typeOf(server.registry, props.type).kind?.name ?? 'this kind'}`
         ) : nameIsTitle ? (
           // Typed here: the field it asks for is this one.
@@ -318,6 +340,12 @@ function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean }) {
               : undefined
       }
       noStage
+      // A box that opens a sheet says nothing beside it, as a group's does:
+      // its sheet clears it.
+      // In a sheet the header's Clear and each input's own editing are the
+      // way back: no Reset per part, no second Tab stop each.
+      noReset={control === 'hours' || props.inSheet || undefined}
+      source={control === 'hours' ? null : undefined}
       group={kind === 'image'}
       note={
         // A product named after its page asks for a name here instead.
@@ -364,8 +392,56 @@ function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean }) {
       lines={1}
       placeholder={placeholder ?? (bySite ? siteName : undefined)}
       input={(input) =>
-        prop.kind === 'enum' || prop.kind === 'currency' ? (
-          <OptionInput {...input} prop={prop} none={prop.key === 'sold_here' ? 'Not answered' : site ? `Site currency: ${site}` : 'Not set'} />
+        who ? (
+          <WhoSelect {...input} who={who} siteName={siteName} pageDefault={!!prop.page_default && !template} label={prop.label} />
+        ) : prop.kind === 'currency' ? (
+          // Searchable, the site's currency suggested first.
+          <Picker
+            {...input}
+            label={prop.label}
+            noun="currency"
+            choices={currencyList(server.ui, server.site.currency, input.value)}
+            suggested={server.site.currency ? [server.site.currency] : undefined}
+            placeholder={site ? `Site currency: ${site}` : undefined}
+          />
+        ) : control === 'checks' ? (
+          <CheckRows {...input} label={prop.label} choices={choicesOf(prop, server.codes?.[prop.codes ?? ''] ?? [], server.ui)} />
+        ) : control === 'picker' ? (
+          <Picker
+            {...input}
+            label={prop.label}
+            noun={prop.codes === 'country' ? 'country' : prop.label.toLowerCase()}
+            choices={choicesOf(prop, server.codes?.[prop.codes ?? ''] ?? [], server.ui)}
+            many={!!prop.list}
+            max={prop.max}
+            suggested={prop.suggest === 'country' && server.site.country ? [server.site.country] : undefined}
+          />
+        ) : control === 'duration' ? (
+          <DurationInput {...input} label={prop.label} />
+        ) : control === 'hours' ? (
+          <HoursBox {...input} label={prop.label} path={path} />
+        ) : control === 'link' ? (
+          template ? (
+            // A box the size of an input, in the anatomy of a linked one: it
+            // opens the link menu.
+            <button
+              id={input.id}
+              type="button"
+              className="seo-group-box seo-link-only-box"
+              aria-describedby={input.describedBy}
+              aria-invalid={input.invalid || undefined}
+              disabled={input.disabled}
+              onClick={(event) => input.openMenu?.(event.currentTarget)}
+              onKeyDown={input.onKeyDown}
+            >
+              <span className="seo-muted">Link a field…</span>
+              <Link2Icon aria-hidden />
+            </button>
+          ) : (
+            <p className="seo-muted seo-link-only">Comes from a field or a component</p>
+          )
+        ) : prop.kind === 'enum' ? (
+          <OptionInput {...input} prop={prop} none={prop.key === 'sold_here' ? 'Not answered' : 'Not set'} />
         ) : prop.kind === 'date' ? (
           <DateInput {...input} label={prop.label} />
         ) : prop.kind === 'url' || prop.kind === 'number' || prop.pattern ? (
@@ -384,26 +460,619 @@ function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean }) {
   );
 }
 
-/** Lays details out; a price and its currency share a row where there is room. */
-function Details(props: { items: SchemaProp[]; type: string; revealed?: string | null }) {
+/**
+ * Who it is: the site, or someone else, whose name and website are then
+ * asked for under it. On a Canvas page a reference the site is by default
+ * has no "Not set".
+ */
+function WhoSelect(props: InputProps & { who: Who; siteName: string; pageDefault: boolean; label: string }) {
+  const site = `${props.siteName || 'This site'} (this site)`;
+  const value = props.who.choice === 'none' && props.pageDefault ? 'site' : props.who.choice;
+  const chosen = useRef<string | null>(null);
+  return (
+    <Select.Root
+      value={value}
+      disabled={props.disabled}
+      onValueChange={(next) => {
+        chosen.current = next;
+        props.who.choose(next as Who['choice']);
+      }}
+    >
+      <Select.Trigger id={props.id} className="seo-select-box" data-unset={value === 'none' && !props.who.byDefault ? '' : undefined} aria-describedby={props.describedBy} onKeyDown={props.onKeyDown} />
+      <Select.Content
+        position="popper"
+        className="seo-select-content seo-select-fit"
+        aria-label={props.label}
+        // Someone else: focus goes to the name asked for under the choice,
+        // not back to the choice.
+        onCloseAutoFocus={(event) => {
+          if (chosen.current === 'other') {
+            event.preventDefault();
+            props.who.focusName();
+          }
+          chosen.current = null;
+        }}
+      >
+        {!props.pageDefault && <Select.Item value="none">{props.who.byDefault ?? 'Not set'}</Select.Item>}
+        <Select.Item value="site">{site}</Select.Item>
+        <Select.Item value="other">Someone else</Select.Item>
+      </Select.Content>
+    </Select.Root>
+  );
+}
+
+/**
+ * A reference that is the site or someone else (an organizer, an employer,
+ * an author): one choice. "Someone else" shows the name and website under
+ * it, named for whom they are ("Organizer name"); the site or a linked
+ * reference field hides them.
+ */
+function WhoField(props: { group: string; type: string }) {
+  const { state, dispatch, ...app } = useApp();
+  const server = state.server!;
+  const type = server.registry[props.type];
+  const group = type.groups![props.group];
+  const parts = useShown(props.type, type).filter((prop) => prop.group === props.group);
+  const ref = parts.find((prop) => prop.key === props.group);
+  const others = parts.filter((prop) => prop.key !== props.group);
+  const effective = app.view!.effective.schema?.props ?? {};
+  const [other, setOther] = useState(false);
+  const own = effective[props.group];
+  const template = server.target!.scope === 'template';
+  // On a Canvas page the site is the default: "Someone else" is stored, so
+  // the site is no longer assumed while the name is being typed.
+  const pageDefault = !!ref?.page_default && !template;
+  // A name nobody set that is someone all the same: the page's author.
+  const defaultName = others.find((prop) => prop.default && 'fact' in prop.default);
+  const named = defaultName ? resolve(defaultName.default, 'text', app.view!.lookup) : undefined;
+  const choice: Who['choice'] =
+    own && 'fact' in own && own.fact === 'identity'
+      ? 'site'
+      : other || (own && 'text' in own) || others.some((prop) => effective[prop.key] !== undefined)
+        ? 'other'
+        : 'none';
+  if (!ref) {
+    return <Details items={others} type={props.type} inGroup />;
+  }
+  const choose = (next: Who['choice']) => {
+    const stored = state.edits.target.schema?.props ?? {};
+    const kept = Object.fromEntries(Object.entries(stored).filter(([key]) => key !== props.group && !others.some((prop) => prop.key === key)));
+    setOther(next === 'other');
+    if (next === 'other' && choice === 'other') {
+      return;
+    }
+    // The site where it is the default is the default: nothing stored, as
+    // if nobody had changed it.
+    const site = `${app.view!.lookup.facts.site?.value || server.site.identity.name || 'This site'} (this site)`;
+    dispatch({
+      type: 'apply',
+      scope: 'target',
+      values: {
+        ...state.edits.target,
+        schema: {
+          ...state.edits.target.schema,
+          props:
+            next === 'site' && !pageDefault
+              ? { ...kept, [props.group]: { fact: 'identity' } }
+              : next === 'other' && pageDefault
+                ? { ...kept, [props.group]: { text: '' } }
+                : kept,
+        },
+      },
+      undo: next === 'site' ? `${group.label}: ${pageDefault ? 'back to ' : ''}${site}` : next === 'other' ? `${group.label}: someone else` : `${group.label}: not set`,
+    });
+  };
+  // Someone else: the name is asked for first.
+  const focusName = () =>
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-path="schema.props.${props.group}_name"] :is(input, textarea)`)?.focus());
+  const who: Who = {
+    choice,
+    choose,
+    focusName,
+    parts: others.map((prop) => prop.key),
+    byDefault: named?.status === 'ok' && named.text ? `${named.text} (the page's ${(defaultName!.default as { fact: string }).fact})` : undefined,
+  };
+  return (
+    <>
+      <Detail prop={{ ...ref, label: group.label ?? ref.label }} type={props.type} who={who} />
+      {choice === 'other' && (
+        <div className="seo-under">
+          {/* "Name" under Organizer; named "Organizer name" all the same. */}
+          <Details
+            items={others.map((prop) => ({ ...prop, label: `${group.label ?? ''} ${(prop.short ?? prop.label).toLowerCase()}`.trim() }))}
+            short={Object.fromEntries(others.map((prop) => [prop.key, prop.short ?? prop.label]))}
+            type={props.type}
+            inGroup
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
+const UNIT_WORDS: Record<string, string> = { minute: 'minutes', hour: 'hours' };
+
+/** What a linked duration's field counts in. */
+function UnitQuestion(props: { label: string; units: string[]; value: string; disabled: boolean; set(unit: 'minute' | 'hour'): void }) {
+  return (
+    <div className="seo-unit-question">
+      {/* Named by what it shows, for its time: "Prep time: the field counts
+          minutes"; two linked times are told apart. */}
+      <span>The field counts</span>
+      <Select.Root value={props.value} disabled={props.disabled} onValueChange={(unit) => props.set(unit as 'minute' | 'hour')}>
+        <Select.Trigger variant="ghost" className="seo-unit-select" aria-label={`${props.label}: the field counts ${UNIT_WORDS[props.value]}`}>
+          {UNIT_WORDS[props.value]}
+        </Select.Trigger>
+        <Select.Content position="popper" className="seo-select-content" aria-label={`What ${props.label}'s field counts`}>
+          {props.units.map((unit) => (
+            <Select.Item key={unit} value={unit}>
+              {UNIT_WORDS[unit]}
+            </Select.Item>
+          ))}
+        </Select.Content>
+      </Select.Root>
+    </div>
+  );
+}
+
+/**
+ * Lays details out. Where there is room, two numbers share a row (From and
+ * Up to, Latitude and Longitude), as do a price and its currency, and a
+ * currency and what it is per. A detail shown under another is indented
+ * under it.
+ */
+function Details(props: { items: SchemaProp[]; type: string; revealed?: string | null; inGroup?: boolean; inSheet?: boolean; short?: Record<string, string> }) {
+  const { state } = useApp();
   const rows: ReactNode[] = [];
   const { items } = props;
+  const placed = new Set<string>();
   for (let index = 0; index < items.length; index++) {
     const prop = items[index];
     const next = items[index + 1];
-    if (prop.kind === 'number' && next?.kind === 'currency') {
+    // A group is one line that opens a sheet, or its few parts in place.
+    if (prop.group && !props.inGroup) {
+      if (!placed.has(prop.group)) {
+        placed.add(prop.group);
+        const field =
+          state.server!.registry[props.type]?.groups?.[prop.group]?.shape === 'who' ? (
+            <WhoField key={prop.group} group={prop.group} type={props.type} />
+          ) : (
+            <GroupField key={prop.group} group={prop.group} type={props.type} />
+          );
+        // A group shown because of another's answer (the workplace, for
+        // work on site) sits under it, as every dependent detail does.
+        const gate = Object.keys(prop.when ?? {}).find((key) => items.some((one) => one.key === key));
+        rows.push(gate ? <div className="seo-under" key={prop.group}>{field}</div> : field);
+      }
+      continue;
+    }
+    if (prop.under && !props.inGroup && items.some((one) => one.key === prop.under)) {
       rows.push(
-        <div className="seo-pair seo-price" key={prop.key}>
+        <div className="seo-under" key={prop.key}>
           <Detail prop={prop} type={props.type} />
-          <Detail prop={next} type={props.type} />
+        </div>,
+      );
+      continue;
+    }
+    if (
+      (prop.kind === 'number' && !prop.unit && next?.kind === 'number' && !next.unit) ||
+      (prop.kind === 'currency' && next?.kind === 'enum' && !next.list)
+    ) {
+      rows.push(
+        <div className="seo-pair" data-even="" key={prop.key}>
+          <Detail prop={prop} type={props.type} inSheet={props.inSheet} />
+          <Detail prop={next} type={props.type} inSheet={props.inSheet} />
         </div>,
       );
       index++;
       continue;
     }
-    rows.push(<Detail key={prop.key} prop={prop} type={props.type} revealed={prop.key === props.revealed} />);
+    if (prop.kind === 'number' && next?.kind === 'currency') {
+      rows.push(
+        <div className="seo-pair seo-price" key={prop.key}>
+          <Detail prop={prop} type={props.type} inSheet={props.inSheet} />
+          <Detail prop={next} type={props.type} inSheet={props.inSheet} />
+        </div>,
+      );
+      index++;
+      continue;
+    }
+    rows.push(<Detail key={prop.key} prop={prop} type={props.type} revealed={prop.key === props.revealed} inSheet={props.inSheet} shortLabel={props.short?.[prop.key]} />);
   }
   return rows;
+}
+
+/** The details of a type its scope offers and its gates allow, in order. */
+function useShown(id: string, type: SchemaType): SchemaProp[] {
+  const { state, ...app } = useApp();
+  const scope = state.server!.target!.scope;
+  const props = app.view!.effective.schema?.props ?? {};
+  const code = (key: string) => {
+    const value = props[key] ?? type.props?.find((one) => one.key === key)?.default;
+    return value && 'text' in value ? value.text : undefined;
+  };
+  return (type.props ?? []).filter(
+    (prop) =>
+      offered(state.server!.registry, id, prop.key, scope) &&
+      Object.entries(prop.when ?? {}).every(([gate, values]) => values.includes(code(gate) ?? '')),
+  );
+}
+
+/** What a part of a group shows in the group's line. */
+function useLine(type: SchemaType, key: string): string {
+  const { state, ...app } = useApp();
+  const server = state.server!;
+  const props = app.view!.effective.schema?.props ?? {};
+  const group = type.groups![key];
+  const shown = (part: string) => {
+    const prop = type.props?.find((one) => one.key === part);
+    const value = props[part];
+    if (!prop) {
+      return '';
+    }
+    // A currency nobody set is the site's: the pay reads "€5,200 a month".
+    if (!value) {
+      return prop.kind === 'currency' ? server.site.currency : '';
+    }
+    const found = resolve(value, propKind(prop), app.view!.lookup);
+    if (found.status !== 'ok') {
+      return '';
+    }
+    if (prop.kind === 'enum') {
+      return choicesOf(prop, server.codes?.[prop.codes ?? ''] ?? [], server.ui).find((choice) => choice.value === found.value)?.label ?? found.text;
+    }
+    return found.text;
+  };
+  return groupLine(key, group, shown, server.ui);
+}
+
+/**
+ * What a group reads as, in its box and its sheet alike: the page or the
+ * site its reference names, then its own parts ("Lakeside Hall, Rantakatu
+ * 1, Helsinki"), or its parts alone: one separator, as every group line.
+ */
+function useGroupReading(type: SchemaType, key: string): string {
+  const { state, ...app } = useApp();
+  const line = useLine(type, key);
+  const ref = state.server!.target ? app.view!.effective.schema?.props?.[key] : undefined;
+  // A linked page the item has none of reads as nothing: its box says so.
+  const named = ref && type.props?.some((one) => one.key === key) ? resolve(ref, 'ref', app.view!.lookup).text || ('source' in ref ? '' : tagOf(ref, app.view!.lookup, `schema.props.${key}`)) : '';
+  // A venue page named as the venue: the name once.
+  return named && line.split(', ')[0] === named ? line : [named, line].filter(Boolean).join(', ');
+}
+
+/** The parts of a group a scope offers: a page has no page picker yet, so no page reference. */
+function useParts(typeId: string, type: SchemaType, key: string): SchemaProp[] {
+  const { state } = useApp();
+  const page = state.server!.target!.scope === 'page';
+  return useShown(typeId, type).filter((prop) => prop.group === key && !(page && prop.key === key && prop.kind === 'ref' && !prop.site));
+}
+
+/**
+ * A group: its few parts in place, or one line that opens its sheet. A group
+ * with a reference reads the referenced page or the publisher first. What
+ * it misses to be used is said under it, as the verdicts say it.
+ */
+function GroupField(props: { group: string; type: string }) {
+  const { state, openSheet, ...app } = useApp();
+  const server = state.server!;
+  const type = server.registry[props.type];
+  const group = type.groups![props.group];
+  const parts = useParts(props.type, type, props.group);
+  const reading = useGroupReading(type, props.group);
+  const gap = useGap(props.type, type, props.group);
+  const valueId = useId();
+  // Linked to a reference field: the box says so, as a linked value's does.
+  const refValue = app.view!.effective.schema?.props?.[props.group];
+  const linkedTo = refValue && 'source' in refValue ? tagOf(refValue, app.view!.lookup, `schema.props.${props.group}`, 'ref') : '';
+  if (parts.length <= IN_PLACE_PARTS) {
+    return <Details items={parts.map((prop) => (prop.short ? { ...prop, label: prop.short } : prop))} type={props.type} inGroup />;
+  }
+  // What is wrong with the group as a whole: pay From above Up to.
+  const whole = useWhole(props.group);
+  const open = (at?: string) => openSheet({ kind: 'group', type: props.type, group: props.group, ...(at && { focus: at }) });
+  return (
+    <div className="seo-field seo-group" data-path={`schema.props.${props.group}`}>
+      <span className="seo-label" id={`group-${props.group}`}>
+        {group.label}
+        {group.level === 'required' && <span className="seo-visually-hidden"> (required)</span>}
+      </span>
+      <button
+        type="button"
+        className="seo-group-box"
+        // Named by its label, then what it reads: "Venue, Lakeside Hall".
+        aria-labelledby={`group-${props.group} ${valueId}`}
+        aria-describedby={gap.text || whole ? `${valueId}-gap` : undefined}
+        onClick={() => open()}
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' && event.altKey) {
+            event.preventDefault();
+            open();
+          }
+        }}
+      >
+        {linkedTo ? (
+          <span id={valueId} className="seo-group-words">
+            <span className="seo-linked-tag">
+              <Link2Icon aria-hidden />
+              <span className="seo-linked-leaf" dir="auto">{linkedTo}</span>
+            </span>
+            <span className={reading ? undefined : 'seo-muted'}>{reading || `Empty for this ${inSentence(server.target!.label)}`}</span>
+          </span>
+        ) : (
+          <span id={valueId} className={reading ? undefined : 'seo-muted'}>
+            {reading || 'Not set'}
+          </span>
+        )}
+        <ChevronRightIcon aria-hidden />
+      </button>
+      {whole ? (
+        <Guide tone="fix" id={`${valueId}-gap`}>
+          {whole.text}{' '}
+          {/* On the amount to change: Up to. */}
+          <Btn variant="ghost" size={24} aria-label={`Show ${group.label?.toLowerCase()}`} onClick={() => open(whole.focus)}>
+            Show
+          </Btn>
+        </Guide>
+      ) : gap.text ? (
+        <Guide tone="improve" id={`${valueId}-gap`}>
+          {gap.text}{' '}
+          {/* "Add", named for the part it opens on as the verdict's is: "Add
+              Country"; "Choose" for one set to what the list does not hold. */}
+          <Btn variant="ghost" size={24} aria-label={`${gap.choose ? 'Choose' : 'Add'} ${gap.first}`} onClick={() => open(gap.focus)}>
+            {gap.choose ? 'Choose' : 'Add'}
+          </Btn>
+        </Guide>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * What is wrong with a group as a whole, said once under its box and in its
+ * sheet: pay whose From is above its Up to ("From is more than Up to."),
+ * and the part to change.
+ */
+function useWhole(group: string): { text: string; focus?: string } | null {
+  const { issues, state } = useApp();
+  const issue = issues.find((one) => one.severity !== 'info' && one.jump?.field === `schema.props.${group}` && one.id.startsWith('schema-pay-order'));
+  if (!issue) {
+    return null;
+  }
+  const parts = state.server!.registry[state.edits.target.schema?.type ?? '']?.props ?? [];
+  return {
+    text: `${issue.message.slice(issue.message.indexOf(': ') + 2)}.`,
+    focus: parts.find((prop) => prop.group === group && prop.key.endsWith('_maxValue'))?.key,
+  };
+}
+
+/**
+ * What a group misses, in one sentence its box and its sheet share: "Add the
+ * country, so the address can be used.", "Add the city and the country for
+ * event listings." `focus`: the part a jump opens the sheet on; `first`: its
+ * name.
+ */
+function useGap(typeId: string, type: SchemaType, key: string): { text: string; focus?: string; first: string; choose?: boolean } {
+  const { state, ...app } = useApp();
+  const server = state.server!;
+  const group = type.groups![key];
+  const parts = useParts(typeId, type, key);
+  const stored = app.view!.effective.schema?.props ?? {};
+  const report = server.resolved?.schema;
+  // The server's word on what it misses, as built; else what is set here.
+  const set = (one: string) => stored[one] !== undefined;
+  const local = !stored[key] && parts.some((prop) => prop.key !== key && set(prop.key)) ? missingParts(group, set, type.groups!) : [];
+  const ours = report?.type === typeId;
+  // A nested group's gap is its group's: the venue's address.
+  const { missing, fors } = groupGap(type, key, ours ? report : null, server.search_features, local);
+  const prop = (one: string) => type.props?.find((item) => item.key === one);
+  const noun = (one: string) => partNoun(prop(one), type.groups?.[one]?.label ?? type.groups?.[one]?.shape ?? one);
+  const first = missing[0];
+  if (!first) {
+    return { text: '', first: '' };
+  }
+  // A part of an address makes the address usable; any other, the group.
+  const whole = missing.some((one) => type.groups?.[prop(one)?.part ?? one]?.shape === 'address' || group.shape === 'address') ? 'address' : group.label?.toLowerCase();
+  const why = fors.length ? ` for ${andList(fors)}` : `, so the ${whole} can be used`;
+  // A part set to what the list does not hold ("Finland" for a country) is
+  // chosen from the list, never added.
+  const dropped = new Set(ours ? (report?.dropped ?? []).map((one) => one.key) : []);
+  const add = missing.filter((one) => !dropped.has(one));
+  const choose = missing.filter((one) => dropped.has(one));
+  return {
+    text: [add.length ? `Add ${andList(add.map(noun))}${why}.` : '', choose.length ? `Choose ${andList(choose.map(noun))} from the list.` : ''].filter(Boolean).join(' '),
+    focus: prop(first) ? first : type.groups?.[first]?.parts.find((part) => prop(part)),
+    first: prop(first)?.short ?? prop(first)?.label ?? type.groups?.[first]?.label ?? type.groups?.[first]?.shape ?? first,
+    choose: dropped.has(first),
+  };
+}
+
+/** A group's sheet: what it reads as, then its parts in the shape's order. */
+export function GroupSheet(props: { type: string; group: string; focus?: string; onClose(): void }) {
+  const { state, dispatch, issues, ...app } = useApp();
+  const server = state.server!;
+  const type = server.registry[props.type];
+  const group = type.groups![props.group];
+  const parts = useParts(props.type, type, props.group);
+  const reading = useGroupReading(type, props.group);
+  const gap = useGap(props.type, type, props.group);
+  const whole = useWhole(props.group);
+  const line = useLine(type, props.group);
+  const stored = state.edits.target.schema?.props ?? {};
+  const set = parts.filter((prop) => stored[prop.key] !== undefined);
+  const template = server.target!.scope === 'template';
+  const allLinked = template && set.length > 0 && set.every((prop) => 'source' in stored[prop.key]!);
+  // What opened it, as it was before the sheet took focus.
+  const [from] = useState(() => document.activeElement as HTMLElement | null);
+  // What the page does not show of the group's values, said once.
+  const notOnPage = issues
+    .filter((issue) => parts.some((prop) => issue.id === `schema-not-on-page:${prop.key}`))
+    .map((issue) => issue.message.replace(/^Couldn't find (.*) on this page$/, '$1'));
+  // Linked to a page: its own parts are used only where the page gives no
+  // address, and wait folded until then.
+  const ref = parts.find((prop) => prop.key === props.group && prop.kind === 'ref');
+  const refValue = ref ? app.view!.effective.schema?.props?.[ref.key] : undefined;
+  const own = parts.filter((prop) => prop !== ref);
+  useEffect(() => {
+    if (!props.focus) {
+      return;
+    }
+    // The part's own control (its input, select or box), never its link
+    // button: in the same frame the sheet opens, so focus never rests on
+    // the document.
+    const control = () =>
+      document.querySelector<HTMLElement>(
+        `.seo-sheet [data-path="schema.props.${props.focus}"] .seo-control :is(input, textarea, button, [role="combobox"]):not([disabled])`,
+      );
+    const found = control();
+    if (found) {
+      found.focus();
+    } else {
+      requestAnimationFrame(() => control()?.focus());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const partsList = (items: SchemaProp[]) => (
+    <Details items={items.map((prop) => (prop.short && prop.key !== props.group ? { ...prop, label: prop.short } : prop))} type={props.type} inGroup inSheet />
+  );
+  return (
+    <Sheet
+      title={group.label ?? props.group}
+      focusTitle={!props.focus}
+      end={
+        set.length > 0 &&
+        state.readonly === 'no' && (
+          <Btn
+            variant="ghost"
+            onClick={() => {
+              // The button goes with the values: the title keeps focus.
+              document.querySelector<HTMLElement>('.seo-sheet-header h2')?.focus();
+              dispatch({
+                type: 'apply',
+                scope: 'target',
+                values: {
+                  ...state.edits.target,
+                  schema: {
+                    ...state.edits.target.schema,
+                    props: Object.fromEntries(Object.entries(stored).filter(([key]) => !parts.some((prop) => prop.key === key))),
+                  },
+                },
+                undo: allLinked ? `Unlinked ${group.label}` : `Cleared ${group.label}`,
+              });
+            }}
+          >
+            {allLinked ? 'Unlink all' : 'Clear'}
+          </Btn>
+        )
+      }
+      onClose={() => {
+        props.onClose();
+        // Back to where the jump came from while it is there: a part of
+        // the sentence, a verdict's Add, its line (its proof has closed);
+        // from anywhere else (the box, Checks, which the sheet replaced),
+        // to the group's box.
+        requestAnimationFrame(() =>
+          (from?.isConnected && from.closest('.seo-schema-stage')
+            ? from
+            : document.querySelector<HTMLElement>(`.seo-group[data-path="schema.props.${props.group}"] .seo-group-box`)
+          )?.focus(),
+        );
+      }}
+    >
+      <p className="seo-reads-as" role="status">
+        Reads as: {reading || 'Not set'}
+      </p>
+      {/* What the group misses, and what the page does not show, said once
+          for the whole group. */}
+      {(whole || gap.text || notOnPage.length > 0) && (
+        <div className="seo-group-gap">
+          {whole && <Guide tone="fix">{whole.text}</Guide>}
+          {gap.text && <Guide tone="improve">{gap.text}</Guide>}
+          {notOnPage.length > 0 && <Guide tone="improve">Couldn't find {andList(notOnPage)} on this page.</Guide>}
+        </div>
+      )}
+      <div className="seo-group-parts">
+        {ref && refValue ? (
+          <>
+            {partsList([ref])}
+            <List>
+              {/* Its own details, used where the page has none: they read
+                  as they are, "Not set" until one is. */}
+              <Disclosure
+                label="Own details, if the page has none"
+                summary={line || 'Not set'}
+                defaultOpen={own.some((prop) => stored[prop.key] !== undefined) || (!!props.focus && props.focus !== ref.key)}
+              >
+                <div className="seo-row-field seo-group-parts">{partsList(own)}</div>
+              </Disclosure>
+            </List>
+          </>
+        ) : (
+          partsList(parts)
+        )}
+      </div>
+    </Sheet>
+  );
+}
+
+/** Opening hours: the week in one line, opening its sheet. */
+function HoursBox(props: InputProps & { label: string; path: string }) {
+  const { openSheet } = useApp();
+  const week = parseHours(props.value);
+  const valueId = useId();
+  return (
+    <button
+      id={props.id}
+      type="button"
+      className="seo-group-box"
+      // Named by its label, then what it reads: "Opening hours, Mon–Fri 09:00–17:00".
+      aria-labelledby={`${props.id}-label ${valueId}`}
+      aria-describedby={props.describedBy}
+      disabled={props.disabled}
+      onClick={() => openSheet({ kind: 'hours', path: props.path, label: props.label })}
+    >
+      <span id={valueId} className={week ? undefined : 'seo-muted'}>
+        {week ? hoursLine(week) : 'Not set'}
+      </span>
+      <ChevronRightIcon aria-hidden />
+    </button>
+  );
+}
+
+/** The opening hours sheet. */
+export function HoursSheet(props: { path: string; label: string; onClose(): void }) {
+  const { state, dispatch, locked } = useApp();
+  const value = (state.edits.target.schema?.props?.[props.path.slice('schema.props.'.length)] ?? undefined) as Value | undefined;
+  const text = value && 'text' in value ? value.text : '';
+  return (
+    <Sheet
+      title={props.label}
+      focusTitle
+      onClose={props.onClose}
+      end={
+        text !== '' &&
+        !locked.target && (
+          <Btn
+            variant="ghost"
+            onClick={() => {
+              // The button goes with the week: the title keeps focus.
+              document.querySelector<HTMLElement>('.seo-sheet-header h2')?.focus();
+              dispatch({ type: 'apply', scope: 'target', values: setPath(state.edits.target, props.path, undefined), undo: `Cleared ${props.label}` });
+            }}
+          >
+            Clear
+          </Btn>
+        )
+      }
+    >
+      <WeekEditor
+        label={props.label}
+        value={text}
+        disabled={locked.target}
+        set={(next) => dispatch({ type: 'edit', scope: 'target', path: props.path, value: next === undefined ? undefined : { text: next } })}
+      />
+    </Sheet>
+  );
 }
 
 /**
@@ -464,9 +1133,13 @@ function Stage(props: { onReveal(key: string): void }) {
       return null;
     }
     const prop = type.props?.find((one) => one.key === key);
-    return resolve(stored, PROP_KINDS[prop?.kind ?? 'text'], app.view!.lookup).status === 'empty' ? `${prop?.label ?? key}: empty for ${page}` : null;
+    return resolve(stored, prop ? propKind(prop) : 'text', app.view!.lookup).status === 'empty' ? `${prop?.label ?? key}: empty for ${page}` : null;
   };
   const verdicts = stageVerdicts(report, `${server.preview?.url}#primary`, `${server.preview?.url}#webpage`);
+  // A kind chosen but left out until it has what it needs: the sentence,
+  // which reads the page as it ships, says so.
+  const withheld = report?.withheld && report.type === id ? [...report.withheld.missing, ...report.withheld.dropped] : [];
+  const notYet = notYetText(server.registry, rules, id, withheld);
 
   // A fix that took its own button away (Choose, once the image is there):
   // focus goes to its feature line, not to the document.
@@ -599,7 +1272,7 @@ function Stage(props: { onReveal(key: string): void }) {
   const shownField = match?.jump?.field ?? '';
   const showName = match?.id.startsWith('hand-') || shownField === 'schema.custom'
     ? 'Show in your own JSON-LD'
-    : `Show ${type.props?.find((one) => `schema.props.${one.key}` === shownField)?.label ?? 'the field'}`;
+    : `Show ${type.props?.find((one) => `schema.props.${one.key}` === shownField)?.label ?? type.groups?.[shownField.slice('schema.props.'.length)]?.label ?? 'the field'}`;
 
   return (
     <section className="seo-stage seo-schema-stage" aria-labelledby="seo-understood" aria-busy={catchingUp(state) || undefined}>
@@ -637,6 +1310,7 @@ function Stage(props: { onReveal(key: string): void }) {
                 const previous = all[at - 1];
                 return <span key={at}>{typeof previous !== 'string' && previous ? part.replace(/^[.,;:!?]/, '') : part}</span>;
               })}
+              {notYet && <span className="seo-muted"> {notYet}</span>}
             </p>
           ) : (
             <dl className="seo-readback-list">
@@ -684,7 +1358,7 @@ function Stage(props: { onReveal(key: string): void }) {
           const label = featureLabel(rules, verdict.feature);
           const words = verdictText(server, verdict, emptyFor);
           const action = fix(verdict);
-          const quiet = ['not_fit', 'not_here', 'retired', 'none'].includes(verdict.verdict);
+          const quiet = QUIET.includes(verdict.verdict);
           return (
             <li key={`${verdict.feature}|${verdict.node}`} className="seo-feature" data-line={`${verdict.feature}|${verdict.node}`} data-verdict={verdict.verdict} data-quiet={quiet || undefined}>
               {verdict.feature === null ? (
@@ -760,6 +1434,21 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
   // A withheld main node is judged all the same: its proof reads its values.
   const { node, index } = judged(graph, verdict.node, main, server.resolved?.schema.withheld?.node);
   const isMain = verdict.node === main;
+  // A part of a group left out until it is complete: it is set, and held
+  // back. "Mannerheimintie 13e · left out until the address is complete".
+  const report = server.resolved?.schema;
+  const held = (path: string): string | null => {
+    const found = isMain && report?.judged ? valueAt(report.judged, path, index) : undefined;
+    if (found === undefined || found === null || typeof found === 'object') {
+      return null;
+    }
+    const key = rules.props[path] ?? path.replace(/\./g, '_');
+    const prop = type.props?.find((one) => one.key === key);
+    const owner = prop?.part ?? prop?.group ?? '';
+    const what = type.groups?.[owner]?.shape === 'address' ? 'address' : (type.groups?.[owner]?.label ?? 'group').toLowerCase();
+    const shown = prop?.kind === 'enum' ? optionText(prop, String(found)) : String(found);
+    return `${shown} · left out until the ${what} is complete`;
+  };
   const [open, setOpen] = useState(false);
   // Changed from here: focus goes to the kind, not back to a line that goes.
   const moved = useRef(false);
@@ -786,8 +1475,6 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
       openSheet({ kind: 'custom' });
     }
   };
-  // The facts it asks for: the first path of each entry.
-  const asked = [...(feature.required ?? []), ...(feature.complete ?? [])].map((entry) => (Array.isArray(entry) ? entry[0] : entry).split('|')[0]);
   const not = verdict.verdict === 'not_fit' ? feature.not_for?.find((one) => one.id === verdict.reason) : undefined;
   // "Bought on this page", as it was answered.
   const soldHere = type.props?.find((one) => one.key === 'sold_here');
@@ -811,8 +1498,14 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
     if (path.endsWith('priceCurrency') && typeof found === 'string') {
       return currencyName(found, server.ui);
     }
-    // An image by the name it has in the media library, as its field shows it.
     const prop = isMain ? type.props?.find((one) => one.key === (rules.props[path] ?? path.replace(/\./g, '_'))) : undefined;
+    // A detail that decides and is never emitted reads as it was answered
+    // ("On site or remote"), not as the code it gave.
+    const answer = prop?.emit === false && gates && !Array.isArray(gates) ? gates[prop.key] : undefined;
+    if (prop && answer) {
+      return optionText(prop, answer);
+    }
+    // An image by the name it has in the media library, as its field shows it.
     if (prop?.kind === 'image') {
       const own = resolve(state.edits.target.schema?.props?.[prop.key] ?? prop.default, 'image', app.view!.lookup);
       if (own.image?.name) {
@@ -823,6 +1516,10 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
       const named = (found as Record<string, unknown>).name;
       return typeof named === 'string' ? named : 'Set';
     }
+    // Formatted text by its words: a job description.
+    if (prop?.html && typeof found === 'string') {
+      return plainText(found);
+    }
     if (prop?.kind === 'date' && typeof found === 'string') {
       return dateWords(found, server.ui) ?? found;
     }
@@ -831,6 +1528,12 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
     }
     return String(found).replace(/^https:\/\/schema\.org\//, '');
   };
+  // The facts it asks for: of each entry, the one it misses, else the one
+  // set, else the first ("Where the work is" while it is not answered).
+  const asked = [...(feature.required ?? []), ...(feature.complete ?? [])].map((entry) => {
+    const paths = (Array.isArray(entry) ? entry : [entry]).map((one) => one.split('|')[0]);
+    return paths.find((path) => missing.has(path)) ?? paths.find((path) => value(path) !== null || held(path) !== null) ?? paths[0];
+  });
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger>
@@ -886,7 +1589,7 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
                 <dl className="seo-proof-facts">
                   {asked.map((path) => {
                     const fact = (verdict.missing ?? []).find((one) => one.path === path);
-                    const shown = missing.has(path) ? null : value(path);
+                    const shown = missing.has(path) ? null : (value(path) ?? held(path));
                     return (
                       <div key={path}>
                         <dt>{label(path, fact?.prop)}</dt>
@@ -968,7 +1671,7 @@ function ChangeToService(props: { onDone?(): void }) {
       disabled={state.readonly !== 'no'}
       onClick={() => {
         props.onDone?.();
-        dispatch({ type: 'apply', scope: 'target', values: withKind(server, state.edits.target, 'Service'), undo: 'Changed to plans for a service' });
+        dispatch({ type: 'apply', scope: 'target', values: withKind(server, state.edits.target, 'Service', state.errors.target), undo: 'Changed to plans for a service' });
         // The button goes with the hint: focus stays on the kind, which now reads it.
         requestAnimationFrame(() => document.querySelector<HTMLElement>('.seo-kind-trigger')?.focus());
       }}
@@ -1077,7 +1780,7 @@ export function KindSheet(props: { onDone(): void; onClose(): void }) {
     dispatch({
       type: 'apply',
       scope: 'target',
-      values: withKind(server, state.edits.target, to),
+      values: withKind(server, state.edits.target, to, state.errors.target),
       undo: `Changed to ${name(to)}`,
     });
     props.onDone();
@@ -1114,7 +1817,7 @@ export function KindSheet(props: { onDone(): void; onClose(): void }) {
       <fieldset className="seo-kinds" disabled={locked} ref={group}>
         {/* The sheet's title says it: the group's name is for assistive technology. */}
         <legend className="seo-visually-hidden">What is this page?</legend>
-        {kinds(registry).map((kind) => {
+        {kinds(registry, server.target!.scope).map((kind) => {
           const entry = registry[kind].kind!;
           return (
             <label key={kind} className="seo-kind">
@@ -1142,7 +1845,7 @@ export function KindSheet(props: { onDone(): void; onClose(): void }) {
           );
         })}
       </fieldset>
-      <p className="seo-sheet-intro">FAQ, how-to and other results search engines no longer show are not offered.</p>
+      <p className="seo-sheet-intro">Results that search engines no longer show, such as FAQ and how-to, aren't offered.</p>
       {/* While a change waits, its confirm is the next stop after the list. */}
       {!to && (
         <p className="seo-sheet-intro">
@@ -1173,7 +1876,7 @@ function VariantField(props: { kind: string }) {
         <Select.Root
           value={id}
           disabled={field.disabled}
-          onValueChange={(to) => dispatch({ type: 'apply', scope: 'target', values: withKind(server, state.edits.target, to), undo: `Changed to ${registry[to].label}` })}
+          onValueChange={(to) => dispatch({ type: 'apply', scope: 'target', values: withKind(server, state.edits.target, to, state.errors.target), undo: `Changed to ${registry[to].label}` })}
         >
           <Select.Trigger id={field.id} className="seo-select-box" aria-labelledby={field.labelId} aria-describedby={field.describedBy} />
           <Select.Content position="popper" className="seo-select-content seo-select-fit">
@@ -1212,7 +1915,7 @@ export function SchemaTab() {
   const target = server.target!;
   const stored = state.edits.target.schema ?? {};
   const { id, type, unknown } = useType();
-  const props = type.props ?? [];
+  const props = useShown(id, type);
   const [revealed, setRevealed] = useState<string | null>(null);
   const [moved, dismissMoved] = useMovedNotice(target.auto_save_key, !!stored.custom);
   // A field opened in place belongs to the kind it was opened for.
@@ -1221,12 +1924,46 @@ export function SchemaTab() {
   // decides nothing: it waits in More details.
   const billing = app.view!.effective.schema?.props?.billing;
   const recurring = id === 'Product' && !!billing && 'text' in billing && billing.text !== 'once';
+  // The first four the scope offers: a recipe's ingredients and steps on a
+  // content type, its times and image on a page.
+  const offeredFirst = (type.main ?? []).filter((key) => props.some((prop) => prop.key === key || prop.group === key)).slice(0, 4);
   const first = [
-    ...(revealed && !type.main?.includes(revealed) ? [revealed] : []),
-    ...(type.main ?? []).filter((key) => !(recurring && key === 'sold_here' && revealed !== key)),
+    ...(revealed && !offeredFirst.includes(revealed) ? [revealed] : []),
+    ...offeredFirst.filter((key) => !(recurring && key === 'sold_here' && revealed !== key)),
   ];
-  const main = first.flatMap((key) => props.filter((prop) => prop.key === key));
-  const more = props.filter((prop) => !first.includes(prop.key));
+  // A detail shown under another ("Open to people in" under "Where the
+  // work is") goes where that one goes.
+  const inFirst = (prop: SchemaProp): boolean =>
+    first.includes(prop.key) || (!!prop.group && first.includes(prop.group)) || (!!prop.under && first.includes(prop.under));
+  const main = first.flatMap((key) => [
+    ...props.filter((prop) => prop.key === key || (prop.group === key && !props.some((one) => one.key === key))),
+    ...props.filter((prop) => prop.under === key),
+  ]);
+  const more = props.filter((prop) => !inFirst(prop));
+  // More details names groups by their label, once; a default that may need
+  // changing (the organizer is the site) first, with what it is.
+  const report = server.resolved?.schema.type === id ? server.resolved.schema : undefined;
+  // Someone nobody chose: the site by a Canvas page's default, or a name
+  // part's own default (the page's author).
+  const byDefault = (prop: SchemaProp): string | null => {
+    if (report?.defaults?.includes(prop.group ?? prop.key)) {
+      return `${app.view!.lookup.facts.site?.value || server.site.identity.name || 'This site'} (this site)`;
+    }
+    if (!prop.group || type.groups?.[prop.group]?.shape !== 'who' || Object.keys(stored.props ?? {}).some((key) => key === prop.group || key.startsWith(`${prop.group}_`))) {
+      return null;
+    }
+    const part = props.find((one) => one.group === prop.group && one.default && 'fact' in one.default);
+    const found = part ? resolve(part.default, 'text', app.view!.lookup) : null;
+    return found?.status === 'ok' && found.text ? found.text : null;
+  };
+  const named = more
+    .filter((prop, index) => !prop.group || more.findIndex((one) => one.group === prop.group) === index)
+    .sort((a, b) => Number(!!byDefault(b)) - Number(!!byDefault(a)))
+    .map((prop) => {
+      const label = prop.group ? (type.groups?.[prop.group]?.label ?? prop.label) : prop.label;
+      const who = byDefault(prop);
+      return who ? `${label}: ${who}` : label;
+    });
   const kind = kindOfType(server.registry, id);
   const variants = !!server.registry[kind].variants && Object.values(server.registry).some((one) => one.variant_of === kind);
 
@@ -1272,9 +2009,10 @@ export function SchemaTab() {
           <Disclosure
             label="More details"
             summary={
-              more.length > 2
-                ? `${more.slice(0, 2).map((prop, index) => (index ? prop.label.toLowerCase() : prop.label)).join(', ')}, ${more.length - 2} more`
-                : more.map((prop, index) => (index ? prop.label.toLowerCase() : prop.label)).join(', ') || server.registry[kind].variants!
+              // Each detail by its own label, as its field reads.
+              named.length > 2
+                ? `${named.slice(0, 2).join(', ')}, ${named.length - 2} more`
+                : named.join(', ') || server.registry[kind].variants!
             }
             // Open when it holds a value set here, or a problem.
             defaultOpen={more.some((prop) => stored.props?.[prop.key] !== undefined || state.errors.target[`schema.props.${prop.key}`] !== undefined)}

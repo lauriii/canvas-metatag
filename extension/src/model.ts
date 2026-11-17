@@ -4,6 +4,7 @@
 import currencyCodes from '../../data/currencies.json';
 import { ApiError } from './api';
 import type { EditorToken, HostContext } from './host';
+import { durationText, groupLine, hoursLine, parseHours } from './controls';
 import { dateWords } from './readback';
 import {
   type Lookup,
@@ -98,11 +99,24 @@ export function currencyChoices(locale: string, inUse: (string | undefined)[]) {
   return { common, rest: all.filter((one) => !common.includes(one)) };
 }
 
-/** The kinds, in their order. */
-export const kinds = (registry: Registry): string[] =>
+/** The kinds, in their order; on a scope, those it offers. */
+export const kinds = (registry: Registry, scope?: 'page' | 'template'): string[] =>
   Object.keys(registry)
-    .filter((id) => registry[id].kind)
+    .filter((id) => registry[id].kind && !(scope && registry[id].scopes?.[scope]))
     .sort((a, b) => registry[a].kind!.order - registry[b].kind!.order);
+
+/** Whether a type, or one of its details, is offered on a scope. As SchemaGraph::offered(). */
+export function offered(registry: Registry, type: string, key: string | null, scope: 'page' | 'template'): boolean {
+  const entry = registry[type];
+  if (!entry || entry.scopes?.[scope]) {
+    return false;
+  }
+  if (key === null) {
+    return true;
+  }
+  const prop = entry.props?.find((one) => one.key === key);
+  return !!prop && !prop.scopes?.[scope];
+}
 
 /** "Merchant listing", or the feature id when the rules have none. */
 export const featureLabel = (rules: SearchFeatures, feature: string | null) =>
@@ -136,13 +150,53 @@ export function removed(server: StatePayload, values: SeoValues, to: string, loc
   const props = values.schema?.props ?? {};
   // In the order the form shows them: the facts shown first, then the rest.
   const order = [...(from.main ?? []), ...(from.props ?? []).map((prop) => prop.key)];
-  const at = (key: string) => (order.includes(key) ? order.indexOf(key) : order.length);
+  // A part of a group is where its group is.
+  const at = (key: string) => {
+    const found = [key, from.props?.find((one) => one.key === key)?.group].map((one) => (one ? order.indexOf(one) : -1)).filter((index) => index >= 0);
+    return found.length ? Math.min(...found) : order.length;
+  };
   const gone = Object.keys(props)
-    .filter((key) => !next.some((prop) => prop.key === key))
+    // "Someone else" not named yet is said by its name, if any: never as an
+    // empty value of its own.
+    .filter((key) => !next.some((prop) => prop.key === key) && !(props[key] && 'text' in props[key] && props[key].text.trim() === ''))
     .sort((a, b) => at(a) - at(b));
+  // A value as the dialog reads it: a country by its name.
+  const words = (prop: SchemaProp | undefined, value: Value | undefined) => {
+    if (!value || !('text' in value)) {
+      return '';
+    }
+    if (prop?.codes === 'country') {
+      const names = new Intl.DisplayNames([locale], { type: 'region' });
+      return value.text.split(',').map((code) => { try { return names.of(code) ?? code; } catch { return code; } }).join(', ');
+    }
+    // A duration as its box reads it: "1 h 30 min".
+    if (prop?.unit && /^\d+$/.test(value.text)) {
+      return durationText(value.text);
+    }
+    return prop?.kind === 'enum' ? (prop.option_labels?.[value.text] ?? value.text) : value.text;
+  };
+  // A group is said once, as its box reads: "the address (Rantakatu 1, Helsinki, Finland)".
+  const groups = new Set<string>();
   return gone
     .filter((key) => !(key === 'offers_priceCurrency' && gone.includes('offers_price')))
+    .flatMap((key) => {
+      const prop = from.props?.find((one) => one.key === key);
+      const top = prop?.group;
+      const group = top ? from.groups?.[top] : undefined;
+      if (top && group && group.shape !== 'who') {
+        if (groups.has(top)) {
+          return [];
+        }
+        groups.add(top);
+        const line = groupLine(top, group, (part) => words(from.props?.find((one) => one.key === part), props[part]), locale);
+        return [`the ${(group.label ?? group.shape).toLowerCase()}${line ? ` (${line})` : ''}`];
+      }
+      return [key];
+    })
     .map((key) => {
+      if (key.startsWith('the ')) {
+        return key;
+      }
       const prop = from.props?.find((one) => one.key === key);
       const value = props[key];
       // A question is named by what it asks; a detail by its name.
@@ -155,12 +209,18 @@ export function removed(server: StatePayload, values: SeoValues, to: string, loc
         // A draft that is not a number yet is said as typed.
         key === 'offers_price' && currency && 'text' in currency && value.text.trim() !== '' && Number.isFinite(Number(value.text))
           ? new Intl.NumberFormat(locale, { style: 'currency', currency: currency.text, minimumFractionDigits: 0 }).format(Number(value.text))
-          : prop?.kind === 'enum'
-            ? (prop.option_labels?.[value.text] ?? value.text)
+          : prop?.kind === 'enum' || prop?.unit
+            ? words(prop, value)
             : prop?.kind === 'date'
               ? (dateWords(value.text, locale) ?? value.text)
-              : value.text;
-      return `${label} (${shown})`;
+              : prop?.kind === 'hours'
+                ? (() => {
+                    const week = parseHours(value.text);
+                    return week ? hoursLine(week) : value.text;
+                  })()
+                : value.text;
+      // Never parentheses in parentheses: "(a venue, not a business)".
+      return `${label} (${shown.replace(/\s*\(([^()]*)\)/g, ', $1')})`;
     });
 }
 
@@ -190,7 +250,7 @@ const NOUNS: Record<string, string> = {
 };
 
 /** The values with another kind: the details the new one has are kept. */
-export function withKind(server: StatePayload, values: SeoValues, to: string): SeoValues {
+export function withKind(server: StatePayload, values: SeoValues, to: string, errors: Record<string, string> = {}): SeoValues {
   const next = typeOf(server.registry, to).props ?? [];
   const schema = values.schema ?? {};
   return {
@@ -198,7 +258,8 @@ export function withKind(server: StatePayload, values: SeoValues, to: string): S
     schema: {
       ...schema,
       type: to,
-      props: Object.fromEntries(Object.entries(schema.props ?? {}).filter(([key]) => next.some((prop) => prop.key === key))),
+      // A value the server refused is not carried into the new kind.
+      props: Object.fromEntries(Object.entries(schema.props ?? {}).filter(([key]) => next.some((prop) => prop.key === key) && errors[`schema.props.${key}`] === undefined)),
     },
   };
 }
@@ -297,8 +358,9 @@ export function setPath<T>(values: T, path: string, value: unknown): T {
 }
 
 function pruned(value: unknown, key?: string): unknown {
-  // "No ending" is the one empty value that is stored.
-  if (key === 'title_end' && isObj(value) && value.text === '' && Object.keys(value).length === 1) {
+  // The empty values that are stored: "No ending", and "Someone else" not
+  // named yet (an organizer or author on a Canvas page; Values::canon()).
+  if ((key === 'title_end' || key === 'organizer' || key === 'author') && isObj(value) && value.text === '' && Object.keys(value).length === 1) {
     return value;
   }
   if (Array.isArray(value)) {
@@ -2046,3 +2108,29 @@ export function siteTexts(state: State, shown: View): Texts {
 }
 
 export { sameValue };
+
+/** The most parts a group shows in place; one with more is a box that opens a sheet. */
+export const IN_PLACE_PARTS = 3;
+
+/**
+ * The sheet a detail's field is in, when it is a part of a group shown as a
+ * box: a jump to it opens that sheet, on the part. A nested group ("the
+ * venue's address") is focused at its first part. Null for a detail shown
+ * in place.
+ */
+export function sheetOf(registry: Registry, typeId: string, key: string, scope: 'page' | 'template'): { group: string; focus?: string } | null {
+  const type = registry[typeId];
+  const prop = type?.props?.find((one) => one.key === key);
+  const nested = type?.groups?.[key];
+  const { parent: owner } = nested ?? {};
+  const group = prop?.group ?? owner ?? (nested ? key : undefined);
+  if (!type || !group || type.groups?.[group]?.shape === 'who') {
+    return null;
+  }
+  const parts = (type.props ?? []).filter((one) => one.group === group && offered(registry, typeId, one.key, scope));
+  if (parts.length <= IN_PLACE_PARTS) {
+    return null;
+  }
+  const focus = prop ? key : nested?.parts.find((part) => parts.some((one) => one.key === part));
+  return { group, ...(focus && focus !== group && { focus }) };
+}

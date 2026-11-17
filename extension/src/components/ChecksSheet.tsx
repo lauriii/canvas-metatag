@@ -79,6 +79,7 @@ export function ChecksSheet() {
       type.props
         ?.find((prop) => prop.key === key)
         ?.label.toLowerCase() ??
+      type.groups?.[key ?? '']?.label?.toLowerCase() ??
       FIELDS.find(([pattern]) => pattern.test(jump.field))?.[1] ??
       'field'
     );

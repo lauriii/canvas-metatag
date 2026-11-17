@@ -59,6 +59,10 @@ final class SearchFeaturesTest extends UnitTestCase {
       'type' => $built['type'],
       'gates' => $built['gates'],
       'extra' => isset($built['withheld']['node']) ? [$built['withheld']['node']] : [],
+      'judged' => $built['judged'],
+      'incomplete' => $built['incomplete'],
+      'items' => $built['items'],
+      'today' => $ctx['today'] ?? '',
     ]);
     $keyed = [];
     foreach ($verdicts as $verdict) {
@@ -342,6 +346,114 @@ final class SearchFeaturesTest extends UnitTestCase {
       'custom' => '[{"@type":"Product","@id":"#p","name":"P","image":"https://example.com/p.jpg","offers":{"@id":"#offer"}},{"@type":"Offer","@id":"#offer","price":"5","priceCurrency":"EUR","seller":{"@id":"https://example.com/#identity"}}]',
     ]);
     self::assertSame('ready', $verdicts['merchant-listing #p']['verdict']);
+  }
+
+  /**
+   * A fact whose value the feature does not accept counts as missing.
+   */
+  public function testUnacceptedValueIsMissing(): void {
+    $job = static fn (string $where): array => self::verdicts([
+      'custom' => (string) json_encode([
+        '@type' => 'JobPosting',
+        '@id' => '#job',
+        'title' => 'Translator',
+        'description' => '<p>Translate concert notes.</p>',
+        'datePosted' => '2026-11-01',
+        'hiringOrganization' => ['@type' => 'Organization', 'name' => 'Example'],
+        'jobLocationType' => $where,
+        'applicantLocationRequirements' => ['@type' => 'Country', 'name' => 'FI'],
+      ]),
+    ])['job-posting #job'];
+    self::assertSame('needs', $job('Remote')['verdict']);
+    self::assertSame([['path' => 'jobLocationType']], $job('Remote')['missing']);
+    self::assertSame('where the work is', SchemaGraph::searchFeatures()['facts']['jobLocationType']['need']);
+    self::assertSame('ready', $job('TELECOMMUTE')['verdict']);
+  }
+
+  /**
+   * Job postings: closed, a repeated title, remote without countries.
+   */
+  public function testJobPosting(): void {
+    $job = static fn (array $more = [], array $ctx = []): array => self::verdicts([
+      'custom' => (string) json_encode($more + [
+        '@type' => 'JobPosting',
+        '@id' => '#job',
+        'title' => 'Senior developer',
+        'description' => '<p>Build editorial tools.</p>',
+        'datePosted' => '2026-11-01',
+        'hiringOrganization' => ['@type' => 'Organization', 'name' => 'Example'],
+        'jobLocation' => [
+          '@type' => 'Place',
+          'address' => ['@type' => 'PostalAddress', 'addressLocality' => 'Tampere', 'addressCountry' => 'FI'],
+        ],
+      ]),
+    ], $ctx + ['today' => '2026-11-13'])['job-posting #job'];
+    self::assertSame('ready', $job()['verdict']);
+    // Closed: still shipped, said in gray with its date.
+    self::assertSame(['verdict' => 'closed', 'date' => '2026-10-31'], $job(['validThrough' => '2026-10-31T23:59:00+02:00']));
+    self::assertSame('ready', $job(['validThrough' => '2026-11-13'])['verdict']);
+    // A description that only repeats the title.
+    $same = $job(['description' => '<p>Senior developer</p>']);
+    self::assertSame('needs', $same['verdict']);
+    self::assertSame('a full job description', SchemaGraph::searchFeatures()['features']['job-posting']['rules'][$same['missing'][0]['rule']]['need']);
+    // Fully remote without the countries people can apply from.
+    $remote = $job(['jobLocation' => NULL, 'jobLocationType' => 'TELECOMMUTE']);
+    self::assertSame([['path' => 'applicantLocationRequirements', 'rule' => 1]], $remote['missing']);
+  }
+
+  /**
+   * Where the work is: the verdict asks for what the answer leaves open.
+   *
+   * On site with no workplace asks for the workplace's address; no answer
+   * asks where the work is.
+   */
+  public function testJobWhereTheWorkIs(): void {
+    $job = static fn (array $props): array => self::verdicts([
+      'type' => 'JobPosting',
+      'props' => $props + [
+        'description' => '<p>Build editorial tools for newsrooms.</p>',
+        'datePosted' => '2026-11-01',
+        'hiringOrganization' => 'Example',
+      ],
+    ], ['scope' => 'template', 'title' => 'Senior developer', 'today' => '2026-11-13'])['job-posting'];
+    self::assertSame([['path' => 'jobLocation.address', 'prop' => 'jobLocation_address']], $job(['work' => 'onsite'])['missing']);
+    self::assertSame([['path' => 'jobLocationType', 'prop' => 'work']], $job([])['missing']);
+    $address = ['jobLocation_address_addressLocality' => 'Tampere', 'jobLocation_address_addressCountry' => 'FI'];
+    self::assertSame('ready', $job(['work' => 'onsite'] + $address)['verdict']);
+    // Work that may be remote also asks where people can apply from, beside
+    // a workplace with its address.
+    $hybrid = $job(['work' => 'both'] + $address);
+    self::assertSame('needs', $hybrid['verdict']);
+    self::assertSame([
+      ['path' => 'applicantLocationRequirements', 'prop' => 'applicantLocationRequirements', 'rule' => 1],
+    ], $hybrid['missing']);
+    self::assertSame('ready', $job(['work' => 'both', 'applicantLocationRequirements' => 'FI,SE'] + $address)['verdict']);
+  }
+
+  /**
+   * Recipes, places, venues and courses.
+   */
+  public function testRecipePlaceAndCourse(): void {
+    self::assertSame('needs', self::verdicts(['type' => 'Recipe', 'props' => []])['recipe']['verdict']);
+    self::assertSame('ready', self::verdicts(['type' => 'Recipe', 'props' => ['image' => 'image']])['recipe']['verdict']);
+    $place = static fn (string $kind): array => self::verdicts([
+      'type' => 'LocalBusiness',
+      'props' => [
+        'placeKind' => $kind,
+        'address_addressLocality' => 'Tampere',
+        'address_addressCountry' => 'FI',
+      ],
+    ]);
+    self::assertSame('ready', $place('Restaurant')['local-business']['verdict']);
+    // An address without its country is no address: the verdict names it.
+    $incomplete = self::verdicts(['type' => 'LocalBusiness', 'props' => ['address_addressLocality' => 'Tampere']]);
+    self::assertSame('needs', $incomplete['local-business']['verdict']);
+    self::assertContains(['path' => 'address.addressCountry', 'prop' => 'address_addressCountry'], $incomplete['local-business']['missing']);
+    // A venue that is not a business earns no search feature.
+    self::assertSame(['' => ['verdict' => 'none']], $place('EventVenue'));
+    // A course alone shows only from a list page.
+    self::assertSame(['verdict' => 'elsewhere'], self::verdicts(['type' => 'Course'])['course-list']);
+    self::assertSame('a list page with at least 3 courses', SchemaGraph::searchFeatures()['features']['course-list']['elsewhere']);
   }
 
 }

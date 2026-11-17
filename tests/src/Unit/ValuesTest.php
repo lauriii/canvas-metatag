@@ -264,14 +264,14 @@ final class ValuesTest extends UnitTestCase {
     // Read mode keeps a type this release no longer has, so it can be said.
     yield 'schema type' => [
       'page',
-      ['schema' => ['type' => 'Recipe']],
+      ['schema' => ['type' => 'Movie']],
       'schema.type',
       'Choose one of the listed page types.',
       TRUE,
     ];
     yield 'schema type that is not a name' => [
       'page',
-      ['schema' => ['type' => 'Recipe<script>']],
+      ['schema' => ['type' => 'Movie<script>']],
       'schema.type',
       'Choose one of the listed page types.',
     ];
@@ -619,9 +619,9 @@ final class ValuesTest extends UnitTestCase {
     }
 
     // A stored type this release no longer has is kept, as a web page.
-    self::assertSame(['schema' => ['type' => 'Recipe']], Values::clean([
+    self::assertSame(['schema' => ['type' => 'Movie']], Values::clean([
       'schema' => [
-        'type' => 'Recipe',
+        'type' => 'Movie',
         'props' => ['name' => self::typed('Soup')],
       ],
     ], 'page', NULL)[0]);
@@ -650,7 +650,7 @@ final class ValuesTest extends UnitTestCase {
     self::assertSame([
       'schema.props.name',
       'schema.props.offers_price',
-    ], array_keys(Values::clean($props, 'page', self::accepts(), 'Recipe')[1]));
+    ], array_keys(Values::clean($props, 'page', self::accepts(), 'Movie')[1]));
   }
 
   /**
@@ -902,6 +902,143 @@ final class ValuesTest extends UnitTestCase {
     self::assertSame('Ask us', Values::fromHtml('<p>Ask us</p><script>alert(1)</script><style>p{color:red}</style>'));
     self::assertSame('One Two & three', Values::fromHtml('<p>One</p><p>Two &amp; <b>three</b></p>'));
     self::assertSame('', Values::fromHtml("\xC3\x28"));
+  }
+
+  /**
+   * Cleans one schema value of a type on a scope, with any source accepted.
+   *
+   * @return array{0: ?array, 1: ?string}
+   *   The clean value, and the error at its path.
+   */
+  private static function one(string $type, string $key, array $value, string $scope = 'page'): array {
+    [$clean, $errors] = Values::clean(['schema' => ['type' => $type, 'props' => [$key => $value]]], $scope, static fn (): bool => TRUE);
+    return [$clean['schema']['props'][$key] ?? NULL, $errors["schema.props.$key"] ?? NULL];
+  }
+
+  /**
+   * A typed value on a list: several codes, or one url, image or reference.
+   */
+  public function testTypedListOnlyOnEnumListAndOneOnUrlImageRef(): void {
+    self::assertSame([['text' => 'FI,SE,EE'], NULL], self::one('JobPosting', 'applicantLocationRequirements', self::typed('FI,SE,EE'), 'template'));
+    self::assertSame('Choose one of the listed options.', self::one('JobPosting', 'applicantLocationRequirements', self::typed('FI,Sweden'), 'template')[1]);
+    self::assertSame([['text' => 'https://social.example.com/ada'], NULL], self::one('ProfilePage', 'sameAs', self::typed('https://social.example.com/ada')));
+    self::assertSame('Enter a full address that starts with https://.', self::one('ProfilePage', 'sameAs', self::typed('https://a.example.com/ https://b.example.com/'))[1]);
+    self::assertSame([['media' => self::UUID], NULL], self::one('Product', 'image', ['media' => self::UUID]));
+    self::assertSame([['fact' => 'identity'], NULL], self::one('Article', 'author', ['fact' => 'identity']));
+  }
+
+  /**
+   * A list of text and a linked-only detail refuse typed text.
+   */
+  public function testTextListAndLinkOnlyRefuseTypedValues(): void {
+    self::assertSame([NULL, 'This comes from a field or a component.'], self::one('Recipe', 'recipeIngredient', self::typed('1 tsp salt'), 'template'));
+    self::assertSame([NULL, 'This comes from a field or a component.'], self::one('JobPosting', 'description', self::typed('<p>Build things.</p>'), 'template'));
+    // Linked, both are kept.
+    self::assertSame([['source' => self::SUMMARY], NULL], self::one('Recipe', 'recipeIngredient', ['source' => self::SUMMARY], 'template'));
+    self::assertSame([['source' => self::SUMMARY], NULL], self::one('JobPosting', 'description', ['source' => self::SUMMARY], 'template'));
+  }
+
+  /**
+   * What a scope does not offer is refused, and says why.
+   */
+  public function testNotOfferedOnScopeRefused(): void {
+    self::assertSame([NULL, 'This comes from a field or a component.'], self::one('Recipe', 'recipeIngredient', self::typed('1 tsp salt')));
+    self::assertSame([NULL, 'This comes from a field or a component.'], self::one('Event', 'performer', ['fact' => 'identity']));
+    [$clean, $errors] = Values::clean(['schema' => ['type' => 'JobPosting']], 'page', self::accepts());
+    self::assertSame([[], ['schema.type' => 'Choose one of the listed page types.']], [$clean, $errors]);
+    self::assertSame([['schema' => ['type' => 'JobPosting']], []], Values::clean(['schema' => ['type' => 'JobPosting']], 'template', self::accepts()));
+    // What each page has of its own is linked on a template, never typed
+    // once for every page.
+    self::assertSame([NULL, 'This comes from a field or a component.'], self::one('JobPosting', 'validThrough', self::typed('2027-01-31'), 'template'));
+    $link = ['source' => ['expression' => 'ℹ︎␜entity:node:job␝field_closes␞␟value', 'sourceType' => 'entity-field']];
+    self::assertSame([$link, NULL], self::one('JobPosting', 'validThrough', $link, 'template'));
+  }
+
+  /**
+   * Someone else, not named yet, is kept on a Canvas page only.
+   *
+   * There it stops the site from being the organizer by default; elsewhere
+   * it is nothing.
+   */
+  public function testSomeoneElseNotNamedYet(): void {
+    self::assertSame([['text' => ''], NULL], self::one('Event', 'organizer', self::typed('')));
+    self::assertSame([NULL, NULL], self::one('Event', 'organizer', self::typed(''), 'template'));
+    self::assertSame([NULL, NULL], self::one('Event', 'organizer_name', self::typed('')));
+  }
+
+  /**
+   * The publisher only where it may be one; a page pick not yet.
+   *
+   * Nothing in the dialog picks a page until the page picker ships
+   * (link-groups-and-pick-pages): a `{node}` value is refused.
+   */
+  public function testIdentityFactOnlyOnRefAndNoPagePickYet(): void {
+    self::assertSame('Choose a value from the list.', self::one('Event', 'name', ['fact' => 'identity'], 'template')[1]);
+    self::assertSame('Choose a value from the list.', self::one('Event', 'location', ['fact' => 'identity'])[1]);
+    self::assertSame([['fact' => 'identity'], NULL], self::one('Event', 'organizer', ['fact' => 'identity']));
+    self::assertSame([NULL, 'This value is not valid.'], self::one('Event', 'location', ['node' => self::UUID]));
+  }
+
+  /**
+   * Opening hours are one valid week.
+   */
+  public function testHoursLiteralValidation(): void {
+    self::assertSame([['text' => 'Mo-Fr 09:00-17:00; 2026-12-24 closed'], NULL], self::one('LocalBusiness', 'openingHoursSpecification', self::typed('Mo-Fr 09:00-17:00; 2026-12-24 closed')));
+    foreach (['Mo 09:00-13:00,12:00-17:00', 'Monday 9-5', 'Mo 17:00-09:00'] as $refused) {
+      self::assertSame([NULL, 'Check the opening hours: times are in order and do not overlap.'], self::one('LocalBusiness', 'openingHoursSpecification', self::typed($refused)), $refused);
+    }
+  }
+
+  /**
+   * A duration is a whole number of its unit, never zero.
+   */
+  public function testDurationIntegerRange(): void {
+    self::assertSame([['text' => '90'], NULL], self::one('Recipe', 'prepTime', self::typed('90')));
+    foreach (['0', '1.5', '-5', 'an hour'] as $refused) {
+      self::assertSame([NULL, 'Enter a whole number, or leave it empty if you do not know it.'], self::one('Recipe', 'prepTime', self::typed($refused)), $refused);
+    }
+    // One limit everywhere: 30 days, as the graph emits and the dialog
+    // allows (controls.ts durationValue()).
+    self::assertSame([['text' => '43200'], NULL], self::one('Recipe', 'prepTime', self::typed('43200')));
+    foreach (['43201', '50000', '100000'] as $refused) {
+      self::assertSame([NULL, 'Use at most 30 days.'], self::one('Recipe', 'prepTime', self::typed($refused)), $refused);
+    }
+  }
+
+  /**
+   * A country stored as text before countries were codes is kept when read.
+   *
+   * The graph then reports it as dropped, and the dialog shows it, instead
+   * of losing it without a word; a save asks for a code.
+   */
+  public function testCountryTextKeptWhenRead(): void {
+    $props = ['location_address_addressCountry' => ['text' => 'Finland']];
+    // Read mode: no field checker.
+    [$read] = Values::clean(['schema' => ['type' => 'Event', 'props' => $props]], 'page', NULL);
+    self::assertSame(['text' => 'Finland'], $read['schema']['props']['location_address_addressCountry']);
+    self::assertSame([NULL, 'Choose one of the listed options.'], self::one('Event', 'location_address_addressCountry', self::typed('Finland')));
+  }
+
+  /**
+   * A unit is kept beside a linked duration's field, and nowhere else.
+   */
+  public function testDurationUnitBesideSourceOnly(): void {
+    self::assertSame([['source' => self::SUMMARY, 'unit' => 'hour'], NULL], self::one('Recipe', 'cookTime', [
+      'source' => self::SUMMARY,
+      'unit' => 'hour',
+    ], 'template'));
+    self::assertSame([NULL, 'This value is not valid.'], self::one('Recipe', 'cookTime', [
+      'text' => '20',
+      'unit' => 'hour',
+    ], 'template'));
+    self::assertSame([NULL, 'This value is not valid.'], self::one('Recipe', 'cookTime', [
+      'source' => self::SUMMARY,
+      'unit' => 'day',
+    ], 'template'));
+    self::assertSame([NULL, 'This value is not valid.'], self::one('Recipe', 'recipeYield', [
+      'source' => self::SUMMARY,
+      'unit' => 'hour',
+    ], 'template'));
   }
 
 }

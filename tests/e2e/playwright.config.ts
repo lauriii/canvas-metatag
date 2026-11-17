@@ -14,6 +14,9 @@ import { defineConfig, devices } from '@playwright/test';
  * fixture). `host-contract` is the coupled seed too: it is a project
  * of its own only so that it runs first, and so that a Canvas change which
  * breaks the editor integration fails once, loudly, instead of in every spec.
+ * `schema-kinds` is the coupled seed: the newer kinds' sheets and controls.
+ * `schema-templates` is the complex seed plus courses and a page that lists
+ * them: recipes, job postings and the list page, set up on content types.
  * Use `--no-deps` to run one project without it.
  */
 const use = {
@@ -49,5 +52,12 @@ export default defineConfig({
     { name: 'headless', testMatch: 'headless.spec.ts', dependencies: ['host-contract'], use },
     { name: 'ai', testMatch: 'ai.spec.ts', dependencies: ['host-contract'], use },
     { name: 'complex', testMatch: 'template-complex.spec.ts', dependencies: ['host-contract'], use },
+    { name: 'schema-kinds', testMatch: 'schema-kinds.spec.ts', dependencies: ['host-contract'], use },
+    {
+      name: 'schema-templates',
+      testMatch: ['schema-recipe.spec.ts', 'schema-job.spec.ts', 'schema-list-page.spec.ts'],
+      dependencies: ['host-contract'],
+      use,
+    },
   ],
 });

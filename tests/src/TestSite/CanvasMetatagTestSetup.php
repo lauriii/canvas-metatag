@@ -54,6 +54,8 @@ if (!\class_exists(TestSetupInterface::class)) {
  *   edits the search result prompt and adds a site guardrail (configureAi()).
  * - CANVAS_METATAG_E2E_COMPLEX=1 adds the complex content fixture after the
  *   base site: its nodes are 4 to 24, in the order of COMPLEX_NODES.
+ * - CANVAS_METATAG_E2E_COURSES=1, with the complex fixture, adds courses and
+ *   a page that lists them (installCourses()): nodes 25 to 30.
  *
  * The values here are repeated in tests/e2e/constants.ts. Entities are created
  * in a fixed order, so their ids are stable: pages 1 to 5, nodes 1 to 3.
@@ -131,6 +133,9 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     'article_mixed' => 24,
   ];
 
+  // The course list of the schema-templates project.
+  public const int COURSE_LIST_NODE = 30;
+
   // The Article template's stored description in the complex project: a
   // link to a field that no longer exists.
   public const string GONE_FIELD = 'field_gone';
@@ -174,6 +179,9 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     }
     if ($complex) {
       $this->installComplexContent();
+      if (\getenv('CANVAS_METATAG_E2E_COURSES') === '1') {
+        $this->installCourses();
+      }
     }
     if ($ai) {
       $this->configureAi();
@@ -442,9 +450,9 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     // Described with a type this release no longer has. Changed long ago, so
     // it is never the page the dialog opens without one.
     Page::create([
-      'title' => 'Rye bread',
-      'path' => ['alias' => '/rye-bread'],
-      'canvas_metatag' => \json_encode(['schema' => ['type' => 'Recipe']], JSON_THROW_ON_ERROR),
+      'title' => 'Night at the cinema',
+      'path' => ['alias' => '/night-at-the-cinema'],
+      'canvas_metatag' => \json_encode(['schema' => ['type' => 'Movie']], JSON_THROW_ON_ERROR),
       'status' => 1,
       'changed' => 946684800,
     ])->save();
@@ -552,6 +560,82 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
         ],
       ],
     ])->save();
+  }
+
+  /**
+   * Adds five courses, four with a summary, and a page that lists them.
+   *
+   * Every Course is described as a course; Every Course list as a list page
+   * whose pages it lists come from its Courses field.
+   */
+  private function installCourses(): void {
+    foreach (['course' => 'Course', 'course_list' => 'Course list'] as $bundle => $label) {
+      NodeType::create(['type' => $bundle, 'name' => $label])->save();
+    }
+    FieldConfig::create(['field_name' => 'body', 'entity_type' => 'node', 'bundle' => 'course', 'label' => 'Summary'])->save();
+    FieldStorageConfig::create([
+      'field_name' => 'field_courses',
+      'entity_type' => 'node',
+      'type' => 'entity_reference',
+      'settings' => ['target_type' => 'node'],
+      'cardinality' => -1,
+    ])->save();
+    FieldConfig::create([
+      'field_name' => 'field_courses',
+      'entity_type' => 'node',
+      'bundle' => 'course_list',
+      'label' => 'Courses',
+      'settings' => ['handler' => 'default:node', 'handler_settings' => ['target_bundles' => ['course' => 'course']]],
+    ])->save();
+    $display = \Drupal::service('entity_display.repository');
+    $display->getFormDisplay('node', 'course')->setComponent('body')->save();
+    $display->getFormDisplay('node', 'course_list')->setComponent('field_courses')->save();
+    $ids = [];
+    foreach ([
+      'Drupal basics' => 'Build your first site in a day.',
+      'Site building' => 'Content types, fields and views.',
+      'Theming' => '',
+      'Accessibility' => 'Pages that work for everyone.',
+      'Content modelling' => 'Fields that fit what you publish.',
+    ] as $title => $summary) {
+      $node = Node::create([
+        'type' => 'course',
+        'title' => $title,
+        'status' => 1,
+        'body' => $summary === '' ? [] : ['value' => "<p>$summary</p>", 'format' => 'plain_text'],
+      ]);
+      $node->save();
+      $ids[] = (int) $node->id();
+    }
+    $list = Node::create(['type' => 'course_list', 'title' => 'All courses', 'status' => 1, 'field_courses' => $ids]);
+    $list->save();
+    if ((int) $list->id() !== self::COURSE_LIST_NODE) {
+      throw new \RuntimeException("The course list is node {$list->id()}, not " . self::COURSE_LIST_NODE . '.');
+    }
+    $templates = [
+      'course' => ['type' => 'Course'],
+      'course_list' => [
+        'type' => 'CollectionPage',
+        'props' => [
+          'items' => [
+            'source' => [
+              'sourceType' => 'entity-field',
+              'expression' => 'ℹ︎␜entity:node:course_list␝field_courses␞␟entity␜␜entity:node␝title␞␟value',
+            ],
+          ],
+        ],
+      ],
+    ];
+    foreach ($templates as $bundle => $schema) {
+      ContentTemplate::create([
+        'content_entity_type_id' => 'node',
+        'content_entity_type_bundle' => $bundle,
+        'content_entity_type_view_mode' => 'full',
+        'component_tree' => [],
+        'status' => TRUE,
+        'third_party_settings' => ['canvas_metatag' => ['values' => ['schema' => $schema]]],
+      ])->save();
+    }
   }
 
   /**

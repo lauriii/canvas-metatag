@@ -1,0 +1,190 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/membership",
+        "langcode": "en",
+        "title": "Studio membership",
+        "description": "Unlimited studio time.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "template",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "Service",
+        "props": {
+            "offers_price": {
+                "text": "25"
+            },
+            "billing": {
+                "text": "P1M"
+            }
+        }
+    },
+    "facts": {
+        "title": "Studio membership",
+        "description": "Unlimited studio time.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/membership"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": [],
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "description": "default",
+            "offers_price": "set",
+            "offers_priceCurrency": "site",
+            "billing": "set"
+        },
+        "gates": {
+            "billing": "P1M"
+        },
+        "type": "Service",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/membership#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/membership#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/membership#primary",
+                "type": "Service",
+                "origin": "main",
+                "at": 4
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [],
+        "refs_inline": [],
+        "defaults": [],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "https://www.example.com/membership#webpage",
+                "url": "https://www.example.com/membership",
+                "name": "Studio membership",
+                "description": "Unlimited studio time.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/membership#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/membership#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/membership#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            },
+            {
+                "@type": "Service",
+                "@id": "https://www.example.com/membership#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/membership#webpage"
+                },
+                "provider": {
+                    "@id": "https://www.example.com/#identity"
+                },
+                "name": "Studio membership",
+                "description": "Unlimited studio time.",
+                "offers": {
+                    "@type": "Offer",
+                    "price": "25",
+                    "priceCurrency": "EUR",
+                    "priceSpecification": {
+                        "@type": "UnitPriceSpecification",
+                        "price": "25",
+                        "priceCurrency": "EUR",
+                        "billingDuration": "P1M",
+                        "unitCode": "MON"
+                    }
+                }
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": null,
+            "node": null,
+            "verdict": "none"
+        }
+    ]
+}

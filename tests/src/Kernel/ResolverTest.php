@@ -195,6 +195,8 @@ final class ResolverTest extends CanvasKernelTestBase {
       'published' => ['label' => 'First published', 'kind' => 'date', 'value' => self::PUBLISHED],
       'modified' => ['label' => 'Last updated', 'kind' => 'date', 'value' => self::MODIFIED],
       'image' => ['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
+      // The publisher, for references, by its name.
+      'identity' => ['label' => 'This site', 'kind' => 'ref', 'value' => 'Example'],
     ], $resolver->facts($page, $cacheability));
     self::assertSame('|', $resolver->separator(new CacheableMetadata()));
     // The author's name is public although profiles are not: anonymous
@@ -393,6 +395,15 @@ final class ResolverTest extends CanvasKernelTestBase {
       'ok',
       'http://localhost/fr/node/' . $node->id(),
     ], $resolver->link($this->linkTo('More', 'address')['source'], $french, 'address', new CacheableMetadata()));
+    // A reference names its target in the host's language only when
+    // visitors may see that translation: an unpublished French translation
+    // of a published page is never named, by its title or its address.
+    $nodes->load($writer->id())->getTranslation('fr')->setUnpublished()->save();
+    $this->container->get('entity_type.manager')->getAccessControlHandler('node')->resetCache();
+    $writer = $nodes->loadUnchanged($writer->id());
+    self::assertSame('Ada', $resolver->target($writer, 'en', new CacheableMetadata())['name']);
+    self::assertNull($resolver->target($writer, 'fr', new CacheableMetadata()));
+    self::assertNull($resolver->target($writer->getTranslation('fr'), 'fr', new CacheableMetadata()));
 
     $resolved = $head();
     $meta = self::meta($resolved['head']);
@@ -983,10 +994,15 @@ final class ResolverTest extends CanvasKernelTestBase {
     $default = $this->createImage('Default');
     $this->config('canvas_metatag.site')->set('identity.default_image', $default->uuid())->set('currency', 'EUR')->save();
     $product = ['schema' => ['type' => 'Product', 'props' => ['offers_price' => ['text' => '89']]]];
-    $image = fn (array $values, array $page = []): ?string => self::graph($this->resolver()->resolve($this->createPage($page + [
-      'canvas_metatag' => Values::encode(array_replace_recursive($product, $values)),
-      'path' => ['alias' => '/lamp-' . $this->randomMachineName()],
-    ]))['head'])['primary']['image']['url'] ?? NULL;
+    $image = function (array $values, array $page = []) use ($product): ?string {
+      $graph = self::graph($this->resolver()->resolve($this->createPage($page + [
+        'canvas_metatag' => Values::encode(array_replace_recursive($product, $values)),
+        'path' => ['alias' => '/lamp-' . $this->randomMachineName()],
+      ]))['head']);
+      // The page's own image is referenced by its @id.
+      $own = $graph['primary']['image'] ?? [];
+      return $own['url'] ?? (isset($own['@id']) ? $graph['primaryimage']['url'] : NULL);
+    };
 
     self::assertSame($this->imageOf($hero)['url'], $image([], ['image' => $hero->id()]));
     self::assertSame($this->imageOf($shared)['url'], $image(['social' => ['image' => ['media' => $shared->uuid()]]], ['image' => $hero->id()]));

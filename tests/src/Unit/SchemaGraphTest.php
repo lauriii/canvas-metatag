@@ -123,25 +123,6 @@ final class SchemaGraphTest extends UnitTestCase {
   }
 
   /**
-   * One expected graph per registry family.
-   */
-  #[DataProvider('providerFixtures')]
-  public function testFixture(string $name): void {
-    $fixture = json_decode((string) file_get_contents(dirname(__DIR__, 2) . "/fixtures/graphs/$name.json"), TRUE, 32, JSON_THROW_ON_ERROR);
-    $result = self::build($fixture['schema'], $fixture['facts'], $fixture['images'], $fixture['ctx'], $fixture['links']);
-    self::assertSame($fixture['graph'], $result['graph']);
-    self::assertSame($fixture['report'], array_diff_key($result, ['graph' => TRUE]));
-    self::assertGraphRules($result['graph'], $fixture['ctx']['home'], $fixture['ctx']['url']);
-  }
-
-  /**
-   * Data provider for testFixture().
-   */
-  public static function providerFixtures(): array {
-    return [['WebPage'], ['Article'], ['Event'], ['Product'], ['ProfilePage']];
-  }
-
-  /**
    * The registry is loaded with `extends` resolved.
    */
   public function testTypes(): void {
@@ -159,6 +140,10 @@ final class SchemaGraphTest extends UnitTestCase {
         'Product',
         'Service',
         'ProfilePage',
+        'JobPosting',
+        'LocalBusiness',
+        'Recipe',
+        'Course',
       ],
       array_keys($types),
     );
@@ -179,7 +164,17 @@ final class SchemaGraphTest extends UnitTestCase {
     foreach ($types as $id => $type) {
       foreach ($type['props'] ?? [] as $prop) {
         self::assertMatchesRegularExpression('/^[A-Za-z]+(_[A-Za-z]+)*$/', $prop['key']);
-        self::assertContains($prop['kind'], ['text', 'url', 'date', 'number', 'enum', 'currency', 'image']);
+        self::assertContains($prop['kind'], [
+          'text',
+          'url',
+          'date',
+          'number',
+          'enum',
+          'currency',
+          'image',
+          'ref',
+          'hours',
+        ]);
         $path = ($prop['emit'] ?? TRUE) ? explode('_', $prop['key']) : [];
         array_pop($path);
         while ($path) {
@@ -193,15 +188,26 @@ final class SchemaGraphTest extends UnitTestCase {
     self::assertSame('BlogPosting', $result['graph']['@graph'][3]['@type']);
     self::assertSame('WebPage', $result['graph']['@graph'][2]['@type']);
     // An unknown or absent type is a plain web page.
-    foreach ([[], ['type' => 'Recipe']] as $schema) {
+    foreach ([[], ['type' => 'Movie']] as $schema) {
       $result = self::build($schema);
       self::assertSame(['Organization', 'WebSite', 'WebPage'], array_column($result['graph']['@graph'], '@type'));
       self::assertNull($result['withheld']);
     }
-    // The six kinds, each a type the editor can choose, in their order.
+    // The kinds, each a type the editor can choose, in their order.
     $kinds = array_filter($types, static fn (array $type): bool => isset($type['kind']));
     uasort($kinds, static fn (array $a, array $b): int => $a['kind']['order'] <=> $b['kind']['order']);
-    self::assertSame(['Product', 'Service', 'Article', 'Event', 'ProfilePage', 'WebPage'], array_keys($kinds));
+    self::assertSame([
+      'Product',
+      'Service',
+      'Article',
+      'Event',
+      'ProfilePage',
+      'JobPosting',
+      'LocalBusiness',
+      'Recipe',
+      'Course',
+      'WebPage',
+    ], array_keys($kinds));
     foreach ($types as $id => $type) {
       self::assertTrue(isset($type['kind']) xor isset($type['variant_of']), "$id is a kind or a variant of one");
     }
@@ -308,6 +314,7 @@ final class SchemaGraphTest extends UnitTestCase {
       'props' => $props + [
         'startDate' => self::typed('2026-07-01'),
         'location_address_streetAddress' => self::typed('1 Example Street'),
+        'location_address_addressCountry' => self::typed('FI'),
       ],
     ], ['title' => 'Launch'])['graph']['@graph'][3];
     self::assertSame(['@id' => self::HOME . '#identity'], $event([])['organizer']);
@@ -467,7 +474,7 @@ final class SchemaGraphTest extends UnitTestCase {
       'type' => 'Event',
       'props' => ['startDate' => self::link('field_when'), 'location_name' => self::typed('Example Hall')],
     ], ['title' => 'Launch'], [], ['description' => ''], ['ℹ︎␜entity:node:page␝field_when␞␟value' => '']);
-    self::assertSame(['startDate', 'location_address_streetAddress'], $result['withheld']['missing']);
+    self::assertSame(['startDate'], $result['withheld']['missing']);
     self::assertSame([], $result['withheld']['dropped']);
     // The node as it would have been, for the verdicts.
     self::assertSame(['@type' => 'Place', 'name' => 'Example Hall'], $result['withheld']['node']['location']);
@@ -488,7 +495,10 @@ final class SchemaGraphTest extends UnitTestCase {
     $event = static fn (array $props, string $timezone = 'Europe/Helsinki'): array => self::build(
       [
         'type' => 'Event',
-        'props' => array_map(static fn (string $v): array => Uuid::isValid($v) ? ['media' => $v] : self::typed($v), $props + ['location_address_streetAddress' => '1 Example Street']),
+        'props' => array_map(static fn (string $v): array => Uuid::isValid($v) ? ['media' => $v] : self::typed($v), $props + [
+          'location_address_streetAddress' => '1 Example Street',
+          'location_address_addressCountry' => 'FI',
+        ]),
       ],
       ['title' => 'Launch'],
       [self::UUID => self::IMAGE],
@@ -497,11 +507,12 @@ final class SchemaGraphTest extends UnitTestCase {
 
     // A time without an offset gets the site default timezone's, for that
     // day; a date, and a time that has an offset, are left alone.
-    self::assertSame('2026-01-15T18:00+02:00', $event(['startDate' => '2026-01-15T18:00'])['startDate']);
+    // A time is written with its seconds.
+    self::assertSame('2026-01-15T18:00:00+02:00', $event(['startDate' => '2026-01-15T18:00'])['startDate']);
     self::assertSame('2026-07-01T18:00:30+03:00', $event(['startDate' => '2026-07-01T18:00:30'])['startDate']);
     self::assertSame('2026-07-01T18:00:00-04:00', $event(['startDate' => '2026-07-01T18:00:00'], 'America/New_York')['startDate']);
     self::assertSame('2026-07-01', $event(['startDate' => '2026-07-01'])['startDate']);
-    self::assertSame('2026-07-01T18:00Z', $event(['startDate' => '2026-07-01T18:00Z'])['startDate']);
+    self::assertSame('2026-07-01T18:00:00Z', $event(['startDate' => '2026-07-01T18:00Z'])['startDate']);
     self::assertSame('2026-07-01T18:00:00+05:30', $event(['startDate' => '2026-07-01T18:00:00+05:30'])['startDate']);
 
     $node = $event([
@@ -520,7 +531,7 @@ final class SchemaGraphTest extends UnitTestCase {
     self::assertSame([
       '@type' => 'Place',
       'name' => 'Example Hall',
-      'address' => ['@type' => 'PostalAddress', 'streetAddress' => '1 Example Street'],
+      'address' => ['@type' => 'PostalAddress', 'streetAddress' => '1 Example Street', 'addressCountry' => 'FI'],
     ], $node['location']);
 
     // Site nodes: a person carries the logo as `image`.
@@ -558,6 +569,12 @@ final class SchemaGraphTest extends UnitTestCase {
     $nodes = array_column($graph, NULL, '@id');
     self::assertSame(['@type', '@id', 'url', 'contentUrl'], array_keys($nodes[self::HOME . '#logo']));
     self::assertSame(['@type', '@id', 'url', 'contentUrl', 'caption'], array_keys($nodes[self::URL . '#primaryimage']));
+    // The page's own image is referenced from the main node, not repeated.
+    self::assertSame(['@id' => self::URL . '#primaryimage'], end($graph)['image']);
+    $graph = self::build([
+      'type' => 'Article',
+      'props' => ['image' => ['media' => self::UUID]],
+    ], [], [self::UUID => $unmeasured], ['image' => ['url' => 'https://cms.example.com/other.jpg'] + self::IMAGE])['graph']['@graph'];
     self::assertSame(['@type' => 'ImageObject', 'url' => self::IMAGE['url']], end($graph)['image']);
   }
 
@@ -575,7 +592,7 @@ final class SchemaGraphTest extends UnitTestCase {
   public static function providerLiterals(): \Generator {
     yield 'text' => ['Article', 'headline', 'Anything <b> & {more}', TRUE];
     yield 'unknown key' => ['Article', 'offers_price', '5', FALSE];
-    yield 'unknown type' => ['Recipe', 'name', 'A', FALSE];
+    yield 'unknown type' => ['Movie', 'name', 'A', FALSE];
     yield 'type without props' => ['WebPage', 'headline', 'A', FALSE];
     yield 'inherited prop' => ['NewsArticle', 'headline', 'A', TRUE];
     yield 'url' => ['Article', 'author_url', 'https://example.com/ada', TRUE];
@@ -605,6 +622,18 @@ final class SchemaGraphTest extends UnitTestCase {
     yield 'currency lower case' => ['Product', 'offers_priceCurrency', 'eur', FALSE];
     yield 'currency trailing newline' => ['Product', 'offers_priceCurrency', "EUR\n", FALSE];
     yield 'currency symbol' => ['Product', 'offers_priceCurrency', '€', FALSE];
+    // A telephone number in an international or local form; never words.
+    yield 'telephone' => ['LocalBusiness', 'telephone', '+358 9 123 4567', TRUE];
+    yield 'telephone local' => ['LocalBusiness', 'telephone', '09 123-4567', TRUE];
+    yield 'telephone words' => ['LocalBusiness', 'telephone', 'call us', FALSE];
+    yield 'telephone short' => ['LocalBusiness', 'telephone', '123', FALSE];
+    // Coordinates inside their ranges, each half named.
+    yield 'latitude' => ['LocalBusiness', 'geo_latitude', '60.1699', TRUE];
+    yield 'latitude negative' => ['LocalBusiness', 'geo_latitude', '-33.86', TRUE];
+    yield 'latitude out of range' => ['LocalBusiness', 'geo_latitude', '91', FALSE];
+    yield 'longitude out of range' => ['LocalBusiness', 'geo_longitude', '-180.5', FALSE];
+    yield 'duration at most 30 days' => ['Recipe', 'prepTime', '43200', TRUE];
+    yield 'duration over 30 days' => ['Recipe', 'prepTime', '43201', FALSE];
     yield 'currency not in the list' => ['Product', 'offers_priceCurrency', 'ABC', FALSE];
     yield 'billing' => ['Service', 'billing', 'P1M', TRUE];
     yield 'billing other period' => ['Service', 'billing', 'P1W', FALSE];
@@ -728,6 +757,818 @@ final class SchemaGraphTest extends UnitTestCase {
     // The custom node keeps the text as typed; ours are normalized.
     self::assertSame($hostile, $result['graph']['@graph'][4]['name']);
     self::assertSame(Values::plain($hostile, 2000), $result['graph']['@graph'][3]['headline']);
+  }
+
+  /**
+   * Builds with field links that give lists, as the resolver does.
+   *
+   * @param array $schema
+   *   The `schema` value.
+   * @param array<string, mixed> $links
+   *   Field name => what it gives: a value, or a list of values.
+   * @param array $ctx
+   *   Overrides of the context.
+   */
+  private static function linked(array $schema, array $links = [], array $ctx = []): array {
+    return SchemaGraph::build($ctx + ['facts' => []] + self::CTX, $schema, static function (array $value, string $kind, bool $list = FALSE) use ($links): mixed {
+      $found = match (array_key_first($value)) {
+        'text' => $value['text'],
+        'source' => $links[preg_replace('/^.*␝([a-z_]+)␞.*$/u', '$1', $value['source']['expression'])] ?? NULL,
+        'fact' => ['title' => 'Hello', 'published' => self::CTX['published']][$value['fact']] ?? '',
+        default => NULL,
+      };
+      $many = is_array($found) && array_is_list($found);
+      if ($list) {
+        return $many ? $found : ($found === NULL || $found === '' ? [] : [$found]);
+      }
+      return $many ? $found[0] ?? NULL : $found;
+    });
+  }
+
+  /**
+   * The main node of a build.
+   */
+  private static function main(array $built): array {
+    return array_column($built['graph']['@graph'], NULL, '@id')[self::URL . '#primary'] ?? [];
+  }
+
+  /**
+   * A list property gives every item of its field, in order.
+   */
+  public function testListEmitsEveryItemInOrder(): void {
+    $built = self::linked(['type' => 'Recipe', 'props' => ['recipeIngredient' => self::link('field_ingredients')]], [
+      'field_ingredients' => ['200 g flour', '1 tsp salt', '2 eggs'],
+    ], ['scope' => 'template']);
+    self::assertSame(['200 g flour', '1 tsp salt', '2 eggs'], self::main($built)['recipeIngredient']);
+    // The same field on a property that is not a list gives its first item.
+    $built = self::linked(['type' => 'Recipe', 'props' => ['recipeYield' => self::link('field_ingredients')]], [
+      'field_ingredients' => ['200 g flour', '1 tsp salt'],
+    ], ['scope' => 'template']);
+    self::assertSame('200 g flour', self::main($built)['recipeYield']);
+  }
+
+  /**
+   * Empty items are left out; items over the maximum are dropped and said.
+   */
+  public function testListDropsEmptyAndOverMax(): void {
+    $built = self::linked(['type' => 'ProfilePage', 'props' => ['sameAs' => self::link('field_links')]], [
+      'field_links' => [
+        'https://a.example.com/',
+        '',
+        'not a url',
+        ...array_map(static fn (int $n): string => "https://$n.example.com/", range(1, 10)),
+      ],
+    ], ['scope' => 'template']);
+    self::assertCount(10, self::main($built)['sameAs']);
+    self::assertSame('https://a.example.com/', self::main($built)['sameAs'][0]);
+    self::assertSame([
+      ['key' => 'sameAs', 'count' => 1, 'reason' => 'invalid'],
+      ['key' => 'sameAs', 'count' => 1, 'reason' => 'max'],
+    ], $built['dropped_items']);
+    // Private images are dropped and counted.
+    $image = static fn (string $name): array => [
+      'url' => "https://cms.example.com/$name.jpg",
+      'width' => 800,
+      'height' => 800,
+      'alt' => '',
+    ];
+    $built = self::linked([
+      'type' => 'Product',
+      'props' => ['image' => self::link('field_gallery'), 'offers_price' => self::typed('9')],
+    ], [
+      'field_gallery' => [$image('a'), NULL, $image('b'), NULL, $image('c')],
+    ], ['scope' => 'template']);
+    self::assertCount(3, self::main($built)['image']);
+    self::assertSame([['key' => 'image', 'count' => 2, 'reason' => 'private']], $built['dropped_items']);
+  }
+
+  /**
+   * A list of text keeps its repeats.
+   */
+  public function testTextListsKeepDuplicates(): void {
+    $built = self::linked(['type' => 'Recipe', 'props' => ['recipeIngredient' => self::link('field_ingredients')]], [
+      'field_ingredients' => ['1 tsp salt', '200 g flour', '1 tsp salt'],
+    ], ['scope' => 'template']);
+    self::assertSame(['1 tsp salt', '200 g flour', '1 tsp salt'], self::main($built)['recipeIngredient']);
+  }
+
+  /**
+   * Lists of things that are the same when equal lose their repeats.
+   */
+  public function testIdentityListsDropDuplicates(): void {
+    $ada = [
+      'name' => 'Ada',
+      'url' => 'https://www.example.com/ada',
+      'id' => 'https://www.example.com/ada#primary',
+      'type' => 'Person',
+    ];
+    $bo = [
+      'name' => 'Bo',
+      'url' => 'https://www.example.com/bo',
+      'id' => 'https://www.example.com/bo#primary',
+      'type' => 'Person',
+    ];
+    $built = self::linked(['type' => 'Article', 'props' => ['author' => self::link('field_writers')]], [
+      'field_writers' => [$ada, $bo, $ada],
+    ], ['scope' => 'template']);
+    self::assertSame(['Ada', 'Bo'], array_column(self::main($built)['author'], 'name'));
+    $built = self::linked(['type' => 'ProfilePage', 'props' => ['sameAs' => self::link('field_links')]], [
+      'field_links' => ['https://a.example.com/', 'https://b.example.com/', 'https://a.example.com/'],
+    ], ['scope' => 'template']);
+    self::assertSame(['https://a.example.com/', 'https://b.example.com/'], self::main($built)['sameAs']);
+  }
+
+  /**
+   * A reference is the publisher, a page's main thing, or a name.
+   */
+  public function testRefIdentityAndTargetAndInlineFallback(): void {
+    $event = static fn (array $props, array $links = []): array => self::main(self::linked([
+      'type' => 'Event',
+      'props' => $props + [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Hall'),
+      ],
+    ], $links, ['scope' => 'template']));
+    self::assertSame(['@id' => self::HOME . '#identity'], $event(['organizer' => ['fact' => 'identity']])['organizer']);
+    // A restaurant is a place: the venue points at the page's main node.
+    $restaurant = [
+      'name' => 'Riverside Hall',
+      'url' => self::HOME . 'places/riverside',
+      'id' => self::HOME . 'places/riverside#primary',
+      'type' => 'Restaurant',
+      'address' => ['@type' => 'PostalAddress', 'addressLocality' => 'Helsinki', 'addressCountry' => 'FI'],
+    ];
+    self::assertSame([
+      '@id' => self::HOME . 'places/riverside#primary',
+      '@type' => 'Restaurant',
+      'name' => 'Riverside Hall',
+      'url' => self::HOME . 'places/riverside',
+      'address' => $restaurant['address'],
+    ], $event(['location' => self::link('field_venue')], ['field_venue' => [$restaurant]])['location']);
+    // A page described as something it does not accept is named only.
+    $built = self::linked([
+      'type' => 'Event',
+      'props' => ['startDate' => self::typed('2027-06-19'), 'location' => self::link('field_venue')],
+    ], [
+      'field_venue' => [['type' => 'Article', 'id' => self::HOME . 'news/hall#primary'] + $restaurant],
+    ], ['scope' => 'template']);
+    self::assertSame(['@type' => 'Place', 'name' => 'Riverside Hall'], self::main($built)['location']);
+    self::assertSame([['key' => 'location', 'name' => 'Riverside Hall', 'reason' => 'kind']], $built['refs_inline']);
+    // Someone else, by name.
+    self::assertSame(['@type' => 'Organization', 'name' => 'Example Hall Ltd'], $event(['organizer_name' => self::typed('Example Hall Ltd')])['organizer']);
+  }
+
+  /**
+   * Every @id the module writes is absolute.
+   */
+  public function testAbsoluteIdsOnly(): void {
+    $built = self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location' => self::link('field_venue'),
+        'organizer' => ['fact' => 'identity'],
+      ],
+    ], [
+      'field_venue' => [
+        [
+          'name' => 'Hall',
+          'url' => self::HOME . 'hall',
+          'id' => self::HOME . 'hall#primary',
+          'type' => 'EventVenue',
+        ],
+      ],
+    ], ['scope' => 'template']);
+    array_walk_recursive($built['graph'], static function (mixed $value, int|string $key): void {
+      if ($key === '@id') {
+        self::assertMatchesRegularExpression('~^https://www\.example\.com/~', $value);
+      }
+    });
+  }
+
+  /**
+   * On a Canvas page an organizer nobody set is the publisher, and said.
+   */
+  public function testPageDefaultPublisherReported(): void {
+    $props = ['startDate' => self::typed('2027-06-19'), 'location_name' => self::typed('Hall')];
+    $page = self::linked(['type' => 'Event', 'props' => $props]);
+    self::assertSame(['@id' => self::HOME . '#identity'], self::main($page)['organizer']);
+    self::assertSame(['organizer'], $page['defaults']);
+    // Touched, it is no longer a default.
+    $named = self::linked(['type' => 'Event', 'props' => $props + ['organizer_name' => self::typed('Ada')]]);
+    self::assertSame([], $named['defaults']);
+    // Someone else, not named yet: no organizer, and not the site.
+    $other = self::linked(['type' => 'Event', 'props' => $props + ['organizer' => self::typed('')]]);
+    self::assertArrayNotHasKey('organizer', self::main($other));
+    self::assertSame([], $other['defaults']);
+    // On a template nobody's default is assumed.
+    $template = self::linked(['type' => 'Event', 'props' => $props], [], ['scope' => 'template']);
+    self::assertArrayNotHasKey('organizer', self::main($template));
+    self::assertSame([], $template['defaults']);
+  }
+
+  /**
+   * An enum is a schema.org URL, a bare code or the node's type.
+   */
+  public function testEnumEmitsCodeUrlOrType(): void {
+    $job = self::main(self::linked([
+      'type' => 'JobPosting',
+      'props' => [
+        'description' => self::link('body'),
+        'employmentType' => self::typed('FULL_TIME'),
+        'work' => self::typed('remote'),
+        'hiringOrganization' => ['fact' => 'identity'],
+      ],
+    ], ['body' => '<p>Build things.</p>'], ['scope' => 'template']));
+    self::assertSame('FULL_TIME', $job['employmentType']);
+    // Where the work is: remote, also when it may be on site, is TELECOMMUTE;
+    // on site is said by the workplace alone.
+    self::assertSame('TELECOMMUTE', $job['jobLocationType']);
+    foreach (['both' => 'TELECOMMUTE', 'onsite' => NULL] as $work => $emitted) {
+      self::assertSame($emitted, self::main(self::linked([
+        'type' => 'JobPosting',
+        'props' => [
+          'description' => self::link('body'),
+          'work' => self::typed($work),
+          'hiringOrganization' => ['fact' => 'identity'],
+        ],
+      ], ['body' => '<p>Build things.</p>'], ['scope' => 'template']))['jobLocationType'] ?? NULL);
+    }
+    $place = self::main(self::linked([
+      'type' => 'LocalBusiness',
+      'props' => [
+        'placeKind' => self::typed('Restaurant'),
+        'address_addressLocality' => self::typed('Tampere'),
+        'address_addressCountry' => self::typed('FI'),
+      ],
+    ]));
+    self::assertSame('Restaurant', $place['@type']);
+    self::assertArrayNotHasKey('placeKind', $place);
+    $event = self::main(self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Hall'),
+        'eventStatus' => self::typed('EventScheduled'),
+      ],
+    ]));
+    self::assertSame('https://schema.org/EventScheduled', $event['eventStatus']);
+  }
+
+  /**
+   * A group missing what it requires is left out and said.
+   */
+  public function testGroupIncompleteIsDroppedAndReported(): void {
+    $built = self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Riverside Hall'),
+        'location_address_streetAddress' => self::typed('Mill Road 4'),
+        'location_address_addressLocality' => self::typed('Tampere'),
+      ],
+    ]);
+    self::assertSame(['@type' => 'Place', 'name' => 'Riverside Hall'], self::main($built)['location']);
+    self::assertSame([['group' => 'location_address', 'missing' => ['location_address_addressCountry']]], $built['incomplete']);
+    // The verdicts judge the address as it is: it needs its country.
+    self::assertSame('PostalAddress', $built['judged']['location']['address']['@type']);
+    $verdicts = SchemaGraph::features($built['graph'], [
+      'home' => self::HOME,
+      'url' => self::URL,
+      'type' => 'Event',
+      'judged' => $built['judged'],
+    ]);
+    self::assertSame([['path' => 'location.address.addressCountry', 'prop' => 'location_address_addressCountry']], $verdicts[0]['missing']);
+  }
+
+  /**
+   * A required group left out withholds the main node.
+   */
+  public function testRequiredGroupWithholdsMainNode(): void {
+    $built = self::linked(['type' => 'Event', 'props' => ['startDate' => self::typed('2027-06-19')]]);
+    self::assertSame(['location'], $built['withheld']['missing']);
+    self::assertSame([], self::main($built));
+  }
+
+  /**
+   * A country is its code.
+   */
+  public function testCountryCodeEnumEmitsCode(): void {
+    $event = self::main(self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_address_addressLocality' => self::typed('Tampere'),
+        'location_address_addressCountry' => self::typed('FI'),
+      ],
+    ]));
+    self::assertSame('FI', $event['location']['address']['addressCountry']);
+  }
+
+  /**
+   * A suggested country is never emitted unless it was chosen.
+   */
+  public function testCountrySuggestionNeverEmitted(): void {
+    // The publisher is in Finland; the suggestion is the dialog's alone.
+    $prop = SchemaGraph::prop('Event', 'location_address_addressCountry');
+    self::assertSame('country', $prop['suggest']);
+    $built = self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Hall'),
+        'location_address_addressLocality' => self::typed('Tampere'),
+      ],
+    ], [], ['identity' => ['kind' => 'organization', 'name' => 'Example', 'same_as' => [], 'country' => 'FI']]);
+    self::assertArrayNotHasKey('address', self::main($built)['location']);
+    self::assertStringNotContainsString('"FI"', (string) json_encode($built['graph']));
+  }
+
+  /**
+   * Presale is PreOrder; not on sale yet has only the date it goes on sale.
+   */
+  public function testTicketsPresaleIsPreOrderAndNotOnSaleHasNoAvailability(): void {
+    $offers = static fn (string $availability): array => self::main(self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Hall'),
+        'offers_price' => self::typed('25'),
+        'offers_availability' => self::typed($availability),
+        'offers_validFrom' => self::typed('2027-01-10'),
+      ],
+    ], [], ['currency' => 'EUR']))['offers'];
+    self::assertSame([
+      '@type' => 'Offer',
+      'price' => '25',
+      'priceCurrency' => 'EUR',
+      'availability' => 'https://schema.org/PreOrder',
+      'validFrom' => '2027-01-10',
+    ], $offers('PreOrder'));
+    self::assertSame(['@type' => 'Offer', 'price' => '25', 'priceCurrency' => 'EUR', 'validFrom' => '2027-01-10'], $offers('NotYet'));
+  }
+
+  /**
+   * A property gated by another counts only while its gate holds.
+   */
+  public function testWhenSkipsProp(): void {
+    $place = static fn (string $kind): array => self::main(self::linked([
+      'type' => 'LocalBusiness',
+      'props' => [
+        'placeKind' => self::typed($kind),
+        'address_addressLocality' => self::typed('Tampere'),
+        'address_addressCountry' => self::typed('FI'),
+        'menu' => self::typed('https://www.example.com/menu'),
+      ],
+    ]));
+    self::assertSame('https://www.example.com/menu', $place('Restaurant')['menu']);
+    self::assertArrayNotHasKey('menu', $place('Dentist'));
+    // On sale from is said for presale only.
+    $offers = self::main(self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Hall'),
+        'offers_price' => self::typed('25'),
+        'offers_availability' => self::typed('InStock'),
+        'offers_validFrom' => self::typed('2027-01-10'),
+      ],
+    ]))['offers'];
+    self::assertArrayNotHasKey('validFrom', $offers);
+  }
+
+  /**
+   * Weekly days with the same times share a node; dated entries stay apart.
+   */
+  public function testHoursGroupsWeeklyDaysAndKeepsDatedApart(): void {
+    $fixture = json_decode((string) file_get_contents(dirname(__DIR__, 2) . '/fixtures/hours.json'), TRUE, 16, JSON_THROW_ON_ERROR);
+    foreach ($fixture['valid'] as $case) {
+      self::assertNotNull(SchemaGraph::hours($case['text']), $case['text']);
+      self::assertSame($case['nodes'], SchemaGraph::hoursNodes((array) SchemaGraph::hours($case['text']), $case['today'] ?? ''), $case['text']);
+    }
+    foreach ($fixture['invalid'] as $text) {
+      self::assertNull(SchemaGraph::hours($text), $text);
+    }
+  }
+
+  /**
+   * A job description keeps basic markup and no script or event handler.
+   */
+  public function testJobDescriptionFilteredHtml(): void {
+    self::assertSame(
+      '<p>Hi</p><a>apply</a><ul><li>Design</li></ul>',
+      SchemaGraph::filterHtml('<p onclick="x()">Hi</p><script>alert(1)</script><a href="javascript:alert(1)">apply</a><ul><li>Design</li></ul>'),
+    );
+    self::assertSame(
+      '<p><strong>Build</strong> <em>tools</em><br> <a href="https://www.example.com/jobs">jobs</a> <a>here</a></p>',
+      SchemaGraph::filterHtml('<p style="color:red"><strong>Build</strong> <em>tools</em><br/> <a href="https://www.example.com/jobs" target="_blank">jobs</a> <a href="/relative">here</a></p><style>p{}</style><!-- note -->'),
+    );
+    self::assertSame('Text &lt; more', SchemaGraph::filterHtml('<div>Text < more</div>'));
+    self::assertSame('', SchemaGraph::filterHtml("\xC3\x28"));
+    self::assertSame(20000, mb_strlen(SchemaGraph::filterHtml(str_repeat('a', 25000))));
+    // A tag that is never closed stays text, whatever it holds.
+    self::assertSame('<p>Apply</p>&lt;a href=javascript:alert(1) onclick=alert(1)', SchemaGraph::filterHtml('<p>Apply</p><a href=javascript:alert(1) onclick=alert(1)'));
+    // The cut never leaves half a tag that opens.
+    $cut = SchemaGraph::filterHtml(str_repeat('a', 19990) . ' <a href="https://www.example.com/jobs">jobs</a>');
+    self::assertStringContainsString('&lt;a href=', $cut);
+    self::assertSame(0, preg_match('~<(?!/?(?:p|ul|ol|li|br|strong|em)>|/a>|a>|a href="[^"<>]*">)~', $cut));
+    // A comment inside a tag's name never makes a script of it: its text is
+    // removed with it.
+    self::assertSame('<p>Hi</p>', SchemaGraph::filterHtml('<p>Hi</p><scr<!-- -->ipt>alert(1)</script>'));
+    // Only the href attribute is the link: not data-href, not text in
+    // another attribute's value.
+    self::assertSame('<a href="https://www.example.com/jobs">jobs</a>', SchemaGraph::filterHtml('<a data-href="https://evil.example.com/" href="https://www.example.com/jobs">jobs</a>'));
+    self::assertSame('<a>jobs</a>', SchemaGraph::filterHtml('<a title="x href=https://evil.example.com/" data-href="https://evil.example.com/">jobs</a>'));
+  }
+
+  /**
+   * Each workplace carries its own page's address.
+   */
+  public function testJobLocationRefListCarriesEachTargetsAddress(): void {
+    $office = static fn (string $slug, array $address): array => [
+      'name' => ucfirst($slug),
+      'url' => self::HOME . $slug,
+      'id' => self::HOME . "$slug#primary",
+      'type' => 'LocalBusiness',
+      'address' => ['@type' => 'PostalAddress'] + $address,
+    ];
+    $job = self::main(self::linked([
+      'type' => 'JobPosting',
+      'props' => [
+        'description' => self::link('body'),
+        'hiringOrganization' => ['fact' => 'identity'],
+        'work' => self::typed('onsite'),
+        'jobLocation' => self::link('field_offices'),
+      ],
+    ], [
+      'body' => '<p>Build things.</p>',
+      'field_offices' => [
+        $office('north', [
+          'streetAddress' => 'Mill Road 4',
+          'postalCode' => '33100',
+          'addressLocality' => 'Tampere',
+          'addressCountry' => 'FI',
+        ]),
+        $office('south', ['streetAddress' => 'Hall Road 1', 'addressLocality' => 'Tampere', 'addressCountry' => 'FI']),
+      ],
+    ], ['scope' => 'template']));
+    self::assertSame(['Mill Road 4', 'Hall Road 1'], array_column(array_column($job['jobLocation'], 'address'), 'streetAddress'));
+    self::assertSame('33100', $job['jobLocation'][0]['address']['postalCode']);
+    self::assertArrayNotHasKey('postalCode', $job['jobLocation'][1]['address']);
+    self::assertArrayNotHasKey('jobLocationType', $job);
+    // On site or remote: remote work beside the workplace.
+    $both = self::main(self::linked([
+      'type' => 'JobPosting',
+      'props' => [
+        'description' => self::link('body'),
+        'hiringOrganization' => ['fact' => 'identity'],
+        'work' => self::typed('both'),
+        'jobLocation' => self::link('field_offices'),
+      ],
+    ], [
+      'body' => '<p>Build things.</p>',
+      'field_offices' => [$office('north', ['addressLocality' => 'Tampere', 'addressCountry' => 'FI'])],
+    ], ['scope' => 'template']));
+    self::assertSame('TELECOMMUTE', $both['jobLocationType']);
+    self::assertSame('Tampere', $both['jobLocation']['address']['addressLocality']);
+  }
+
+  /**
+   * A workplace page described otherwise is its name beside the parts.
+   *
+   * As for an event's venue: the workplace keeps the address linked in its
+   * own parts, and the report says the page is only named.
+   */
+  public function testNamedWorkplaceKeepsTheGroupsParts(): void {
+    $built = self::linked([
+      'type' => 'JobPosting',
+      'props' => [
+        'description' => self::link('body'),
+        'hiringOrganization' => ['fact' => 'identity'],
+        'work' => self::typed('onsite'),
+        'jobLocation' => self::link('field_location'),
+        'jobLocation_address_streetAddress' => self::link('field_street'),
+        'jobLocation_address_addressLocality' => self::link('field_city'),
+        'jobLocation_address_addressCountry' => self::link('field_country'),
+      ],
+    ], [
+      'body' => '<p>Build things.</p>',
+      'field_location' => [
+        [
+          'name' => 'Example office',
+          'url' => self::HOME . 'office',
+          'id' => self::HOME . 'office#primary',
+          'type' => 'Article',
+        ],
+      ],
+      'field_street' => 'Kungsgatan 1',
+      'field_city' => 'Stockholm',
+      'field_country' => 'SE',
+    ], ['scope' => 'template']);
+    self::assertSame([
+      '@type' => 'Place',
+      'name' => 'Example office',
+      'address' => [
+        '@type' => 'PostalAddress',
+        'streetAddress' => 'Kungsgatan 1',
+        'addressLocality' => 'Stockholm',
+        'addressCountry' => 'SE',
+      ],
+    ], self::main($built)['jobLocation']);
+    self::assertSame([['key' => 'jobLocation', 'name' => 'Example office', 'reason' => 'kind']], $built['refs_inline']);
+  }
+
+  /**
+   * A country typed as a name before countries were codes is dropped.
+   *
+   * Its address is left out, and the report lists the country as a value
+   * that does not fit: Checks ask for the country from the list.
+   */
+  public function testCountryStoredAsNameIsDropped(): void {
+    $built = self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Riverside Hall'),
+        'location_address_addressLocality' => self::typed('Tampere'),
+        'location_address_addressCountry' => self::typed('Finland'),
+      ],
+    ]);
+    self::assertSame(['@type' => 'Place', 'name' => 'Riverside Hall'], self::main($built)['location']);
+    self::assertSame([['key' => 'location_address_addressCountry', 'value' => 'Finland', 'kind' => 'enum']], $built['dropped']);
+    self::assertSame([['group' => 'location_address', 'missing' => ['location_address_addressCountry']]], $built['incomplete']);
+  }
+
+  /**
+   * An event that shipped with only a street keeps its Event (decision 8).
+   *
+   * Before groups, a street was all an event needed. Its venue, with no name
+   * and an address without a country, is left out and reported; the event
+   * is not withheld. Nothing set for the venue still withholds it.
+   */
+  public function testOldMinimumEventIsKept(): void {
+    foreach ([[], ['location_address_addressLocality' => 'Tampere'], ['location_address_addressCountry' => 'Finland']] as $more) {
+      $built = self::linked([
+        'type' => 'Event',
+        'props' => [
+          'startDate' => self::typed('2027-06-19'),
+          'location_address_streetAddress' => self::typed('Hämeenkatu 1'),
+        ] + array_map(self::typed(...), $more),
+      ]);
+      self::assertNull($built['withheld']);
+      $event = self::main($built);
+      self::assertSame('Event', $event['@type']);
+      self::assertArrayNotHasKey('location', $event);
+      self::assertSame(['location_address', 'location'], array_column($built['incomplete'], 'group'));
+      self::assertSame(['location_address_addressCountry'], $built['incomplete'][0]['missing']);
+    }
+  }
+
+  /**
+   * Someone else with only a website is not someone yet: the name is asked.
+   */
+  public function testWhoWithoutNameIsIncomplete(): void {
+    $built = self::linked([
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::typed('2027-06-19'),
+        'location_name' => self::typed('Riverside Hall'),
+        'organizer_url' => self::typed('https://hall.example.org/'),
+      ],
+    ]);
+    self::assertArrayNotHasKey('organizer', self::main($built));
+    self::assertSame([['group' => 'organizer', 'missing' => ['organizer_name']]], $built['incomplete']);
+    // Not the site by default either: the organizer was answered.
+    self::assertSame([], $built['defaults']);
+  }
+
+  /**
+   * One amount is a value; From above To is left out and said.
+   */
+  public function testPaySingleValueAndFromOverTo(): void {
+    $pay = static fn (array $links): array => self::linked([
+      'type' => 'JobPosting',
+      'props' => [
+        'description' => self::link('body'),
+        'hiringOrganization' => ['fact' => 'identity'],
+        'baseSalary_value_minValue' => self::link('field_from'),
+        'baseSalary_value_maxValue' => self::link('field_to'),
+        'baseSalary_value_unitText' => self::typed('MONTH'),
+      ],
+    ], $links + ['body' => '<p>Build things.</p>'], ['scope' => 'template', 'currency' => 'EUR']);
+    self::assertSame(
+      [
+        '@type' => 'MonetaryAmount',
+        'value' => ['@type' => 'QuantitativeValue', 'value' => 4200, 'unitText' => 'MONTH'],
+        'currency' => 'EUR',
+      ],
+      self::main($pay(['field_from' => '4200']))['baseSalary'],
+    );
+    self::assertSame(
+      ['@type' => 'QuantitativeValue', 'minValue' => 4200, 'maxValue' => 5000.5, 'unitText' => 'MONTH'],
+      self::main($pay(['field_from' => '4200', 'field_to' => '5000.50']))['baseSalary']['value'],
+    );
+    $built = $pay(['field_from' => '5000', 'field_to' => '4200']);
+    self::assertArrayNotHasKey('baseSalary', self::main($built));
+    self::assertTrue($built['pay_order']);
+  }
+
+  /**
+   * Steps are HowToSteps when there are several; countries are Countries.
+   */
+  public function testItemWrapsHowToStepAndCountry(): void {
+    $recipe = self::main(self::linked([
+      'type' => 'Recipe',
+      'props' => ['recipeInstructions' => self::link('field_steps')],
+    ], ['field_steps' => ['Preheat', 'Mix']], ['scope' => 'template']));
+    self::assertSame([['@type' => 'HowToStep', 'text' => 'Preheat'], ['@type' => 'HowToStep', 'text' => 'Mix']], $recipe['recipeInstructions']);
+    $job = self::main(self::linked([
+      'type' => 'JobPosting',
+      'props' => [
+        'description' => self::link('body'),
+        'hiringOrganization' => ['fact' => 'identity'],
+        'work' => self::typed('remote'),
+        'applicantLocationRequirements' => self::typed('FI,SE'),
+      ],
+    ], ['body' => '<p>Build things.</p>'], ['scope' => 'template']));
+    self::assertSame([['@type' => 'Country', 'name' => 'FI'], ['@type' => 'Country', 'name' => 'SE']], $job['applicantLocationRequirements']);
+  }
+
+  /**
+   * A duration is ISO 8601, in the unit its field counts in.
+   */
+  public function testDurationEmitsIso(): void {
+    $recipe = static fn (array $props, array $links = []): array => self::main(self::linked([
+      'type' => 'Recipe',
+      'props' => $props,
+    ], $links, ['scope' => 'template']));
+    $times = $recipe(['prepTime' => self::typed('90'), 'cookTime' => self::typed('30')]);
+    self::assertSame(['PT1H30M', 'PT30M'], [$times['prepTime'], $times['cookTime']]);
+    self::assertSame('PT1H', $recipe(['prepTime' => self::typed('60'), 'cookTime' => self::typed('5')])['prepTime']);
+    // A field that counts hours: 1.5 hours.
+    $linked = $recipe([
+      'prepTime' => self::typed('10'),
+      'cookTime' => self::link('field_cook_hours') + ['unit' => 'hour'],
+    ], ['field_cook_hours' => '1.5']);
+    self::assertSame('PT1H30M', $linked['cookTime']);
+    self::assertSame('PT2H', SchemaGraph::duration(120));
+    self::assertSame('PT0M', SchemaGraph::duration(0));
+  }
+
+  /**
+   * Prep and cook time are emitted together or not at all.
+   */
+  public function testPrepWithoutCookNotEmitted(): void {
+    $built = self::linked(['type' => 'Recipe', 'props' => ['prepTime' => self::typed('20')]]);
+    self::assertArrayNotHasKey('prepTime', self::main($built));
+    self::assertSame(['prepTime'], $built['unpaired']);
+    // Left out for its pair: not reported as set, so nothing asks again for
+    // what is there. A linked time over 30 days gives nothing.
+    self::assertArrayNotHasKey('prepTime', $built['sources']);
+    $built = self::linked([
+      'type' => 'Recipe',
+      'props' => ['prepTime' => self::link('field_prep'), 'cookTime' => self::typed('30')],
+    ], ['field_prep' => '50000'], ['scope' => 'template']);
+    self::assertSame(['cookTime'], $built['unpaired']);
+    self::assertSame([], array_intersect(['prepTime', 'cookTime'], array_keys($built['sources'])));
+  }
+
+  /**
+   * Someone else, typed by name, keeps the website typed with the name.
+   *
+   * A reference that gives only a name is the group's name, never a reason
+   * to drop its other parts: a venue page not described as a place keeps
+   * the address linked in the venue's parts.
+   */
+  public function testNamedReferenceKeepsTheGroupsParts(): void {
+    $event = static fn (array $props, array $links = []): array => self::main(self::linked([
+      'type' => 'Event',
+      'props' => $props + ['startDate' => self::typed('2027-06-19')],
+    ], $links, ['scope' => 'template']));
+    self::assertSame(
+      ['@type' => 'Organization', 'name' => 'Example Hall Ltd', 'url' => 'https://hall.example.org/'],
+      $event([
+        'location_name' => self::typed('Hall'),
+        'organizer' => self::typed('Example Hall Ltd'),
+        'organizer_url' => self::typed('https://hall.example.org/'),
+      ])['organizer'],
+    );
+    $location = $event([
+      'location' => self::link('field_venue'),
+      'location_address_streetAddress' => self::link('field_street'),
+      'location_address_addressLocality' => self::typed('Helsinki'),
+      'location_address_addressCountry' => self::typed('FI'),
+    ], [
+      'field_venue' => [
+        [
+          'name' => 'Lakeside',
+          'url' => self::HOME . 'lakeside',
+          'id' => self::HOME . 'lakeside#primary',
+          'type' => 'Article',
+        ],
+      ],
+      'field_street' => 'Rantakatu 1',
+    ])['location'];
+    self::assertSame('Lakeside', $location['name']);
+    self::assertSame([
+      '@type' => 'PostalAddress',
+      'streetAddress' => 'Rantakatu 1',
+      'addressLocality' => 'Helsinki',
+      'addressCountry' => 'FI',
+    ], $location['address']);
+    // A country linked to a field that gives a lowercase code is the code.
+    self::assertSame('FI', $event([
+      'location_name' => self::typed('Hall'),
+      'location_address_addressLocality' => self::typed('Helsinki'),
+      'location_address_addressCountry' => self::link('field_country'),
+    ], ['field_country' => 'fi'])['location']['address']['addressCountry']);
+  }
+
+  /**
+   * Instructions with items are steps; one text is one text.
+   */
+  public function testInstructionsStepsFromItemsTextOtherwise(): void {
+    $steps = static fn (mixed $field): mixed => self::main(self::linked([
+      'type' => 'Recipe',
+      'props' => ['recipeInstructions' => self::link('field_steps')],
+    ], ['field_steps' => $field], ['scope' => 'template']))['recipeInstructions'];
+    self::assertSame('Mix it all and bake.', $steps(['Mix it all and bake.']));
+    // A formatted method of one paragraph is that paragraph, as text.
+    self::assertSame('Mix it all and bake.', $steps(Values::items('<p>Mix it all and bake.</p>')));
+    self::assertCount(3, $steps(['Mix', 'Proof', 'Bake']));
+  }
+
+  /**
+   * Calories are "n calories" in a NutritionInformation, only with a yield.
+   */
+  public function testCaloriesNeedYieldAndFormat(): void {
+    $recipe = static fn (array $props): array => self::linked([
+      'type' => 'Recipe',
+      'props' => $props + ['nutrition_calories' => self::typed('180')],
+    ]);
+    self::assertSame(['@type' => 'NutritionInformation', 'calories' => '180 calories'], self::main($recipe(['recipeYield' => self::typed('1 loaf')]))['nutrition']);
+    $built = $recipe([]);
+    self::assertArrayNotHasKey('nutrition', self::main($built));
+    self::assertSame([['group' => 'nutrition', 'missing' => ['recipeYield']]], $built['incomplete']);
+  }
+
+  /**
+   * Terms of a multi-value field are joined into one text; typed text stays.
+   */
+  public function testJoinTerms(): void {
+    $recipe = self::main(self::linked([
+      'type' => 'Recipe',
+      'props' => ['keywords' => self::link('field_tags'), 'recipeCuisine' => self::typed('Thai, vegan')],
+    ], ['field_tags' => ['rye', 'sourdough', 'rye']], ['scope' => 'template']));
+    self::assertSame('rye, sourdough, rye', $recipe['keywords']);
+    self::assertSame('Thai, vegan', $recipe['recipeCuisine']);
+  }
+
+  /**
+   * A list page lists public pages in order.
+   *
+   * The course list counts complete courses only.
+   */
+  public function testItemListCountsOnlyCompleteTargets(): void {
+    $course = static fn (string $slug, bool $complete = TRUE): array => [
+      'name' => $slug,
+      'url' => self::HOME . $slug,
+      'id' => self::HOME . "$slug#primary",
+      'type' => 'Course',
+      'complete' => $complete,
+    ];
+    $built = self::linked(['type' => 'CollectionPage', 'props' => ['items' => self::link('field_pages')]], [
+      'field_pages' => [
+        $course('a'),
+        $course('b', FALSE),
+        NULL,
+        $course('c'),
+        ['name' => 'News', 'url' => self::HOME . 'news'],
+      ],
+    ], ['scope' => 'template']);
+    $list = $built['graph']['@graph'][2]['mainEntity'];
+    self::assertSame('ItemList', $list['@type']);
+    self::assertSame([1, 2, 3, 4], array_column($list['itemListElement'], 'position'));
+    self::assertSame([['key' => 'items', 'count' => 1, 'reason' => 'hidden']], $built['dropped_items']);
+    $verdicts = SchemaGraph::features($built['graph'], [
+      'home' => self::HOME,
+      'url' => self::URL,
+      'type' => 'CollectionPage',
+      'items' => $built['items'],
+    ]);
+    self::assertSame([
+      'feature' => 'course-list',
+      'node' => self::URL . '#webpage',
+      'verdict' => 'needs',
+      'count' => 2,
+      'of' => 4,
+      'missing' => [['path' => 'itemListElement']],
+    ], $verdicts[0]);
+    // A list page is never offered on a Canvas page.
+    self::assertArrayNotHasKey('mainEntity', self::linked([
+      'type' => 'CollectionPage',
+      'props' => ['items' => self::link('field_pages')],
+    ], ['field_pages' => [$course('a')]])['graph']['@graph'][2]);
   }
 
 }

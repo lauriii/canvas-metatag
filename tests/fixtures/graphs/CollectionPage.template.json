@@ -1,0 +1,141 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/complex/announcements/news",
+        "langcode": "en",
+        "title": "About Example",
+        "description": "Who we are and what we make.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "template",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "CollectionPage"
+    },
+    "facts": {
+        "title": "About Example",
+        "description": "Who we are and what we make.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/complex/announcements/news"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": [],
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": [],
+        "gates": [],
+        "type": "CollectionPage",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/complex/announcements/news#webpage",
+                "type": "CollectionPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/complex/announcements/news#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [],
+        "refs_inline": [],
+        "defaults": [],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "CollectionPage",
+                "@id": "https://www.example.com/complex/announcements/news#webpage",
+                "url": "https://www.example.com/complex/announcements/news",
+                "name": "About Example",
+                "description": "Who we are and what we make.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/complex/announcements/news#primaryimage"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/complex/announcements/news#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": null,
+            "node": null,
+            "verdict": "none"
+        }
+    ]
+}

@@ -8,7 +8,9 @@ context: |
   built on the Drupal AI module.
   Constraints an agent cannot infer from the code:
   - Nothing committed may name or compare against a commercial vendor or
-    product. Neutral wording only ("search result preview").
+    product. Neutral wording only ("search result preview"). One exception
+    (product-owner decision 2): a search feature's documentation source link
+    may stay in data/search-features.json, never in UI copy.
   - Supported Canvas is the 1.x development branch; Canvas internals used are
     listed in ARCHITECTURE.md and every new one needs a row there and a test
     that fails if Canvas changes it.

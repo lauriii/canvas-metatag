@@ -20,9 +20,28 @@ final class SchemaGraph {
   private const BILLING = ['P1M' => 'MON', 'P1Y' => 'ANN'];
 
   /**
+   * Where a job's work is, by the answer to "Where the work is".
+   *
+   * Remote work, also when it may be on site, is TELECOMMUTE; on site says
+   * nothing more than the workplace does.
+   */
+  private const WORK = ['remote' => 'TELECOMMUTE', 'both' => 'TELECOMMUTE'];
+
+  /**
    * The verdicts, in the order the dialog lists them.
    */
-  private const ORDER = ['needs', 'unanswered', 'ready', 'complete', 'not_fit', 'not_here', 'retired', 'none'];
+  private const ORDER = [
+    'needs',
+    'unanswered',
+    'ready',
+    'complete',
+    'not_fit',
+    'closed',
+    'elsewhere',
+    'not_here',
+    'retired',
+    'none',
+  ];
 
   /**
    * Types a hand-added node may copy the site's identity's name with.
@@ -33,9 +52,87 @@ final class SchemaGraph {
   private const WHO = ['Organization', 'Person', 'LocalBusiness', 'Corporation', 'OnlineStore', 'Store', 'NGO'];
 
   /**
-   * The registry with `extends` resolved.
+   * The attributes a property may have, each read in one place.
+   */
+  public const ATTRIBUTES = [
+    'key', 'label', 'kind', 'default', 'level', 'options', 'option_labels', 'pattern', 'ai', 'emit',
+    'list', 'max', 'codes', 'unit', 'units', 'item', 'join', 'pair', 'html', 'link_only', 'per_item', 'inline',
+    'scopes', 'accept', 'as', 'site', 'page_default', 'when', 'under', 'range', 'format', 'suggest',
+    'meter', 'group', 'part', 'short',
+  ];
+
+  /**
+   * Why a type or a property is not offered on a scope.
    *
-   * A variant takes its base's details, never its kind.
+   * `component`: only a component mapping could fill it, and none exists
+   * yet. `policy`: it is never offered there.
+   */
+  public const SCOPE_REASONS = ['component', 'policy'];
+
+  /**
+   * How an enum is emitted.
+   *
+   * As a schema.org URL, its bare code, or the node's type; FALSE is never
+   * (a gate that decides what is emitted).
+   */
+  public const EMIT = ['url', 'code', 'type'];
+
+  /**
+   * Minutes per unit of a duration.
+   */
+  public const UNITS = ['minute' => 1, 'hour' => 60];
+
+  /**
+   * The days of the opening hours grammar, in order.
+   */
+  public const DAYS = [
+    'Mo' => 'Monday',
+    'Tu' => 'Tuesday',
+    'We' => 'Wednesday',
+    'Th' => 'Thursday',
+    'Fr' => 'Friday',
+    'Sa' => 'Saturday',
+    'Su' => 'Sunday',
+  ];
+
+  /**
+   * What the registry's kinds of place also are.
+   *
+   * A reference accepts a target of an accepted type or of a type that is
+   * one: a restaurant is a local business, a place and an organization; a
+   * venue that is not a business is a place only.
+   */
+  public const ANCESTORS = [
+    'LocalBusiness' => ['Place', 'Organization'],
+    'EventVenue' => ['Place'],
+  ];
+
+  /**
+   * The elements and the attribute a job description keeps.
+   */
+  private const HTML_KEEP = ['p', 'ul', 'ol', 'li', 'br', 'strong', 'em', 'a'];
+
+  /**
+   * The length a job description is cut at.
+   */
+  private const HTML_MAX = 20000;
+
+  /**
+   * The longest duration, in minutes: 30 days.
+   *
+   * Typed or linked, the dialog and the cleaner refuse more (controls.ts
+   * durationValue()).
+   */
+  public const DURATION_MAX = 43200;
+
+  /**
+   * The registry with `extends` resolved and groups expanded.
+   *
+   * A variant takes its base's details, never its kind. A group entry
+   * (`group`, `use`) becomes its reference, when it has one, and one property
+   * per part of its shape, keyed by path ("location_address_postalCode");
+   * the type then lists it under `groups` and each nested node's type under
+   * `nested`.
    *
    * @return array<string, array>
    *   Type id => entry.
@@ -43,15 +140,166 @@ final class SchemaGraph {
   public static function types(): array {
     static $types;
     if ($types === NULL) {
-      $types = self::data('schema-types');
+      $data = self::data('schema-types');
+      $shapes = $data['$shapes'] ?? [];
+      unset($data['$shapes']);
+      $types = $data;
       foreach ($types as $id => $type) {
         if (isset($type['extends'])) {
           unset($type['extends']);
-          $types[$id] = $type + array_diff_key($types[$types[$id]['extends']], ['kind' => TRUE, 'variants' => TRUE]);
+          $types[$id] = $type + array_diff_key($data[$data[$id]['extends']], ['kind' => TRUE, 'variants' => TRUE]);
+        }
+      }
+      foreach ($types as $id => $type) {
+        $props = [];
+        $groups = [];
+        $nested = $type['nested'] ?? [];
+        foreach ($type['props'] ?? [] as $entry) {
+          if (!isset($entry['group'])) {
+            $props[] = $entry;
+            continue;
+          }
+          $key = $entry['group'];
+          if (isset($entry['ref'])) {
+            $props[] = array_filter([
+              'key' => $key,
+              'label' => $entry['ref']['label'],
+              'kind' => 'ref',
+              'list' => $entry['list'] ?? NULL,
+              'max' => isset($entry['list']) ? 20 : NULL,
+              'accept' => $entry['ref']['accept'],
+              'as' => $entry['type'] ?? $shapes[$entry['use']]['type'],
+              'site' => $entry['ref']['site'] ?? NULL,
+              'page_default' => $entry['ref']['page_default'] ?? NULL,
+              'inline' => $entry['ref']['inline'] ?? NULL,
+              'per_item' => $entry['ref']['per_item'] ?? NULL,
+              'when' => $entry['when'] ?? NULL,
+              'group' => $key,
+              'ai' => FALSE,
+            ], static fn (mixed $value): bool => $value !== NULL);
+          }
+          self::expand($shapes, $entry['use'], $key, $key, $entry, $props, $groups, $nested);
+        }
+        $types[$id]['props'] = $props;
+        if ($groups) {
+          $types[$id]['groups'] = $groups;
+        }
+        if ($nested) {
+          $types[$id]['nested'] = $nested;
         }
       }
     }
     return $types;
+  }
+
+  /**
+   * Expands one use of a shape into properties and groups.
+   *
+   * @param array $shapes
+   *   The registry's shapes.
+   * @param string $use
+   *   The shape's name.
+   * @param string $prefix
+   *   The key of the group's node: "location_address".
+   * @param string $top
+   *   The key of the top group: "location".
+   * @param array $entry
+   *   The type's group entry: its label, level, defaults and scopes.
+   * @param array $props
+   *   Collects the properties.
+   * @param array $groups
+   *   Collects the groups by key.
+   * @param array $nested
+   *   Collects the type of each nested node by key.
+   */
+  private static function expand(array $shapes, string $use, string $prefix, string $top, array $entry, array &$props, array &$groups, array &$nested): void {
+    $shape = $shapes[$use];
+    $own = $prefix === $top;
+    $nested[$prefix] = $own ? $entry['type'] ?? $shape['type'] : $shape['type'];
+    foreach ($shape['nested'] ?? [] as $path => $nested_type) {
+      $nested["{$prefix}_$path"] = $nested_type;
+    }
+    $parts = [];
+    foreach ($shape['parts'] as $part) {
+      if (isset($part['use'])) {
+        self::expand($shapes, $part['use'], "{$prefix}_{$part['key']}", $top, $entry, $props, $groups, $nested);
+        $parts[] = "{$prefix}_{$part['key']}";
+        continue;
+      }
+      $relative = substr("{$prefix}_{$part['key']}", strlen($top) + 1);
+      // A part's gate is a part of the same node; the group's gate is a
+      // detail of the type, and holds for each of its parts.
+      if (isset($part['when'])) {
+        $part['when'] = array_combine(array_map(static fn (string $gate): string => "{$prefix}_$gate", array_keys($part['when'])), $part['when']);
+      }
+      if (isset($entry['when'])) {
+        $part['when'] = $entry['when'] + ($part['when'] ?? []);
+      }
+      // A group's name is called by the group's label outside it ("Venue"),
+      // and by its own inside ("Name").
+      if ($own && $part['key'] === 'name' && isset($entry['label'])) {
+        $part = ['label' => $entry['label'], 'short' => $part['label']] + $part;
+      }
+      $props[] = ['key' => "{$prefix}_{$part['key']}"] + $part + array_filter([
+        'default' => $entry['defaults'][$relative] ?? NULL,
+        'scopes' => $entry['scopes'] ?? NULL,
+        'group' => $top,
+        'part' => $own ? NULL : $prefix,
+      ], static fn (mixed $value): bool => $value !== NULL);
+      $parts[] = "{$prefix}_{$part['key']}";
+    }
+    $groups[$prefix] = array_filter([
+      'label' => $own ? $entry['label'] : NULL,
+      'type' => $nested[$prefix],
+      'shape' => $use,
+      'parts' => $parts,
+      'requires' => array_map(static fn (array $one): array => array_map(static fn (string $key): string => "{$prefix}_$key", $one), $shape['requires']),
+      'needs' => $shape['needs'] ?? NULL,
+      'level' => $own ? $entry['level'] ?? NULL : NULL,
+      'list' => $own ? $entry['list'] ?? NULL : NULL,
+      'parent' => $own ? NULL : $top,
+    ], static fn (mixed $value): bool => $value !== NULL);
+  }
+
+  /**
+   * One property of a type, by key.
+   */
+  public static function prop(string $type, string $key): ?array {
+    return array_column(self::types()[$type]['props'] ?? [], NULL, 'key')[$key] ?? NULL;
+  }
+
+  /**
+   * Whether a type, or one of its properties, is offered on a scope.
+   *
+   * @param string $type
+   *   The type id.
+   * @param string|null $key
+   *   A property key; NULL for the type itself.
+   * @param string $scope
+   *   One of 'page' or 'template'.
+   */
+  public static function offered(string $type, ?string $key, string $scope): bool {
+    $entry = self::types()[$type] ?? NULL;
+    if ($entry === NULL || isset($entry['scopes'][$scope])) {
+      return FALSE;
+    }
+    if ($key === NULL) {
+      return TRUE;
+    }
+    $prop = self::prop($type, $key);
+    return $prop !== NULL && !isset($prop['scopes'][$scope]);
+  }
+
+  /**
+   * A type and every type it is, by the registry's kinds of place.
+   *
+   * @return list<string>
+   *   The type first.
+   */
+  public static function ancestors(string $type): array {
+    $places = self::options(self::prop('LocalBusiness', 'placeKind') ?? []);
+    $base = $type !== 'EventVenue' && in_array($type, $places, TRUE) ? 'LocalBusiness' : $type;
+    return array_values(array_unique([$type, $base, ...self::ANCESTORS[$base] ?? []]));
   }
 
   /**
@@ -83,23 +331,61 @@ final class SchemaGraph {
   }
 
   /**
-   * Whether a literal passes the property's `kind`, `options` and `pattern`.
+   * The codes of a code list, such as the ISO 3166-1 country codes.
+   *
+   * @return list<string>
+   *   In order.
+   */
+  public static function codes(string $list): array {
+    static $codes = [];
+    return $codes[$list] ??= self::data("codes/$list");
+  }
+
+  /**
+   * The choices of an enum: its options, or the codes of its list.
+   *
+   * @return list<string>
+   *   In order.
+   */
+  public static function options(array $prop): array {
+    return isset($prop['codes']) ? self::codes($prop['codes']) : $prop['options'] ?? [];
+  }
+
+  /**
+   * Whether a literal passes the property's kind and attributes.
    *
    * The only implementation of that rule: the cleaner, the graph builder and
-   * the AI submodule call it.
+   * the AI submodule call it. On an enum list the literal is several codes
+   * joined by commas; a duration is a whole number of its unit; opening
+   * hours are a week in the hours grammar (hours()).
    */
   public static function validLiteral(string $type, string $key, string $value): bool {
-    $prop = array_column(self::types()[$type]['props'] ?? [], NULL, 'key')[$key] ?? NULL;
-    if ($prop === NULL) {
-      return FALSE;
+    $prop = self::prop($type, $key);
+    return $prop !== NULL && self::literal($prop, $value);
+  }
+
+  /**
+   * ValidLiteral() for a property.
+   */
+  public static function literal(array $prop, string $value): bool {
+    if (($prop['kind'] ?? '') === 'enum' && !empty($prop['list'])) {
+      $codes = explode(',', $value);
+      return count($codes) <= ($prop['max'] ?? 50) && count($codes) === count(array_unique($codes))
+        && !array_diff($codes, self::options($prop));
     }
     $valid = match ($prop['kind']) {
-      'text' => TRUE,
+      'text', 'ref' => TRUE,
       'url' => Values::isHttpUrl($value),
       'date' => preg_match(self::DATE, $value, $m) && checkdate((int) $m[2], (int) $m[3], (int) $m[1]),
-      'number' => (bool) preg_match('/^\d+(\.\d+)?$/D', $value),
-      'enum' => in_array($value, $prop['options'] ?? [], TRUE),
+      'number' => match (TRUE) {
+        // A duration: a whole number of its unit, never zero.
+        isset($prop['unit']) => preg_match('/^[1-9]\d{0,4}$/D', $value) && (int) $value * self::UNITS[$prop['unit']] <= self::DURATION_MAX,
+        isset($prop['range']) => preg_match('/^-?\d+(\.\d+)?$/D', $value) && (float) $value >= $prop['range'][0] && (float) $value <= $prop['range'][1],
+        default => (bool) preg_match('/^\d+(\.\d+)?$/D', $value),
+      },
+      'enum' => in_array($value, self::options($prop), TRUE),
       'currency' => isset(self::currencies()[$value]),
+      'hours' => self::hours($value) !== NULL,
       // An image is a media item, a fact or a link, never text.
       default => FALSE,
     };
@@ -107,14 +393,207 @@ final class SchemaGraph {
   }
 
   /**
+   * Whether a property can be typed: a literal, not a list of text.
+   *
+   * A text list comes from a field or a component; a linked-only property
+   * from a field; a property each page has its own of (`per_item`: a
+   * closing date, performers, a venue page) from a field on a template,
+   * never one typed value for every page.
+   *
+   * @param array $prop
+   *   The property.
+   * @param string|null $scope
+   *   'page' or 'template'; NULL for either.
+   */
+  public static function typable(array $prop, ?string $scope = NULL): bool {
+    return empty($prop['link_only']) && !($prop['kind'] === 'text' && !empty($prop['list']))
+      && !($scope === 'template' && !empty($prop['per_item']));
+  }
+
+  /**
+   * Parses a week of opening hours.
+   *
+   * The grammar, shared with the dialog (tests/fixtures/hours.json): entries
+   * joined by "; ", each either weekly days and times ("Mo-Fr 09:00-17:00",
+   * "Sa 10:00-14:00,15:00-18:00") or a date and times or "closed"
+   * ("2026-12-24 closed"). Open all day is 00:00-23:59. A day is in one
+   * weekly entry at most, a date in one dated entry, and the times of a day
+   * are in order and never overlap.
+   *
+   * @return array{weekly: array<string, list<array{0: string, 1: string}>>, dated: array<string, list<array{0: string, 1: string}>>}|null
+   *   Times by day code and by date; an empty list is closed. NULL when the
+   *   text is not a valid week.
+   */
+  public static function hours(string $text): ?array {
+    $week = ['weekly' => [], 'dated' => []];
+    $days = array_keys(self::DAYS);
+    foreach (explode('; ', $text) as $entry) {
+      if (!preg_match('/^(\d{4}-\d{2}-\d{2}|[A-Z][a-z](?:-[A-Z][a-z])?(?:,[A-Z][a-z](?:-[A-Z][a-z])?)*) (closed|\d\d:\d\d-\d\d:\d\d(?:,\d\d:\d\d-\d\d:\d\d)*)$/D', $entry, $m)) {
+        return NULL;
+      }
+      $ranges = [];
+      foreach ($m[2] === 'closed' ? [] : explode(',', $m[2]) as $range) {
+        [$opens, $closes] = explode('-', $range);
+        $last = end($ranges);
+        if (!preg_match('/^([01]\d|2[0-3]):[0-5]\d$/D', $opens) || !preg_match('/^([01]\d|2[0-3]):[0-5]\d$/D', $closes)
+          || ($opens >= $closes) || ($last !== FALSE && $opens < $last[1])) {
+          return NULL;
+        }
+        $ranges[] = [$opens, $closes];
+      }
+      if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/D', $m[1], $date)) {
+        if (!checkdate((int) $date[2], (int) $date[3], (int) $date[1]) || isset($week['dated'][$m[1]])) {
+          return NULL;
+        }
+        $week['dated'][$m[1]] = $ranges;
+        continue;
+      }
+      // A weekly entry is open on its days: "closed" is said by leaving a day
+      // out.
+      if ($ranges === []) {
+        return NULL;
+      }
+      foreach (explode(',', $m[1]) as $span) {
+        [$from, $to] = explode('-', $span) + [1 => $span];
+        $start = array_search($from, $days, TRUE);
+        $end = array_search($to, $days, TRUE);
+        if ($start === FALSE || $end === FALSE || $end < $start) {
+          return NULL;
+        }
+        foreach (array_slice($days, $start, $end - $start + 1) as $day) {
+          if (isset($week['weekly'][$day])) {
+            return NULL;
+          }
+          $week['weekly'][$day] = $ranges;
+        }
+      }
+    }
+    return $week;
+  }
+
+  /**
+   * A week as OpeningHoursSpecification nodes.
+   *
+   * Weekly days with the same times share one node per range; a dated entry
+   * is its own node, with no days; a dated closure is 00:00-00:00. Dates
+   * before $today are left out.
+   *
+   * @return list<array>
+   *   The nodes.
+   */
+  public static function hoursNodes(array $week, string $today): array {
+    $nodes = [];
+    $same = [];
+    foreach (array_keys(self::DAYS) as $day) {
+      if (isset($week['weekly'][$day])) {
+        $same[json_encode($week['weekly'][$day])][] = $day;
+      }
+    }
+    foreach ($same as $times => $days) {
+      foreach (json_decode($times, TRUE) as [$opens, $closes]) {
+        $nodes[] = [
+          '@type' => 'OpeningHoursSpecification',
+          'dayOfWeek' => array_map(static fn (string $day): string => 'https://schema.org/' . self::DAYS[$day], $days),
+          'opens' => $opens,
+          'closes' => $closes,
+        ];
+      }
+    }
+    ksort($week['dated']);
+    foreach ($week['dated'] as $date => $ranges) {
+      if ($today !== '' && $date < $today) {
+        continue;
+      }
+      foreach ($ranges ?: [['00:00', '00:00']] as [$opens, $closes]) {
+        $nodes[] = [
+          '@type' => 'OpeningHoursSpecification',
+          'validFrom' => $date,
+          'validThrough' => $date,
+          'opens' => $opens,
+          'closes' => $closes,
+        ];
+      }
+    }
+    return $nodes;
+  }
+
+  /**
+   * A job description: formatted text with only basic markup kept.
+   *
+   * Keeps p, ul, ol, li, br, strong and em without attributes, and a with
+   * its href only when that is an absolute http(s) URL. The content of
+   * script, style and template elements is removed; every other tag is
+   * removed and its text kept. Cut at 20,000 characters.
+   */
+  public static function filterHtml(string $html): string {
+    if (!mb_check_encoding($html, 'UTF-8')) {
+      return '';
+    }
+    $attributes = '(?:"[^"]*+"|\'[^\']*+\'|[^\'">]++)*+';
+    // Comments first: one inside a tag's name never joins a script's.
+    $html = preg_replace('~<!--.*?(?:-->|\z)~s', '', $html) ?? '';
+    $html = preg_replace('~<(script|style|template)\b' . $attributes . '>.*?(?:</\1\s*>|\z)~is', '', $html) ?? '';
+    $keep = implode('|', self::HTML_KEEP);
+    $html = preg_replace_callback('~<(/?)([a-zA-Z][a-zA-Z0-9]*)(' . $attributes . ')>~', static function (array $m) use ($keep): string {
+      $name = strtolower($m[2]);
+      if (!preg_match("~^(?:$keep)$~", $name)) {
+        return '';
+      }
+      if ($m[1] === '/' || $name !== 'a') {
+        return "<$m[1]$name>";
+      }
+      // Attribute by attribute: "data-href", or "href" inside another
+      // attribute's value, is never the link.
+      preg_match_all('~([^\s"\'=/>]+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'>]*)))?~', $m[3], $found, PREG_SET_ORDER);
+      $href = '';
+      foreach ($found as $one) {
+        if (strtolower($one[1]) === 'href') {
+          $href = html_entity_decode(($one[2] ?? '') . ($one[3] ?? '') . ($one[4] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+          break;
+        }
+      }
+      return Values::isHttpUrl($href) ? '<a href="' . htmlspecialchars($href, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '">' : '<a>';
+    }, $html) ?? '';
+    $html = trim((string) preg_replace('/\s+/u', ' ', $html));
+    $html = mb_strlen($html) > self::HTML_MAX ? Values::whole($html, mb_substr($html, 0, self::HTML_MAX)) : $html;
+    // After the cut: a "<" that does not start one of the exact tags rebuilt
+    // above is text, so an unclosed tag, or one the cut split, never opens.
+    $tags = implode('|', array_diff(self::HTML_KEEP, ['a']));
+    return preg_replace('~<(?!/?(?:' . $tags . ')>|/a>|a>|a href="[^"<>]*">)~', '&lt;', $html) ?? '';
+  }
+
+  /**
+   * A duration in minutes as ISO 8601: PT1H30M.
+   */
+  public static function duration(int $minutes): string {
+    $hours = intdiv($minutes, 60);
+    $rest = $minutes % 60;
+    return 'PT' . ($hours ? "{$hours}H" : '') . ($rest || !$hours ? "{$rest}M" : '');
+  }
+
+  /**
    * The registry property a feature path is set with, for a type.
    *
    * "offers.price" is the property `offers_price`; the rules file names the
-   * paths that are set another way.
+   * paths that are set another way. A path into a group whose part is not a
+   * property ("location.address") is the group.
    */
   public static function propOf(string $path, string $type): ?string {
     $key = self::searchFeatures()['props'][$path] ?? str_replace('.', '_', $path);
-    return in_array($key, array_column(self::types()[$type]['props'] ?? [], 'key'), TRUE) ? $key : NULL;
+    $entry = self::types()[$type] ?? [];
+    if (in_array($key, array_column($entry['props'] ?? [], 'key'), TRUE)) {
+      return $key;
+    }
+    // The nearest group a path goes into: "baseSalary.value" is the pay.
+    for ($at = $key; $at !== ''; $at = substr($at, 0, (int) strrpos($at, '_'))) {
+      if (isset($entry['groups'][$at])) {
+        return $at;
+      }
+      if (!str_contains($at, '_')) {
+        break;
+      }
+    }
+    return NULL;
   }
 
   /**
@@ -123,14 +602,22 @@ final class SchemaGraph {
    * @param array $ctx
    *   The keys home, url, langcode, title, description, published, modified,
    *   timezone, currency (the site's, or ''), identity{kind, name, same_as[]},
-   *   logo?{url, width, height}, image?{url, width, height, alt, source} and
-   *   facts (name => text, the fixed names custom JSON-LD strings may use).
+   *   logo?{url, width, height}, image?{url, width, height, alt, source},
+   *   facts (name => text, the fixed names custom JSON-LD strings may use),
+   *   scope ('page', the default, or 'template') and today (Y-m-d, for the
+   *   dates of opening hours that have passed; '' keeps them).
    *   `url` is the entity's own public URL, never a canonical override.
    * @param array $schema
    *   The effective `schema` value, cleaned.
-   * @param callable(array, string): (string|array|null) $value
+   * @param callable(array, string, bool, int): mixed $value
    *   What a value gives for this entity, by kind: text, or for the image
-   *   kind an image array; '' or NULL for nothing.
+   *   kind an image array; '' or NULL for nothing. With TRUE for a list
+   *   property, the list of what it gives, in order (NULL for an item that
+   *   cannot be used, such as a private image). For the ref kind always a
+   *   list of targets: ['identity' => TRUE] for the publisher, NULL for a
+   *   page visitors may not see, or {name, url?, type?, id?, address?};
+   *   once the property's cap (the fourth argument) of targets is read,
+   *   FALSE for each one left, counted as over the cap.
    *
    * @return array
    *   `graph`; `type`: the registry type used; `withheld`: NULL, or why
@@ -143,12 +630,23 @@ final class SchemaGraph {
    *   `unknown_type`: a stored type the registry does not have, or NULL;
    *   `nodes`: every node, emitted or left out ({id, type, origin: site, page,
    *   main or hand, item: the hand-added item's index, at: its index in
-   *   @graph, left_out: withheld, skip, reserved or duplicate}).
+   *   @graph, left_out: withheld, skip, reserved or duplicate});
+   *   `incomplete`: groups with values that were left out ({group, missing:
+   *   the parts that would complete it}); `dropped_items`: list items left
+   *   out ({key, count, reason: invalid, private, hidden, max});
+   *   `refs_inline`: references that name their target instead of pointing
+   *   at it, because it is not described as an accepted kind ({key, name,
+   *   reason: kind}); `defaults`: references
+   *   that are the publisher only by a Canvas page's default; `unpaired`: a
+   *   property left out because its pair gives nothing; `pay_order`: pay
+   *   left out because its From is above its To; `items`: the pages a list
+   *   page lists ({url, type, complete}).
    */
   public static function build(array $ctx, array $schema, callable $value): array {
     $types = self::types();
     $stored_type = (string) ($schema['type'] ?? '');
-    $type_id = isset($types[$stored_type]) ? $stored_type : 'WebPage';
+    $scope = $ctx['scope'] ?? 'page';
+    $type_id = isset($types[$stored_type]) && self::offered($stored_type, NULL, $scope) ? $stored_type : 'WebPage';
     $type = $types[$type_id];
     // Identity: these never change after the first release.
     $ids = [
@@ -170,10 +668,139 @@ final class SchemaGraph {
       'type' => $type_id,
       'unknown_type' => $stored_type !== '' && !isset($types[$stored_type]) ? $stored_type : NULL,
       'nodes' => [],
+      'incomplete' => [],
+      'dropped_items' => [],
+      'refs_inline' => [],
+      'defaults' => [],
+      'unpaired' => [],
+      'pay_order' => FALSE,
+      'items' => [],
+      'judged' => NULL,
     ];
+    $props = array_filter($type['props'] ?? [], static fn (array $prop): bool => self::offered($type_id, $prop['key'], $scope));
+    $groups = $type['groups'] ?? [];
+    $nested = $type['nested'] ?? [];
 
-    // The primary node first: the page node points at it only when it ships.
+    // Every property's value, before it is placed: groups, pairs and gates
+    // decide what is emitted.
+    $found = [];
+    $codes = [];
+    foreach ($props as $prop) {
+      $key = $prop['key'];
+      $default = $prop['default'] ?? NULL;
+      $kind = Values::kindOf($prop);
+      $list = !empty($prop['list']) || isset($prop['join']) || $prop['kind'] === 'ref';
+      $max = $prop['max'] ?? ($list ? 100 : 1);
+      // The Description fact is the page's own description, as search shows
+      // it, not the raw text it may have been cut from. A link that gives
+      // nothing gives the default; one that gives a value that does not
+      // fit leaves the detail out.
+      $resolve = static fn (?array $v): mixed => match (TRUE) {
+        $v === NULL => NULL,
+        $v === ['fact' => 'description'] => (string) ($ctx['description'] ?? ''),
+        $v === ['fact' => 'identity'] => [['identity' => TRUE]],
+        // A reference's targets past the cap are FALSE, never read.
+        default => $value($v, $kind, $list, $max),
+      };
+      $stored = $schema['props'][$key] ?? NULL;
+      $raw = $resolve($stored);
+      $source = 'set';
+      if ($raw === NULL || $raw === '' || $raw === []) {
+        $group_set = isset($prop['group']) && array_filter(array_keys($schema['props'] ?? []), static fn (string $other): bool => $other === $prop['group'] || str_starts_with($other, $prop['group'] . '_'));
+        [$raw, $source] = match (TRUE) {
+          // An image chosen to share the page comes before the page's own.
+          $default === ['fact' => 'image'] && ($page_image['source'] ?? '') === 'override' => [
+            $list ? [$page_image] : $page_image,
+            'default',
+          ],
+          // The site currency, for a price or pay: never an offer of
+          // nothing. The registry lists an amount before its currency.
+          $prop['kind'] === 'currency' && self::amountIn($key, $found, $props) => [
+            (string) ($ctx['currency'] ?? ''),
+            'site',
+          ],
+          // On a Canvas page an organizer or an author nobody set is the
+          // publisher; the report says so.
+          !empty($prop['page_default']) && $scope === 'page' && !$group_set => [[['identity' => TRUE]], 'publisher'],
+          default => [$resolve($default), 'default'],
+        };
+      }
+      $items = $list ? (is_array($raw) && array_is_list($raw) ? $raw : ($raw === NULL || $raw === '' ? [] : [$raw])) : [$raw];
+      // Typed codes are one text: "FI,SE".
+      if ($prop['kind'] === 'enum' && !empty($prop['list'])) {
+        $items = array_merge([], ...array_map(static fn (mixed $item): array => is_string($item) ? explode(',', $item) : [$item], $items));
+      }
+      $emitted = [];
+      $dropped = ['invalid' => 0, 'private' => 0, 'hidden' => 0, 'max' => 0];
+      foreach ($items as $item) {
+        if ($item === FALSE) {
+          $dropped['max']++;
+          continue;
+        }
+        if ($item === NULL && $list) {
+          // An image in a private file; a page visitors may not see.
+          $dropped[$prop['kind'] === 'ref' ? 'hidden' : 'private']++;
+          continue;
+        }
+        $one = $prop['kind'] === 'ref' ? $item : self::value($type_id, $prop, $item, $ctx, $stored['unit'] ?? NULL);
+        if ($one === NULL) {
+          if (is_string($item) && trim($item) !== '') {
+            $dropped['invalid']++;
+            if (!$list) {
+              $report['dropped'][] = ['key' => $key, 'value' => mb_substr($item, 0, 200), 'kind' => $prop['kind']];
+            }
+          }
+          continue;
+        }
+        $emitted[] = $one;
+      }
+      // Lists of things that are the same when equal lose their repeats;
+      // a list of text keeps them.
+      if ($list && $prop['kind'] !== 'text') {
+        $emitted = array_values(array_unique($emitted, SORT_REGULAR));
+      }
+      if (count($emitted) > $max) {
+        $dropped['max'] += count($emitted) - $max;
+        $emitted = array_slice($emitted, 0, $max);
+      }
+      foreach ($list ? array_filter($dropped) : [] as $reason => $count) {
+        $report['dropped_items'][] = ['key' => $key, 'count' => $count, 'reason' => $reason];
+      }
+      if ($emitted === []) {
+        continue;
+      }
+      if ($source === 'publisher') {
+        $report['defaults'][] = $key;
+        $source = 'default';
+      }
+      $report['sources'][$key] = $source;
+      if ($prop['kind'] === 'enum' && empty($prop['list'])) {
+        $codes[$key] = str_replace('https://schema.org/', '', (string) $emitted[0]);
+      }
+      $found[$key] = match (TRUE) {
+        isset($prop['join']) => implode($prop['join'], $emitted),
+        $prop['kind'] === 'ref' || !empty($prop['list']) => $emitted,
+        default => $emitted[0],
+      };
+    }
+
+    // A gated property counts only when its gate holds; a pair only whole.
+    foreach ($props as $prop) {
+      foreach ($prop['when'] ?? [] as $gate => $wanted) {
+        if (!in_array($codes[$gate] ?? NULL, $wanted, TRUE)) {
+          unset($found[$prop['key']], $report['sources'][$prop['key']]);
+        }
+      }
+    }
+    foreach ($props as $prop) {
+      if (isset($prop['pair'], $found[$prop['key']]) && !isset($found[$prop['pair']])) {
+        $report['unpaired'][] = $prop['key'];
+        unset($found[$prop['key']], $report['sources'][$prop['key']]);
+      }
+    }
+
     $primary = NULL;
+    $page_main = NULL;
     if (isset($type['primary_type'])) {
       $primary = ['@type' => $type['primary_type'], '@id' => $ids['primary'], 'mainEntityOfPage' => $ref('webpage')];
       // A fixed ref first; one with a condition when the values are known.
@@ -182,64 +809,89 @@ final class SchemaGraph {
         'fixed' => TRUE,
       ] : $to, $type['refs'] ?? []);
       foreach (array_filter($refs, static fn (array $to): bool => isset($to['fixed'])) as $key => $to) {
-        self::put($primary, $key, $ref($to['to']), $type['nested'] ?? []);
+        self::put($primary, $key, $ref($to['to']), $nested);
       }
-      $missing = $invalid = [];
-      foreach ($type['props'] ?? [] as $prop) {
-        $key = $prop['key'];
-        $default = $prop['default'] ?? NULL;
-        // The Description fact is the page's own description, as search shows
-        // it, not the raw text it may have been cut from. A link that gives
-        // nothing gives the default; one that gives a value that does not
-        // fit leaves the detail out.
-        $resolve = static fn (?array $v): string|array|null => $v === NULL ? NULL : (
-          $v === ['fact' => 'description'] ? (string) ($ctx['description'] ?? '') : $value($v, Values::KINDS[$prop['kind']])
-        );
-        $raw = $resolve($schema['props'][$key] ?? NULL);
-        $source = 'set';
-        if ($raw === NULL || $raw === '') {
-          [$raw, $source] = match (TRUE) {
-            // An image chosen to share the page comes before the page's own.
-            $default === ['fact' => 'image'] && ($page_image['source'] ?? '') === 'override' => [
-              $page_image,
-              'default',
-            ],
-            // The site currency, for a price: never an offer of nothing. The
-            // registry lists a price before its currency.
-            $prop['kind'] === 'currency' && isset($primary['offers']['price']) => [
-              (string) ($ctx['currency'] ?? ''),
-              'site',
-            ],
-            default => [$resolve($default), 'default'],
-          };
+    }
+    $missing = $invalid = [];
+    $placed = [];
+    // Incomplete groups as they are: the verdicts name the part they miss.
+    $partial = [];
+    foreach ($props as $prop) {
+      $key = $prop['key'];
+      $group = $prop['group'] ?? NULL;
+      if ($group !== NULL) {
+        if (!isset($placed[$group])) {
+          $placed[$group] = TRUE;
+          $node = self::group($group, $groups, $nested, $props, $found, $ids, $report, $partial);
+          // A required group nothing was set for withholds the main node;
+          // one that has values is left out and reported incomplete, and
+          // the node kept (decision 8: an event with only a street keeps
+          // its Event).
+          if ($node === NULL && !isset($partial[$group]) && ($groups[$group]['level'] ?? '') === 'required') {
+            $missing[] = $group;
+          }
+          if ($node !== NULL && $primary !== NULL) {
+            $primary[$group] = $node;
+          }
         }
-        $found = self::value($type_id, $prop, $raw, $ctx);
-        $dropped = $found === NULL && is_string($raw) && trim($raw) !== '';
-        if ($dropped) {
-          $report['dropped'][] = ['key' => $key, 'value' => mb_substr($raw, 0, 200), 'kind' => $prop['kind']];
+        continue;
+      }
+      if (!array_key_exists($key, $found)) {
+        if (($prop['level'] ?? '') === 'required') {
+          in_array($key, array_column($report['dropped'], 'key'), TRUE) ? $invalid[] = $key : $missing[] = $key;
         }
-        if ($found === NULL && ($prop['level'] ?? '') === 'required') {
-          $dropped ? $invalid[] = $key : $missing[] = $key;
-        }
-        if ($found === NULL) {
+        continue;
+      }
+      $emitted = $found[$key];
+      if ($prop['kind'] === 'ref') {
+        $emitted = self::refs($prop, $emitted, $ids, $report);
+        if (($prop['item'] ?? NULL) === 'ListItem') {
+          // A list page's pages, as the page node's main entity.
+          $page_main = $emitted ? ['@type' => 'ItemList', 'itemListElement' => $emitted] : NULL;
           continue;
         }
-        $report['sources'][$key] = $source;
-        if (($prop['emit'] ?? TRUE) === FALSE) {
-          // The clean value, as it was validated: " P1M" is "P1M".
-          $report['gates'][$key] = $found;
+        if ($emitted === []) {
           continue;
         }
-        self::put($primary, $key, $found, $type['nested'] ?? []);
       }
+      // A list of one is its item; a list of steps is steps only when there
+      // are several.
+      if (is_array($emitted) && array_is_list($emitted)) {
+        if (isset($prop['item']) && $prop['kind'] !== 'ref' && ($prop['item'] !== 'HowToStep' || count($emitted) > 1)) {
+          $emitted = array_map(static fn (string $one): array => $prop['item'] === 'Country'
+            ? ['@type' => 'Country', 'name' => $one]
+            : ['@type' => $prop['item'], 'text' => $one], $emitted);
+        }
+        $emitted = count($emitted) === 1 ? $emitted[0] : $emitted;
+      }
+      if (($prop['emit'] ?? TRUE) === FALSE) {
+        // The clean value, as it was validated: " P1M" is "P1M".
+        $report['gates'][$key] = $emitted;
+        continue;
+      }
+      if (($prop['emit'] ?? '') === 'type') {
+        if ($primary !== NULL) {
+          $primary['@type'] = $emitted;
+        }
+        continue;
+      }
+      if ($primary !== NULL) {
+        self::put($primary, $key, $emitted, $nested);
+      }
+    }
+    if ($primary !== NULL) {
       foreach (array_diff_key($refs, array_filter($refs, static fn (array $to): bool => isset($to['fixed']))) as $key => $to) {
         $holds = !isset($to['unless']) || !isset($report['sources'][$to['unless']]);
         foreach ($to['if'] ?? [] as $gate => $wanted) {
           $holds = $holds && ($report['gates'][$gate] ?? NULL) === $wanted;
         }
         if ($holds) {
-          self::put($primary, $key, $ref($to['to']), $type['nested'] ?? []);
+          self::put($primary, $key, $ref($to['to']), $nested);
         }
+      }
+      $work = self::WORK[$report['gates']['work'] ?? ''] ?? NULL;
+      if ($work !== NULL) {
+        $primary['jobLocationType'] = $work;
       }
       // A price billed every month or year says so beside the plain price.
       $billing = self::BILLING[$report['gates']['billing'] ?? ''] ?? NULL;
@@ -252,15 +904,23 @@ final class SchemaGraph {
           'unitCode' => $billing,
         ]);
       }
+      $judged = $primary;
+      uksort($partial, static fn (string $a, string $b): int => strlen($a) <=> strlen($b));
+      foreach ($partial as $key => $node) {
+        self::put($judged, $key, $node, $nested);
+      }
       if ($missing || $invalid) {
-        $report['withheld'] = ['missing' => $missing, 'dropped' => $invalid, 'node' => $primary];
+        $report['withheld'] = ['missing' => $missing, 'dropped' => $invalid, 'node' => $judged];
         $report['nodes'][] = [
           'id' => $ids['primary'],
-          'type' => $type['primary_type'],
+          'type' => $primary['@type'],
           'origin' => 'main',
           'left_out' => 'withheld',
         ];
         $primary = NULL;
+      }
+      elseif ($judged !== $primary) {
+        $report['judged'] = $judged;
       }
     }
 
@@ -294,7 +954,7 @@ final class SchemaGraph {
         'datePublished' => $ctx['published'] ?? '',
         'dateModified' => $ctx['modified'] ?? '',
         'primaryImageOfPage' => $page_image ? $ref('primaryimage') : NULL,
-        'mainEntity' => $primary ? $ref('primary') : NULL,
+        'mainEntity' => $primary ? $ref('primary') : $page_main,
       ]),
       'page:image' => $page_image ? self::imageNode($ids['primaryimage'], $page_image) + self::node(['caption' => $page_image['alt'] ?? '']) : NULL,
       'main' => $primary,
@@ -345,6 +1005,189 @@ final class SchemaGraph {
   }
 
   /**
+   * Whether a currency's node has an amount.
+   *
+   * "offers_priceCurrency" has one when "offers_price" gave a value.
+   */
+  private static function amountIn(string $key, array $found, array $props): bool {
+    $node = substr($key, 0, (int) strrpos($key, '_'));
+    foreach ($props as $prop) {
+      if ($prop['kind'] === 'number' && str_starts_with($prop['key'], "{$node}_") && isset($found[$prop['key']])) {
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * The node of a group, or NULL when it is incomplete or empty.
+   *
+   * A group whose reference gives the publisher or a page is that
+   * reference. A reference that gives only a name (a page not described as
+   * an accepted kind) is the group's name, and the group's other parts are
+   * kept; so is a list group's one target. Otherwise its parts are placed
+   * in its node, with each nested group that is complete; a group that has
+   * values but misses what it requires is reported.
+   */
+  private static function group(string $key, array $groups, array $nested, array $props, array $found, array $ids, array &$report, array &$partial): ?array {
+    $group = $groups[$key];
+    $by_key = array_column($props, NULL, 'key');
+    if (!isset($group['parent']) && isset($found[$key], $by_key[$key])) {
+      $targets = self::refs($by_key[$key], $found[$key], $ids, $report);
+      // One target, also of a list group (a workplace): named only, it is
+      // the group's name beside the group's own parts.
+      if (isset($targets[0]) && (empty($group['list']) || count($targets) === 1) && !isset($targets[0]['@id']) && isset($by_key["{$key}_name"])) {
+        $found["{$key}_name"] ??= $targets[0]['name'];
+        $targets = [];
+      }
+      if ($targets) {
+        // The parts are not what is emitted: the reference is.
+        $report['sources'] = array_diff_key($report['sources'], array_flip(array_filter(array_keys($report['sources']), static fn (string $one): bool => str_starts_with($one, "{$key}_"))));
+        return empty($group['list']) ? $targets[0] : (count($targets) === 1 ? $targets[0] : $targets);
+      }
+    }
+    $node = ['@type' => $group['type']];
+    $done = [];
+    $inner_nested = [];
+    foreach ($nested as $path => $nested_type) {
+      if (str_starts_with($path, "{$key}_")) {
+        $inner_nested[substr($path, strlen($key) + 1)] = $nested_type;
+      }
+    }
+    foreach ($group['parts'] as $part) {
+      $name = substr($part, strlen($key) + 1);
+      if (isset($groups[$part])) {
+        $inner = self::group($part, $groups, $nested, $props, $found, $ids, $report, $partial);
+        if ($inner !== NULL) {
+          $node[$name] = $inner;
+          $done[$part] = TRUE;
+        }
+        continue;
+      }
+      if (!array_key_exists($part, $found) || !isset($by_key[$part])) {
+        continue;
+      }
+      $done[$part] = TRUE;
+      if (($by_key[$part]['emit'] ?? TRUE) === FALSE) {
+        continue;
+      }
+      $leaf = $found[$part];
+      // Not on sale yet: no availability, only the date it goes on sale.
+      if ($group['shape'] === 'tickets' && $name === 'availability' && $leaf === 'https://schema.org/NotYet') {
+        continue;
+      }
+      // Coordinates and pay are numbers.
+      if (in_array($group['shape'], ['geo', 'pay'], TRUE) && is_numeric($leaf)) {
+        $leaf = 0 + $leaf;
+      }
+      self::put($node, $name, $leaf, $inner_nested);
+    }
+    // A group nothing was set for is not there; the site currency alone
+    // sets nothing.
+    $set = array_filter(array_keys($found), static fn (string $one): bool => str_starts_with($one, "{$key}_") && ($by_key[$one]['kind'] ?? '') !== 'currency');
+    if ($set === []) {
+      return NULL;
+    }
+    $missing = [];
+    foreach ($group['requires'] as $entry) {
+      if (!array_intersect($entry, array_keys($done))) {
+        array_push($missing, ...array_values(array_filter($entry, static fn (string $one): bool => !isset($groups[$one]))));
+        foreach (array_filter($entry, static fn (string $one): bool => isset($groups[$one])) as $inner) {
+          // A nested group that is not there at all is missing as a whole.
+          if (!in_array($inner, array_column($report['incomplete'], 'group'), TRUE)) {
+            $missing[] = $inner;
+          }
+        }
+      }
+    }
+    foreach ($group['needs'] ?? [] as $other) {
+      if (!isset($found[$other])) {
+        $missing[] = $other;
+      }
+    }
+    if ($group['shape'] === 'pay' && $missing === []) {
+      $value = $node['value'];
+      $from = $value['minValue'] ?? NULL;
+      $to = $value['maxValue'] ?? NULL;
+      if ($to !== NULL && $to < $from) {
+        $report['pay_order'] = TRUE;
+        return NULL;
+      }
+      if ($to === NULL || $to == $from) {
+        $node['value'] = ['@type' => 'QuantitativeValue', 'value' => $from, 'unitText' => $value['unitText']];
+      }
+    }
+    if ($missing) {
+      $report['incomplete'][] = ['group' => $key, 'missing' => $missing];
+      $partial[$key] = $node;
+      return NULL;
+    }
+    return $node;
+  }
+
+  /**
+   * The emitted form of a reference's targets.
+   *
+   * The publisher is the identity's @id; a public page described as an
+   * accepted kind is its main node's @id with its type, name, URL and any
+   * inline address; anything else is named only.
+   *
+   * @return list<array>
+   *   One node per target.
+   */
+  private static function refs(array $prop, array $targets, array $ids, array &$report): array {
+    $out = [];
+    $position = 0;
+    foreach ($targets as $target) {
+      // Someone else, by name.
+      if (is_string($target)) {
+        $target = ['name' => $target];
+      }
+      if (!is_array($target)) {
+        continue;
+      }
+      if (!empty($target['identity'])) {
+        $out[] = ['@id' => $ids['identity']];
+        continue;
+      }
+      if (($prop['item'] ?? NULL) === 'ListItem') {
+        // A list page lists pages; one visitors may not see is NULL and was
+        // dropped before (`hidden`).
+        if (!isset($target['url'])) {
+          continue;
+        }
+        $report['items'][] = [
+          'url' => $target['url'],
+          'type' => $target['type'] ?? NULL,
+          'complete' => !empty($target['complete']),
+        ];
+        $out[] = ['@type' => 'ListItem', 'position' => ++$position, 'url' => $target['url']];
+        continue;
+      }
+      $name = Values::plain((string) ($target['name'] ?? ''), 255);
+      $accepted = isset($target['type']) && array_intersect(self::ancestors($target['type']), $prop['accept'] ?? []);
+      if ($accepted && isset($target['id'], $target['url']) && $name !== '') {
+        $out[] = self::node([
+          '@id' => $target['id'],
+          '@type' => $target['type'],
+          'name' => $name,
+          'url' => $target['url'],
+          'address' => isset($prop['inline']) ? $target['address'] ?? NULL : NULL,
+        ]);
+        continue;
+      }
+      if ($name === '') {
+        continue;
+      }
+      if (isset($target['url']) || isset($target['type'])) {
+        $report['refs_inline'][] = ['key' => $prop['key'], 'name' => $name, 'reason' => 'kind'];
+      }
+      $out[] = ['@type' => $prop['as'] ?? 'Thing', 'name' => $name];
+    }
+    return array_values(array_unique($out, SORT_REGULAR));
+  }
+
+  /**
    * The verdict of every search feature that applies to a graph.
    *
    * Follows {"@id"} references inside the graph, so hand-added items get
@@ -355,8 +1198,9 @@ final class SchemaGraph {
    *   The built graph, `@context` and `@graph`.
    * @param array $ctx
    *   The keys home, url, front (whether the page is the front page), type (the
-   *   registry type), gates (the report's), extra (nodes to judge as if they
-   *   were in the graph: the withheld main node).
+   *   registry type), scope ('page' or 'template': what also helps is only
+   *   what that scope offers), gates (the report's), extra (nodes to judge
+   *   as if they were in the graph: the withheld main node).
    *
    * @return list<array{feature: ?string, node: ?string, verdict: string, missing?: list<array>, helps?: list<array>, reason?: string}>
    *   One verdict per feature and node, ordered as the dialog lists them;
@@ -368,6 +1212,12 @@ final class SchemaGraph {
   public static function features(array $graph, array $ctx): array {
     $rules = self::searchFeatures();
     $nodes = [...$graph['@graph'] ?? [], ...$ctx['extra'] ?? []];
+    // The main node with its incomplete groups, so that a verdict names the
+    // part a group misses.
+    $judged = $ctx['judged'] ?? NULL;
+    if (is_array($judged)) {
+      $nodes = array_map(static fn (array $node): array => ($node['@id'] ?? NULL) === $judged['@id'] ? $judged : $node, $nodes);
+    }
     $index = self::index($nodes);
     // A review or a rating that names what it reviews counts as that item's
     // own: a hand-added review of a hand-added product "#p" is that
@@ -396,6 +1246,10 @@ final class SchemaGraph {
     foreach ($nodes as $top) {
       foreach (self::objects($top) as [$object, $nested]) {
         $id = is_string($object['@id'] ?? NULL) ? $object['@id'] : NULL;
+        // A reference to another page's main thing is judged on that page.
+        if ($nested && $id !== NULL && !isset($index[$id]) && !str_starts_with($id, $ctx['url'] . '#')) {
+          continue;
+        }
         foreach ($id === NULL ? [] : $reviewed[$id] ?? [] as $as => $found) {
           $object[$as] ??= $found;
         }
@@ -420,6 +1274,22 @@ final class SchemaGraph {
             $verdicts[] = $verdict + ['verdict' => 'retired'];
             continue;
           }
+          // A list feature is judged on the list; the things it lists are
+          // shown only from there.
+          if (isset($feature['list'])) {
+            if ($object['@type'] !== 'ItemList') {
+              $verdicts[] = $verdict + ['verdict' => 'elsewhere'];
+              continue;
+            }
+            $items = $ctx['items'] ?? [];
+            $complete = count(array_filter($items, static fn (array $item): bool => $item['type'] === $feature['list']['of'] && $item['complete']));
+            $verdicts[] = $verdict + [
+              'verdict' => $complete >= $feature['list']['min'] ? 'ready' : 'needs',
+              'count' => $complete,
+              'of' => count($items),
+            ] + ($complete >= $feature['list']['min'] ? [] : ['missing' => [['path' => 'itemListElement']]]);
+            continue;
+          }
           $is_main = isset($main[(string) $id]);
           $fact = static function (string $path, ?int $rule = NULL) use ($is_main, $id, $ours, $ctx, $rules): array {
             $path = explode('|', $path)[0];
@@ -431,7 +1301,9 @@ final class SchemaGraph {
             ], static fn (mixed $v): bool => $v !== NULL);
           };
           // A one-of entry is a list; "a|b" is either path.
-          $has = static fn (string|array $entry): bool => (bool) array_filter((array) $entry, static fn (string $one): bool => self::has($object, $one, $index));
+          // A coded value the feature does not accept counts as missing.
+          $accepts = $feature['accepts'] ?? [];
+          $has = static fn (string|array $entry): bool => (bool) array_filter((array) $entry, static fn (string $one): bool => self::has($object, $one, $index, $accepts));
           $reason = NULL;
           foreach ($feature['not_for'] ?? [] as $not) {
             $seller = isset($not['seller']) ? self::at($object, $not['seller'], $index) : NULL;
@@ -443,6 +1315,9 @@ final class SchemaGraph {
                 self::at($object, $not['several'], $index),
               ))) < 2,
               isset($not['subdirectory']) => in_array(parse_url($ctx['home'], PHP_URL_PATH) ?? '/', ['', '/'], TRUE),
+              // A closing date that has passed, with no time zone of its
+              // own: compared as the site's date.
+              isset($not['past']) => ($ctx['today'] ?? '') === '' || !is_string($closes = self::at($object, $not['past'], $index)[0] ?? NULL) || substr($closes, 0, 10) >= $ctx['today'],
               $seller !== NULL => ($seller[0]['@id'] ?? NULL) === $ours['identity'],
               default => TRUE,
             };
@@ -460,6 +1335,13 @@ final class SchemaGraph {
             $verdicts[] = $verdict + ['verdict' => 'unanswered'];
             continue;
           }
+          if ($reason === 'closed') {
+            $verdicts[] = $verdict + [
+              'verdict' => 'closed',
+              'date' => substr((string) self::at($object, 'validThrough', $index)[0], 0, 10),
+            ];
+            continue;
+          }
           if ($reason !== NULL) {
             $verdicts[] = $verdict + ['verdict' => 'not_fit', 'reason' => $reason];
             continue;
@@ -467,14 +1349,43 @@ final class SchemaGraph {
           $missing = [];
           foreach ([...$feature['required'], ...$feature['complete'] ?? []] as $entry) {
             if (!$has($entry)) {
-              $missing[] = $fact(is_array($entry) ? $entry[0] : $entry);
+              $missing[] = $fact(self::asked($entry, $ctx, static fn (string $path): bool => self::at($object, explode('|', $path)[0], $index) !== []));
             }
           }
+          // A group left out for a part it misses is not there: what the
+          // feature requires of it names that part.
+          if ($is_main) {
+            $required = array_merge(...array_map(static fn (string|array $entry): array => explode('|', implode('|', (array) $entry)), $feature['required'] ?: [[]]));
+            foreach ($ctx['incomplete'] ?? [] as $gap) {
+              $at = str_replace('_', '.', $gap['group']);
+              if (!array_filter($required, static fn (string $path): bool => $path === $at || str_starts_with($path, "$at."))) {
+                continue;
+              }
+              foreach ($gap['missing'] as $key) {
+                $path = str_replace('_', '.', $key);
+                if (!in_array($path, array_column($missing, 'path'), TRUE)) {
+                  $missing[] = $fact($path);
+                }
+              }
+            }
+          }
+          // A part a group misses is asked for instead of the whole group.
+          $missing = array_values(array_filter($missing, static fn (array $one): bool => !array_filter($missing, static fn (array $other): bool => str_starts_with($other['path'], $one['path'] . '.'))));
           foreach ($feature['rules'] ?? [] as $at => $rule) {
+            // Needed only when another fact is there: remote work needs who
+            // can apply from where.
+            if (isset($rule['when'])) {
+              if (self::has($object, $rule['when'], $index, $accepts) && !self::has($object, $rule['path'], $index, $accepts)) {
+                $missing[] = $fact($rule['path'], $at);
+              }
+              continue;
+            }
             foreach (self::at($object, $rule['path'], $index) as $found) {
               $passes = match (TRUE) {
                 isset($rule['gt']) => is_numeric($found) && $found > $rule['gt'],
                 isset($rule['is']) => $found === $rule['is'],
+                // A description that only repeats the title says nothing.
+                isset($rule['differs']) => !is_string($found) || mb_strtolower(trim(strip_tags($found))) !== mb_strtolower(trim((string) (self::at($object, $rule['differs'], $index)[0] ?? ''))),
                 default => TRUE,
               };
               if (!$passes) {
@@ -483,7 +1394,12 @@ final class SchemaGraph {
               }
             }
           }
-          $helps = array_values(array_map($fact, array_filter($feature['recommended'] ?? [], static fn (string $entry): bool => !$has($entry))));
+          // Only what the page's scope can fill helps: a recipe page has no
+          // ingredients to add.
+          $helps = array_values(array_filter(
+            array_map($fact, array_filter($feature['recommended'] ?? [], static fn (string $entry): bool => !$has($entry))),
+            static fn (array $one): bool => !isset($one['prop'], $ctx['scope']) || self::prop($ctx['type'] ?? 'WebPage', $one['prop']) === NULL || self::offered($ctx['type'] ?? 'WebPage', $one['prop'], $ctx['scope']),
+          ));
           $verdicts[] = $verdict + array_filter([
             'verdict' => $missing ? 'needs' : (isset($feature['complete']) ? 'complete' : 'ready'),
             'missing' => $missing,
@@ -497,6 +1413,43 @@ final class SchemaGraph {
     }
     usort($verdicts, static fn (array $a, array $b): int => array_search($a['verdict'], self::ORDER, TRUE) <=> array_search($b['verdict'], self::ORDER, TRUE));
     return $verdicts;
+  }
+
+  /**
+   * The fact to ask for when a required entry is missing.
+   *
+   * Of a one-of entry: the one written with a value the feature does not
+   * accept; else the first whose detail an answer has not ruled out (once
+   * "Where the work is" is on site, the workplace's address, not the
+   * question again); else the first.
+   *
+   * @param string|array $entry
+   *   A required entry: a path, or a list of paths one of which is enough.
+   * @param array $ctx
+   *   See features(): type and gates.
+   * @param callable(string): bool $written
+   *   Whether the node has a value at a path.
+   */
+  private static function asked(string|array $entry, array $ctx, callable $written): string {
+    $type = $ctx['type'] ?? 'WebPage';
+    foreach ((array) $entry as $one) {
+      if ($written($one)) {
+        return $one;
+      }
+    }
+    foreach ((array) $entry as $one) {
+      $key = self::propOf(explode('|', $one)[0], $type);
+      $first = self::types()[$type]['groups'][$key ?? '']['parts'][0] ?? NULL;
+      $prop = $key === NULL ? NULL : self::prop($type, $key) ?? ($first === NULL ? NULL : self::prop($type, $first));
+      $holds = $prop !== NULL;
+      foreach ($prop['when'] ?? [] as $gate => $values) {
+        $holds = $holds && in_array($ctx['gates'][$gate] ?? NULL, $values, TRUE);
+      }
+      if ($holds) {
+        return $one;
+      }
+    }
+    return ((array) $entry)[0];
   }
 
   /**
@@ -591,28 +1544,72 @@ final class SchemaGraph {
   }
 
   /**
-   * Resolves one property; NULL when it is empty or not valid for its kind.
+   * Resolves one value of a property; NULL when it is empty or not valid.
+   *
+   * @param string $type
+   *   The type id.
+   * @param array $prop
+   *   The property.
+   * @param string|array|null $resolved
+   *   What its value gave: text, or an image array.
+   * @param array $ctx
+   *   See build().
+   * @param string|null $unit
+   *   The unit a linked duration's field counts in.
    */
-  private static function value(string $type, array $prop, string|array|null $resolved, array $ctx): string|array|null {
+  private static function value(string $type, array $prop, string|array|null $resolved, array $ctx, ?string $unit = NULL): string|array|null {
     if ($prop['kind'] === 'image') {
+      if (!is_array($resolved) || !isset($resolved['url'])) {
+        return NULL;
+      }
+      // The page's own image is referenced, not repeated.
+      if (isset($ctx['image']['url']) && $ctx['image']['url'] === $resolved['url']) {
+        return ['@id' => $ctx['url'] . '#primaryimage'];
+      }
       // A dimension that was never measured (0) is left out, not claimed.
-      return is_array($resolved) ? self::node([
+      return self::node([
         '@type' => 'ImageObject',
         'url' => $resolved['url'],
         'width' => $resolved['width'] ?: NULL,
         'height' => $resolved['height'] ?: NULL,
-      ]) : NULL;
+      ]);
+    }
+    if (!empty($prop['html'])) {
+      $html = self::filterHtml(is_string($resolved) ? $resolved : '');
+      return $html === '' ? NULL : $html;
     }
     $value = Values::plain(is_string($resolved) ? $resolved : '', 2000);
-    if ($value === '' || !self::validLiteral($type, $prop['key'], $value)) {
+    if (isset($prop['unit']) && $value !== '') {
+      // A linked duration counts in the unit its field was answered with;
+      // 1.5 hours is 90 minutes.
+      if (!is_numeric($value) || (float) $value <= 0) {
+        return NULL;
+      }
+      $minutes = (int) round((float) $value * self::UNITS[$unit ?? $prop['unit']]);
+      return $minutes > 0 && $minutes <= self::DURATION_MAX ? self::duration($minutes) : NULL;
+    }
+    // A country code in either case is the code: "fi" is "FI".
+    if (isset($prop['codes'])) {
+      $value = strtoupper(trim($value));
+    }
+    if ($value === '' || !self::literal(array_diff_key($prop, ['list' => TRUE]), $value)) {
       return NULL;
     }
+    // A time is written with its seconds, typed or linked: 18:00:00.
+    if ($prop['kind'] === 'date' && preg_match('/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?!:)(.*)$/D', $value, $time)) {
+      $value = "$time[1]:00$time[2]";
+    }
     return match ($prop['kind']) {
-      'enum' => ($prop['emit'] ?? TRUE) === FALSE ? $value : 'https://schema.org/' . $value,
+      'enum' => match ($prop['emit'] ?? 'url') {
+        'url' => 'https://schema.org/' . $value,
+        default => $value,
+      },
       // A time without an offset is in the site's default timezone.
       'date' => preg_match(self::DATE, $value, $m) && ($m[4] ?? '') !== '' && ($m[5] ?? '') === ''
         ? $value . (new \DateTimeImmutable($value, new \DateTimeZone($ctx['timezone'] ?? 'UTC')))->format('P')
         : $value,
+      'number' => isset($prop['format']) ? str_replace('{n}', $value, $prop['format']) : $value,
+      'hours' => self::hoursNodes((array) self::hours($value), (string) ($ctx['today'] ?? '')) ?: NULL,
       default => $value,
     };
   }
@@ -620,8 +1617,8 @@ final class SchemaGraph {
   /**
    * Sets a value at a property key's path, creating the typed nodes on it.
    *
-   * "location_address_streetAddress" is the path location > address >
-   * streetAddress; schema.org names contain no underscore.
+   * "offers_priceCurrency" is the path offers > priceCurrency; schema.org
+   * names contain no underscore.
    */
   private static function put(array &$node, string $key, mixed $value, array $nested): void {
     $path = explode('_', $key);
@@ -710,8 +1707,11 @@ final class SchemaGraph {
   /**
    * Whether any of the "a|b" alternatives of an entry resolves.
    */
-  private static function has(array $object, string $entry, array $index): bool {
-    return (bool) array_filter(explode('|', $entry), static fn (string $path): bool => self::at($object, $path, $index) !== []);
+  private static function has(array $object, string $entry, array $index, array $accepts = []): bool {
+    return (bool) array_filter(explode('|', $entry), static fn (string $path): bool => array_filter(
+      self::at($object, $path, $index),
+      static fn (mixed $value): bool => !isset($accepts[$path]) || in_array($value, $accepts[$path], TRUE),
+    ) !== []);
   }
 
   /**

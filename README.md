@@ -75,14 +75,56 @@ to show a result. Each line opens its proof: where the feature appears, what
 it needs and what also helps, the guidelines no machine checks, the date the
 rules were last reviewed and their source (`data/search-features.json`).
 
-**What this page is** is one of six kinds: a product people buy, plans for a
-service (memberships, subscriptions and services: no search feature of their
+**What this page is** is one of these kinds: a product people buy, plans for
+a service (memberships, subscriptions and services: no search feature of their
 own, never shopping listings), an article (Kind of article: blog post, news
-article), an event people attend in person, a person's profile, or a web page
-(Kind of page: about, contact, collection). A product says how its price is
+article), an event people attend in person, a person's profile, a job posting
+(on a content type only: one page per job), a place people visit (a local
+business, or a venue that is not one), a recipe, a course, or a web page (Kind
+of page: about, contact, collection). A product says how its price is
 **Billed** (once, every month, every year) and whether it is **Bought on this
 page**; only then is the site its seller. Site › Prices › Currency is the
-currency of every price that names none.
+currency of every price and pay that names none.
+
+Every detail a kind offers can be filled without writing JSON-LD, and a kind
+is offered only where that holds (a contract test pins it):
+
+- **Groups.** A venue, an address, the tickets or the pay is one line that
+  opens a sheet with its parts. A group is left out until it has what it
+  needs (an address needs a street or city, and a country; a venue its name
+  or its address); the box, its sheet and Checks say which part is missing,
+  in one sentence with what a search feature asks more of it.
+- **References.** An organizer, an employer or an author is one choice:
+  your site, or someone else, whose name and website you then give; on a
+  content type it can also link a reference field. A venue, a workplace and
+  performers point at another page's main thing by linking a reference field
+  on a content type; on a Canvas page you give the venue's or workplace's name
+  and address. A page described as an accepted kind is referenced by its
+  `@id` with its name, address and URL; any other page gives its name; a page
+  visitors may not see is never named. On a Canvas page, an organizer or a
+  recipe's author nobody set is the site, and Checks says so; choosing
+  "Someone else" is kept, and nothing is emitted until a name is typed.
+- **Each page's own.** On a content type, a closing date, performers, a venue
+  page and a workplace page are linked to a field, never typed once for
+  every page.
+- **Lists.** On a content type, a multi-value field gives every item in
+  order (ingredients, profile links, authors), and one formatted text gives
+  its own list items, else its paragraphs, and one long plain text its
+  lines. A text list is never typed, so
+  ingredients and steps are offered on content types only. A field of several
+  values on a single detail gives its first item, and the menu says "First of
+  ‹n›".
+- **Codes and durations.** Countries are picked from a searchable list;
+  short lists of choices are checkboxes. A time is one box of hours and
+  minutes; a linked one asks whether its field counts minutes or hours.
+- **Opening hours** are a week with special days, in one sheet.
+- **A job description** is linked from a formatted field and keeps only
+  paragraphs, lists, line breaks, bold, italics and links to full addresses.
+  Where the work is is one answer (on site, fully remote, or on site or
+  remote); the workplace and the countries people can apply from follow it.
+- **A list page** (a collection page on a content type) lists the pages a
+  multi-value reference field holds, in order; three complete courses make a
+  course list.
 
 Your own JSON-LD is under **Code › Add your own JSON-LD**. Each item gets its
 verdicts and checks: text that is not on the page can be left out until it
@@ -126,10 +168,9 @@ Checks says so. A few things work differently from what you might expect:
 
 - A text list gives its stored key (`EventScheduled`), not its label, which is
   what structured data needs.
-- A multi-value field gives its first item. A multi-value media field, such as
-  a gallery, cannot be linked as an image; the Image fact uses its first
-  image. A multi-value formatted text field, such as recipe steps, is not
-  offered.
+- On a single detail, a multi-value field gives its first item; on a list
+  (ingredients, steps, profile links) it gives every item. A multi-value
+  media field, such as a gallery, links only its first image.
 - While you preview an item visitors cannot see yet, its links are read with
   your access.
 - A field deleted after it was linked leaves the link in place; each item uses
@@ -317,7 +358,10 @@ marked `UPSTREAM(canvas)`; ARCHITECTURE.md lists every ask:
   its fields in another order than their machine names may now take another
   field for its description or page image (see "The three scopes"). The
   dialog's previews show it before anything is published, and cached pages
-  are refreshed when the form changes.
+  are refreshed when the form changes. An event's organizer was the site
+  unless a name was typed; it now is by default on Canvas pages only, so the
+  update stores the site as the organizer of every event content type that
+  never set one (and of its draft): their heads stay as they were.
 - To keep a staging site out of search engines, override the site setting in
   its `settings.php`. The dialog shows such pages as hidden and says the
   setting comes from outside:
@@ -332,8 +376,9 @@ XML sitemaps, redirects, `robots.txt` or `llms.txt`; keyword or readability
 scoring, or any score; bulk editing; overrides for a single node (a node uses
 its content type's settings); import of Metatag data; search console
 integrations; head output on routes it does not own; breadcrumb structured
-data; repeating structured data such as FAQs or recipe steps (add your own
-JSON-LD); robots rules for single crawlers and AI-training opt-outs (those
+data; repeating structured data typed line by line, such as FAQs (lists come
+only from multi-value fields and one text's list items; add your own JSON-LD
+for the rest); robots rules for single crawlers and AI-training opt-outs (those
 belong in `robots.txt`); `og:locale`; image upload or image styles; a site-wide
 default description or social text; a UI for translating template or site
 values; editing a translation's own SEO text where the Canvas editor cannot

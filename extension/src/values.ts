@@ -22,6 +22,7 @@ export const FACT_KINDS: Record<Fact, Kind> = {
   published: 'date',
   modified: 'date',
   image: 'image',
+  identity: 'ref',
 };
 
 /** The kind of value a structured data property takes. As Values::KINDS. */
@@ -33,7 +34,12 @@ export const PROP_KINDS: Record<SchemaProp['kind'], Kind> = {
   enum: 'text',
   currency: 'text',
   image: 'image',
+  ref: 'ref',
+  hours: 'hours',
 };
+
+/** The kind of value a property takes: formatted text for a job description. As Values::kindOf(). */
+export const propKind = (prop: SchemaProp): Kind => (prop.html ? 'html' : PROP_KINDS[prop.kind]);
 
 /** An image as the dialog shows it. */
 export interface ShownImage {
@@ -80,7 +86,7 @@ export function kindOf(path: string, props: SchemaProp[] = []): Kind {
   }
   if (path.startsWith('schema.props.')) {
     const prop = props.find((one) => one.key === path.slice(13));
-    return prop ? PROP_KINDS[prop.kind] : 'text';
+    return prop ? propKind(prop) : 'text';
   }
   return 'text';
 }
@@ -167,6 +173,9 @@ const A: Record<Kind, string> = {
   date: 'A date',
   number: 'A number',
   image: 'An image',
+  html: 'Formatted text',
+  ref: 'A page or a name',
+  hours: 'Opening hours',
 };
 const NOUN: Record<Kind, string> = {
   text: 'text',
@@ -174,6 +183,9 @@ const NOUN: Record<Kind, string> = {
   date: 'a date',
   number: 'a number',
   image: 'an image',
+  html: 'formatted text',
+  ref: 'a page or a name',
+  hours: 'opening hours',
 };
 
 /** Why an entry of one kind cannot fill a place of another: "An image, not text". */
@@ -228,6 +240,7 @@ function factNote(fact: Fact, lookup: Lookup): string {
     author: "Its author's name",
     published: 'When it was first published',
     modified: 'When it was last changed',
+    identity: 'Your site',
     image: 'The first image it has',
   }[fact];
 }
@@ -270,6 +283,10 @@ export function entriesFor(
   lookup: Lookup,
   typeLabel: string,
   choices?: string[],
+  /** `list`: the place takes every item; `one`: only the first is used. */
+  items?: 'list' | 'one',
+  /** The place's own label: a list's fields named like it are suggested first. */
+  placeLabel?: string,
 ): Entry[] {
   const facts: Entry[] = factsFor(path, kind, scope).map((fact) => {
     const shown = resolve({ fact }, kind, lookup);
@@ -278,13 +295,15 @@ export function entriesFor(
       value: { fact },
       label: lookup.facts[fact]?.label ?? fact,
       full: lookup.facts[fact]?.label ?? fact,
-      group: 'Page',
+      // A reference's publisher is its own group, first.
+      group: kind === 'ref' ? 'This site' : 'Page',
       level: null,
       kind,
       shown: shown.text,
       image: shown.image,
       status: shown.status === 'none' ? 'none' : shown.status === 'ok' ? 'ok' : 'empty',
-      disabled: choices ? NOT_AN_OPTION : undefined,
+      // A fact is one value: never a list of text.
+      disabled: choices ? NOT_AN_OPTION : items === 'list' && kind === 'text' ? ONE_VALUE : undefined,
     };
   });
   if (scope !== 'template') {
@@ -292,13 +311,16 @@ export function entriesFor(
   }
   const fields: Entry[] = lookup.sources.map((row) => {
     const own = row.kinds.includes(kind) ? kind : row.kinds[0];
+    // A reference is its field, one Enter away: "Location", its page.
+    const page = kind === 'ref' && own === 'ref';
+    const shown = row.status === 'ok' ? row.shown || row.value : '';
     return {
       key: row.source.expression,
       value: { source: row.source },
-      label: (row.hop ? row.path.slice(1) : row.path).join(' › '),
-      full: row.label,
+      label: page ? row.path[0] : (row.hop ? row.path.slice(1) : row.path).join(' › '),
+      full: page ? `the ${row.path[0]} page` : row.label,
       group: typeLabel,
-      level: row.hop ? row.path[0] : null,
+      level: row.hop && !page ? row.path[0] : null,
       kind: own,
       shown: row.status === 'ok' ? row.shown || row.value : '',
       image: own === 'image' ? (row.image ?? null) : null,
@@ -315,8 +337,30 @@ export function entriesFor(
               ? 'Hidden from visitors'
               : undefined,
       names: row.names,
+      note: page ? (shown ? `Its page: ${shown}` : 'Its page') : own === kind && !choices ? itemsNote(row, items) : undefined,
     };
   });
+  // A list of text takes many values, or one formatted text's items; a list
+  // of codes takes a list field of one value too.
+  if (items === 'list' && kind === 'text' && !choices) {
+    for (const entry of fields) {
+      const row = lookup.sources.find((one) => one.source.expression === entry.key)!;
+      if (entry.kind === kind && !row.many && !row.kinds.includes('html') && !row.lines) {
+        entry.disabled ??= ONE_VALUE;
+      }
+    }
+    // Suggested: fields of several values named like the place
+    // (Ingredients for Ingredients), first.
+    const words = folded(placeLabel ?? '').split(/\W+/).filter((word) => word.length > 2);
+    for (const entry of fields) {
+      const row = lookup.sources.find((one) => one.source.expression === entry.key)!;
+      if (!entry.disabled && row.many && words.some((word) => folded(entry.full).includes(word))) {
+        entry.group = 'Suggested';
+        entry.level = null;
+      }
+    }
+    fields.sort((a, b) => Number(b.group === 'Suggested') - Number(a.group === 'Suggested'));
+  }
   // Two fields with one label are told apart by their machine names.
   const counts: Record<string, number> = {};
   for (const entry of fields) {
@@ -338,11 +382,30 @@ export function entriesFor(
       entry.note = factNote((entry.value as { fact: Fact }).fact, lookup);
     }
   }
-  // At template scope the type's own fields come first: they are what a link is for.
-  return [...fields, ...facts];
+  // At template scope the type's own fields come first: they are what a link
+  // is for. A reference's publisher comes before them.
+  return kind === 'ref' ? [...facts, ...fields] : [...fields, ...facts];
 }
 
 const NOT_AN_OPTION = 'Not one of the options';
+const ONE_VALUE = 'One value, not a list';
+
+/**
+ * What a field gives a place that takes a list (every item, or one
+ * formatted text's own items), or that only its first item is used.
+ */
+function itemsNote(row: SourceRow, items: 'list' | 'one' | undefined): string | undefined {
+  if (items === 'list') {
+    return row.many
+      ? `All${row.count ? ` ${row.count}` : ''}, in order`
+      : row.kinds.includes('html')
+        ? 'Each list item, in order'
+        : row.lines
+          ? 'Each line, in order'
+          : undefined;
+  }
+  return row.many && (row.count ?? 0) > 1 ? `First of ${row.count}` : undefined;
+}
 
 /** Text compared without case and accents. */
 const folded = (text: string) =>
@@ -369,6 +432,10 @@ export const levelOf = (entry: Entry): string | null => (entry.disabled ? FOLD :
 export function foldLabel(entries: Entry[], kind: Kind): string {
   const count = entries.length;
   const fields = count === 1 ? 'field' : 'fields';
+  // A reference takes a page: everything else is another field.
+  if (kind === 'ref') {
+    return `${count} other ${fields}`;
+  }
   return entries.every((entry) => entry.kind !== kind)
     ? `${count} ${fields} that ${count === 1 ? "isn't" : "aren't"} ${NOUN[kind]}`
     : `${count} ${fields} that can't be linked here`;
@@ -465,6 +532,8 @@ export function tagOf(
   value: Value,
   lookup: Lookup,
   path?: string,
+  /** A reference is named by its field: "Location", not "Location › Title". */
+  kind?: Kind,
 ): string {
   if ('text' in value) {
     return 'Typed text';
@@ -477,9 +546,11 @@ export function tagOf(
   }
   const field = machineName(value.source.expression);
   const broken = path ? lookup.broken?.[path] : undefined;
+  const row = rowOf(lookup, value);
   return (
     (broken && broken.field === field ? broken.field : undefined) ??
-    rowOf(lookup, value)?.label ??
+    (kind === 'ref' && row?.names ? row.path[0] : undefined) ??
+    row?.label ??
     field ??
     'A field'
   );

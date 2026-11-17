@@ -1,0 +1,217 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/complex/people/mira-kallio",
+        "langcode": "en",
+        "title": "Mira Kallio",
+        "description": "Conductor of new music.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "template",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "ProfilePage",
+        "props": {
+            "jobTitle": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:person␝field_role␞␟value",
+                    "sourceType": "entity-field"
+                }
+            },
+            "sameAs": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:person␝field_links␞␟uri",
+                    "sourceType": "entity-field"
+                }
+            },
+            "image": {
+                "source": {
+                    "expression": "ℹ︎␜entity:node:person␝field_photo␞␟entity␜␜entity:media␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}",
+                    "sourceType": "entity-field"
+                }
+            },
+            "worksFor_name": {
+                "text": "Helsinki Chamber Players"
+            }
+        }
+    },
+    "facts": {
+        "title": "Mira Kallio",
+        "description": "Conductor of new music.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/complex/people/mira-kallio"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": {
+        "ℹ︎␜entity:node:person␝field_role␞␟value": "Conductor",
+        "ℹ︎␜entity:node:person␝field_links␞␟uri": [
+            "https://mira.example.org",
+            "https://social.example.net/@mira",
+            "https://mira.example.org"
+        ],
+        "ℹ︎␜entity:node:person␝field_photo␞␟entity␜␜entity:media␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}": {
+            "url": "https://cms.example.com/sites/default/files/mira.png",
+            "width": 800,
+            "height": 1000,
+            "alt": "Mira Kallio"
+        }
+    },
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "description": "default",
+            "image": "set",
+            "jobTitle": "set",
+            "worksFor_name": "set",
+            "sameAs": "set"
+        },
+        "gates": [],
+        "type": "ProfilePage",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/complex/people/mira-kallio#webpage",
+                "type": "ProfilePage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/complex/people/mira-kallio#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/complex/people/mira-kallio#primary",
+                "type": "Person",
+                "origin": "main",
+                "at": 4
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [],
+        "refs_inline": [],
+        "defaults": [],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "ProfilePage",
+                "@id": "https://www.example.com/complex/people/mira-kallio#webpage",
+                "url": "https://www.example.com/complex/people/mira-kallio",
+                "name": "Mira Kallio",
+                "description": "Conductor of new music.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/complex/people/mira-kallio#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/complex/people/mira-kallio#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/complex/people/mira-kallio#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            },
+            {
+                "@type": "Person",
+                "@id": "https://www.example.com/complex/people/mira-kallio#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/complex/people/mira-kallio#webpage"
+                },
+                "name": "Mira Kallio",
+                "description": "Conductor of new music.",
+                "image": {
+                    "@type": "ImageObject",
+                    "url": "https://cms.example.com/sites/default/files/mira.png",
+                    "width": 800,
+                    "height": 1000
+                },
+                "jobTitle": "Conductor",
+                "worksFor": {
+                    "@type": "Organization",
+                    "name": "Helsinki Chamber Players"
+                },
+                "sameAs": [
+                    "https://mira.example.org",
+                    "https://social.example.net/@mira"
+                ]
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": "profile-page",
+            "node": "https://www.example.com/complex/people/mira-kallio#webpage",
+            "verdict": "ready"
+        }
+    ]
+}

@@ -217,14 +217,14 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       ],
       'product_lamp' => [
         // The scale the field stores.
-        'field_price' => ['89.00', 'number'],
+        'field_price' => ['89', 'number'],
         'field_currency' => 'EUR',
         'field_sku' => 'LAMP-OAK-01',
         'field_category' => 'Lamps',
       ],
       'product_rtl' => [
         'title' => 'مصباح مكتب',
-        'field_price' => ['1200.50', 'number'],
+        'field_price' => ['1200.5', 'number'],
         'field_currency' => 'USD',
         'field_category' => 'Desks & tables',
       ],
@@ -236,7 +236,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
         'field_category' => NULL,
       ],
       'product_archived' => [
-        'field_price' => ['149.00', 'number'],
+        'field_price' => ['149', 'number'],
         // An unpublished term is hidden from visitors.
         'field_category' => NULL,
       ],
@@ -250,7 +250,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       ],
       'job_developer' => [
         'description' => 'Build editorial tools with a small team.',
-        'field_salary' => ['5200.00', 'number'],
+        'field_salary' => ['5200', 'number'],
         'field_salary_unit' => 'MONTH',
         'field_employment_type' => 'FULL_TIME',
         // A date-only field stays a date.
@@ -288,8 +288,9 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
         self::assertSame($value, $actual, "$key: $name");
       }
     }
-    // Canvas offers no multi-value formatted text as one text.
-    self::assertNull($sources->sourceFor('recipe', 'field_steps', 'text'));
+    // Canvas offers a multi-value formatted text for a list of formatted
+    // texts: the module asks for one, so steps can be linked.
+    self::assertSame(['expression' => 'ℹ︎␜entity:node:recipe␝field_steps␞␟value', 'sourceType' => 'entity-field'], $sources->sourceFor('recipe', 'field_steps', 'text'));
 
     // A long body without a summary: its text, cut at a word boundary within
     // 160 characters.
@@ -408,17 +409,17 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     self::assertSame(['identity', 'website', 'webpage', 'primaryimage', 'primary'], array_keys($graph));
     self::assertSame('WebPage', $graph['webpage']['@type']);
     self::assertArrayHasKey('mainEntity', $graph['webpage']);
-    self::assertSame([
-      'Lakeside Concert Hall',
-      'Mannerheimintie 13e',
-    ], [$graph['primary']['location']['name'], $graph['primary']['location']['address']['streetAddress']]);
+    // The venue's name; its street has no city or country, so the address
+    // is left out and reported, and the event still ships.
+    self::assertSame(['@type' => 'Place', 'name' => 'Lakeside Concert Hall'], $graph['primary']['location']);
+    self::assertSame([['group' => 'location_address', 'missing' => ['location_address_addressCountry']]], $this->resolver()->resolve($this->node('event_full'))['schema']['incomplete']);
     self::assertSame('https://schema.org/EventScheduled', $graph['primary']['eventStatus']);
     self::assertSame('An orchestra on an open-air stage at dusk', $graph['primaryimage']['caption']);
     // What withholds the main node, and the values that do not fit.
     $reports = [
       'event_full' => [NULL, []],
-      // No venue for visitors: no street address.
-      'event_hidden_refs' => [['location_address_streetAddress'], []],
+      // No venue for visitors: no venue at all.
+      'event_hidden_refs' => [['location'], []],
       // A text list gives its key, a currency code.
       'product_lamp' => [NULL, []],
       'product_rtl' => [NULL, []],
@@ -465,10 +466,13 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       'mainEntityOfPage' => ['@id' => "$url#webpage"],
       'name' => 'Mira Kallio',
       'description' => 'Conductor of new music.',
-      'image' => ['@type' => 'ImageObject', 'url' => $this->fileUrl('mira'), 'width' => 800, 'height' => 800],
+      // The photo is the page's own image: referenced, not repeated.
+      'image' => ['@id' => "$url#primaryimage"],
       'jobTitle' => 'Conductor',
-      'sameAs' => 'https://mira.example.org',
+      // Every profile link, in order.
+      'sameAs' => ['https://mira.example.org', 'https://social.example.net/@mira'],
     ], $graph['primary']);
+    self::assertSame($this->fileUrl('mira'), $graph['primaryimage']['url']);
     // Every optional field empty: name and photo only.
     $primary = self::graph($heads['person_empty'])['primary'];
     self::assertSame(['@type', '@id', 'mainEntityOfPage', 'name', 'image'], array_keys($primary));

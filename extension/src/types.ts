@@ -9,10 +9,12 @@ export type Fact =
   | 'author'
   | 'published'
   | 'modified'
-  | 'image';
+  | 'image'
+  /** The publisher: the site's own identity. References only. */
+  | 'identity';
 
 /** The kind of value a place takes, and a fact or a source gives. */
-export type Kind = 'text' | 'address' | 'date' | 'number' | 'image';
+export type Kind = 'text' | 'address' | 'date' | 'number' | 'image' | 'html' | 'ref' | 'hours';
 
 /** A Canvas entity-field source: a template's link to a field. */
 export interface SourceRef {
@@ -28,7 +30,7 @@ export type Value =
   | { text: string }
   | { fact: Fact }
   | { media: string }
-  | { source: SourceRef };
+  | { source: SourceRef; unit?: 'minute' | 'hour' };
 
 /** One shape at every scope. Every key is optional and absent means "inherit". */
 export interface SeoValues {
@@ -79,6 +81,8 @@ export interface SiteSettings {
   values: SeoValues;
   /** An ISO 4217 code: the currency of every price that names none. '' = none. */
   currency: string;
+  /** The site's default country (ISO 3166-1), which a country picker suggests; '' = none. State only. */
+  country?: string;
 }
 
 // The JSON-LD type registry (data/schema-types.json), in the dialog's language.
@@ -86,7 +90,7 @@ export interface SiteSettings {
 export interface SchemaProp {
   key: string;
   label: string;
-  kind: 'text' | 'url' | 'date' | 'number' | 'enum' | 'currency' | 'image';
+  kind: 'text' | 'url' | 'date' | 'number' | 'enum' | 'currency' | 'image' | 'ref' | 'hours';
   default?: Value;
   /** The main node is left out without it. */
   level?: 'required';
@@ -95,8 +99,69 @@ export interface SchemaProp {
   option_labels?: Record<string, string>;
   pattern?: string;
   ai?: boolean;
-  /** Stored, never in the graph: it decides what is. */
-  emit?: false;
+  /** How an enum is emitted; false: stored, never in the graph, it decides what is. */
+  emit?: false | 'url' | 'code' | 'type';
+  /** Several values, in order. */
+  list?: true;
+  max?: number;
+  /** The choices are a code list: "country". */
+  codes?: string;
+  /** A duration: whole units of this. */
+  unit?: 'minute' | 'hour';
+  /** The units a linked duration's field may count in. */
+  units?: ('minute' | 'hour')[];
+  /** Each item is a node of this type. */
+  item?: string;
+  /** Several values become one text, joined with this. */
+  join?: string;
+  /** Emitted with this detail, or not at all. */
+  pair?: string;
+  /** Formatted text, linked only. */
+  html?: true;
+  link_only?: true;
+  /** Each page has its own: on a template only a field gives it (a closing date, performers). */
+  per_item?: true;
+  /** A reference: the kinds of page it accepts, and its type when it names. */
+  accept?: string[];
+  as?: string;
+  /** The publisher can be it. */
+  site?: true;
+  /** On a Canvas page, the publisher when nobody set it. */
+  page_default?: true;
+  /** A reference carries its target's address. */
+  inline?: string;
+  /** Where it is not offered, and why. */
+  scopes?: Partial<Record<'page' | 'template', 'component' | 'policy'>>;
+  /** Counts only while these details have one of these values. */
+  when?: Record<string, string[]>;
+  /** Shown as a line under this detail. */
+  under?: string;
+  range?: [number, number];
+  format?: string;
+  /** A value the dialog suggests, never emitted unless chosen. */
+  suggest?: string;
+  /** The characters a result shows of it. */
+  meter?: number;
+  /** Its label inside its group, where it differs: "Name" for "Venue". */
+  short?: string;
+  /** The group it is a part of, and the nested group it sits in. */
+  group?: string;
+  part?: string;
+}
+
+/** A nested node of the main thing: a venue, an address, the pay. */
+export interface SchemaGroup {
+  label?: string;
+  type: string;
+  shape: string;
+  /** Its parts in order: property keys and nested groups. */
+  parts: string[];
+  /** Each entry is a list of parts of which one must be set. */
+  requires: string[][];
+  needs?: string[];
+  level?: 'required';
+  list?: true;
+  parent?: string;
 }
 
 /** One fact of a read-back sentence: a path in the built graph. */
@@ -136,8 +201,11 @@ export interface SchemaType {
   primary_type?: string;
   og_type?: string;
   props?: SchemaProp[];
-  /** The details shown before More details. */
+  /** The details shown before More details: properties and groups. */
   main?: string[];
+  groups?: Record<string, SchemaGroup>;
+  /** Where the type is not offered, and why. */
+  scopes?: Partial<Record<'page' | 'template', 'component' | 'policy'>>;
   /** References to the site's nodes: fixed, or with the detail that replaces them. */
   refs?: Record<string, string | { to: string; unless?: string; if?: Record<string, string> }>;
   slots?: Record<string, Slot>;
@@ -163,6 +231,8 @@ export type VerdictName =
   | 'complete'
   | 'not_fit'
   | 'not_here'
+  | 'closed'
+  | 'elsewhere'
   | 'retired'
   | 'none';
 
@@ -175,6 +245,11 @@ export interface Verdict {
   helps?: FeatureFact[];
   /** Why it does not fit: a `not_for` id. */
   reason?: string;
+  /** A closed job's closing date. */
+  date?: string;
+  /** A list: the complete things it lists, of how many. */
+  count?: number;
+  of?: number;
 }
 
 /** data/search-features.json, in the dialog's language. */
@@ -202,6 +277,11 @@ export interface SearchFeatures {
       complete?: string[];
       recommended?: string[];
       rules?: { path: string; need?: string }[];
+      /** A list feature: what it lists, and how many at least. */
+      list?: { of: string; min: number };
+      /** What a thing it lists needs: "a list page with at least 3 courses". */
+      elsewhere?: string;
+      accepts?: Record<string, string[]>;
       not_for?: { id: string; reason: string; why: string; suggest?: string; seller?: string }[];
       confirm?: string[];
     }
@@ -275,6 +355,11 @@ export interface SourceRow {
   list?: true;
   /** The referenced item's own name (its title, its name). */
   names?: true;
+  /** A field of several values, and how many the previewed item has. */
+  many?: true;
+  /** One long plain text: a list takes its lines. */
+  lines?: true;
+  count?: number;
 }
 
 /** A stored link that cannot be read, and why. */
@@ -315,6 +400,20 @@ export interface Resolved {
     /** A stored type the registry does not have. */
     unknown_type: string | null;
     nodes: GraphNode[];
+    /** Groups with values that were left out, and what they miss. */
+    incomplete?: { group: string; missing: string[] }[];
+    /** List items left out. */
+    dropped_items?: { key: string; count: number; reason: 'invalid' | 'private' | 'hidden' | 'max' }[];
+    /** References that name their target instead of pointing at it. */
+    refs_inline?: { key: string; name: string; reason: string }[];
+    /** References that are the publisher only by a Canvas page's default. */
+    defaults?: string[];
+    /** Details left out because their pair gives nothing. */
+    unpaired?: string[];
+    /** Pay left out: From above To. */
+    pay_order?: boolean;
+    /** The main node as the verdicts judge it, with its incomplete groups, when it ships without them. */
+    judged?: Record<string, unknown> | null;
     front: boolean;
     features: Verdict[];
     rules: GraphRule[];
@@ -354,6 +453,8 @@ export interface StatePayload {
   };
   site: SiteSettings;
   registry: Registry;
+  /** The code lists of enums that have one: "country" => ISO 3166-1 codes. */
+  codes?: Record<string, string[]>;
   search_features: SearchFeatures;
   target: Target | null;
   preview: {

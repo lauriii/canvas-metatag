@@ -1,0 +1,214 @@
+{
+    "ctx": {
+        "home": "https://www.example.com/",
+        "url": "https://www.example.com/recipes/rye-bread",
+        "langcode": "en",
+        "title": "Ruisleipä (Finnish rye bread)",
+        "description": "A sour rye loaf that keeps for a week.",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "timezone": "Europe/Helsinki",
+        "currency": "EUR",
+        "identity": {
+            "kind": "organization",
+            "name": "Example",
+            "same_as": []
+        },
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        },
+        "scope": "page",
+        "today": "2026-11-16"
+    },
+    "schema": {
+        "type": "Recipe",
+        "props": {
+            "prepTime": {
+                "text": "20"
+            },
+            "cookTime": {
+                "text": "50"
+            },
+            "recipeYield": {
+                "text": "1 loaf"
+            },
+            "recipeCategory": {
+                "text": "Bread"
+            },
+            "recipeCuisine": {
+                "text": "Finnish"
+            },
+            "keywords": {
+                "text": "rye, sourdough"
+            },
+            "nutrition_calories": {
+                "text": "180"
+            }
+        }
+    },
+    "facts": {
+        "title": "Ruisleipä (Finnish rye bread)",
+        "description": "A sour rye loaf that keeps for a week.",
+        "author": "Rosa Martín",
+        "published": "2026-05-04T11:00:00+03:00",
+        "modified": "2026-05-06T11:00:00+03:00",
+        "url": "https://www.example.com/recipes/rye-bread"
+    },
+    "images": {
+        "image": {
+            "url": "https://cms.example.com/sites/default/files/share.png",
+            "width": 1200,
+            "height": 630,
+            "alt": "A lake at dusk"
+        }
+    },
+    "links": [],
+    "report": {
+        "withheld": null,
+        "dropped": [],
+        "sources": {
+            "name": "default",
+            "image": "default",
+            "description": "default",
+            "author": "default",
+            "datePublished": "default",
+            "prepTime": "set",
+            "cookTime": "set",
+            "recipeYield": "set",
+            "recipeCategory": "set",
+            "recipeCuisine": "set",
+            "keywords": "set",
+            "nutrition_calories": "set"
+        },
+        "gates": [],
+        "type": "Recipe",
+        "unknown_type": null,
+        "nodes": [
+            {
+                "id": "https://www.example.com/#identity",
+                "type": "Organization",
+                "origin": "site",
+                "at": 0
+            },
+            {
+                "id": "https://www.example.com/#website",
+                "type": "WebSite",
+                "origin": "site",
+                "at": 1
+            },
+            {
+                "id": "https://www.example.com/recipes/rye-bread#webpage",
+                "type": "WebPage",
+                "origin": "page",
+                "at": 2
+            },
+            {
+                "id": "https://www.example.com/recipes/rye-bread#primaryimage",
+                "type": "ImageObject",
+                "origin": "page",
+                "at": 3
+            },
+            {
+                "id": "https://www.example.com/recipes/rye-bread#primary",
+                "type": "Recipe",
+                "origin": "main",
+                "at": 4
+            }
+        ],
+        "incomplete": [],
+        "dropped_items": [],
+        "refs_inline": [],
+        "defaults": [
+            "author"
+        ],
+        "unpaired": [],
+        "pay_order": false,
+        "items": [],
+        "judged": null
+    },
+    "graph": {
+        "@context": "https://schema.org",
+        "@graph": [
+            {
+                "@type": "Organization",
+                "@id": "https://www.example.com/#identity",
+                "name": "Example",
+                "url": "https://www.example.com/"
+            },
+            {
+                "@type": "WebSite",
+                "@id": "https://www.example.com/#website",
+                "url": "https://www.example.com/",
+                "name": "Example",
+                "inLanguage": "en",
+                "publisher": {
+                    "@id": "https://www.example.com/#identity"
+                }
+            },
+            {
+                "@type": "WebPage",
+                "@id": "https://www.example.com/recipes/rye-bread#webpage",
+                "url": "https://www.example.com/recipes/rye-bread",
+                "name": "Ruisleipä (Finnish rye bread)",
+                "description": "A sour rye loaf that keeps for a week.",
+                "inLanguage": "en",
+                "isPartOf": {
+                    "@id": "https://www.example.com/#website"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "dateModified": "2026-05-06T11:00:00+03:00",
+                "primaryImageOfPage": {
+                    "@id": "https://www.example.com/recipes/rye-bread#primaryimage"
+                },
+                "mainEntity": {
+                    "@id": "https://www.example.com/recipes/rye-bread#primary"
+                }
+            },
+            {
+                "@type": "ImageObject",
+                "@id": "https://www.example.com/recipes/rye-bread#primaryimage",
+                "url": "https://cms.example.com/sites/default/files/share.png",
+                "contentUrl": "https://cms.example.com/sites/default/files/share.png",
+                "width": 1200,
+                "height": 630,
+                "caption": "A lake at dusk"
+            },
+            {
+                "@type": "Recipe",
+                "@id": "https://www.example.com/recipes/rye-bread#primary",
+                "mainEntityOfPage": {
+                    "@id": "https://www.example.com/recipes/rye-bread#webpage"
+                },
+                "name": "Ruisleipä (Finnish rye bread)",
+                "image": {
+                    "@id": "https://www.example.com/recipes/rye-bread#primaryimage"
+                },
+                "description": "A sour rye loaf that keeps for a week.",
+                "author": {
+                    "@id": "https://www.example.com/#identity"
+                },
+                "datePublished": "2026-05-04T11:00:00+03:00",
+                "prepTime": "PT20M",
+                "cookTime": "PT50M",
+                "recipeYield": "1 loaf",
+                "recipeCategory": "Bread",
+                "recipeCuisine": "Finnish",
+                "keywords": "rye, sourdough",
+                "nutrition": {
+                    "@type": "NutritionInformation",
+                    "calories": "180 calories"
+                }
+            }
+        ]
+    },
+    "verdicts": [
+        {
+            "feature": "recipe",
+            "node": "https://www.example.com/recipes/rye-bread#primary",
+            "verdict": "ready"
+        }
+    ]
+}

@@ -31,6 +31,7 @@ import {
   initialState,
   kindOfType,
   kinds,
+  offered,
   leaveOut,
   changeKindText,
   proposalLossText,
@@ -59,6 +60,7 @@ import {
   robotsUnsent,
   reducer,
   saveDraft,
+  sheetOf,
   setPath,
   sitePaths,
   siteTexts,
@@ -147,6 +149,7 @@ const payload = (over: Partial<StatePayload> = {}): StatePayload => ({
     published: { label: 'First published', kind: 'date', value: '2026-03-02T09:00:00+02:00' },
     modified: { label: 'Last updated', kind: 'date', value: '2026-03-04T09:00:00+02:00' },
     image: { label: 'Image', kind: 'image', value: '', image: null },
+    identity: { label: 'This site', kind: 'ref', value: 'Example' },
   },
   separator: '|',
   sources: [],
@@ -310,8 +313,9 @@ describe('prune() and canon()', () => {
       schema: { custom: ' x ' },
     });
     expect(prune({})).toEqual({});
-    // "No ending" is the one empty value that is kept.
+    // "No ending" is kept, and "Someone else" not named yet.
     expect(prune({ title_end: { text: '' }, title: { text: ' ' } })).toEqual({ title_end: { text: '' } });
+    expect(prune({ schema: { props: { organizer: { text: '' }, organizer_name: { text: '' } } } })).toEqual({ schema: { props: { organizer: { text: '' } } } });
   });
 
   it('canon() is independent of key order and keeps list order', () => {
@@ -1594,13 +1598,19 @@ describe('footer and strips', () => {
     });
   });
 
-  it('kinds: six, in order, each type reached through one', () => {
-    expect(kinds(REGISTRY)).toEqual(['Product', 'Service', 'Article', 'Event', 'ProfilePage', 'WebPage']);
+  it('kinds: in order, each type reached through one, and only where it can be filled', () => {
+    expect(kinds(REGISTRY)).toEqual(['Product', 'Service', 'Article', 'Event', 'ProfilePage', 'JobPosting', 'LocalBusiness', 'Recipe', 'Course', 'WebPage']);
+    // A job posting is set up on a content type: one page per job.
+    expect(kinds(REGISTRY, 'page')).not.toContain('JobPosting');
+    expect(kinds(REGISTRY, 'template')).toContain('JobPosting');
+    expect(offered(REGISTRY, 'Recipe', 'recipeIngredient', 'page')).toBe(false);
+    expect(offered(REGISTRY, 'Recipe', 'recipeIngredient', 'template')).toBe(true);
+    expect(offered(REGISTRY, 'Recipe', 'recipeYield', 'page')).toBe(true);
     expect(kindOfType(REGISTRY, 'BlogPosting')).toBe('Article');
     expect(kindOfType(REGISTRY, 'AboutPage')).toBe('WebPage');
     // A type this site no longer has is a web page.
-    expect(kindOfType(REGISTRY, 'Recipe')).toBe('WebPage');
-    expect(typeOf(REGISTRY, 'Recipe')).toBe(REGISTRY.WebPage);
+    expect(kindOfType(REGISTRY, 'Movie')).toBe('WebPage');
+    expect(typeOf(REGISTRY, 'Movie')).toBe(REGISTRY.WebPage);
     expect(REGISTRY.BlogPosting.props).toEqual(REGISTRY.Article.props);
     expect(REGISTRY.BlogPosting.kind).toBeUndefined();
   });
@@ -1656,18 +1666,55 @@ describe('footer and strips', () => {
   it('a change of kind keeps the details the new one has, and names the rest', () => {
     const product = ready({ target: target({ values: { schema: { type: 'Product', props: { name: t('Studio'), offers_price: t('120'), offers_priceCurrency: t('EUR'), billing: t('P1M'), sold_here: t('yes') } } } }) });
     const server = product.server!;
-    expect(removed(server, product.edits.target, 'Event', 'en')).toEqual(['the price (€120)', 'the answer to “Bought on this page” (yes, from us)', 'the billing (every month)']);
+    expect(removed(server, product.edits.target, 'Article', 'en')).toEqual(['the price (€120)', 'the answer to “Bought on this page” (yes, from us)', 'the name (Studio)', 'the billing (every month)']);
+    // An event's tickets keep the price.
+    expect(removed(server, product.edits.target, 'Event', 'en')).toEqual(['the answer to “Bought on this page” (yes, from us)', 'the billing (every month)']);
     // A draft price that is not a number yet is said as typed, never "€NaN".
     const draft = ready({ target: target({ values: { schema: { type: 'Product', props: { offers_price: t('49,90'), offers_priceCurrency: t('EUR') } } } }) });
-    expect(removed(draft.server!, draft.edits.target, 'Event', 'en')).toEqual(['the price (49,90)']);
+    expect(removed(draft.server!, draft.edits.target, 'Article', 'en')).toEqual(['the price (49,90)']);
     // An event's dates, as the dialog writes dates, by their nouns, in the form's order.
     const event = ready({ target: target({ values: { schema: { type: 'Event', props: { endDate: t('2027-05-11'), startDate: t('2027-05-12T18:00'), location_name: t('Hall') } } } }) });
-    expect(removed(event.server!, event.edits.target, 'Article', 'en')).toEqual(['the start (12 May 2027, 18:00)', 'the end (11 May 2027)', 'the venue (Hall)']);
+    expect(removed(event.server!, event.edits.target, 'Article', 'en')).toEqual(['the start (12 May 2027, 18:00)', 'the venue (Hall)', 'the end (11 May 2027)']);
+    // Times as their boxes read them, never as raw minutes.
+    const recipe = ready({ target: target({ values: { schema: { type: 'Recipe', props: { prepTime: t('90'), cookTime: t('30') } } } }) });
+    expect(removed(recipe.server!, recipe.edits.target, 'Article', 'en')).toEqual(['the prep time (1 h 30 min)', 'the cook time (30 min)']);
+    // Someone else is said once, by their name; an option's own aside never
+    // nests its parentheses.
+    const organizer = ready({ target: target({ values: { schema: { type: 'Event', props: { organizer: t(''), organizer_name: t('Hall Ltd'), organizer_url: t('https://hall.example.org/') } } } }) });
+    expect(removed(organizer.server!, organizer.edits.target, 'Recipe', 'en')).toEqual(['the organizer (Hall Ltd)', 'the website (https://hall.example.org/)']);
+    const venue = ready({ target: target({ values: { schema: { type: 'LocalBusiness', props: { placeKind: t('EventVenue') } } } }) });
+    expect(removed(venue.server!, venue.edits.target, 'Article', 'en')).toEqual(['the kind of place (a venue, not a business)']);
     // Plans for a service keep the name, the price, the currency and the billing.
     expect(withKind(server, product.edits.target, 'Service').schema).toEqual({
       type: 'Service',
       props: { name: t('Studio'), offers_price: t('120'), offers_priceCurrency: t('EUR'), billing: t('P1M') },
     });
+    // A value the server refused is not carried into the new kind.
+    expect(withKind(server, product.edits.target, 'Service', { 'schema.props.name': 'Use at most 255 characters.' }).schema?.props).not.toHaveProperty('name');
+    // A group is said once, as its box reads it; opening hours and a
+    // country in words.
+    const place = ready({
+      target: target({
+        values: {
+          schema: {
+            type: 'LocalBusiness',
+            props: { address_streetAddress: t('Rantakatu 1'), address_addressLocality: t('Helsinki'), address_addressCountry: t('FI'), openingHoursSpecification: t('Mo-Fr 09:00-17:00') },
+          },
+        },
+      }),
+    });
+    expect(removed(place.server!, place.edits.target, 'Article', 'en')).toEqual(['the address (Rantakatu 1, Helsinki, Finland)', 'the opening hours (Mon–Fri 09:00–17:00)']);
+  });
+
+  it('opens the sheet of a group shown as a box on a jump to one of its parts', () => {
+    expect(sheetOf(REGISTRY, 'Event', 'location_address_addressCountry', 'page')).toEqual({ group: 'location', focus: 'location_address_addressCountry' });
+    // The venue's address as a whole: its first part.
+    expect(sheetOf(REGISTRY, 'Event', 'location_address', 'page')).toEqual({ group: 'location', focus: 'location_address_streetAddress' });
+    expect(sheetOf(REGISTRY, 'Event', 'location', 'page')).toEqual({ group: 'location' });
+    // Shown in place: no sheet.
+    expect(sheetOf(REGISTRY, 'Event', 'organizer_name', 'page')).toBeNull();
+    expect(sheetOf(REGISTRY, 'LocalBusiness', 'geo_latitude', 'page')).toBeNull();
+    expect(sheetOf(REGISTRY, 'Event', 'startDate', 'page')).toBeNull();
   });
 
   it('says what a change of kind removes, one value or several', () => {
