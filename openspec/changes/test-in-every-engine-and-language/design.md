@@ -182,7 +182,7 @@ language hosts; the fixture fails with that sentence instead of skipping.
 ### D6. Screen readers: a scripted pass by a person
 
 `tests/e2e/SCREEN-READERS.md`, linked from the README's Development section,
-is a 12-step checklist of about 30 minutes per pair:
+is a 14-step checklist of about 30 minutes per pair:
 
 1. The frame is announced as "SEO" and focus lands on the scope button.
 2. Tabs: name, state and position; arrows and Home move between them.
@@ -200,10 +200,21 @@ is a 12-step checklist of about 30 minutes per pair:
 11. The suggestions tray, with the test provider: a working status, the
     variants as a radio group.
 12. The system's high-contrast theme: focus and edges stay visible.
+13. A template's composed title (`compose-values-from-fields`): one textbox
+    named by the field, its chips read as words in the flow, a chip stepped
+    over in one press and told from a typed word of the same text, its
+    description starting with the result, and "added", "removed" and
+    "replaced" announced once. The link menu in add mode reads its header
+    ("After …") and its groups.
+14. Input methods in the composer: a Japanese and a Chinese input method
+    compose beside a chip and as the first key after an insert, losing no
+    key and never composing inside a chip.
 
 Pairs: a WebKit browser with its platform's built-in screen reader, and
 Firefox with an open-source screen reader; the farm's desktop host can carry
-the first. A record in the release notes gives the date, module commit,
+the first. Steps 13 and 14 also run with the open-source screen reader in a
+Chromium browser, the pairs `compose-values-from-fields` names for its
+composer. A record in the release notes gives the date, module commit,
 Canvas version, each pair with versions, the keyboard setting used, and each
 step's result. A failed step 4 blocks the release and is fixed by giving the
 sentence a hidden element named by `aria-describedby`.

@@ -102,7 +102,12 @@ All new members are new keys, so nothing stored today changes.
 A row is `{element: meta, attr: name|property, key, value}` or `{element: link,
 attr: rel, key, type?, value}`, or the same identity with `off: true` instead of
 `value` (page and template only). `value` is a Value: `{text}` at every scope,
-or a field source at template scope. Identity: meta `meta:<lowercase key>`
+or a field source at template scope, and for a meta row's content at template
+scope also a composition (`{parts}`, from `compose-values-from-fields`, which
+lands first). Because `value` is a Value, `Values::value()` checks each part,
+and `Values::composes()` is true for `tags.N.value` of a meta row at template
+scope, as for the description. A link row's address and the stop date stay one
+value: a machine reads them. Identity: meta `meta:<lowercase key>`
 (name and property are the same key), link `link:<rel>` plus `:<type>` for
 feeds. `Values::canon()` keeps the order of `tags` and `verification`, prunes
 empty rows and exact duplicates.
@@ -183,6 +188,7 @@ One Value feeds `unavailable_after` inside robots and, with `og:type` article,
 site's time zone; the emitted value always carries the offset, as structured
 data dates do. At template scope it links like any other date value; an empty
 or hidden link means no stop date (the safe default: the page keeps showing).
+It never composes (`compose-values-from-fields`: dates stay one value).
 No max-age is needed: the head text does not change over time.
 
 ### 9. AI use
@@ -244,7 +250,9 @@ the site identity. `head` keeps exactly its four keys.
   "Site settings are one configuration object" (site-seo) and "Where values
   can be linked" (value-links) are written on top of link-values-to-fields. If
   that change's plan changes before it archives, re-derive these four blocks
-  from its archived text.
+  from its archived text. `compose-values-from-fields` does not modify "Where
+  values can be linked", so that block needs no rebase on it; the sheet's text
+  rows simply use its composer.
 
 ## Migration Plan
 

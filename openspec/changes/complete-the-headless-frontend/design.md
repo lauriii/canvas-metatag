@@ -216,20 +216,28 @@ formatted or long text" fallback after step 2 (amendment).
    `via`: "How teams turn … · from Summary". A box that follows a default
    which reads a field says the same in its description. Facts that read no
    field (Title, Site name, Address, Author, the dates) show their value
-   alone. A box and the announcements name a fact by its label alone
-   ("Linked to First published"), never "Automatic › …".
+   alone. A box, a chip and the announcements name a fact by its label
+   alone ("Linked to First published", a chip "Title"), never "Automatic ›
+   …". In a composer (`compose-values-from-fields`), "from ‹via›" goes into
+   the chip's tooltip and the composer's description, not onto the chip.
 2. **A fact no item can have is disabled.** The resolver reports, per fact
    and per type, whether anything of the type can give it. That is `via`
    being set for Description and Image, and always for the rest. A fact
    without it moves to the quiet last row, disabled, with the reason "No
    ‹type› has one" ("No post has one"). "Empty for this ‹type›" keeps its
    meaning: this item lacks a value others may have.
-3. **A field's own default is not in its menu.** Linking a field to the
-   value it already follows changes nothing. The field's Default box shows
-   the default and its source, and "Reset" returns to it.
+3. **A field's own default is not in its menu when the pick links the whole
+   value.** Linking a field to the value it already follows changes nothing.
+   The field's Default box shows the default and its source, and "Reset"
+   returns to it. In add mode, and when replacing a chip of a composition,
+   the menu offers it, since "Tickets: ‹Title›" needs Title. On a Default box
+   and in an empty composer, the row "Add words or fields · Start from
+   ‹Title›" adopts it as the first chip.
 4. **With an empty filter, fields named for the value come first**, by the
    same words. The filter's own "best match first" ranking does this already
    for typed text. Without a filter, form order decides within each band.
+
+Points 2 and 4 hold in every mode of the menu: link, add and replace.
 
 Group headings become `role="group"` elements named by their heading through
 `aria-labelledby`, wrapping their options. A listbox may own groups of

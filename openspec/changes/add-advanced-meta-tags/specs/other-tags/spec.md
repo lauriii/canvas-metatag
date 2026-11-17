@@ -176,13 +176,26 @@ key off, which MUST remove it. Rows MUST keep their stored order.
 ### Requirement: A content type's rows can follow a field
 
 At content type scope a row's content or address MAY be typed or linked to a
-source (value-links). A linked row that is empty, hidden from visitors or
-broken for a node MUST be left out for that node. At page and site scope rows MUST be typed.
+source (value-links), and a meta row's content MAY be composed of typed text
+and fields, as the description is. A link row's address MUST stay one value. A
+linked row that is empty, hidden from visitors or broken for a node MUST be
+left out for that node, and a composed one when every field gives nothing. At
+page and site scope rows MUST be typed.
 
 #### Scenario: A handle per article
 
 - **WHEN** "Every Article" has a `fediverse:creator` row linked to Writer › Handle
 - **THEN** each article MUST carry its writer's handle, and an article whose writer has no handle MUST carry no `fediverse:creator`
+
+#### Scenario: A composed row
+
+- **WHEN** "Every Article" has a `citation_title` row composed of Title, " – ", Writer › Name
+- **THEN** an article "Hello world" by Ada MUST carry `citation_title` "Hello world – Ada", and an article without a writer "Hello world"
+
+#### Scenario: A composed address
+
+- **WHEN** a template write sends a link row whose address is a composition
+- **THEN** the system MUST refuse it with "This setting is not available here."
 
 #### Scenario: A link sent for a page row
 

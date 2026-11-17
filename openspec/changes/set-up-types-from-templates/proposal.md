@@ -33,7 +33,10 @@ describe something visitors cannot see.
   date is exempt.
 - **Per-item facts.** A name, headline, date, price or image typed once for
   every item makes every feature that needs it read "Needs a name per
-  product", with no count.
+  product", with no count. A composition that holds a field counts as set per
+  item, never as the same text on every item.
+- **The spread of a composed title.** Reach shows how long a composed title
+  is across items ("38–71 characters on other events").
 - **Dropped values counted** ("3 Products have a currency that isn't one ·
   Show which"); the dialog never edits those items.
 - **Authors as links.** An author linked to a reference field gives one
@@ -53,8 +56,11 @@ editing.
 ## Depends on / followed by
 
 - **Depends on** `rethink-structured-data`, `read-page-components` (the
-  template's component tree) and `link-values-to-fields` groups 6–7 (field
-  links as Canvas sources, the link menu with references).
+  template's component tree), `link-values-to-fields` groups 6–7 (field
+  links as Canvas sources, the link menu with references) and
+  `compose-values-from-fields` (compositions; amendment recorded there on
+  2026-11-17). Self-setup proposes single links; proposing compositions is
+  left for later.
 - **Followed by** `add-structured-data-diff-and-overview` (the template
   publish diff and the overview reuse the reach route).
 
@@ -66,7 +72,8 @@ None.
 
 ### Modified Capabilities
 
-- `template-seo`: self-setup, reach, preview one, per-item facts.
+- `template-seo`: self-setup, reach, preview one, per-item facts, the spread
+  of a composed title's length.
 - `seo-checks`: a linked field the template does not show; per-item facts
   fixed at type scope; dropped values counted.
 - `structured-data`: authors linked to their profile pages, several authors,

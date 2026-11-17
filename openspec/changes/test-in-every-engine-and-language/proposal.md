@@ -52,9 +52,13 @@ adds the coverage, then removes the README line.
   - Accessibility-tree snapshots (ARIA snapshots) of each view, in Chromium.
   - Forced colours and reduced motion, emulated in Chromium.
 - **A scripted screen-reader pass** before each release.
-  `tests/e2e/SCREEN-READERS.md` holds a 12-step checklist for two pairs: a
+  `tests/e2e/SCREEN-READERS.md` holds a 14-step checklist for two pairs: a
   WebKit browser with its platform's built-in screen reader, and Firefox with
-  an open-source screen reader. Each pass is recorded in the release notes.
+  an open-source screen reader. The template composer of
+  `compose-values-from-fields` joins it: its steps also run with the
+  open-source screen reader in a Chromium browser, and with a real Japanese
+  and a real Chinese input method. Each pass is recorded in the release
+  notes.
 - **Docs.** The README's limitation line is replaced by one sentence: screen
   readers are checked by hand before each release, not on every change.
   README, ARCHITECTURE and the design-system checklist list the projects,
@@ -88,6 +92,15 @@ already queues it. It needs from that change:
 - media text in the page's language (M4);
 - the translation editing probe, task 4.1, whose recorded outcome decides
   what L2 asserts.
+
+`compose-values-from-fields` lands before this change (decisions.md item
+17; amendment recorded there on 2026-11-17). Its composer joins the
+screen-reader and input-method matrix (steps 13 and 14 of design D6, a third
+pair with the open-source screen reader in a Chromium browser), and its
+accessibility tree snapshots join task 4.3, with the link menu taken in add
+mode as well. The farm has no screen reader, so that change's own check is
+the owner's merge check; this change's checklist makes it part of every
+release pass after it.
 
 `serve-each-frontend-its-own-addresses` lands before both and proves its
 language-domain case with a frontend in kernel tests. The seeds here have no

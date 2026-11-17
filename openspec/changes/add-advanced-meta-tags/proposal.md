@@ -108,6 +108,12 @@ Kept closed, on purpose:
   that change's `og:locale`, `og:locale:alternate`, `og:image:type` and icon
   link rows, and Metatag's sharing tags are left out so that the module's
   made images are the only shared image (task group 6b).
+- **Builds on `compose-values-from-fields`** (lands first, decisions.md item
+  17; amendment recorded there on 2026-11-17). At template scope a meta row's
+  content composes like the description, in its composer; an address row and
+  the stop date stay one link. A row's `value` is a Value, so its parts are
+  checked by `Values::value()`. Its deltas do not touch "Where values can be
+  linked", so that block needs no rebase.
 - **Followed by `add-home-page-defaults`.** That change decides once, per
   language, which entity is the front page. Until it lands, the "Verification
   missing from the home page" check uses the front page setting as the state
@@ -123,7 +129,8 @@ Kept closed, on purpose:
 
 - `other-tags`: plain `meta` and `link` rows at site, content type and page
   scope: their shape, what is refused and why, how scopes layer per key, field
-  links at content type scope, and cleaning on output.
+  links and composed meta content at content type scope, and cleaning on
+  output.
 
 ### Modified Capabilities
 
