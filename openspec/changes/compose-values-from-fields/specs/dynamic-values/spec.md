@@ -1,0 +1,562 @@
+## RENAMED Requirements
+
+- FROM: `### Requirement: A value is typed text or linked to one source`
+- TO: `### Requirement: A value is typed text, one source, or a composition`
+
+## MODIFIED Requirements
+
+### Requirement: A value is typed text, one source, or a composition
+
+A value MUST be exactly one of: typed text, a fact (Title, Description, Site
+name, Page address, Author, First published, Last updated, Image), a chosen
+media item, a link to a field of the content type, or a composition of typed
+text with fields and facts. A value that is not set MUST give its default.
+Typed text, alone or in a composition, MUST be stored and emitted as typed
+and MUST NOT be scanned for values, so braces are literal text.
+
+#### Scenario: Braces in typed text
+
+- **WHEN** a page's title is `Plans {for teams} {site}`
+- **THEN** the title MUST be emitted with `Plans {for teams} {site}` as typed, and `{site}` MUST NOT be filled
+
+#### Scenario: A field value that looks like a value
+
+- **WHEN** an article's byline field holds the text `{site}` and the Article template links the author name to Byline
+- **THEN** the author name MUST be the literal text `{site}`
+
+#### Scenario: Two sources in one value
+
+- **WHEN** a write sends a value that holds both typed text and a fact as two keys of one value
+- **THEN** the system MUST refuse it with "This value is not valid."
+
+#### Scenario: Braces typed inside a composition
+
+- **WHEN** "Every Event"'s title is the Title fact followed by the typed text ` {field.field_city}`
+- **THEN** each event's title MUST end with the literal text `{field.field_city}`, and no field MUST be read for it
+
+### Requirement: An empty link gives the field's own default
+
+When a linked field is empty for an item, hidden from visitors, or broken, the
+value MUST be what it would be with nothing set. In a composition, such a field
+or fact MUST instead be left out with the text that goes with it, and only when
+every field and fact of the composition gives nothing MUST the value be what it
+would be with nothing set. The fallback MUST NOT be configurable. The dialog's
+preview and the head MUST follow the same rule.
+
+#### Scenario: An article without a summary
+
+- **WHEN** the Article template links the description to Summary and an article's summary is empty
+- **THEN** that article's description MUST be its Description fact, in the head and in the dialog's preview
+
+#### Scenario: An empty linked image
+
+- **WHEN** the Article template links the social image to Hero and an article has no hero image
+- **THEN** the image MUST be the article's Image fact, else the site's default image
+
+#### Scenario: An empty linked ending
+
+- **WHEN** the site sets the ending "Example Co", "Every Article" links its ending to Section, and an article's section is empty, hidden or broken
+- **THEN** that article's title MUST end with "| Example Co", in the head and in the dialog; with the site's "No ending" it MUST have no ending
+
+#### Scenario: A composed title without a city
+
+- **WHEN** "Every Event"'s title is Title, " in ", Venue › City, " · ", Starts, and the event "Summer Gala" on 20 June 2026 has a venue without a city
+- **THEN** its title MUST start with "Summer Gala · 20 June 2026", in the head and in the dialog's preview
+
+#### Scenario: A composition whose fields are all empty
+
+- **WHEN** "Every Event"'s description is "Tickets for ", Performers, " in ", Venue › City, and an event has no performers and no venue
+- **THEN** that event's description MUST be its Description fact, and the head MUST NOT carry "Tickets for"
+
+### Requirement: A link to a field that no longer fits is broken
+
+A stored link, alone or in a composition, MUST be kept when its field is
+deleted, changes to a type that no longer fits the value's kind, or cannot be
+read. Alone, it MUST give the default; in a composition, it MUST be left out as
+an empty field is. The template's state MUST list it as broken, with the
+field's machine name, the reason (`missing`, `kind` or `error`) and its place
+in a composition. Recreating the field MUST make the link work again.
+
+#### Scenario: A deleted field
+
+- **WHEN** the Article template links the description to Summary and `field_summary` is deleted
+- **THEN** the template MUST still hold the link, each article's description MUST be its Description fact, and the state MUST list `field_summary` as broken with the reason `missing`
+
+#### Scenario: A field that changed kind
+
+- **WHEN** a link of the text kind points at a field that can no longer give text
+- **THEN** the state MUST list it as broken with the reason `kind`
+
+#### Scenario: The field comes back
+
+- **WHEN** `field_summary` is created again on the Article type
+- **THEN** the link MUST give each article's summary again
+
+#### Scenario: A deleted field in a composed title
+
+- **WHEN** "Every Event"'s title is Title, " in ", City, and `field_city` is deleted
+- **THEN** each event's title MUST start with its own title alone, and the state MUST list `field_city` as broken with the reason `missing` as the title's third part
+
+#### Scenario: Editing the words around a broken field
+
+- **WHEN** an editor changes " in " to " at " in that title while `field_city` is still deleted
+- **THEN** the write MUST be accepted, and the template MUST keep the link to `field_city` with the new words
+
+### Requirement: Field values are plain values of the first item
+
+A field link MUST give its first item, every item in field order on a list
+property, or in text every item visitors may see. Formatted text MUST become
+plain text: script, style and template content and tags removed, entities
+decoded, whitespace collapsed, a space between blocks. A heading, list item,
+definition, table row or caption, and text before a list or heading, MUST end
+in a full stop unless it ends in a sentence or clause mark. Text typed into a
+plain text field MUST NOT be stripped.
+
+#### Scenario: A field with several values
+
+- **WHEN** a byline field holds "Ada" and "Grace", "Every Article"'s description links to it, and so does its title ending
+- **THEN** the description MUST be "Ada, Grace", and the ending, which is not text that composes, MUST be "Ada"
+
+#### Scenario: Several values on a list property
+
+- **WHEN** an article's author list links to a Writers field holding Ada and Grace
+- **THEN** the value MUST be Ada and Grace, in that order
+
+#### Scenario: Formatted text
+
+- **WHEN** a value links to a formatted text field that holds `<p>One</p><p>Two &amp; <b>three</b></p>`
+- **THEN** the value MUST be "One Two & three"
+
+#### Scenario: A heading and a list
+
+- **WHEN** a product's body holds `<h2>Made to last</h2><p>Solid oak.</p><ul><li>Dimmable</li><li>Fabric cable, 3 m.</li></ul>` and no summary
+- **THEN** a value linked to the body MUST be "Made to last. Solid oak. Dimmable. Fabric cable, 3 m."
+
+#### Scenario: A nested list, a table and a definition
+
+- **WHEN** a body holds `<ul><li>Features<ul><li>Dimmable</li></ul></li></ul>`, `<table><tr><th>Height</th><td>45 cm</td></tr><tr><th>Weight</th><td>1.2 kg</td></tr></table>` or `<dl><dt>Term</dt><dd>Its meaning</dd></dl>`
+- **THEN** its value MUST be "Features. Dimmable.", "Height 45 cm. Weight 1.2 kg." or "Term Its meaning."
+
+#### Scenario: A heading that ends in a bracket
+
+- **WHEN** a body holds `<h2>Price (USD)</h2><p>From 49</p>`
+- **THEN** its value MUST be "Price (USD). From 49"
+
+#### Scenario: A paragraph before a heading
+
+- **WHEN** a body holds `<p>Buy now</p><h2>Specs</h2>`
+- **THEN** its value MUST be "Buy now. Specs."
+
+#### Scenario: A heading that ends in a mark of another script
+
+- **WHEN** a body holds `<h2>見出し：</h2><p>本文</p>` or `<h2>مرحبا،</h2><p>x</p>`
+- **THEN** its value MUST be "見出し： 本文" or "مرحبا، x", with no full stop added
+
+#### Scenario: Marks that spare the full stop
+
+- **WHEN** a heading ends in a full stop, question or exclamation mark, ellipsis, colon, semicolon or comma, or in the same mark in CJK text (full-width and half-width forms), Arabic, Urdu or Devanagari text, with closing quotes or brackets after it
+- **THEN** no full stop MUST be added after it
+
+#### Scenario: Formatted text that is not valid UTF-8
+
+- **WHEN** a body holds text that is not valid UTF-8
+- **THEN** its value MUST be empty
+
+#### Scenario: A value linked to a long formatted text
+
+- **WHEN** an Article template links the description, or the title or a structured data detail, to a Body of 1,000 characters
+- **THEN** that value MUST be the Body's text, not its summary, cut at a word boundary within 160 characters
+
+#### Scenario: Formatted text with a script and a style block
+
+- **WHEN** a product's body holds `<p>Ask us</p><script>alert(1)</script><style>p{color:red}</style>` and no summary
+- **THEN** a value linked to the body and the product's Description fact MUST be "Ask us"
+
+### Requirement: Other field kinds give their natural value
+
+A date MUST be ISO 8601 with the site's offset, except a date-only field,
+which MUST stay a date. A number MUST keep the digits it is stored with. A link
+MUST be an absolute http(s) address, put on the public base when it is
+internal, or nothing. An entity reference MUST give the referenced entity's
+label, or its image when it references image media. In a value that can be
+composed, these MUST read as words ("Fields read as words in text").
+
+#### Scenario: A date-only field
+
+- **WHEN** an event date field stores only the date 2026-07-01 and a date value links to it
+- **THEN** the value MUST be `2026-07-01`
+
+#### Scenario: An internal link
+
+- **WHEN** an address value links to a link field that points at a Canvas page of the site, and a headless frontend is the public base
+- **THEN** the value MUST be that page's address on the frontend
+
+#### Scenario: The same date in a date detail and in the title
+
+- **WHEN** "Every Event" links its Starts detail to the Starts field and also puts Starts in its title, and an event starts on 20 June 2026 at 19:00 in Europe/Helsinki
+- **THEN** its `startDate` MUST be `2026-06-20T19:00:00+03:00` and its title MUST hold "20 June 2026"
+
+### Requirement: Field links offer what Canvas offers
+
+The fields a template value can link to MUST be those Canvas offers when
+linking a component prop of that kind in a content template, with Canvas's
+labels, in the order of the type's form (then fields off the form), less the
+module's exclusions and facts. A formatted text with a summary MUST be offered
+as two entries; a link to its text MUST give the text cut at a word within 160
+characters, for any value. A text list MUST give its stored key, and its label
+in the item's language in a value that can be composed.
+
+#### Scenario: Body and its summary
+
+- **WHEN** the Article type has a Body field with a summary
+- **THEN** the description's link menu MUST offer "Body" and "Body › Summary" as two entries
+
+#### Scenario: A text list
+
+- **WHEN** a choice detail links to a text list field whose stored key is `green` and whose label is "Green", and the description links to the same field
+- **THEN** the detail MUST be `green`, and the description MUST be "Green"
+
+#### Scenario: Two fields with one label
+
+- **WHEN** two linkable fields of the type are both labelled "Summary"
+- **THEN** each entry MUST add its machine name, such as "Summary (field_summary)"
+
+### Requirement: A field link is stored as a Canvas field source
+
+A template's field link, alone or as a part of a composition, MUST be stored
+as a Canvas entity-field prop source, `{sourceType: entity-field, expression}`,
+in the form Canvas itself writes, with no adapter. A composition MUST be a list
+of parts and MUST NOT be stored as a Canvas adapted source or as a string.
+When Canvas deprecates a stored form, a module update MUST convert the stored
+links, in compositions too.
+
+#### Scenario: Exporting a template
+
+- **WHEN** the Article template links its description to Summary and its configuration is exported
+- **THEN** the description MUST be `source` with `sourceType: entity-field` and the expression Canvas uses for the value of `field_summary` on Article
+
+#### Scenario: Links made before sources
+
+- **WHEN** the database is updated on a site whose templates use whole `{field.NAME}` values
+- **THEN** each link MUST become the Canvas source for that field and kind, a link to the type's first formatted text with a summary MUST become the Description fact, and a link with no matching source MUST be dropped and logged
+
+#### Scenario: Exporting a composed title
+
+- **WHEN** "Every Event"'s title is Title, " in ", Venue › City, and its configuration is exported
+- **THEN** the title MUST be `parts` holding `fact: title`, `text: ' in '`, and `source` with `sourceType: entity-field` and Canvas's expression for the venue's city, in that order
+
+### Requirement: Values stored in the earlier form are converted by an update
+
+Running the database updates MUST convert the brace values stored in site
+settings, in every node `full` template and its draft, in every revision and
+translation of a page, and in every page draft. A template's value that can be
+composed MUST become a composition of every part it named that fits text, with
+each `{sep}` that does not split a title as typed separator text and at most its first
+eight fields; a part that cannot be converted MUST be dropped with the words
+that go with it. A conversion that loses text or a part MUST be logged under
+`canvas_metatag` with the entity, the key and the names it dropped, never the
+words. A draft MUST keep its other changes and its client id.
+
+#### Scenario: The installed site pattern
+
+- **WHEN** the site's title is `{title} {sep} {site}`
+- **THEN** after the update the site MUST store no title ending, and a page "Pricing" on the site "Example" MUST still have the title "Pricing | Example"
+
+#### Scenario: A template ending
+
+- **WHEN** the Article template's title is `{title} {sep} Journal`
+- **THEN** after the update its main part MUST be unset and its ending MUST be "Journal"
+
+#### Scenario: A page title with the site's ending
+
+- **WHEN** a page's title is `Pricing plans for every team {sep} {site}`
+- **THEN** after the update its main part MUST be the text "Pricing plans for every team" and its ending MUST be inherited from the site
+
+#### Scenario: A whole field value
+
+- **WHEN** the Article template's description is `{field.field_summary}`
+- **THEN** after the update the description MUST be linked to Summary
+
+#### Scenario: A composite title
+
+- **WHEN** a template's title is `{title} by {field.field_byline}`
+- **THEN** after the update its main part MUST be the composition Title, " by ", Byline, and nothing MUST be logged as lost
+
+#### Scenario: A composite with a field the type no longer has
+
+- **WHEN** a template's description is `{title} in {field.field_gone} {sep} {site}`, the site's separator is "|", and `field_gone` has no matching source
+- **THEN** after the update the description MUST be Title, " | ", Site name, and the log MUST name `field_gone` without the words
+
+#### Scenario: An old revision
+
+- **WHEN** a page with an old revision in the brace form is reverted to that revision after the update
+- **THEN** the reverted page MUST hold the converted value
+
+#### Scenario: A template draft
+
+- **WHEN** the Article template has a draft with layout changes and a brace title
+- **THEN** after the update the draft MUST hold the layout changes and the converted title, under the same client id
+
+#### Scenario: A composite on a page
+
+- **WHEN** a page's title is `Plans for {site} teams`
+- **THEN** after the update its main part MUST be the text "Plans for", and the log MUST say that it kept its first part and dropped `{site}` and typed text, without the words themselves
+
+## ADDED Requirements
+
+### Requirement: A template text can be composed from fields and typed text
+
+At template scope, the title's main part, the description, the social texts
+and each structured data detail the registry marks as free text MAY be
+composed: typed text and up to eight fields or facts, in order, each one the
+place may link to. One field or fact and no text MUST be stored as that link,
+and typed text alone as typed text. Text between fields MUST be kept as typed,
+spaces included; spaces before the first field and after the last MUST be
+trimmed.
+
+#### Scenario: An event title
+
+- **WHEN** "Every Event"'s title is Title, " in ", Venue › City, " · ", Starts, and the event "Summer Gala" in Helsinki starts on 20 June 2026, on the site "Example"
+- **THEN** its title MUST be "Summer Gala in Helsinki · 20 June 2026 | Example", in the head and in the dialog
+
+#### Scenario: One field alone
+
+- **WHEN** an editor removes everything but Summary from a composed description
+- **THEN** the template MUST store the description exactly as linking it to Summary stores it
+
+#### Scenario: A space between two fields
+
+- **WHEN** a Person template's name detail is First name, " ", Last name, and a person is Ada Lovelace
+- **THEN** the template MUST store the space as its own part, and the name MUST be "Ada Lovelace"
+
+#### Scenario: A space after the last field
+
+- **WHEN** a write sends the description Summary, " "
+- **THEN** the template MUST store the description exactly as linking it to Summary stores it
+
+### Requirement: Which words go with which field
+
+In a composition, text between two fields or facts MUST go with the one after
+it, except a closing mark at its very first character (a closing bracket, or a
+quote followed by a space, punctuation or the end), which goes with the one
+before. Text after the last MUST go with the last, and text before the first
+with the first. Text that goes with a field MUST show only when that field
+gives a value, in the head and the dialog alike.
+
+#### Scenario: A missing date
+
+- **WHEN** "Every Event"'s title is Title, " in ", City, " · ", Starts, and "Summer Gala" in Helsinki has no start date
+- **THEN** its title MUST start with "Summer Gala in Helsinki" and MUST NOT hold "·"
+
+#### Scenario: Brackets
+
+- **WHEN** the title is Title, " (", City, ") · ", Starts, and "Summer Gala" on 20 June 2026 has no city
+- **THEN** its title MUST start with "Summer Gala · 20 June 2026"
+
+#### Scenario: A unit after the last field
+
+- **WHEN** the title is Title, " – ", Price, " €", and a product "Lamp" has no price
+- **THEN** its title MUST start with "Lamp" and MUST NOT hold "€"
+
+#### Scenario: A possessive
+
+- **WHEN** the name detail is Brand, "'s ", Title, and the product "Lamp" has no brand
+- **THEN** its name MUST be "Lamp"
+
+#### Scenario: A quote before an empty field
+
+- **WHEN** the title is Title, ' "', Subtitle, '"', and "Summer Gala" has no subtitle
+- **THEN** its title MUST start with "Summer Gala" and MUST NOT hold a quote
+
+### Requirement: A lead-in that is a label always shows
+
+Text before the first field or fact whose last character that is not a space
+is label punctuation (`:` `.` `!` `?` `…` `|` `·` `•` `–` `—` `-` `/`) MUST
+always show while any field or fact gives a value.
+
+#### Scenario: A lead-in
+
+- **WHEN** the description is "Tickets: ", Title, and the event is "Summer Gala"
+- **THEN** the description MUST be "Tickets: Summer Gala"
+
+#### Scenario: A label before an empty first field
+
+- **WHEN** the description is "Tickets: ", Performers, " in ", Venue › City, and an event in Helsinki has no performers
+- **THEN** the description MUST be "Tickets: Helsinki"
+
+### Requirement: Joining words never dangle
+
+Text that goes with the field after it MUST show only when a field or fact
+before it was also kept, unless it is the text before the first. Text after the
+last field that holds only separator characters (`·` `•` `|` `–` `—` `-` `/`
+`,` `;` `:`) and spaces MUST never show. When every field and fact gives
+nothing, text alone MUST never be emitted.
+
+#### Scenario: A missing first field
+
+- **WHEN** the title is City, " · ", Starts, and an event on 20 June 2026 has no city
+- **THEN** its title MUST start with "20 June 2026", never with "·"
+
+#### Scenario: A lead-in that reads into its field
+
+- **WHEN** the description is "Tickets for ", Performers, " in ", Venue › City, and an event in Helsinki has no performers
+- **THEN** the description MUST be "Helsinki", never "Tickets for in Helsinki"
+
+#### Scenario: A separator left at the end
+
+- **WHEN** an editor removes Starts from the title Title, " · ", Starts, on the site "Example"
+- **THEN** "Summer Gala"'s title MUST be "Summer Gala | Example"
+
+### Requirement: Fields read as words in text
+
+In a value that can be composed, a date field, a timestamp offered as a number
+or a date fact MUST give its date without the time, in the long style of the
+item's locale (its language with its region, else the site's default country),
+in the site's timezone; a date-only field MUST never move a day. An integer
+MUST give its digits, a decimal its digits to its scale in the locale's marks,
+a text list its label in the item's language, with no configuration. The dialog
+MUST show the server's words.
+
+#### Scenario: A date in a title
+
+- **WHEN** an event's Starts is 20 June 2026 at 19:00 in Europe/Helsinki, the title holds Starts, and the site's default country is the United Kingdom
+- **THEN** the English title MUST hold "20 June 2026", and the title of its French translation "20 juin 2026"
+
+#### Scenario: The site's country
+
+- **WHEN** the same event is on a site whose default country is the United States
+- **THEN** the English title MUST hold "June 20, 2026"
+
+#### Scenario: Other languages
+
+- **WHEN** the event has German, Finnish and Japanese translations
+- **THEN** their titles MUST hold "20. Juni 2026", "20. kesäkuuta 2026" and "2026年6月20日"
+
+#### Scenario: A date-only field in another timezone
+
+- **WHEN** the site's timezone is America/Los_Angeles, its country the United Kingdom, and a date-only field holds 2026-07-01
+- **THEN** a title that holds it MUST read "1 July 2026"
+
+#### Scenario: A decimal
+
+- **WHEN** a product's Price, a decimal field of scale 2, holds 1234.50 and the description holds Price
+- **THEN** the description MUST hold "1,234.50" in English and "1.234,50" in German, and follow the region for `de-ch` and `pt-br`
+
+#### Scenario: A year
+
+- **WHEN** a book's Year, an integer field, holds 2026 and the title holds Year
+- **THEN** the title MUST hold "2026", never "2,026"
+
+#### Scenario: A timestamp offered as a number
+
+- **WHEN** the title holds Venue › Authored on and the venue was created on 20 June 2026
+- **THEN** the title MUST hold "20 June 2026", never the timestamp's digits
+
+#### Scenario: A list label in the item's language
+
+- **WHEN** the dialog's language is English, the previewed event is French, and the description holds Event status
+- **THEN** the description, in the dialog and in the head, MUST hold the French label
+
+### Requirement: In text, a field gives every item visitors may see
+
+In a value that can be composed, alone or in a composition, a field with
+several values MUST give every item an anonymous visitor may see, in field
+order, joined with the list separator of the item's locale. In a title-like
+place (the title's main part, the social title, a name, a headline, an
+alternate name, a street address line) it MUST give at most two items and
+then a translatable, plural-aware "and ‹n› more". The dialog MUST show the
+server's words.
+
+#### Scenario: Every performer in a description
+
+- **WHEN** "Every Event"'s description is Title, " with ", Performers › Title, and "Summer Gala" has the performers Ada, Grace and Hedy
+- **THEN** its description MUST be "Summer Gala with Ada, Grace, Hedy", in the head and in the dialog
+
+#### Scenario: Three performers in a title
+
+- **WHEN** the title's main part is Title, " with ", Performers › Title, for the same event on the site "Example"
+- **THEN** its title MUST be "Summer Gala with Ada, Grace and 1 more | Example"
+
+#### Scenario: Two performers in a title
+
+- **WHEN** the event has only the performers Ada and Grace
+- **THEN** its title MUST start with "Summer Gala with Ada, Grace", with no "more"
+
+#### Scenario: A performer visitors may not see
+
+- **WHEN** Grace's page is unpublished
+- **THEN** the description MUST be "Summer Gala with Ada, Hedy", and nothing MUST count Grace
+
+#### Scenario: The language's separator
+
+- **WHEN** the event has a Japanese translation
+- **THEN** its description MUST join the performers with "、"
+
+#### Scenario: A detail that is not text
+
+- **WHEN** a choice detail links to a multi-value text list field holding `green` and `blue`
+- **THEN** the detail MUST be `green`
+
+### Requirement: A long text in a composition gets the room left
+
+In a description-like place, a formatted text or the Description fact inside a
+composition MUST be cut to the room the rest of the result leaves, about 155
+characters in all and never under 70 for that part, at its last whole sentence
+within that room, else at a word with "…". In a title-like place it MUST NOT be
+a part. Alone, it MUST give what a link to it gives today.
+
+#### Scenario: A call to action after the body
+
+- **WHEN** the description is Body, " Free delivery.", and an article's body is 900 characters long
+- **THEN** the description MUST end with the last whole sentence of the body that fits, followed by " Free delivery.", and MUST NOT be longer than about 155 characters
+
+### Requirement: Where composition is refused
+
+A composition MUST be refused on a page, in site settings, in the title
+ending, and in a value that is not free text: an image, an address, a date, a
+number, a choice, a code, a list, a reference, opening hours, formatted
+markup, or a detail the registry does not mark. It MUST also be refused with
+more than eight fields and facts, with a media item or a picked page as a
+part, with a field or fact that does not fit text, or with long text in a
+title-like place.
+
+#### Scenario: A page
+
+- **WHEN** a page write sends a composed title
+- **THEN** the system MUST refuse `title` with "This setting is not available here."
+
+#### Scenario: The title ending
+
+- **WHEN** a template write sends a composed title ending
+- **THEN** the system MUST refuse `title_end` with "This setting is not available here."
+
+#### Scenario: Nine fields
+
+- **WHEN** a template write sends a description that holds nine fields
+- **THEN** the system MUST refuse `description` with "Use at most 8 fields in one value."
+
+#### Scenario: An image in a composition
+
+- **WHEN** a template write sends a title that holds the Image fact
+- **THEN** the system MUST refuse `title` with "Choose a value from the list."
+
+#### Scenario: A field the menu does not offer, in a composition
+
+- **WHEN** a template write sends a title that holds a field expression the link menu does not offer
+- **THEN** the system MUST refuse `title` with "Choose a field from the list."
+
+#### Scenario: Long text in a title
+
+- **WHEN** a template write sends a title that holds Title, " – ", Body
+- **THEN** the system MUST refuse `title` with "Choose a field from the list."
+
+#### Scenario: A date detail
+
+- **WHEN** a template write sends a composed Starts detail
+- **THEN** the system MUST refuse `schema.props.startDate` with "This setting is not available here."
+
+#### Scenario: A detail the registry does not mark
+
+- **WHEN** a template write sends a composed postal code detail
+- **THEN** the system MUST refuse it with "This setting is not available here."
+

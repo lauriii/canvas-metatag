@@ -159,6 +159,14 @@ MODIFIED blocks are written on their text.
   job title.
 - **`read-page-components`**: a Canvas page's component image, text and first
   heading, read as an anonymous visitor.
+- **`compose-values-from-fields`** (lands before this change, decisions.md
+  item 17; amendment recorded there on 2026-11-17): a composed main part is
+  cut whole fields first, then words, then "…", never leaving " in …" or
+  " · …"; the Default box stays the at-rest look of an untouched field and
+  composing starts from it; the small line's date uses its `Words` helper;
+  its long-text budget and this change's derived descriptions share one
+  sentence-cut helper; the card uses the social title as resolved, composed
+  or not.
 - **Followed by**, in this order among the changes that amend it:
   `add-advanced-meta-tags` (owned prefixes and the fixed rows, amended),
   `add-home-page-defaults` (home rules on top of this change, amended),

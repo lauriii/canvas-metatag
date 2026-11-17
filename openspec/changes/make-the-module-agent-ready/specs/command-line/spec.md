@@ -210,14 +210,20 @@ patch.
 ### Requirement: What inspect prints, set accepts
 
 The values `inspect` prints MUST be accepted by `set` for the same target
-unchanged, with nothing changed: field links as handles, media as
-`{"media": "<uuid>"}`, hand-added JSON-LD as JSON. Only a link the
-vocabulary no longer offers MAY print in its stored form.
+unchanged, with nothing changed: field links as handles, also inside a
+composition's `parts`, media as `{"media": "<uuid>"}`, hand-added JSON-LD as
+JSON. Only a link the vocabulary no longer offers MAY print in its stored
+form.
 
 #### Scenario: A round trip
 
 - **WHEN** an agent sends a template's printed values back with `set`
 - **THEN** the result MUST say `changed: false`
+
+#### Scenario: A round trip of a composed title
+
+- **WHEN** `node.event`'s title is Title, " in ", Venue › City, and an agent inspects it and sends the printed values back with `set`
+- **THEN** `inspect` MUST print the title as `{"parts": [{"fact": "title"}, {"text": " in "}, {"field": "field_venue.field_city"}]}`, and `set` MUST say `changed: false`
 
 ### Requirement: inspect prints the head visitors get
 
@@ -334,6 +340,16 @@ accepts it. The hand-writable forms of configuration-as-code MUST be accepted.
 
 - **WHEN** `set node.article` is sent `{"description": {"field": "field_summary"}}`
 - **THEN** the template MUST hold the Canvas field source for the summary, and `inspect` MUST print it back as `{"field": "field_summary"}`
+
+#### Scenario: A composition by handle
+
+- **WHEN** `set node.article` is sent `{"description": {"parts": [{"field": "field_summary"}, {"text": " Free delivery."}]}}`
+- **THEN** the template MUST hold a composition of the summary's Canvas field source and the typed text, refused with code `field` only when a handle is not offered in words
+
+#### Scenario: A composition on a page
+
+- **WHEN** `set` on a page is sent a composed title
+- **THEN** it MUST be refused at `/title`, as the dialog refuses it, and nothing MUST be stored
 
 ### Requirement: Dry runs and repeated runs change nothing
 

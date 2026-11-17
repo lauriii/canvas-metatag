@@ -67,3 +67,19 @@ it.
 
 - **WHEN** the Product type's name is typed as "Oak desk lamp"
 - **THEN** "Product result" MUST read "Needs a name per product" and the Name field MUST say "The same name on every Product. Link it to a field instead." with "Link to Title"
+
+#### Scenario: A composed name
+
+- **WHEN** the Event type's name is composed as Title, " · ", Starts
+- **THEN** it MUST count as set per item, and nothing MUST say "The same name on every Event"
+
+### Requirement: Reach shows the spread of a composed title's length
+
+At type scope, when the title's main part is a composition that holds a field,
+the length guidance MUST add the range of the full title's length across the
+published items reach counted.
+
+#### Scenario: Titles that vary
+
+- **WHEN** "Every Event"'s title is Title, " in ", Venue › City, and the published events' titles run from 38 to 71 characters
+- **THEN** the title's length guidance MUST add "38–71 characters on other events"

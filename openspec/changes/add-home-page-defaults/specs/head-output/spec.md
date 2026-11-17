@@ -158,7 +158,7 @@ canonical MUST stay the entity's own URL.
 
 ### Requirement: A vaguely named front page is titled by the site
 
-When the owned front page has no title of its own and its name is empty, the Site name, an alternate name or a vague word in its language, its title MUST be the Site name, followed by the separator and Drupal's slogan when one is set, and its `og:title` MUST be the same unless a social title is set. A front page with a real name MUST keep the usual title.
+When the owned front page's title main part is its Title fact alone, by default or linked, and its name is empty, the Site name, an alternate name or a vague word in its language, its title MUST be the Site name, followed by the separator and Drupal's slogan when one is set, and its `og:title` MUST be the same unless a social title is set. A composed main part and a front page with a real name MUST keep the usual title.
 
 #### Scenario: A front page named Home
 
@@ -174,6 +174,16 @@ When the owned front page has no title of its own and its name is empty, the Sit
 
 - **WHEN** the front page is named "Industrial pumps for breweries"
 - **THEN** its title MUST be "Industrial pumps for breweries | Humanify Studio"
+
+#### Scenario: A node home page linked to its title
+
+- **WHEN** the front page is the event "Home", whose template links the title's main part to the Title fact
+- **THEN** its title MUST be "Humanify Studio", as with no title of its own
+
+#### Scenario: A node home page with a composed title
+
+- **WHEN** the front page is the event "Home" in Helsinki, whose template's main part is Title, " in ", Venue › City
+- **THEN** its title MUST be "Home in Helsinki | Humanify Studio", and "Say what the site offers" MUST still judge that resolved text
 
 ### Requirement: A vaguely named front page shares the site card
 

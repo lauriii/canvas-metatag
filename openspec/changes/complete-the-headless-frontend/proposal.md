@@ -68,9 +68,16 @@ Two suggestions were dropped after research:
     reads a field says which ("from Summary").
   - A fact that no item of the type can have is disabled, with the reason
     "No post has one".
-  - A field's menu does not offer its own default. The field's Default box
-    and "Reset" already return to it.
+  - A field's menu does not offer its own default when the pick links the
+    whole value. The field's Default box and "Reset" already return to it.
+    In a composer (`compose-values-from-fields`), adding or replacing a field
+    offers it, and "Add words or fields · Start from ‹Title›" adopts it as
+    the first chip.
+  - A chip of a worked-out value is named by its label alone ("Title"), and
+    says "from ‹via›" in its tooltip and the composer's description.
   - With an empty filter, the type's fields named for the value come first.
+    This and "No ‹type› has one" hold in every mode of the menu: link, add
+    and replace.
 - **Item 4. The dialog tells the truth about an empty description on a
   headless site.** The search preview, the link preview, the focused field
   and the "Add a description" check all say "No description sent. The
@@ -125,7 +132,8 @@ None.
   changes" entry.
 - `seo-checks`: "Add a description" says what is true on a headless site.
 - `value-links`: the "Automatic" group, sources, unavailable facts, no
-  default in its own menu, and fields named for the value first.
+  default in its own menu when a pick links the whole value, and fields named
+  for the value first; worked-out values read the same in a composer.
 
 ## Already covered by queued changes
 
@@ -165,14 +173,19 @@ without them.
      recipe test once with a named frontend.
   5. This change's headless wording follows the frontend being previewed.
 - **`test-in-every-engine-and-language`**, task 4.3: add one accessibility
-  tree snapshot of an open template link menu, with its groups.
+  tree snapshot of an open template link menu, with its groups, taken once
+  in link mode and once in add mode (`compose-values-from-fields`).
 
 ## Dependencies and place in the queue
 
-Land **right after `link-values-to-fields`**, before
-`rethink-structured-data`, and record that as a new decisions.md item.
+Land **right after `compose-values-from-fields`** (decisions.md item 17,
+which supersedes item 16's "Runs first after the JSON-LD form pause"). The
+link menu, its defaults and its rows are built on the composer from the
+start, not reworked later.
 
-- Item 3 is built on the link menu that `link-values-to-fields` adds. The
+- Item 3 is built on the link menu that `link-values-to-fields` adds and
+  the add and replace modes that `compose-values-from-fields` gives it
+  (amendment recorded there, 2026-11-17). The
   MODIFIED blocks for dynamic-values "A page's and a node's own description
   and image" and seo-dialog "The search result preview" are written on its
   text, and the `value-links` capability it creates must exist.

@@ -15,9 +15,10 @@ unless a task says administrator. Screenshots go on the merge request.
 Where a test is meant to fail before the fix, commit it first and record the
 failure in the merge request. Each phase ends releasable.
 
-Before starting, re-read the link menu, `values.ts`, `LinkMenu.tsx` and the
-resolver's facts as `link-values-to-fields` left them. Line numbers in the
-design drift.
+Before starting, re-read the link menu, `values.ts`, `LinkMenu.tsx`,
+`Composer.tsx` and the resolver's facts as `link-values-to-fields` and
+`compose-values-from-fields` left them. The menu has link, add and replace
+modes from the start. Line numbers in the design drift.
 
 ## 1. The recipe for the adapter (item 2)
 
@@ -64,11 +65,11 @@ design drift.
 
 ## 4. The link menu and named groups (items 3 and 7)
 
-- [ ] 4.1 In `entriesFor()`, name the facts group "Automatic". Add "from ‹via›" to a fact entry's value line, and to a Default box's description, when the fact reads a field. Move a fact that cannot be had on the type to the quiet last row, disabled with "No ‹type› has one". At template scope that means Description or Image without `via`. First confirm that the resolver sets `via` from the type's form even when no item exists; if not, set it there. Leave the field's own default fact out of its menu. Name facts by their label alone in boxes and announcements. Prove it with `values.test.ts` cases for each, with "Every Bookmark" as a fixture type with no text or image field, and "Every Post" with a Summary field. Add a `Value` render case: the description of a box linked to Site name starts with "Linked to Site name.".
-- [ ] 4.2 With an empty filter, order the type's fields named for the value first (from `data/value-words.json`, the same rule as 3.1), keeping form order within each band. Prove it with a `values.test.ts` case where Image › Alternative text comes before Summary in form order: Summary comes first. Add a case that a typed filter's ranking is unchanged.
+- [ ] 4.1 In `entriesFor()`, name the facts group "Automatic". Add "from ‹via›" to a fact entry's value line, and to a Default box's description, when the fact reads a field. Move a fact that cannot be had on the type to the quiet last row, disabled with "No ‹type› has one". At template scope that means Description or Image without `via`. First confirm that the resolver sets `via` from the type's form even when no item exists; if not, set it there. Leave the field's own default fact out of its menu when the pick links the whole value; offer it in add and replace mode, and let "Add words or fields · Start from ‹label›" adopt it as the first chip. Name facts by their label alone in boxes, chips and announcements, and put "from ‹via›" into a chip's tooltip and the composer's description. Apply "No ‹type› has one" in link, add and replace mode. Prove it with `values.test.ts` cases for each, for every scenario of value-links "Worked-out values read the same in a composer" and "The field's own default when adding to a composition", with "Every Bookmark" as a fixture type with no text or image field, and "Every Post" with a Summary field. Add a `Value` render case: the description of a box linked to Site name starts with "Linked to Site name.".
+- [ ] 4.2 With an empty filter, order the type's fields named for the value first (from `data/value-words.json`, the same rule as 3.1), keeping form order within each band. Prove it with a `values.test.ts` case where Image › Alternative text comes before Summary in form order: Summary comes first, in link mode and in add mode. Add a case that a typed filter's ranking is unchanged.
 - [ ] 4.3 In `LinkMenu.tsx`, wrap each group's options in `role="group"` with `aria-labelledby` on its heading. Drop `aria-hidden` from the heading and the `role="presentation"` wrappers, and keep `aria-activedescendant` working. If `link-values-to-fields` already did this, keep its version and do only the test changes. Prove it with:
   - `template-complex.spec.ts`: replace both `.seo-menu-group` queries with `getByRole('group', { name })` ("Event", "Automatic", "Job posting");
-  - an axe scan of the open menu with no violations;
+  - an axe scan of the open menu with no violations, in link mode and in add mode;
   - Up and Down still moving across groups.
 - [ ] 4.4 Add "Scripting the dialog" to the README (design D8): the frame titled "SEO", roles and names as the hooks, and an example locator chain for the description's link menu. Point agents at the commands of `make-the-module-agent-ready` once it lands. Prove it by copying the example into a `headless.spec.ts` step that must pass.
 
@@ -89,6 +90,6 @@ design drift.
     - `drush core:requirements --uri=https://cms.example.com` shows the error with its fix;
     - setting `canvas_metatag_public_base` in `settings.local.php` clears it.
   - **Dialog, headless.** On a page without a description: the sentence in both previews, the field and the "Add a description" check. With the frontend removed, the coupled sentences come back.
-  - **Default and link menu.** On a type given a plain Summary field for the check (removed afterwards), the description's Default box says "from Summary", Summary comes first in the type's group, and "Automatic" lists no Description. With a screen reader's tree (Playwright's accessibility snapshot), the groups are named.
+  - **Default and link menu.** On a type given a plain Summary field for the check (removed afterwards), the description's Default box says "from Summary", Summary comes first in the type's group, and "Automatic" lists no Description. "Add words or fields" says "Start from Description" and gives a Description chip whose tooltip says "from Summary"; "Add a field to Description" then lists Description. With a screen reader's tree (Playwright's accessibility snapshot), the groups are named, in link mode and in add mode.
   - **Review changes.** Link the description of "Every Article". The status reads "Draft · in Review changes as “Article content items — Full content view”", and Canvas's "Review changes" lists the same label. Discard the draft there.
 - [ ] 5.3 Record in decisions.md the queue position and the open decisions as taken. Confirm that the amendments applied with this plan are still in `strengthen-zero-config-defaults`, `serve-each-frontend-its-own-addresses` and `test-in-every-engine-and-language`.

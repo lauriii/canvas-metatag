@@ -185,10 +185,12 @@ The kind (rethink-structured-data's registry) decides: the Article family →
 "Article" plus the published date; Event → "Event" plus the start date;
 Product, Recipe, Job posting → their names; Person → its mapped job title,
 else nothing; every other kind, including the WebPage family → nothing. Kind
-names are the registry's translatable labels. Dates have no time:
-`IntlDateFormatter` with the long date style and no time style, in the page's
-language and the site's default country, else the `j F Y` format through
-Drupal's date formatter. No prices, salaries or durations.
+names are the registry's translatable labels. Dates have no time: they are
+read by `compose-values-from-fields`' `Words` helper (`IntlDateFormatter`,
+long date style, no time style, in the item's locale: its language with its
+region, else the site's default country; without `intl`, `j F Y` through
+Drupal's date formatter), so a card and a composed title agree on a date's
+form in every language. No prices, salaries or durations.
 
 ### D9. A page's own image
 
@@ -232,13 +234,18 @@ never fetches an address. A logo over 4096 px a side is skipped.
   content), read through read-page-components as an anonymous visitor; with
   no heading it stays the placeholder. The label is a Canvas internal: an
   ARCHITECTURE.md row and a contract test.
-- **Cut title:** words come off the end of the main part, which ends in "…",
-  until main part, separator and ending fit in 255 characters; the ending is
-  cut only when it alone is too long.
+- **Cut title:** a composed main part (`compose-values-from-fields`) first
+  loses whole fields with the words that go with them, from its end, using
+  that change's segments; then words come off the end of the main part,
+  which ends in "…", until main part, separator and ending fit in 255
+  characters; the ending is cut only when it alone is too long. A cut never
+  leaves " in …" or " · …".
 - **Sentences:** descriptions derived from text are cut to the whole
   sentences that fit in 160 characters (`IntlBreakIterator` sentence instance
   in the page's language); when the first sentence is longer, at a word within
-  159 characters with "…".
+  159 characters with "…". This is the one sentence-cut helper that
+  `compose-values-from-fields` adds for a long-text part's budget; this
+  change reuses it with its own limit rather than writing a second one.
 - **Long text:** a node with no summary and no text field named for a
   description (complete-the-headless-frontend) takes its first formatted or
   long text field in form order.
@@ -250,6 +257,22 @@ never fetches an address. A logo over 4096 px a side is skipped.
   updated on save and delete. The first candidate no other published page
   offers wins. Its cache tag is invalidated only when a hash moves between
   one page and several, so ordinary saves do not flush other pages.
+
+### D11a. Built on the composer
+
+`compose-values-from-fields` lands before this change (decisions.md item 17),
+so this change builds on it from the start:
+
+- **The Default box** stays the at-rest look of an untouched field. Composing
+  starts from it (that change's D9: Arrow right, End, `{` or "Add words or
+  fields · Start from ‹Title›"); nothing here adds another way.
+- **The cut title** drops whole fields of a composed main part before words
+  (D11, and head-output "A cut head text ends at a word").
+- **The small line's date** comes from the `Words` helper (D8).
+- **Sentence cuts** share one helper with the long-text budget (D11).
+- **The card's title** is the social title as resolved, composed or not: the
+  `og:title` exactly as emitted (D3). A composed social title is drawn as its
+  joined text, never as its parts.
 
 ### D12. Alt text and locale
 

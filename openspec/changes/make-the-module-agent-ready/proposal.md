@@ -123,7 +123,16 @@ landing validation earlier).
 - **Hard:** `link-values-to-fields` (value model, `Sources` and its
   vocabulary, behind the field handles), `rethink-structured-data`
   (`Resolver::report()`, `dropped`, verdicts), `extend-structured-data-by-id`
-  (the vocabulary command, hand-added JSON-LD and its error paths).
+  (the vocabulary command, hand-added JSON-LD and its error paths),
+  `compose-values-from-fields` (compositions, `{parts: […]}`, and the value
+  constraint in the config schema; amendment recorded there on 2026-11-17).
+  `set` accepts `{parts: […]}` with the `{field: handle}` shorthand inside
+  parts, `inspect` prints parts with handles, the round trip covers a
+  composed title, and the config import refusal builds on that change's
+  value constraint. Its MODIFIED template-seo "The stored setting is always
+  valid configuration" is the text this change's block of that requirement
+  is rebuilt on once it is archived (task 3.6), keeping its scenarios "A
+  composition" and "A malformed composition".
 - **Soft:** `expose-seo-to-canvas-ai` adds the base module's editor-version
   lookup; if it has not landed, this change adds that method and the AI change
   reuses it. `add-structured-data-diff-and-overview`'s per-entity report cache
@@ -147,7 +156,8 @@ landing validation earlier).
 
 - `draft-writes`: the dialog's write rules are scoped to the dialog; a
   command-line write follows the draft protocol and never takes over a draft.
-- `template-seo`: the stored setting passes the module's shape constraint.
+- `template-seo`: the stored setting passes the module's shape constraint,
+  compositions included.
 - `seo-checks`: rules decided on the server for the command line; the
   configuration problems only the command line reports; site identity on the
   site target.
