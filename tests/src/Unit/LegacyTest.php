@@ -254,7 +254,7 @@ final class LegacyTest extends UnitTestCase {
       'template',
       ['schema' => ['custom' => '{"@type":"Thing","name":"{field.field_byline}"}']],
       ['schema' => ['custom' => '{"@type":"Thing","name":"{field.field_byline}"}']],
-      ['schema.custom: names a field, which custom JSON-LD no longer fills.'],
+      ['schema.custom: names a field. A whole value is filled from its field; a name inside other text stays as written.'],
     ];
 
     // Already converted: left as it is.

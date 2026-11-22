@@ -14,7 +14,7 @@ details sheet.
 ### Requirement: Hand-added links that can't fill are listed
 
 A field or media name inside other text in a hand-added item MUST be listed
-to fix with "This name is only filled when it is the whole value." A
+to improve with "This name is only filled when it is the whole value." A
 hand-added value left out because its link is empty, hidden or gone for the
 item being checked MUST be listed to improve with its path, leading to that
 row in "Add your own JSON-LD".
@@ -22,7 +22,7 @@ row in "Add your own JSON-LD".
 #### Scenario: A byline inside text
 
 - **WHEN** a template's hand-added item has `"name": "By {field.field_byline}"`
-- **THEN** Checks MUST list it to fix with that sentence
+- **THEN** Checks MUST list it to improve with that sentence
 
 #### Scenario: A review without a score
 

@@ -460,6 +460,9 @@ export function Sheet(props: {
   focusTitle?: boolean;
   /** Under the scroller, never over it: a confirm that stays in sight. */
   foot?: ReactNode;
+  /** A sheet with levels: Back and Escape go up one, named for where. */
+  backLabel?: string;
+  onBack?(): void;
   onClose(): void;
   children: ReactNode;
 }) {
@@ -468,23 +471,25 @@ export function Sheet(props: {
   const title = useRef<HTMLHeadingElement>(null);
   const section = useRef<HTMLElement>(null);
   const [scrolled, setScrolled] = useState(false);
-  const close = useRef(props.onClose);
-  close.current = props.onClose;
+  const close = useRef(props.onBack ?? props.onClose);
+  close.current = props.onBack ?? props.onClose;
   useEffect(() => {
     if (props.focusTitle) {
       title.current?.focus();
     } else if (props.focusBack) {
       back.current?.focus();
     }
-    // A button that took itself away left focus nowhere: Escape still
-    // closes the sheet.
+    // A button that took itself away left focus nowhere: Escape still goes
+    // up one level. Caught before the editor's dialog would close on it.
     const escape = (event: globalThis.KeyboardEvent) => {
       if (event.key === 'Escape' && !event.defaultPrevented && (document.activeElement === document.body || document.activeElement === null)) {
+        event.preventDefault();
+        event.stopPropagation();
         close.current();
       }
     };
-    document.addEventListener('keydown', escape);
-    return () => document.removeEventListener('keydown', escape);
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
@@ -495,7 +500,7 @@ export function Sheet(props: {
       onKeyDown={(event: KeyboardEvent) => {
         if (event.key === 'Escape' && !event.defaultPrevented) {
           event.stopPropagation();
-          props.onClose();
+          (props.onBack ?? props.onClose)();
         }
       }}
       onBlur={(event) => {
@@ -513,10 +518,10 @@ export function Sheet(props: {
       <div className="seo-sheet-header" data-scrolled={scrolled || undefined}>
         <IconBtn
           ref={back}
-          label="Back"
+          label={props.backLabel ?? 'Back'}
           tip=""
           size={28}
-          onClick={props.onClose}
+          onClick={props.onBack ?? props.onClose}
         >
           <ChevronLeftIcon aria-hidden />
         </IconBtn>

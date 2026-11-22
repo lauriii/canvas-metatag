@@ -73,6 +73,40 @@ final class SearchFeaturesFileTest extends UnitTestCase {
   }
 
   /**
+   * Every type and name the file documents says what it is and expects.
+   */
+  public function testAboutAndExpects(): void {
+    $rules = SchemaGraph::searchFeatures();
+    foreach ($rules['features'] as $id => $feature) {
+      if ($feature['status'] !== 'shown') {
+        continue;
+      }
+      foreach ($feature['on'] as $type) {
+        self::assertMatchesRegularExpression('/^[A-Z].*\.$/', $rules['about'][$type] ?? '', "$id: $type has a line about it.");
+      }
+      foreach ($feature['names'] as $name) {
+        self::assertNotSame('', SchemaGraph::expects($name) ?: ($feature['expects'][$name]['is'] ?? $feature['expects'][$name] ?? ''), "$id: $name says what it expects.");
+      }
+      // Items added by hand: a sentence for the list, and what each need
+      // must look like.
+      if (isset($feature['only'])) {
+        self::assertNotEmpty($feature['say'] ?? [], "$id has a sentence.");
+        foreach (self::paths($feature['required']) as $path) {
+          $name = substr($path, (int) strrpos(".$path", '.'));
+          self::assertTrue(isset($feature['expects'][$path]) || isset($feature['expects'][$name]) || SchemaGraph::expects($name) !== '', "$id: $path says what it expects.");
+        }
+      }
+    }
+    // No dataset entry: its results feature is being phased out.
+    self::assertSame([], array_filter($rules['features'], static fn (array $feature): bool => in_array('Dataset', $feature['on'], TRUE)));
+    // Every spec is one the checks read.
+    foreach ($rules['expects'] as $name => $spec) {
+      $is = is_array($spec) ? $spec['is'] : $spec;
+      self::assertMatchesRegularExpression('/^((text|number|url|date|datetime|duration|bool)|(item|enum):[A-Za-z]+)(\|((text|number|url|date|datetime|duration|bool)|(item|enum):[A-Za-z]+|[A-Z][A-Za-z]+))*$/D', $is, $name);
+    }
+  }
+
+  /**
    * The paths of required or recommended entries, one-of lists flattened.
    *
    * @return list<string>

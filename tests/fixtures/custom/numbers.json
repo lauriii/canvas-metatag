@@ -1,0 +1,36 @@
+[
+  {
+    "name": "a number too large",
+    "input": "{\"@type\": \"Rating\", \"ratingValue\": 1e400}",
+    "accepted": false,
+    "message": "ratingValue: this number is too large to use.",
+    "item": 0,
+    "path": "/ratingValue"
+  },
+  {
+    "name": "a negative number too large",
+    "input": "{\"@type\": \"Rating\", \"ratingValue\": -1e400}",
+    "accepted": false,
+    "message": "ratingValue: this number is too large to use.",
+    "item": 0,
+    "path": "/ratingValue"
+  },
+  {
+    "name": "a number too large in a list",
+    "input": "{\"@type\": \"Rating\", \"ratingValue\": [1e309]}",
+    "accepted": false,
+    "message": "ratingValue: this number is too large to use.",
+    "item": 0,
+    "path": "/ratingValue/0"
+  },
+  {
+    "name": "a rating as text",
+    "input": "{\"@type\": \"Rating\", \"ratingValue\": \"85%\"}",
+    "accepted": true
+  },
+  {
+    "name": "a number as text",
+    "input": "{\"@type\": \"Rating\", \"ratingValue\": \"4.2\"}",
+    "accepted": true
+  }
+]

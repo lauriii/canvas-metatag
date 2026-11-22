@@ -7,6 +7,7 @@ namespace Drupal\Tests\canvas_metatag\Unit;
 use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -63,6 +64,7 @@ final class SearchFeaturesTest extends UnitTestCase {
       'incomplete' => $built['incomplete'],
       'items' => $built['items'],
       'today' => $ctx['today'] ?? '',
+      'hand' => array_column(array_filter($built['nodes'], static fn (array $one): bool => $one['origin'] === 'hand' && isset($one['at'])), 'at'),
     ]);
     $keyed = [];
     foreach ($verdicts as $verdict) {
@@ -209,6 +211,92 @@ final class SearchFeaturesTest extends UnitTestCase {
     // A product result needs a price, a review or a rating: any one of them.
     self::assertSame('ready', self::verdicts(['custom' => '{"@type":"Product","@id":"#r","name":"R","aggregateRating":{"@type":"AggregateRating","ratingValue":"4.8","reviewCount":"12"}}'])['product-snippet #r']['verdict']);
     self::assertSame([['path' => 'offers.price']], self::verdicts(['custom' => '{"@type":"Product","@id":"#n","name":"N"}'])['product-snippet #n']['missing']);
+  }
+
+  /**
+   * The dialog gives the same verdicts while the editor types (features.ts).
+   *
+   * @param array{graph: list<array>, item: int, verdicts: list<array>} $case
+   *   One case of tests/fixtures/features/.
+   */
+  #[DataProvider('providerSharedFixtures')]
+  public function testSharedFixtures(array $case): void {
+    $url = strstr((string) $case['graph'][$case['item']]['@id'], '#', TRUE);
+    $verdicts = SchemaGraph::features(['@graph' => $case['graph']], [
+      'home' => 'https://example.com/',
+      'url' => $url,
+      'hand' => array_keys($case['graph']),
+    ]);
+    // The item's own verdicts: a typed object inside it is judged too.
+    $item = $case['graph'][$case['item']];
+    $features = SchemaGraph::searchFeatures()['features'];
+    $own = array_values(array_filter($verdicts, static fn (array $verdict): bool => $verdict['node'] === $item['@id']
+      && $verdict['feature'] !== NULL && array_intersect((array) $item['@type'], $features[$verdict['feature']]['on']) !== []));
+    self::assertSame($case['verdicts'], $own);
+  }
+
+  /**
+   * Data provider for testSharedFixtures().
+   */
+  public static function providerSharedFixtures(): \Generator {
+    foreach (glob(dirname(__DIR__, 3) . '/tests/fixtures/features/*.json') as $file) {
+      foreach (json_decode((string) file_get_contents($file), TRUE, 64, JSON_THROW_ON_ERROR) as $case) {
+        yield basename($file, '.json') . ': ' . $case['name'] => [$case];
+      }
+    }
+  }
+
+  /**
+   * Ratings, reviews and discussions added by hand, with what needs must be.
+   */
+  public function testHandAddedTypes(): void {
+    $rating = static fn (array $item): array => self::verdicts([
+      'custom' => (string) json_encode(['@type' => 'EmployerAggregateRating', '@id' => '#rating'] + $item),
+    ])['employer-rating #rating'];
+    $acme = ['@type' => 'Organization', 'name' => 'Acme Logistics', 'sameAs' => 'https://acme-logistics.example'];
+    self::assertSame([
+      'verdict' => 'ready',
+      'helps' => [['path' => 'bestRating'], ['path' => 'worstRating']],
+    ], $rating(['itemReviewed' => $acme, 'ratingValue' => 4.2, 'ratingCount' => 318]));
+    // A company given only as a name: the need names the shape.
+    self::assertSame(
+      [['path' => 'itemReviewed', 'expects' => ['is' => 'item:Organization', 'needs' => ['name']]]],
+      $rating(['itemReviewed' => 'Acme Logistics', 'ratingValue' => 4.2, 'ratingCount' => 318])['missing'],
+    );
+    // Either count.
+    self::assertSame([['path' => 'ratingCount']], $rating(['itemReviewed' => $acme, 'ratingValue' => 4.2])['missing']);
+    self::assertSame('ready', $rating(['itemReviewed' => $acme, 'ratingValue' => '85%', 'reviewCount' => 12])['verdict']);
+    // A subtype of organization is an organization.
+    self::assertSame('ready', $rating([
+      'itemReviewed' => ['@type' => 'Restaurant', 'name' => 'Kala'],
+      'ratingValue' => 4,
+      'ratingCount' => 3,
+    ])['verdict']);
+
+    // A review: an author given only as a name.
+    $review = self::verdicts([
+      'custom' => (string) json_encode([
+        '@type' => 'Review',
+        '@id' => '#review',
+        'itemReviewed' => ['@type' => 'Book', 'name' => 'The Quiet Orchard'],
+        'author' => 'Mia Virtanen',
+        'reviewRating' => ['@type' => 'Rating', 'ratingValue' => 4],
+      ]),
+    ])['review-snippet #review'];
+    self::assertSame([['path' => 'author', 'expects' => ['is' => 'item:Person|Organization', 'needs' => ['name']]]], $review['missing']);
+
+    // A dataset has no search feature; the module's own image nodes are not
+    // judged as image credits.
+    self::assertSame(['' => ['verdict' => 'none']], self::verdicts(['custom' => '{"@type": "Dataset", "@id": "#data", "name": "Rain"}']));
+    self::assertArrayNotHasKey('image-metadata', self::verdicts([], ['image' => self::IMAGE + ['source' => 'entity']]));
+
+    // A Q&A page: the page's own type, with a question as its main thing.
+    $qa = self::verdicts([
+      'extend' => ['#webpage' => '{"@type": ["WebPage", "QAPage"]}'],
+      'custom' => '{"@type": "Question", "@id": "#q", "name": "Can I return it?", "answerCount": 1, "acceptedAnswer": {"@type": "Answer", "text": "Yes."}}',
+      'main' => '#q',
+    ]);
+    self::assertSame('ready', $qa['qa']['verdict']);
   }
 
   /**

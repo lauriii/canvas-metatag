@@ -10,6 +10,7 @@ use Drupal\canvas_headless\Controller\CanvasContentController;
 use Drupal\canvas_metatag\Controller\HeadlessContentController;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Values;
+use Drupal\canvas_metatag\Vocabulary;
 use Drupal\Core\Access\AccessResult;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Cache\CacheableMetadata;
@@ -33,6 +34,7 @@ use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Utility\Error;
+use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
 
 /**
  * Hook implementations for Canvas Metatag.
@@ -45,8 +47,7 @@ final class CanvasMetatagHooks {
    * Hex escaping keeps any text from ending the script element or starting a
    * comment in it.
    */
-  public const JSON_FLAGS = JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_UNESCAPED_SLASHES
-    | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR;
+  public const JSON_FLAGS = Values::OUTPUT_FLAGS;
 
   public function __construct(
     private readonly Resolver $resolver,
@@ -56,6 +57,9 @@ final class CanvasMetatagHooks {
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly ClassResolverInterface $classResolver,
     private readonly AutoSaveManager $autoSaveManager,
+    // Only the status report reads it: built when it does, never for a page.
+    #[AutowireServiceClosure(Vocabulary::class)]
+    private readonly \Closure $vocabulary,
   ) {}
 
   /**
@@ -175,15 +179,17 @@ final class CanvasMetatagHooks {
         'canvas_metatag:' . $link['rel'] . (isset($link['hreflang']) ? ':' . $link['hreflang'] : ''),
       ];
     }
-    $attachments['#attached']['html_head'][] = [
-      [
-        '#tag' => 'script',
-        '#attributes' => ['type' => 'application/ld+json'],
-        // The only markup this module declares safe: the encoder's output.
-        '#value' => Markup::create($head['json_ld']),
-      ],
-      'canvas_metatag:jsonld',
-    ];
+    if ($head['json_ld'] !== NULL) {
+      $attachments['#attached']['html_head'][] = [
+        [
+          '#tag' => 'script',
+          '#attributes' => ['type' => 'application/ld+json'],
+          // The only markup this module declares safe: the encoder's output.
+          '#value' => Markup::create($head['json_ld']),
+        ],
+        'canvas_metatag:jsonld',
+      ];
+    }
     CacheableMetadata::createFromRenderArray($attachments)
       ->addCacheableDependency($resolved['cacheability'])
       ->applyTo($attachments);
@@ -319,14 +325,29 @@ final class CanvasMetatagHooks {
   /**
    * Implements hook_runtime_requirements().
    *
-   * The headless head is ours only while the controller canvas_headless
+   * Which schema.org release the hand-added JSON-LD form reads. The headless
+   * head is ours only while the controller canvas_headless
    * resolves is our decorator, and nothing else would tell that it stopped
    * being: the controller resolver makes this same call.
    */
   #[Hook('runtime_requirements')]
   public function runtimeRequirements(): array {
+    // The schema.org vocabulary of the hand-added JSON-LD form: optional.
+    $installed = ($this->vocabulary)()->installed();
+    $requirements = [
+      'canvas_metatag_vocabulary' => [
+        'title' => new TranslatableMarkup('Schema.org vocabulary for SEO'),
+        'value' => $installed === NULL ? new TranslatableMarkup('Not downloaded') : new TranslatableMarkup('Release @release', ['@release' => $installed['release']]),
+        'description' => match (TRUE) {
+          $installed === NULL => new TranslatableMarkup('The form of "Add your own JSON-LD" offers the types search features read. To offer every schema.org type, run drush canvas-metatag:vocabulary.'),
+          version_compare($installed['release'], Vocabulary::RELEASE, '<') => new TranslatableMarkup('The module is tested with release @pinned. Run drush canvas-metatag:vocabulary to update.', ['@pinned' => Vocabulary::RELEASE]),
+          default => new TranslatableMarkup("Schema.org's definitions are CC BY-SA 3.0."),
+        },
+        'severity' => RequirementSeverity::Info,
+      ],
+    ];
     if (!$this->moduleHandler->moduleExists('canvas_headless')) {
-      return [];
+      return $requirements;
     }
     try {
       $ours = $this->classResolver->getInstanceFromDefinition(CanvasContentController::class) instanceof HeadlessContentController;
@@ -334,7 +355,7 @@ final class CanvasMetatagHooks {
     catch (\Throwable) {
       $ours = FALSE;
     }
-    return $ours ? [] : [
+    return $ours ? $requirements : $requirements + [
       'canvas_metatag_headless' => [
         'title' => new TranslatableMarkup('SEO for headless content'),
         'value' => new TranslatableMarkup('Not in use'),
@@ -387,7 +408,8 @@ final class CanvasMetatagHooks {
       return [
         'entity' => $entity,
         'resolved' => $resolved,
-        'json_ld' => json_encode($resolved['head']['script'][0]['textContent'], self::JSON_FLAGS),
+        // Left out by the resolver when it cannot be written out.
+        'json_ld' => isset($resolved['head']['script'][0]) ? json_encode($resolved['head']['script'][0]['textContent'], self::JSON_FLAGS) : NULL,
       ];
     }
     catch (\Throwable $e) {

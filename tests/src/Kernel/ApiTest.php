@@ -240,6 +240,9 @@ final class ApiTest extends CanvasKernelTestBase {
       'site',
       'registry',
       'codes',
+      'module_ids',
+      'extend_types',
+      'vocabulary',
       'search_features',
       'target',
       'preview',
@@ -272,6 +275,7 @@ final class ApiTest extends CanvasKernelTestBase {
         'values' => ['robots' => ['max_image_preview' => 'large']],
         'currency' => '',
         'country' => '',
+        'timezone' => $this->config('system.date')->get('timezone.default') ?: 'UTC',
       ],
       'target' => [
         'scope' => 'page',
@@ -285,6 +289,8 @@ final class ApiTest extends CanvasKernelTestBase {
         'has_draft' => TRUE,
         'values' => $values,
         'from_default' => [],
+        'refused' => NULL,
+        'source' => NULL,
       ],
       'preview' => [
         'entity_type' => 'canvas_page',
@@ -414,6 +420,20 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame('Tarifs | Example', $french['resolved']['head']['title']);
     self::assertSame('en', self::decodeResponse($this->request(Request::create(self::STATE . $query)))['langcode']);
     self::assertSame('fr', self::decodeResponse($this->request(Request::create('/fr' . self::STATE . $query)))['langcode']);
+    self::assertNull($french['target']['source']);
+
+    // The source version's hand-added items are offered to copy while the
+    // translation has none of its own. (The English draft is the source
+    // while there is one: it goes first.)
+    $auto_save->deleteAll();
+    $items = '[{"@type": "Thing", "@id": "#a", "name": "A"}, {"@type": "Thing", "@id": "#b", "name": "B"}]';
+    $english = Page::load($page->id());
+    $english?->set('canvas_metatag', Values::encode(['schema' => ['custom' => $items]]))->save();
+    $french = self::decodeResponse($this->request(Request::create(self::STATE . $query . '&langcode=fr')));
+    self::assertSame(['langcode' => 'en', 'custom' => $items, 'count' => 2], $french['target']['source']);
+    $english?->getTranslation('fr')->set('canvas_metatag', Values::encode(['schema' => ['custom' => '{"@type": "Thing", "name": "Oma"}']]))->save();
+    $french = self::decodeResponse($this->request(Request::create(self::STATE . $query . '&langcode=fr')));
+    self::assertNull($french['target']['source']);
 
     // Errors, each in the one shape.
     $unpublished = $this->createPage(['status' => FALSE]);
@@ -495,6 +515,9 @@ final class ApiTest extends CanvasKernelTestBase {
       'site',
       'registry',
       'codes',
+      'module_ids',
+      'extend_types',
+      'vocabulary',
       'search_features',
       'target',
       'preview',
@@ -519,7 +542,15 @@ final class ApiTest extends CanvasKernelTestBase {
       'has_draft' => TRUE,
       'values' => $values,
       'from_default' => [],
+      'refused' => NULL,
+      'source' => NULL,
     ], $state['target']);
+    // A template's added type keeps the registry's: a blog post.
+    self::assertSame([
+      '#primary' => ['BlogPosting'],
+      '#webpage' => ['WebPage'],
+      '#identity' => ['Organization'],
+    ], $state['extend_types']);
     self::assertSame([
       'entity_type' => 'node',
       'id' => (string) $node->id(),
@@ -759,6 +790,9 @@ final class ApiTest extends CanvasKernelTestBase {
       'site',
       'registry',
       'codes',
+      'module_ids',
+      'extend_types',
+      'vocabulary',
       'search_features',
       'target',
       'preview',
@@ -898,7 +932,13 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame($identity, $raw['identity']);
     self::assertEquals($values, $raw['values']);
     $state = self::decodeResponse($this->request(Request::create(self::STATE)));
-    self::assertSame(['identity' => $identity, 'values' => $values, 'currency' => '', 'country' => ''], $state['site']);
+    self::assertSame([
+      'identity' => $identity,
+      'values' => $values,
+      'currency' => '',
+      'country' => '',
+      'timezone' => 'Europe/Helsinki',
+    ], $state['site']);
     // The site's default country is what a country picker suggests.
     $this->config('system.date')->set('country.default', 'FI')->save();
     self::assertSame('FI', self::decodeResponse($this->request(Request::create(self::STATE)))['site']['country']);
@@ -1185,6 +1225,69 @@ final class ApiTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A refused hand-added text says where it is, beside its sentence.
+   */
+  public function testCustomJsonLdErrorPath(): void {
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, Page::EDIT_PERMISSION, 'edit canvas metatag']);
+    $page = $this->createPage();
+    $path = "/canvas-metatag/api/draft/canvas_page/{$page->id()}";
+    $response = $this->putDraft($path, $page, ['schema' => ['custom' => '{"@type": "Rating", "ratingValue": 1e400}']], ['langcode' => 'en']);
+    self::assertSame(422, $response->getStatusCode());
+    $error = self::decodeResponse($response)['error'];
+    // Existing readers of the sentence are unchanged.
+    self::assertSame(['schema.custom' => 'ratingValue: this number is too large to use.'], $error['fields']);
+    self::assertSame(['schema.custom' => ['item' => 0, 'path' => '/ratingValue']], $error['error_paths']);
+
+    // Added details: a type changed is refused at its node.
+    $response = $this->putDraft($path, $page, ['schema' => ['extend' => ['#webpage' => '{"@type": "AboutPage"}']]], ['langcode' => 'en']);
+    self::assertSame(422, $response->getStatusCode());
+    self::assertSame(['item' => 0, 'path' => '/@type'], self::decodeResponse($response)['error']['error_paths']['schema.extend.#webpage']);
+
+    // The site's own id, written as its full address, is the site's.
+    $state = self::decodeResponse($this->request(Request::create(self::STATE . '?entity_type=canvas_page&id=' . $page->id())));
+    $home = $state['origin']['url'] . '/';
+    $response = $this->putDraft($path, $page, ['schema' => ['custom' => '{"@type": "Organization", "@id": "' . $home . '#identity"}']], ['langcode' => 'en']);
+    self::assertSame(422, $response->getStatusCode());
+    self::assertSame([
+      'identity' => 'home',
+      'logo' => 'home',
+      'website' => 'home',
+      'return-policy' => 'home',
+      'webpage' => 'url',
+      'primaryimage' => 'url',
+      'primary' => 'url',
+      'group' => 'url',
+    ], $state['module_ids']);
+
+    // Stored as written, details added, a main thing: all travel in the
+    // draft and reach the head.
+    $custom = "[\n  {\n    \"@type\": \"Recipe\",\n    \"@id\": \"#x-recipe\",\n    \"name\": \"Rye bread\"\n  }\n]";
+    $values = [
+      'schema' => ['custom' => $custom, 'extend' => ['#webpage' => '{"keywords": "bread"}'], 'main' => '#x-recipe'],
+    ];
+    $response = $this->putDraft($path, $page, $values, ['langcode' => 'en']);
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    $state = self::decodeResponse($this->request(Request::create(self::STATE . '?entity_type=canvas_page&id=' . $page->id())));
+    self::assertSame($values, $state['target']['values']);
+    $graph = self::graph($state['resolved']['head']);
+    self::assertSame('bread', $graph['webpage']['keywords']);
+    self::assertSame(['@id' => $graph['webpage']['url'] . '#x-recipe'], $graph['webpage']['mainEntity']);
+
+    // The 32 KB the texts share: an unchanged stored text with new details
+    // over the cap is refused at the details, never saved without them.
+    $big = json_encode(['@type' => 'Recipe', '@id' => '#x-big', 'description' => str_repeat('a', 20000)]);
+    $response = $this->putDraft($path, $page, ['schema' => ['custom' => $big]], ['langcode' => 'en']);
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    $details = json_encode(['keywords' => str_repeat('b', 14000)]);
+    $grown = ['schema' => ['custom' => $big, 'extend' => ['#webpage' => $details]]];
+    $response = $this->putDraft($path, $page, $grown, ['langcode' => 'en']);
+    self::assertSame(422, $response->getStatusCode());
+    self::assertSame(['schema.extend.#webpage' => '34 KB. Keep under 32 KB, including added details.'], self::decodeResponse($response)['error']['fields']);
+    $state = self::decodeResponse($this->request(Request::create(self::STATE . '?entity_type=canvas_page&id=' . $page->id())));
+    self::assertSame(['schema' => ['custom' => $big]], $state['target']['values']);
+  }
+
+  /**
    * Sends a draft write as the editor's client, with the current draft state.
    */
   private function putDraft(string $path, EntityInterface $entity, array $values, array $body = []): Response {
@@ -1311,6 +1414,7 @@ final class ApiTest extends CanvasKernelTestBase {
     };
     $translate('A product people buy', 'Tuote, jonka ihmiset ostavat');
     $translate('Merchant listing', 'Kauppalistaus');
+    $translate("A company's rating by the people who work there.", 'Yrityksen arvio sen työntekijöiltä.');
     $translate('{name}, a web page of {site}.', '{name}, sivuston {site} sivu.');
     $this->setUpCurrentUser(permissions: [...self::VISITOR, 'edit canvas metatag']);
 
@@ -1318,6 +1422,9 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame('fi', $finnish['ui']);
     self::assertSame('Tuote, jonka ihmiset ostavat', $finnish['registry']['Product']['kind']['label']);
     self::assertSame('Kauppalistaus', $finnish['search_features']['features']['merchant-listing']['label']);
+    // A line about a type, for the type search of hand-added items.
+    self::assertSame('Yrityksen arvio sen työntekijöiltä.', $finnish['search_features']['about']['EmployerAggregateRating']);
+    self::assertSame('item:Organization', $finnish['search_features']['features']['employer-rating']['expects']['itemReviewed']['is']);
     // Untranslated strings stay English; ids, keys and paths are never
     // translated.
     self::assertSame('Plans for a service', $finnish['registry']['Service']['kind']['label']);

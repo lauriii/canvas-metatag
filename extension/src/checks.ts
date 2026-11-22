@@ -15,6 +15,7 @@ import {
 } from './model';
 import { durationText, partNoun, plainText } from './controls';
 import { dateWords, itemName } from './readback';
+import { emptyWords, linkedField, shapeNeed } from './custom/sheet';
 import type {
   FeatureFact,
   Issue,
@@ -111,6 +112,12 @@ export interface ChecksInput {
   /** The robots settings are sent: `resolved`'s robots tag describes them. */
   robotsSettled: boolean;
   measurer: Measurer;
+  /** A page translation: how many hand-added items its source version has. */
+  source?: { language: string; count: number } | null;
+  /** Hand-added JSON-LD stored before a rule: why an item of it is left out. */
+  refused?: string | null;
+  /** Hand-added JSON-LD left with a problem in the sheet, not sent. */
+  unsaved?: boolean;
 }
 
 const GENERIC = ['home', 'homepage', 'untitled', 'page', 'new page', 'welcome'];
@@ -1217,16 +1224,24 @@ function structured(
   };
   for (const hit of report?.rules ?? []) {
     const shown = hit.value?.startsWith(`${input.url}#`) ? hit.value.slice(input.url.length) : hit.value;
+    // Item -1: a module node with added details, told apart by its id and
+    // opened in its Add details sheet.
+    const short = hit.item < 0 && hit.node ? `#${hit.node.split('#').pop()}` : null;
+    const at = short ? `${hit.item}:${short}` : String(hit.item);
+    const whose = short ? (short === '#identity' ? "Your site's organization" : short === '#webpage' ? 'This page' : `This page's ${inSentence(input.typeLabel) || 'main thing'}`) : itemOf(hit.item);
+    const jump = short ? extendJump(short) : custom;
     issues.push(
       hit.rule === 'own_reviews'
-        ? { id: `hand-reviews:${hit.item}`, severity: 'fix', message: 'No review stars for reviews of your own organization.', detail: `${itemOf(hit.item)}: search engines do not show review stars for reviews an organization publishes of itself. Ratings of other companies are fine.`, jump: custom }
+        ? { id: `hand-reviews:${at}`, severity: 'fix', message: 'No review stars for reviews of your own organization.', detail: `${whose}: search engines do not show review stars for reviews an organization publishes of itself. Ratings of other companies are fine.`, jump }
         : hit.rule === 'second_identity'
-          ? { id: `hand-identity:${hit.item}`, severity: 'improve', message: "Point to your site's organization instead", detail: `This is your site's organization. Point to it with “@id”: “${home}#identity” instead.`, jump: custom }
+          ? { id: `hand-identity:${at}`, severity: 'improve', message: "Point to your site's organization instead", detail: `This is your site's organization. Point to it with “@id”: “${home}#identity” instead.`, jump }
           : hit.rule === 'dangling'
-            ? { id: `hand-dangling:${hit.item}:${shown}`, severity: 'improve', message: `Points to ${shown}, which isn't on this page`, detail: 'Add the item it points to, or point to one that is here.', jump: custom }
-            : { id: `hand-relative:${hit.item}:${shown}`, severity: 'improve', message: `Use a full address for “${shown}”`, detail: 'Addresses in structured data start with https://.', jump: custom },
+            ? { id: `hand-dangling:${at}:${shown}`, severity: 'improve', message: `Points to ${shown}, which isn't on this page`, detail: 'Add the item it points to, or point to one that is here.', jump }
+            : { id: `hand-relative:${at}:${shown}`, severity: 'improve', message: `Use a full address for “${shown}”`, detail: 'Addresses in structured data start with https://.', jump },
     );
   }
+
+  issues.push(...handReport(input, report, label, custom));
 
   // What is not on the page. Never codes or identifiers; never defaults.
   if (!facts) {
@@ -1291,12 +1306,34 @@ function structured(
       }
     }
   }
+  /** Where a value is in an item, dotted: the row a jump opens on. */
+  const valuePath = (value: unknown, wanted: string, at: string[] = []): string | null => {
+    if (Array.isArray(value)) {
+      for (const one of value) {
+        const found = valuePath(one, wanted, at);
+        if (found !== null) return found;
+      }
+    } else if (isNode(value)) {
+      for (const [key, one] of Object.entries(value)) {
+        const found = key.startsWith('@') ? null : valuePath(one, wanted, [...at, key]);
+        if (found !== null) return found;
+      }
+    } else if ((typeof value === 'string' || typeof value === 'number') && String(value).trim() === wanted.trim()) {
+      return at.join('.');
+    }
+    return null;
+  };
+  const rowJump = (item: number | undefined, node: unknown, value: string): Jump => {
+    const path = item === undefined ? null : valuePath(node, value);
+    return path === null ? custom : { ...custom, at: { item: item!, path } };
+  };
   for (const entry of report?.nodes ?? []) {
     const node = entry.origin === 'hand' && entry.at !== undefined ? nodes[entry.at] : undefined;
     if (!node) {
       continue;
     }
-    const lost = handTexts(node).filter((one) => normal(one.text) && !onThePage(one.text));
+    // A field or media name kept as text (inside other text) is never on the page as written.
+    const lost = handTexts(node).filter((one) => normal(one.text) && !/\{(field|media)\.[^}]+\}/.test(one.text) && !onThePage(one.text));
     if (lost.length) {
       const first = lost[0];
       issues.push({
@@ -1304,7 +1341,7 @@ function structured(
         severity: 'fix',
         message: `Couldn't find ${first.question ? 'the question ' : ''}“${first.text.length > 80 ? `${first.text.slice(0, 80)}…` : first.text}” on this page`,
         detail: `Search engines ask that structured data only describes what visitors can see, and pages that break this can lose their search features.${lost.length > 1 ? ` ${lost.length === 2 ? "One more isn't" : `${lost.length - 1} more aren't`} on the page either.` : ''}`,
-        jump: custom,
+        jump: rowJump(entry.item, node, first.text),
         // Only while the JSON-LD still holds the item the report named.
         ...(leaveOut(effective, entry, input.url) && {
           fix: {
@@ -1323,7 +1360,7 @@ function structured(
           severity: 'improve',
           message: `Couldn't find the rating ${value} on this page`,
           detail: 'Show the rating on the page, or leave it out.',
-          jump: custom,
+          jump: rowJump(entry.item, node, value),
         });
         break;
       }
@@ -1335,6 +1372,94 @@ function structured(
 /** "Not shown since 7 May 2026", or without a dated changelog entry, "No longer shown". */
 export const retiredText = (since: string | undefined, ui: string) =>
   since ? `Not shown since ${dateWords(since, ui)}` : 'No longer shown';
+
+/**
+ * What became of hand-added JSON-LD and added details: clashes, names inside
+ * text, links that gave nothing, structured data left out, a main thing not
+ * used, a translation without the source's items, text not saved.
+ */
+/** A jump to a module node's added details: the sheet opens on the row. */
+const extendJump = (node: string, path?: string): Jump => ({
+  ...(node === '#identity' ? { scope: 'site' as const, field: 'schema.extend.#identity' } : { scope: 'target' as const, field: `schema.extend.${node}` }),
+  tab: 'schema',
+  ...(path !== undefined && { at: { item: 0, path } }),
+});
+
+function handReport(input: ChecksInput, report: Resolved['schema'] | null, label: (key: string) => string, custom: Jump): Issue[] {
+  const issues: Issue[] = [];
+  const schema = input.effective.schema ?? {};
+  const itemJump = (item: number | undefined, path: string): Jump => (item === undefined ? custom : { ...custom, at: { item, path } });
+  for (const clash of report?.clashes ?? []) {
+    const from = clash.prop ? `the ${label(clash.prop)} field` : clash.node === '#identity' ? 'the site settings' : 'the page';
+    issues.push({ id: `extend-clash:${clash.node}:${clash.path}`, severity: 'improve', message: `“${clash.path}” comes from ${from}, so the added value isn't used`, detail: 'Remove it from the added details, or change it where it comes from.', jump: extendJump(clash.node, clash.path) });
+  }
+  // A field or media name inside other text is kept as text.
+  const texts: [string, string | undefined, Jump][] = [['custom', schema.custom, custom], ...Object.entries(schema.extend ?? {}).map(([node, text]) => [node, text, extendJump(node)] as [string, string | undefined, Jump])];
+  for (const [where, text, jump] of texts) {
+    let data: unknown;
+    try {
+      data = text ? JSON.parse(text) : undefined;
+    } catch {
+      continue;
+    }
+    const walk = (value: unknown, at: string[]) => {
+      if (Array.isArray(value)) value.forEach((one, index) => walk(one, Array.isArray(data) && at.length === 0 ? [] : [...at, String(index)]));
+      else if (isNode(value)) Object.entries(value).forEach(([key, one]) => walk(one, [...at, key]));
+      else if (typeof value === 'string' && /\{(field|media)\.[^}]+\}/.test(value) && !/^\{(field|media)\.[^}]+\}$/.test(value)) {
+        issues.push({ id: `hand-inside:${where}:${at.join('.')}`, severity: 'improve', message: 'This name is only filled when it is the whole value.', detail: `“${at.filter((one) => !/^\d+$/.test(one)).join(' › ')}”: ${value}`, jump });
+      }
+    };
+    walk(data, []);
+  }
+  const thing = input.scope === 'page' ? 'page' : inSentence(input.typeLabel);
+  // The module's nodes by their short id, in words: "the product".
+  const node = (short: string) => (short === '#identity' ? "the site's organization" : short === '#webpage' ? 'the page' : short === '#primary' ? `the ${inSentence(input.typeLabel) || 'main thing'}` : short === '#logo' ? 'the logo' : 'the item it points to');
+  for (const entry of report?.empty ?? []) {
+    const field = input.lookup.sources.find((row) => row.field === linkedField(entry.name) && row.path.length === 1)?.label ?? linkedField(entry.name);
+    issues.push({
+      id: `hand-empty:${entry.extend ?? entry.item ?? ''}:${entry.path}`,
+      severity: 'improve',
+      message: emptyWords(entry, { field: () => field, thing, rules: input.rules, node }),
+      detail: entry.status === 'absent' ? `“${entry.path}” points to ${node(`#${entry.name.split('#').pop()}`)}.` : `“${entry.path}” is linked to ${/^media\./.test(entry.name) ? 'an image' : field}.`,
+      jump: entry.extend ? extendJump(entry.extend, entry.path) : itemJump(entry.item, entry.path),
+    });
+  }
+  if (report?.over) {
+    issues.push({ id: 'hand-over', severity: 'fix', message: 'Your own JSON-LD was left out: the structured data would be over 256 KB.', detail: 'The other tags are still output. Link fewer long values, or add fewer items.', jump: custom });
+  }
+  if (report?.unencodable) {
+    issues.push({
+      id: 'schema-unencodable',
+      severity: 'fix',
+      message: "The structured data was left out: it can't be written out.",
+      detail: `The other tags are still output.${schema.custom || schema.extend ? ' Check your own JSON-LD and added details.' : ''}`,
+      jump: custom,
+    });
+  }
+  if (report?.main?.ignored) {
+    issues.push(
+      report.main.ignored === 'kind'
+        ? { id: 'hand-main-kind', severity: 'info', message: "Your own main thing isn't used", detail: 'Only a plain web page can have a hand-added main thing.', jump: custom }
+        : { id: 'hand-main-absent', severity: 'improve', message: "The main thing you marked isn't on this page", detail: 'Mark another item, or put it back.', jump: custom },
+    );
+  }
+  if (input.source && input.source.count > 0 && !schema.custom) {
+    issues.push({
+      id: 'hand-translation',
+      severity: 'info',
+      message: `The ${input.source.language} version has ${input.source.count} hand-added ${input.source.count === 1 ? 'item' : 'items'} this translation doesn't.`,
+      detail: 'Copy them in Add your own JSON-LD, then translate their text.',
+      jump: custom,
+    });
+  }
+  if (input.refused) {
+    issues.push({ id: 'hand-refused', severity: 'fix', message: 'An item of your own JSON-LD is left out: it has a problem', detail: input.refused, jump: custom });
+  }
+  if (input.unsaved) {
+    issues.push({ id: 'hand-unsaved', severity: 'fix', message: 'Not saved: your own JSON-LD has a problem', detail: 'Open it to fix the problem, or discard the change.', jump: custom });
+  }
+  return issues;
+}
 
 /** What the bar says once a hand-added item is left out. */
 export const leftOutText = (done: { id: string; given: boolean } | null) =>
@@ -1380,10 +1505,17 @@ export function verdictText(server: StatePayload, verdict: Verdict, emptyFor?: (
       if (feature?.list && verdict.count !== undefined) {
         const noun = server.registry[feature.list.of]?.label.toLowerCase() ?? 'item';
         const many = (count: number) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-        return `Needs at least ${many(feature.list.min)}: ${verdict.count} of the ${verdict.of ?? 0} linked pages ${verdict.count === 1 ? 'is a complete' : 'are complete'} ${verdict.count === 1 ? noun : `${noun}s`}`;
+        // Nothing linked yet: the need alone.
+        if (!verdict.of) return `Needs at least ${many(feature.list.min)}`;
+        return `Needs at least ${many(feature.list.min)}: ${verdict.count} of the ${verdict.of} linked pages ${verdict.count === 1 ? 'is a complete' : 'are complete'} ${verdict.count === 1 ? noun : `${noun}s`}`;
       }
       if (!first) {
         return 'Needs more';
+      }
+      // A value of another shape: "Needs item reviewed as an organization".
+      const shaped = shapeNeed(verdict, rules);
+      if (shaped) {
+        return shaped;
       }
       // A linked detail the previewed item has empty: said for the item.
       const empty = first.prop ? emptyFor?.(first.prop) : null;

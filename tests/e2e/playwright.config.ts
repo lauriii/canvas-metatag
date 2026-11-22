@@ -45,7 +45,7 @@ export default defineConfig({
     { name: 'host-contract', testMatch: 'host-contract.spec.ts', use },
     {
       name: 'coupled',
-      testMatch: ['page.spec.ts', 'template.spec.ts', 'site.spec.ts', 'access.spec.ts', 'schema.spec.ts'],
+      testMatch: ['page.spec.ts', 'template.spec.ts', 'site.spec.ts', 'access.spec.ts', 'schema.spec.ts', 'custom-form.spec.ts'],
       dependencies: ['host-contract'],
       use,
     },

@@ -1183,7 +1183,7 @@ button.seo-feature-line:hover {
 }
 .seo-outline-id {
   font-family: var(--code-font-family, ui-monospace, monospace);
-  font-size: 11px;
+  font-size: 12px;
 }
 .seo-out-actions {
   display: flex;
@@ -1197,34 +1197,7 @@ button.seo-feature-line:hover {
   order: 1;
 }
 
-/* ── Your own JSON-LD: what each item gives ── */
-.seo-hand {
-  margin-top: 16px;
-}
-.seo-hand h3 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 20px;
-}
-.seo-hand ul {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.seo-hand-item {
-  padding: 8px 0;
-  box-shadow: inset 0 1px 0 var(--seo-line-soft);
-}
-.seo-hand-name {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 18px;
-}
-.seo-hand-item > .seo-meta {
-  margin: 2px 0 0;
-}
+/* ── Your own JSON-LD: what Checks says of an item ── */
 .seo-hand-line {
   margin-top: 4px;
   font-size: 12px;
@@ -3497,19 +3470,6 @@ button.seo-row:focus-visible {
     flex-basis: 100%;
   }
 }
-.seo-json-wrap {
-  margin-top: 16px;
-}
-/* Mono, and the sheet's remaining height: header, intro and gutters aside. */
-.seo-json {
-  min-height: max(160px, calc(100vh - 124px));
-  font-family: var(--code-font-family);
-  font-size: 12px;
-  line-height: 18px;
-}
-.seo-json.seo-input {
-  field-sizing: content;
-}
 .seo-more-details > * + * {
   margin-top: var(--seo-field-gap);
 }
@@ -3861,4 +3821,875 @@ button.seo-row:focus-visible {
 .seo-special-add > .seo-input {
   flex: 1;
   min-width: 0;
+}
+
+/* ── Your own JSON-LD: one text, Form or JSON ── */
+.seo-tabs.seo-ctabs.rt-BaseTabList {
+  margin-left: auto;
+}
+.seo-ctabs .seo-tab.rt-BaseTabListTrigger[data-state="active"] {
+  background: var(--seo-hover);
+}
+.seo-ctabs .seo-dot {
+  margin-left: 4px;
+  vertical-align: 1px;
+}
+.seo-ctabs .seo-dot[data-tone="fix"] {
+  background: var(--seo-fix-dot);
+}
+.seo-cpanel {
+  outline: none;
+}
+.seo-cpanel[data-state="inactive"] {
+  display: none;
+}
+.seo-cpanel > * + *,
+.seo-citem > * + *,
+.seo-cextend > * + * {
+  margin-top: var(--seo-4);
+}
+.seo-cbar,
+.seo-notice {
+  margin-bottom: var(--seo-3);
+}
+.seo-cbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  padding: 8px 12px;
+  border-radius: var(--seo-radius-card);
+  background: var(--gray-a2);
+  box-shadow: inset 0 0 0 1px var(--gray-a3);
+  font-size: 13px;
+  line-height: 18px;
+}
+.seo-cbar[data-tone="error"] {
+  color: var(--seo-fix);
+}
+.seo-notice > p {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.seo-notice:has(> .seo-notice-actions) {
+  flex-wrap: wrap;
+}
+.seo-notice > .seo-notice-actions {
+  flex-basis: 100%;
+  margin-top: 0;
+}
+
+/* An item: head, verdicts, bands. */
+.seo-citem-head h3,
+.seo-creview h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+}
+.seo-citem-type,
+.seo-citem-about,
+.seo-clist-type {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.seo-clist-type {
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-citem-type code,
+.seo-clist-type code,
+.seo-cextend code {
+  font-family: var(--code-font-family);
+  font-size: 12px;
+  color: var(--seo-ink-2);
+}
+.seo-cverdicts {
+  padding: 10px 12px;
+  border-radius: var(--seo-radius-card);
+  background: var(--seo-stage-bg);
+  box-shadow: inset 0 0 0 1px var(--gray-a3);
+}
+.seo-cverdicts-title {
+  margin: 0 0 4px;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-cverdicts ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.seo-cverdicts li {
+  display: grid;
+  grid-template-columns: 16px auto 1fr;
+  align-items: start;
+  gap: 8px;
+  padding: 3px 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+.seo-cverdict-icon {
+  display: flex;
+  padding-top: 2px;
+  color: var(--seo-ink-2);
+}
+.seo-cverdicts li[data-verdict="ready"] .seo-cverdict-icon,
+.seo-cverdicts li[data-verdict="complete"] .seo-cverdict-icon {
+  color: var(--seo-ok);
+}
+.seo-cverdicts li[data-verdict="needs"] .seo-cverdict-icon,
+.seo-cverdicts li[data-verdict="needs"] .seo-cverdict-words {
+  color: var(--seo-improve);
+}
+.seo-cverdict-words {
+  justify-self: end;
+  max-width: 100%;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+.seo-cverdict-more {
+  grid-column: 2 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-cverdicts-json {
+  margin-top: 12px;
+}
+.seo-cverdicts-json > summary,
+.seo-cbar-more > summary {
+  list-style: none;
+}
+.seo-cverdicts-json > summary::-webkit-details-marker,
+.seo-cbar-more > summary::-webkit-details-marker {
+  display: none;
+}
+.seo-cverdicts-json:not([open]) > summary > svg,
+.seo-cbar-more:not([open]) > summary > svg {
+  transform: rotate(-90deg);
+}
+.seo-cbar-more {
+  flex-basis: 100%;
+}
+.seo-cbar-more > p {
+  margin: 4px 0 0;
+}
+.seo-cverdicts-json > * + * {
+  margin-top: 8px;
+}
+.seo-cheader-end {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.seo-cband-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.seo-cband-title::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--seo-line);
+}
+.seo-cband > * + * {
+  margin-top: 12px;
+}
+.seo-crow {
+  border-radius: var(--seo-radius-control);
+  transition: background-color 600ms var(--seo-ease);
+}
+.seo-crow[data-washed] {
+  background: var(--blue-a3);
+}
+/* A row's own problem: under its value, the value's box marked. */
+.seo-crow-problem {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--seo-improve);
+}
+.seo-crow-problem[data-tone="red"] {
+  color: var(--seo-fix);
+}
+.seo-crow-problem > .seo-link-btn {
+  margin-left: 4px;
+}
+.seo-crow[data-problem="amber"] > :is(.seo-input, .seo-cref) .seo-input,
+.seo-crow[data-problem="amber"] > .seo-input {
+  box-shadow: inset 0 0 0 1px var(--amber-a8);
+}
+.seo-crow[data-problem="red"] > :is(.seo-input, .seo-cref) .seo-input,
+.seo-crow[data-problem="red"] > .seo-input {
+  box-shadow: inset 0 0 0 1px var(--seo-broken-line);
+}
+/* A row's link and ⋯ show on hover or focus; always with a problem or a link. */
+@media (hover: hover) {
+  .seo-crow:not(:hover, :focus-within, [data-problem], :has(> .seo-crow-from[data-linked])) > .seo-crow-head > .seo-crow-tools > :not([aria-expanded="true"]) {
+    opacity: 0;
+  }
+}
+.seo-crow-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 24px;
+  margin-bottom: 4px;
+}
+.seo-crow-label {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--seo-ink);
+}
+.seo-crow > .seo-crow + .seo-crow,
+.seo-crow > .seo-crow {
+  margin-top: 6px;
+}
+.seo-crow-from {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0 8px;
+  padding: 6px 12px;
+  border-radius: var(--seo-radius-control);
+  background: var(--gray-a2);
+  font-size: 14px;
+  line-height: 20px;
+}
+.seo-crow-from > :first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.seo-crow-from > .seo-meta {
+  margin-left: auto;
+  white-space: nowrap;
+}
+.seo-crow-from-list {
+  display: flex;
+  flex-direction: column;
+}
+.seo-crow-date {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.seo-crow-date > .seo-input {
+  flex: 1 1 130px;
+  width: auto;
+}
+.seo-crow-date > p {
+  flex-basis: 100%;
+  margin: 0;
+}
+.seo-crow > .seo-meta {
+  margin: 4px 0 0;
+}
+.seo-either {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.seo-either {
+  margin-top: 16px;
+}
+.seo-either > legend {
+  padding: 0;
+  margin-bottom: 4px;
+}
+.seo-either[data-met] {
+  margin-top: 12px;
+}
+.seo-either-pair {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.seo-either[data-stack] .seo-either-pair,
+.seo-either[data-stack] .seo-either-one {
+  flex-direction: column;
+  align-items: stretch;
+}
+.seo-either-one {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  gap: 8px;
+  min-width: 0;
+}
+.seo-either-one > .seo-crow {
+  flex: 1;
+  min-width: 0;
+}
+.seo-either-one > .seo-meta {
+  padding-bottom: 6px;
+}
+.seo-either-hint {
+  margin: 0 0 8px;
+  color: var(--seo-improve);
+}
+.seo-either-hint[data-done] {
+  color: var(--seo-ink-2);
+}
+.seo-chelps {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.seo-cmain {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--seo-radius-card);
+  box-shadow: inset 0 0 0 1px var(--seo-line);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.seo-cref > * + * {
+  margin-top: 6px;
+}
+.seo-input.seo-cref-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+/* The name takes the room; the kind is a short hint that gives way. */
+.seo-cref-name {
+  flex: 1 1 auto;
+  min-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-cref-kind {
+  flex: 0 1 auto;
+  max-width: 40%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-cref-trigger > svg {
+  flex: none;
+  color: var(--seo-icon);
+}
+.seo-cnested {
+  margin-left: 4px;
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--seo-line);
+}
+.seo-cnested > * + * {
+  margin-top: 12px;
+}
+/* One disclosure style: a chevron and the group's name. */
+.seo-cdisclose {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  border-radius: 4px;
+}
+.seo-cdisclose:focus-visible {
+  box-shadow: var(--seo-ring);
+}
+.seo-cdisclose > svg {
+  transition: transform var(--seo-fast) var(--seo-ease);
+}
+.seo-cdisclose[aria-expanded="false"] > svg {
+  transform: rotate(-90deg);
+}
+.seo-crow-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.seo-crow-from[data-linked] {
+  background: var(--blue-a2);
+}
+.seo-crow-advice {
+  color: var(--seo-improve);
+}
+.seo-citem-headline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.seo-citem-headline > h3 {
+  flex: 1;
+  min-width: 0;
+}
+.seo-citem-headline .seo-clist-menu {
+  position: static;
+}
+.seo-citem-definition {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: var(--seo-radius-card);
+  background: var(--gray-a2);
+  font-size: 13px;
+  line-height: 18px;
+}
+.seo-citem-definition > p {
+  margin: 0;
+}
+.seo-citem-definition > p + p {
+  margin-top: 4px;
+}
+.seo-link-btn {
+  all: unset;
+  cursor: pointer;
+  color: var(--seo-primary);
+  font-size: 13px;
+  line-height: 20px;
+  border-radius: 4px;
+}
+.seo-link-btn:hover {
+  color: var(--seo-primary-hover);
+  text-decoration: underline;
+}
+
+/* The filter list: type search and Add a detail. */
+.seo-filter > .seo-crow-label {
+  display: block;
+  margin-bottom: 4px;
+}
+.seo-filter-list {
+  margin: 4px 0 0;
+  padding: 4px;
+  border-radius: var(--seo-radius-card);
+  box-shadow: inset 0 0 0 1px var(--seo-line);
+  list-style: none;
+}
+.seo-filter-list > li {
+  padding: 6px 8px;
+  border-radius: var(--seo-radius-control);
+  cursor: pointer;
+}
+.seo-filter-list > li[aria-selected="true"],
+.seo-filter-list > li:hover {
+  background: var(--seo-hover);
+}
+.seo-filter-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.seo-filter-hint {
+  font-size: 12px;
+  color: var(--seo-ink-2);
+}
+.seo-filter-hint[data-code] {
+  font-family: var(--code-font-family);
+}
+.seo-filter-tag {
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.seo-filter-detail {
+  display: block;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-filter + .seo-meta,
+.seo-filter > .seo-meta {
+  margin-top: 8px;
+}
+.seo-filter > .seo-filter-keys {
+  margin-top: 4px;
+}
+.seo-filter > .seo-filter-keys:empty {
+  display: none;
+}
+/* The item list. */
+.seo-clist > ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.seo-clist-row {
+  position: relative;
+  padding: 10px 32px 10px 0;
+  box-shadow: 0 1px 0 var(--seo-line-soft);
+}
+.seo-clist-sentence {
+  all: unset;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 20px;
+  overflow-wrap: anywhere;
+  border-radius: 4px;
+}
+.seo-clist-sentence:hover {
+  text-decoration: underline;
+}
+.seo-clist-row > .seo-meta {
+  margin: 2px 0 0;
+}
+.seo-clist-row > .seo-meta[data-verdict="needs"] {
+  color: var(--seo-improve);
+}
+.seo-clist-menu {
+  position: absolute;
+  top: 8px;
+  right: 0;
+}
+.seo-clist-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.seo-clist-foot > .seo-cpaste-open,
+.seo-clist-foot > .seo-meta {
+  flex-basis: 100%;
+  margin: 0;
+}
+.seo-cpaste-open > * + * {
+  margin-top: 4px;
+}
+.seo-cpaste-open > .seo-meta[data-tone="fix"] {
+  color: var(--seo-fix);
+}
+.seo-cpaste-actions {
+  display: flex;
+  gap: 8px;
+}
+.seo-csearch > .seo-notice,
+.seo-csearch > .seo-filter + .seo-notice {
+  margin-top: 12px;
+}
+.seo-chip[data-tone="fix"] {
+  background: var(--red-a3);
+  color: var(--seo-fix);
+}
+.seo-kind-else {
+  all: unset;
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--seo-radius-card);
+  box-shadow: inset 0 0 0 1px var(--seo-line);
+  cursor: pointer;
+}
+.seo-kind-else:hover {
+  background: var(--seo-hover-row);
+}
+.seo-kind-else:focus-visible {
+  box-shadow: var(--seo-ring);
+}
+/* The ghost's label lines up with the row's text. */
+.seo-outline-row > .seo-btn[data-variant="ghost"] {
+  margin-inline-start: -6px;
+}
+.seo-kind-else {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.seo-kind-else > .seo-kind-text {
+  flex: 1;
+  min-width: 0;
+}
+.seo-kind-else > .seo-kind-chevron {
+  flex: none;
+  color: var(--seo-ink-2);
+}
+
+/* The JSON tab. */
+.seo-jsonview-tools {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.seo-jsonview-tools > .seo-meta {
+  margin-right: auto;
+}
+.seo-jsonview-tools {
+  margin-bottom: 4px;
+}
+.seo-jsonbox {
+  display: flex;
+  min-height: 160px;
+  height: max(160px, calc(100vh - 300px));
+  border-radius: var(--seo-radius-control);
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--seo-control-border);
+  overflow: hidden;
+}
+.seo-jsonbox:focus-within {
+  box-shadow: var(--seo-ring);
+}
+.seo-jsonbox[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--seo-broken-line);
+}
+.seo-jsonbox-gutter {
+  flex: none;
+  min-width: 44px;
+  padding: 6px 6px 6px 4px;
+  overflow: hidden;
+  background: var(--gray-2);
+  color: var(--gray-11);
+  font-family: var(--code-font-family);
+  font-size: 12px;
+  line-height: 18px;
+  text-align: right;
+  user-select: none;
+}
+.seo-jsonbox-gutter > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 2px;
+}
+/* The mark's column is always there: lines never shift when one appears. */
+.seo-jsonbox-gutter > span::before {
+  content: "";
+  flex: none;
+  width: 10px;
+  text-align: left;
+}
+.seo-jsonbox-gutter > span[data-tone="red"] {
+  color: var(--seo-fix);
+  font-weight: 700;
+}
+.seo-jsonbox-gutter > span[data-tone="red"]::before {
+  content: "■";
+}
+.seo-jsonbox-gutter > span[data-tone="amber"] {
+  color: var(--seo-improve);
+}
+.seo-jsonbox-gutter > span[data-tone="amber"]::before {
+  content: "▲";
+}
+.seo-jsonbox-text {
+  all: unset;
+  box-sizing: border-box;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  color: var(--seo-ink);
+  font-family: var(--code-font-family);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre;
+  tab-size: 2;
+}
+.seo-jsonbox-text::placeholder {
+  color: var(--seo-ink-2);
+  white-space: pre-wrap;
+}
+.seo-caretline {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 8px;
+  margin-top: 6px;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--seo-ink-2);
+}
+.seo-caretline code {
+  font-family: var(--code-font-family);
+  color: var(--seo-ink);
+}
+.seo-caretline-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seo-caretline > .seo-btn {
+  flex: none;
+}
+.seo-problems {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.seo-problems > li {
+  display: grid;
+  grid-template-columns: 14px 1fr;
+  gap: 2px 6px;
+  padding: 4px 0;
+  font-size: 13px;
+  line-height: 18px;
+}
+.seo-problems > li[data-tone="red"] {
+  color: var(--seo-fix);
+}
+.seo-problems > li[data-tone="amber"] {
+  color: var(--seo-improve);
+}
+.seo-problem-text {
+  overflow-wrap: anywhere;
+}
+.seo-problem-actions {
+  grid-column: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.seo-problem-actions:empty {
+  display: none;
+}
+.seo-problems > li.seo-problems-more {
+  display: block;
+}
+.seo-crow-unused {
+  flex-basis: 100%;
+}
+.seo-cpaste-row {
+  margin-top: var(--seo-4);
+}
+.seo-cpaste-row > .seo-meta {
+  margin: 4px 0 0;
+}
+
+/* The paste review. */
+.seo-creview > ul {
+  margin: 8px 0;
+  padding: 0;
+  list-style: none;
+}
+.seo-creview-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+  font-size: 14px;
+  line-height: 20px;
+}
+.seo-creview-row .rt-CheckboxRoot {
+  margin-top: 2px;
+}
+.seo-creview-row .seo-meta {
+  display: block;
+}
+.seo-creview-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.seo-citem-short {
+  display: none;
+}
+.seo-site-added {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--seo-ink-2);
+}
+/* A short frame: the box keeps 160 px, the about line goes, a bar is one
+   line, and an item's verdict rides on its type line. */
+@media (max-height: 400px) {
+  .seo-jsonbox {
+    height: 160px;
+  }
+  .seo-citem-short {
+    display: inline;
+  }
+  .seo-citem-short[data-verdict="needs"] {
+    color: var(--seo-improve);
+  }
+  .seo-citem > .seo-cverdicts:not([data-fix]) {
+    display: none;
+  }
+  .seo-citem-about {
+    display: none;
+  }
+  .seo-cbar {
+    flex-wrap: nowrap;
+  }
+  .seo-cbar > span {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+/* A narrow frame (200 % zoom): the tabs take a second header row, before
+   the menu; the JSON box keeps its numbers and scrolls inside; either-or
+   pairs stack. */
+@container seo (max-width: 360px) {
+  .seo-sheet-header:has(.seo-ctabs) {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: var(--seo-header-h);
+    padding-bottom: 4px;
+  }
+  .seo-sheet-header:has(.seo-ctabs) h2 {
+    flex: 1;
+  }
+  .seo-sheet-header:has(.seo-ctabs) > .seo-sheet-end {
+    order: 3;
+    flex-basis: 100%;
+    margin-right: 0;
+  }
+  .seo-cheader-end {
+    width: 100%;
+  }
+  .seo-tabs.seo-ctabs.rt-BaseTabList {
+    margin-left: 0;
+    margin-right: auto;
+  }
+  .seo-cheader-end > .seo-tabs.seo-ctabs.rt-BaseTabList {
+    order: 0;
+    width: auto;
+  }
+  .seo-either-pair,
+  .seo-either-one {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+@media (forced-colors: active) {
+  .seo-jsonbox-gutter > span[data-tone] {
+    outline: 1px solid CanvasText;
+  }
+  .seo-crow[data-washed] {
+    outline: 2px solid Highlight;
+  }
 }

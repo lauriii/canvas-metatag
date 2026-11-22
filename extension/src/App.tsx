@@ -27,7 +27,9 @@ import { Header, Sheet } from './components/Header';
 import { type ImageRequest, ImageSheet, PICKED } from './components/MediaPicker';
 import { OutputSheet, originNote } from './components/Output';
 import { SearchSkeleton } from './components/Previews';
-import { CustomJson, GroupSheet, HoursSheet, KindSheet, SchemaTab } from './components/SchemaTab';
+import { GroupSheet, HoursSheet, KindSheet, SchemaTab } from './components/SchemaTab';
+import { CustomSheet, type CustomNode } from './custom/CustomSheet';
+import { draftKey, readDraft } from './custom/drafts';
 import { SearchTab } from './components/SearchTab';
 import { SiteView } from './components/SiteTab';
 import { SocialTab } from './components/SocialTab';
@@ -80,9 +82,16 @@ import type {
 /** A full-frame tool over the view. */
 export type SheetState =
   | { kind: 'checks' }
-  | { kind: 'output'; section?: 'schema' }
-  | { kind: 'custom' }
-  | { kind: 'kinds' }
+  /** `focus`: the name of the button to focus, coming back from a sheet it opened. */
+  | { kind: 'output'; section?: 'schema'; focus?: string }
+  /** Your own JSON-LD, or details added to one of the module's items. */
+  /**
+   * `start`: at "What is it?" (from the kinds sheet); `from`: the name of
+   * the Output button that opened it, where Back returns.
+   */
+  | { kind: 'custom'; node?: CustomNode; start?: 'search'; from?: string; at?: { item: number; path: string }; entry?: string }
+  /** `focus: 'else'`: back from the type search it opened, on "Something else on this page". */
+  | { kind: 'kinds'; focus?: 'else' }
   | { kind: 'image'; request: ImageRequest }
   /** A group of details: the venue, the pay. */
   | { kind: 'group'; type: string; group: string; focus?: string }
@@ -493,8 +502,8 @@ export default function App() {
       put: (values, token) => api.putDraft(ctx, values, langcode, token),
       quiet: host.quiet,
       getState: () => api.getState(ctx, langcode),
-      refuse: (fields) =>
-        current() && dispatch({ type: 'errors', scope: 'target', fields }),
+      refuse: (fields, places) =>
+        current() && dispatch({ type: 'errors', scope: 'target', fields, places }),
       confirmed(payload, sent) {
         if (!current() || !payload.target) {
           return;
@@ -588,6 +597,7 @@ export default function App() {
           type: 'errors',
           scope: 'site',
           fields: sitePaths(error.fields),
+          places: sitePaths(error.places),
         });
         status({ phase: 'idle' });
       } else {
@@ -882,8 +892,13 @@ export default function App() {
         'default-language',
       measurer,
       robotsSettled,
+      source: server.target.source ? { language: server.languages[server.target.source.langcode] ?? server.target.source.langcode, count: server.target.source.count } : null,
+      refused: server.target.refused?.message ?? null,
+      // Read again when a sheet closes: it may have left a draft.
+      unsaved: readDraft(draftKey(server.target.auto_save_key, server.langcode, 'schema.custom')) !== null,
     });
-  }, [measurer, robotsSettled, shownView, state.facts, state.server]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [measurer, robotsSettled, shownView, state.facts, state.server, sheet]);
 
   const app = useMemo<AppContext>(
     () => ({
@@ -908,7 +923,11 @@ export default function App() {
         }
         dispatch({ type: 'tab', tab: to.tab });
         if (to.field === 'schema.custom') {
-          setSheet({ kind: 'custom' });
+          setSheet({ kind: 'custom', at: to.at });
+          return;
+        }
+        if (to.field.startsWith('schema.extend.')) {
+          setSheet({ kind: 'custom', node: to.field.slice('schema.extend.'.length) as CustomNode, at: to.at });
           return;
         }
         // A part of a group shown as a box: its sheet, on that part. Back
@@ -962,7 +981,9 @@ export default function App() {
         // From a sheet, the way back is to what opened the first one: the
         // sheet and its button are gone once the next one is open.
         const active = document.activeElement as HTMLElement | null;
-        if (!active?.closest('.seo-sheet') || !opener.current?.isConnected) {
+        // Focus lost to the document is no opener.
+        const lost = !active || active === document.body;
+        if ((!lost && !active.closest('.seo-sheet')) || !opener.current?.isConnected) {
           opener.current = active;
         }
         setSheet(next);
@@ -1049,6 +1070,13 @@ export default function App() {
 
   const onKeyDown = (event: KeyboardEvent) => {
     const { scope, siteDirty } = now.current;
+    // Ctrl/Cmd+Z outside a text box: the bar's Undo.
+    const typing = event.target instanceof HTMLElement && (event.target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(event.target.tagName));
+    if (event.key.toLowerCase() === 'z' && (event.ctrlKey || event.metaKey) && !event.shiftKey && !typing && now.current.undo && !event.defaultPrevented) {
+      event.preventDefault();
+      dispatch({ type: 'undo' });
+      return;
+    }
     if (
       event.key === 'Enter' &&
       (event.ctrlKey || event.metaKey) &&
@@ -1209,7 +1237,8 @@ function Buttons(props: {
         const group = pressed.parentElement;
         const after = [...(group?.children ?? [])].indexOf(pressed);
         flushSync(() => props.act(action));
-        const back = action === 'undo' ? props.back?.() : null;
+        // After Undo or Try again: the control that made the change.
+        const back = action === 'undo' || action === 'retry' ? props.back?.() : null;
         if (back?.isConnected) {
           back.focus();
           return;
@@ -1265,19 +1294,9 @@ function Ready(props: {
 }) {
   const { state, dispatch, sheet, closeSheet } = useApp();
   const server = state.server!;
-  // An Undo stays in the bar for 6 s, longer while the bar has focus or
-  // the pointer: editing makes many small changes, and the bar would
-  // always cover the end of the view. It goes; nothing is undone.
-  const [dismissed, setDismissed] = useState<State['undo']>(null);
-  const [holding, setHolding] = useState(false);
-  useEffect(() => {
-    if (!state.undo || state.undo === dismissed || holding) {
-      return;
-    }
-    const timer = setTimeout(() => setDismissed(state.undo), 6000);
-    return () => clearTimeout(timer);
-  }, [state.undo, dismissed, holding]);
-  const shown = footer(state.undo && state.undo === dismissed ? { ...state, undo: null } : state);
+  // An Undo stays in the bar until the next change: no time limit, so
+  // that it can be reached with a keyboard or a screen reader.
+  const shown = footer(state);
   const bar = barOf(state, shown);
   const notes = useNotes();
   const frame = useRef<HTMLDivElement>(null);
@@ -1316,6 +1335,11 @@ function Ready(props: {
       '--seo-bar-h',
       `${element.offsetHeight}px`,
     );
+    // In a sheet: the control in use is never left under the bar.
+    const used = document.activeElement;
+    if (element && used instanceof HTMLElement && used.closest('.seo-sheet .seo-body') && used.getBoundingClientRect().bottom > element.getBoundingClientRect().top - 8) {
+      used.scrollIntoView({ block: 'nearest' });
+    }
     const pad = parseFloat(getComputedStyle(scroller).paddingBottom);
     // Before the first measure: the body's own end padding, 32.
     const grew = pad - (Number.isNaN(room.current) ? 32 : room.current);
@@ -1449,14 +1473,7 @@ function Ready(props: {
       {sheet && <SheetHost sheet={sheet} onClose={() => closeSheet()} />}
       {/* Over a sheet too: a fix made there is undone here. */}
       {bar && (
-          <div
-            className="seo-bar"
-            ref={barRef}
-            onFocus={() => setHolding(true)}
-            onBlur={(event) => setHolding(event.currentTarget.contains(event.relatedTarget))}
-            onPointerEnter={() => setHolding(true)}
-            onPointerLeave={(event) => setHolding(event.currentTarget.contains(document.activeElement))}
-          >
+          <div className="seo-bar" ref={barRef}>
             {shown.actions.includes('hide') ? (
               <ExclamationTriangleIcon aria-hidden />
             ) : (
@@ -1512,7 +1529,7 @@ function Updating({ busy }: { busy: boolean }) {
 
 function SheetHost(props: { sheet: SheetState; onClose(): void }) {
   const { sheet, onClose } = props;
-  const { state, dispatch, closeSheet } = useApp();
+  const { state, closeSheet } = useApp();
   const server = state.server!;
   if (sheet.kind === 'checks') {
     return (
@@ -1529,7 +1546,8 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
     return (
       <Sheet
         title="Output"
-        focusBack
+        // Back from a sheet it opened, the button that opened it has focus.
+        focusBack={!sheet.focus}
         end={
           <>
             {/* The view behind the sheet, with the save status, is inert. */}
@@ -1543,7 +1561,7 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
         }
         onClose={onClose}
       >
-        <OutputSheet section={sheet.section} />
+        <OutputSheet section={sheet.section} focus={sheet.focus} />
       </Sheet>
     );
   }
@@ -1556,42 +1574,12 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
   if (sheet.kind === 'kinds') {
     return (
       // The sheet is the kinds' own: its confirm is its foot.
-      <KindSheet onDone={() => closeSheet()} onClose={onClose} />
+      <KindSheet focus={sheet.focus} onDone={() => closeSheet()} onClose={onClose} />
     );
   }
   if (sheet.kind === 'custom') {
-    const set = !!state.edits.target.schema?.custom;
-    return (
-      <Sheet
-        title="Add your own JSON-LD"
-        // A read-only editor cannot take focus: Back does, so Esc works.
-        focusBack={state.readonly !== 'no'}
-        end={
-          set &&
-          state.readonly === 'no' && (
-            <Btn
-              variant="ghost"
-              onClick={() =>
-                dispatch({
-                  type: 'apply',
-                  scope: 'target',
-                  values: {
-                    ...state.edits.target,
-                    schema: { ...state.edits.target.schema, custom: undefined, skip: undefined },
-                  },
-                  undo: 'Removed custom JSON-LD',
-                })
-              }
-            >
-              Remove
-            </Btn>
-          )
-        }
-        onClose={onClose}
-      >
-        <CustomJson key={set ? 'set' : 'empty'} />
-      </Sheet>
-    );
+    // One sheet per text: another node is a new sheet, never this one with old state.
+    return <CustomSheet key={sheet.node ?? 'own'} node={sheet.node} start={sheet.start} from={sheet.from} at={sheet.at} entry={sheet.entry} onClose={onClose} />;
   }
   return (
     <Sheet title="Choose image" onClose={onClose}>

@@ -15,6 +15,48 @@ final class SchemaGraph {
   private const DATE = '/^(\d{4})-(\d{2})-(\d{2})(T(?:[01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?(Z|[+-]\d{2}:\d{2})?)?$/D';
 
   /**
+   * Every id the module emits, by name, with the address it is anchored on.
+   *
+   * `home` ids are the site's own items, reached from any page by their short
+   * id ("#identity"); `url` ids are the page's. A hand-added item never takes
+   * one (Values), and the module's component parts are "#c-…" on the page.
+   */
+  public const MODULE_IDS = [
+    'identity' => 'home',
+    'logo' => 'home',
+    'website' => 'home',
+    'return-policy' => 'home',
+    'webpage' => 'url',
+    'primaryimage' => 'url',
+    'primary' => 'url',
+    'group' => 'url',
+  ];
+
+  /**
+   * The prefix of the ids of the page's component parts.
+   */
+  public const COMPONENT_PREFIX = 'c-';
+
+  /**
+   * The node each added-details key adds to, by scope.
+   */
+  public const EXTEND = [
+    'page' => ['#primary', '#webpage'],
+    'template' => ['#primary', '#webpage'],
+    'site' => ['#identity'],
+  ];
+
+  /**
+   * The largest structured data the head carries, in bytes.
+   */
+  public const OUTPUT_MAX = 262144;
+
+  /**
+   * The longest text a whole-value field link fills, in characters.
+   */
+  public const FILL_MAX = 5000;
+
+  /**
    * What a billing period is emitted as: its UN/CEFACT unit code.
    */
   private const BILLING = ['P1M' => 'MON', 'P1Y' => 'ANN'];
@@ -959,46 +1001,145 @@ final class SchemaGraph {
       'page:image' => $page_image ? self::imageNode($ids['primaryimage'], $page_image) + self::node(['caption' => $page_image['alt'] ?? '']) : NULL,
       'main' => $primary,
     ];
+    // Every id the module emits, on its address: what a short id points at,
+    // and what a hand-added item can never replace.
+    $ours = [];
+    foreach (self::MODULE_IDS as $name => $anchor) {
+      $ours[($anchor === 'home' ? $ctx['home'] : $ctx['url']) . "#$name"] = TRUE;
+    }
+    $present = array_fill_keys(array_column(array_filter($graph), '@id'), TRUE);
+    // What hand-added JSON-LD and added details did; members are left out
+    // when nothing happened.
+    $report += [
+      'clashes' => [],
+      'unmatched' => [],
+      'added' => [],
+      'type_added' => [],
+      'empty' => [],
+      'cut' => [],
+      'main' => NULL,
+      'over' => FALSE,
+    ];
+    $prepare = self::preparer($ctx, $ours, $present, $value, $report);
+
+    // Added details: merged into the module's own nodes per leaf; a value the
+    // module emits is kept, and the clash reported (decision 2).
+    $own_graph = $graph;
+    $own_judged = $report['judged'];
+    $into = ['#primary' => 'main', '#webpage' => 'page', '#identity' => 'site'];
+    $extended = [];
+    foreach ($schema['extend'] ?? [] as $name => $text) {
+      $added = json_decode((string) $text, TRUE);
+      $origin = $into[$name] ?? NULL;
+      if ($origin === NULL || !is_array($added) || array_is_list($added)) {
+        continue;
+      }
+      if (!isset($graph[$origin])) {
+        $report['unmatched'][] = ['node' => $name, 'path' => ''];
+        continue;
+      }
+      $added = $prepare($added, FALSE, ['extend' => $name, 'path' => []]);
+      $added = is_array($added) ? $added : [];
+      self::merge($graph[$origin], $added, $name, [], $origin === 'main' ? $type_id : NULL, $report);
+      if ($origin === 'main' && is_array($report['judged'])) {
+        // The verdicts read the main node with its incomplete groups: the
+        // details join it there too, reported once.
+        $throwaway = $report;
+        self::merge($report['judged'], $added, $name, [], $type_id, $throwaway);
+      }
+      $extended[$origin] = TRUE;
+    }
+
     // A withheld node is listed first, and takes no place in @graph.
     foreach (array_keys(array_filter($graph)) as $at => $origin) {
       $report['nodes'][] = [
         'id' => $graph[$origin]['@id'],
-        'type' => $graph[$origin]['@type'],
+        'type' => is_array($graph[$origin]['@type']) ? $graph[$origin]['@type'][0] : $graph[$origin]['@type'],
         'origin' => strtok($origin, ':'),
         'at' => $at,
-      ];
+      ] + (isset($extended[$origin]) ? ['extended' => TRUE] : []);
     }
     $graph = array_values(array_filter($graph));
+    $own_graph = array_values(array_filter($own_graph));
 
-    // Custom nodes can point at our nodes and can never replace or extend
-    // them. ponytail: decoded as arrays, so an empty object or one with only
-    // numeric keys is emitted as a list; the stored text keeps them apart.
+    // Hand-added items can point at our nodes and never replace them. Values
+    // refuses the module's ids and shared ones; what was stored before that
+    // rule is renamed when read. ponytail: decoded as arrays, so an empty
+    // object or one with only numeric keys is emitted as a list; the stored
+    // text keeps them apart.
     $custom = json_decode($schema['custom'] ?? '', TRUE);
     $skip = array_fill_keys($schema['skip'] ?? [], TRUE);
-    $present = array_fill_keys(array_column($graph, '@id'), TRUE);
-    $ours = $taken = array_fill_keys($ids, TRUE);
+    $taken = $ours;
+    $hand = [];
     foreach (is_array($custom) ? (array_is_list($custom) ? $custom : [$custom]) : [] as $item => $node) {
-      if (!is_array($node) || !is_string($node['@type'] ?? NULL)) {
+      if (!is_array($node) || !isset($node['@type'])) {
         continue;
       }
       $written = is_string($node['@id'] ?? NULL) ? $node['@id'] : NULL;
-      $node = self::custom($node, TRUE, $ctx['url'], $ours, $present, $ctx['facts'] ?? []);
-      $entry = ['id' => $node['@id'] ?? NULL, 'type' => $node['@type'], 'origin' => 'hand', 'item' => $item];
+      unset($node['@context']);
+      $before = count($node);
+      $node = $prepare($node, TRUE, ['item' => $item, 'path' => []]);
+      $types = (array) ($node['@type'] ?? []);
+      $entry = ['id' => $node['@id'] ?? NULL, 'type' => (string) ($types[0] ?? ''), 'origin' => 'hand', 'item' => $item];
+      // An item emptied by its links is left out: only its type and id left.
       $left_out = match (TRUE) {
         $written !== NULL && isset($skip[$written]) => 'skip',
         isset($node['@id'], $ours[$node['@id']]) => 'reserved',
         isset($node['@id'], $taken[$node['@id']]) => 'duplicate',
+        count($node) < $before && !array_diff_key($node, ['@type' => TRUE, '@id' => TRUE]) => 'empty',
         default => NULL,
       };
       if ($left_out !== NULL) {
-        $report['nodes'][] = $entry + ['left_out' => $left_out];
+        $hand[] = $entry + ['left_out' => $left_out];
         continue;
       }
       if (isset($node['@id'])) {
         $taken[$node['@id']] = TRUE;
       }
-      $report['nodes'][] = $entry + ['at' => count($graph)];
+      $hand[] = $entry + ['at' => count($graph)];
       $graph[] = $node;
+    }
+
+    // A hand-added item as what a plain web page is mainly about.
+    $main = $schema['main'] ?? NULL;
+    if (is_string($main)) {
+      $id = str_starts_with($main, '#') ? $ctx['url'] . $main : $main;
+      $at = array_column($hand, 'at', 'id')[$id] ?? NULL;
+      $page_at = array_search($ids['webpage'], array_column($graph, '@id'), TRUE);
+      $report['main'] = [
+        'id' => $id,
+        'ignored' => match (TRUE) {
+        $type_id !== 'WebPage' || isset($graph[$page_at]['mainEntity']) => 'kind',
+        $at === NULL => 'absent',
+        default => NULL,
+        },
+      ];
+      if ($report['main']['ignored'] === NULL) {
+        $graph[$page_at]['mainEntity'] = ['@id' => $id];
+        $graph[$at]['mainEntityOfPage'] = $ref('webpage');
+      }
+    }
+
+    // Bounded output: over 256 KB, what was added by hand is left out and
+    // the module's own nodes stay.
+    if (($hand || $report['added']) && strlen((string) json_encode($graph, (Values::OUTPUT_FLAGS & ~JSON_THROW_ON_ERROR) | JSON_PARTIAL_OUTPUT_ON_ERROR)) > self::OUTPUT_MAX) {
+      $graph = $own_graph;
+      $report['judged'] = $own_judged;
+      $report['over'] = TRUE;
+      $report['main'] = NULL;
+      // What the details and items did is not output either.
+      $report['added'] = $report['clashes'] = $report['type_added'] = $report['unmatched'] = $report['empty'] = $report['cut'] = [];
+      $report['nodes'] = array_map(static fn (array $entry): array => array_diff_key($entry, ['extended' => TRUE]), $report['nodes']);
+      $hand = array_map(static fn (array $entry): array => isset($entry['at']) ? array_diff_key($entry, ['at' => TRUE]) + ['left_out' => 'over'] : $entry, $hand);
+    }
+    array_push($report['nodes'], ...$hand);
+    foreach (['empty', 'cut'] as $list) {
+      $report[$list] = array_map(static fn (array $one): array => ['path' => implode('.', $one['path'])] + $one, $report[$list]);
+    }
+    foreach (['clashes', 'unmatched', 'added', 'type_added', 'empty', 'cut', 'main', 'over'] as $member) {
+      if (!$report[$member]) {
+        unset($report[$member]);
+      }
     }
 
     return ['graph' => ['@context' => 'https://schema.org', '@graph' => $graph]] + $report;
@@ -1228,8 +1369,8 @@ final class SchemaGraph {
       foreach (self::objects($top) as [$object]) {
         $about = $object['itemReviewed']['@id'] ?? NULL;
         $as = match (TRUE) {
-          $object['@type'] === 'Review' => 'review',
-          $object['@type'] === 'AggregateRating' => 'aggregateRating',
+          in_array('Review', (array) $object['@type'], TRUE) => 'review',
+          in_array('AggregateRating', (array) $object['@type'], TRUE) => 'aggregateRating',
           default => NULL,
         };
         if ($as !== NULL && is_string($about) && isset($index[$about])) {
@@ -1243,7 +1384,11 @@ final class SchemaGraph {
     ]);
     $main = [$ctx['url'] . '#primary' => TRUE, $ctx['url'] . '#webpage' => TRUE];
     $verdicts = [];
-    foreach ($nodes as $top) {
+    // The places in @graph of the hand-added items: what only they are judged
+    // by (a review snippet, an image credit) is never asked of the module's
+    // own nodes.
+    $hand = array_flip($ctx['hand'] ?? []);
+    foreach ($nodes as $at => $top) {
       foreach (self::objects($top) as [$object, $nested]) {
         $id = is_string($object['@id'] ?? NULL) ? $object['@id'] : NULL;
         // A reference to another page's main thing is judged on that page.
@@ -1253,8 +1398,15 @@ final class SchemaGraph {
         foreach ($id === NULL ? [] : $reviewed[$id] ?? [] as $as => $found) {
           $object[$as] ??= $found;
         }
+        // A type added to the main thing does not change what it is.
+        $types = $id === $ctx['url'] . '#primary' ? [((array) $object['@type'])[0]] : (array) $object['@type'];
         foreach ($rules['features'] as $name => $feature) {
-          if (!in_array($object['@type'], $feature['on'], TRUE)) {
+          $only = match ($feature['only'] ?? NULL) {
+            'hand' => !$nested && isset($hand[$at]),
+            'page' => $id === $ctx['url'] . '#webpage',
+            default => TRUE,
+          };
+          if (!$only || !array_intersect($types, $feature['on'])) {
             continue;
           }
           $verdict = ['feature' => $name, 'node' => $id ?? ($top['@id'] ?? NULL)];
@@ -1277,7 +1429,7 @@ final class SchemaGraph {
           // A list feature is judged on the list; the things it lists are
           // shown only from there.
           if (isset($feature['list'])) {
-            if ($object['@type'] !== 'ItemList') {
+            if (!in_array('ItemList', $types, TRUE)) {
               $verdicts[] = $verdict + ['verdict' => 'elsewhere'];
               continue;
             }
@@ -1319,6 +1471,8 @@ final class SchemaGraph {
               // own: compared as the site's date.
               isset($not['past']) => ($ctx['today'] ?? '') === '' || !is_string($closes = self::at($object, $not['past'], $index)[0] ?? NULL) || substr($closes, 0, 10) >= $ctx['today'],
               $seller !== NULL => ($seller[0]['@id'] ?? NULL) === $ours['identity'],
+              // A review or rating of the site's own organization.
+              isset($not['ours']) => (self::at($object, $not['ours'], $index)[0]['@id'] ?? NULL) !== $ours['identity'],
               default => TRUE,
             };
             if (!$fits) {
@@ -1350,6 +1504,13 @@ final class SchemaGraph {
           foreach ([...$feature['required'], ...$feature['complete'] ?? []] as $entry) {
             if (!$has($entry)) {
               $missing[] = $fact(self::asked($entry, $ctx, static fn (string $path): bool => self::at($object, explode('|', $path)[0], $index) !== []));
+              continue;
+            }
+            // A value of another shape counts as missing, and says what it
+            // must be: an organization, not only its name.
+            $misfit = self::misfit($entry, $object, $index, $feature['expects'] ?? []);
+            if ($misfit !== NULL) {
+              $missing[] = $fact($misfit[0]) + ['expects' => $misfit[1]];
             }
           }
           // A group left out for a part it misses is not there: what the
@@ -1488,10 +1649,13 @@ final class SchemaGraph {
       return !$other($node) && array_intersect(array_filter($urls), $ours) !== [];
     };
     $found = [];
+    // Hand-added items, and the module's nodes details were added to (item
+    // -1).
     foreach ($nodes as $entry) {
-      if ($entry['origin'] !== 'hand' || !isset($entry['at'])) {
+      if (!isset($entry['at']) || ($entry['origin'] !== 'hand' && empty($entry['extended']))) {
         continue;
       }
+      $entry['item'] ??= -1;
       $node = $list[$entry['at']];
       $hit = static fn (string $rule, ?string $value = NULL): array => [
         'rule' => $rule,
@@ -1499,13 +1663,13 @@ final class SchemaGraph {
         'node' => $entry['id'],
       ] + ($value === NULL ? [] : ['value' => $value]);
       $name = is_string($node['name'] ?? NULL) ? mb_strtolower(trim($node['name'])) : NULL;
-      if ((array_intersect((array) $node['@type'], self::WHO) && $name !== NULL && $name === mb_strtolower(trim((string) ($identity['name'] ?? ''))))
-        || (!$other($node) && $same($node['url'] ?? NULL) !== '' && $same($node['url'] ?? NULL) === $same($identity['url'] ?? NULL))) {
+      if ($entry['origin'] === 'hand' && ((array_intersect((array) $node['@type'], self::WHO) && $name !== NULL && $name === mb_strtolower(trim((string) ($identity['name'] ?? ''))))
+        || (!$other($node) && $same($node['url'] ?? NULL) !== '' && $same($node['url'] ?? NULL) === $same($identity['url'] ?? NULL)))) {
         $found[] = $hit('second_identity');
       }
       foreach (self::objects($node) as [$object]) {
         $subject = match (TRUE) {
-          in_array($object['@type'], ['Review', 'AggregateRating'], TRUE) => self::follow($object['itemReviewed'] ?? NULL, $index),
+          array_intersect((array) $object['@type'], ['Review', 'AggregateRating']) !== [] => self::follow($object['itemReviewed'] ?? NULL, $index),
           isset($object['review']) || (isset($object['aggregateRating']) && !in_array('EmployerAggregateRating', (array) ($object['aggregateRating']['@type'] ?? []), TRUE)) => $object,
           default => NULL,
         };
@@ -1634,46 +1798,297 @@ final class SchemaGraph {
   }
 
   /**
-   * Prepares a custom node, or a value inside one.
+   * Prepares hand-added JSON-LD, or added details, for one page.
    *
-   * @param mixed $value
-   *   The decoded value.
-   * @param bool $top
-   *   Whether this is a top-level node.
-   * @param string $url
-   *   The entity's own public URL, the base of "#local" ids.
+   * Strings are filled: the fixed names anywhere in a text; a whole-value
+   * field link ("{field.field_score}") or media item ("{media.‹uuid›}") as
+   * the whole value, else kept as written. A short id of the site's own
+   * items ("#identity") points at it from any page; another "#name" is on
+   * the page's address. A nested object with one of the module's ids is a
+   * bare reference, or left out when that node is not in the graph. A value
+   * a fill empties is left out, and so is an object it leaves with nothing
+   * but its type, id and rating bounds, and an emptied list; each is
+   * reported (`empty`: {item|extend, path, name, status}).
+   *
+   * @param array $ctx
+   *   See build(): home, url, facts and `fill`, callable(string $name,
+   *   string $expects): array{0: string, 1: mixed}, which reads a field link
+   *   of the item being output as the shape the name expects (status ok,
+   *   empty, hidden or broken). Text that starts with a refused scheme is
+   *   broken.
    * @param array<string, true> $ours
-   *   The ids of our own nodes.
+   *   Every id the module emits.
    * @param array<string, true> $present
-   *   The ids of our nodes that are in this graph.
-   * @param array<string, string> $facts
-   *   The fixed names and their values (Values::fillFacts()).
+   *   The ids of the module's nodes in this graph.
+   * @param callable $value
+   *   See build(): reads a media item as an image.
+   * @param array $report
+   *   The report: `empty` and `cut` are added to.
    *
-   * @return mixed
-   *   The value to emit; NULL for a reference to a node of ours that is not
-   *   in this graph, which the caller leaves out.
+   * @return \Closure(mixed, bool, array, ?string=): mixed
+   *   Takes a value, whether it is a top-level item, where it is ({item} or
+   *   {extend} and `path`) and its key; gives the value to emit, or NULL.
    */
-  private static function custom(mixed $value, bool $top, string $url, array $ours, array $present, array $facts): mixed {
-    if (is_string($value)) {
-      return Values::fillFacts($value, $facts);
-    }
-    if (!is_array($value)) {
-      return $value;
-    }
-    if (isset($value['@id']) && is_string($value['@id']) && str_starts_with($value['@id'], '#')) {
-      $value['@id'] = $url . $value['@id'];
-    }
-    if (!$top && isset($value['@id'], $ours[$value['@id']])) {
-      return isset($present[$value['@id']]) ? ['@id' => $value['@id']] : NULL;
-    }
-    $result = [];
-    foreach ($value as $key => $item) {
-      $item = str_starts_with((string) $key, '@') ? $item : self::custom($item, FALSE, $url, $ours, $present, $facts);
-      if ($item !== NULL) {
-        $result[$key] = $item;
+  private static function preparer(array $ctx, array $ours, array $present, callable $value, array &$report): \Closure {
+    $facts = $ctx['facts'] ?? [];
+    $fill = $ctx['fill'] ?? NULL;
+    $bounds = ['@type' => TRUE, '@id' => TRUE, 'bestRating' => TRUE, 'worstRating' => TRUE];
+    $prepare = static function (mixed $v, bool $top, array $where, ?string $key = NULL) use (&$prepare, &$report, $ctx, $ours, $present, $value, $facts, $fill, $bounds): mixed {
+      if (is_string($v)) {
+        if (preg_match('/^\{media\.([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\}$/D', $v, $m)) {
+          $image = $value(['media' => $m[1]], 'image');
+          if (is_array($image) && isset($image['url'])) {
+            return $image['url'];
+          }
+          $report['empty'][] = $where + ['name' => "media.$m[1]", 'status' => 'gone'];
+          return NULL;
+        }
+        if (preg_match('/^\{field\.([a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)?)\}$/D', $v, $m)) {
+          [$status, $filled] = $fill === NULL ? ['broken', NULL] : $fill($m[1], self::expects($key ?? ''));
+          // Filled text passes the rule typed text passes when it is saved.
+          if ($status === 'ok' && is_string($filled) && Values::scheme($filled) !== NULL) {
+            $status = 'broken';
+          }
+          if ($status === 'ok' && $filled !== NULL && $filled !== '') {
+            if (is_string($filled) && mb_strlen($filled) > self::FILL_MAX) {
+              $report['cut'][] = $where;
+              $filled = self::cutAtWord($filled, self::FILL_MAX);
+            }
+            return $filled;
+          }
+          $report['empty'][] = $where + ['name' => "field.$m[1]", 'status' => $status === 'ok' ? 'empty' : $status];
+          return NULL;
+        }
+        return Values::fillFacts($v, $facts);
+      }
+      if (!is_array($v)) {
+        return $v;
+      }
+      if (is_string($v['@id'] ?? NULL) && str_starts_with($v['@id'], '#')) {
+        $v['@id'] = ((self::MODULE_IDS[substr($v['@id'], 1)] ?? NULL) === 'home' ? $ctx['home'] : $ctx['url']) . $v['@id'];
+      }
+      if (!$top && isset($v['@id'], $ours[$v['@id']])) {
+        if (isset($present[$v['@id']])) {
+          return ['@id' => $v['@id']];
+        }
+        $report['empty'][] = $where + ['name' => $v['@id'], 'status' => 'absent'];
+        return NULL;
+      }
+      $list = array_is_list($v);
+      $result = [];
+      foreach ($v as $k => $item) {
+        if (!$list && str_starts_with((string) $k, '@')) {
+          $result[$k] = $item;
+          continue;
+        }
+        $child = $prepare($item, FALSE, ['path' => [...$where['path'], $k]] + $where, $list ? $key : (string) $k);
+        if ($child !== NULL) {
+          $result[$k] = $child;
+        }
+      }
+      if ($list) {
+        return $result === [] && $v !== [] ? NULL : array_values($result);
+      }
+      // An object a fill emptied: a rating with only its bounds left.
+      if (!$top && count($result) < count($v) && !array_diff_key($result, $bounds)) {
+        return NULL;
+      }
+      return $result;
+    };
+    return $prepare;
+  }
+
+  /**
+   * Merges added details into one of the module's nodes, per leaf.
+   *
+   * Objects merge at any depth. A value the module emits is kept and the
+   * clash reported; a list it emits takes only "‹list›[*]" (every item) and
+   * "‹list›[name=‹name›]" (the item with that name). @type only grows.
+   *
+   * @param array $node
+   *   The module's node.
+   * @param array $added
+   *   The prepared details.
+   * @param string $name
+   *   The node's short id: "#primary", "#webpage" or "#identity".
+   * @param list<string> $path
+   *   Where in the node.
+   * @param string|null $type
+   *   The registry type, for the main node: a clash names its detail.
+   * @param array $report
+   *   The report: `added`, `clashes`, `unmatched` and `type_added` grow
+   *   (a type added inside the node names its path: "#primary offers").
+   */
+  public static function merge(array &$node, array $added, string $name, array $path, ?string $type, array &$report): void {
+    $object = static fn (mixed $v): bool => is_array($v) && !array_is_list($v) && !(count($v) === 1 && isset($v['@id']));
+    foreach ($added as $key => $value) {
+      $key = (string) $key;
+      $at = [...$path, $key];
+      if ($key === '@type') {
+        // An object of the module's may have no type of its own.
+        $had = (array) ($node['@type'] ?? []);
+        $types = array_values(array_unique([...$had, ...(array) $value]));
+        if (count($types) > count($had)) {
+          $node['@type'] = count($types) === 1 ? $types[0] : $types;
+          $report['type_added'][] = $path ? $name . ' ' . implode('.', $path) : $name;
+        }
+        continue;
+      }
+      if (str_starts_with($key, '@')) {
+        continue;
+      }
+      if (preg_match('/^(.+)\[(\*|name=(.+))\]$/sD', $key, $m)) {
+        $list = $node[$m[1]] ?? NULL;
+        $single = $object($list);
+        $items = $single ? [$list] : (is_array($list) && array_is_list($list) ? $list : []);
+        $hit = FALSE;
+        foreach ($items as $i => $item) {
+          if ($object($item) && $object($value) && ($m[2] === '*' || ($item['name'] ?? NULL) === $m[3])) {
+            self::merge($items[$i], $value, $name, $at, NULL, $report);
+            $hit = TRUE;
+          }
+        }
+        if ($hit) {
+          $node[$m[1]] = $single ? $items[0] : $items;
+        }
+        else {
+          $report['unmatched'][] = ['node' => $name, 'path' => implode('.', $at)];
+        }
+        continue;
+      }
+      if (!array_key_exists($key, $node)) {
+        $node[$key] = $value;
+        $report['added'][] = ['node' => $name, 'path' => implode('.', $at)];
+        continue;
+      }
+      if ($object($node[$key]) && $object($value)) {
+        self::merge($node[$key], $value, $name, $at, $type, $report);
+        continue;
+      }
+      if ($node[$key] !== $value) {
+        $dotted = implode('.', $at);
+        $prop = $type === NULL ? NULL : self::propOf($dotted, $type);
+        $report['clashes'][] = ['node' => $name, 'path' => $dotted] + ($prop === NULL ? [] : ['prop' => $prop]);
       }
     }
-    return array_is_list($value) ? array_values($result) : $result;
+  }
+
+  /**
+   * What the rules file says a name's value must look like, or ''.
+   */
+  public static function expects(string $name): string {
+    $spec = self::searchFeatures()['expects'][$name] ?? '';
+    return is_array($spec) ? (string) ($spec['is'] ?? '') : (string) $spec;
+  }
+
+  /**
+   * The path of an entry whose values are all of another shape, and that shape.
+   *
+   * @param string|array $entry
+   *   A required entry: a path, "a|b", or a list of either.
+   * @param array $object
+   *   The object judged.
+   * @param array $index
+   *   The graph's nodes by @id.
+   * @param array $expects
+   *   The feature's own `expects`, by path or name; the file's by name.
+   *
+   * @return array{0: string, 1: string|array}|null
+   *   NULL when a value fits, or nothing is expected of it.
+   */
+  private static function misfit(string|array $entry, array $object, array $index, array $expects): ?array {
+    $first = NULL;
+    foreach ((array) $entry as $one) {
+      foreach (explode('|', $one) as $path) {
+        $values = self::at($object, $path, $index);
+        if ($values === []) {
+          continue;
+        }
+        $name = substr($path, (int) strrpos(".$path", '.'));
+        $spec = $expects[$path] ?? $expects[$name] ?? self::searchFeatures()['expects'][$name] ?? '';
+        if ($spec === '' || array_filter($values, static fn (mixed $value): bool => self::fits($value, $spec, $index))) {
+          return NULL;
+        }
+        $first ??= [$path, $spec];
+      }
+    }
+    return $first;
+  }
+
+  /**
+   * Whether a value has the shape a spec of the rules file names.
+   *
+   * @param mixed $value
+   *   The value, references followed.
+   * @param string|array $spec
+   *   "text", "number|text", "date|datetime", "url|item:ImageObject",
+   *   "enum:InStock|OutOfStock", "item:Person|Organization", or {is,
+   *   needs}: the names an item must carry.
+   * @param array $index
+   *   The graph's nodes by @id.
+   */
+  public static function fits(mixed $value, string|array $spec, array $index = []): bool {
+    $is = is_array($spec) ? (string) ($spec['is'] ?? '') : $spec;
+    $value = self::follow($value, $index);
+    // "item:Person|Organization": a kind, then the names it lists.
+    $kinds = [];
+    foreach (explode('|', $is) as $token) {
+      if (str_contains($token, ':')) {
+        [$kind, $name] = explode(':', $token, 2);
+        $kinds[] = [$kind, [$name]];
+      }
+      elseif ($kinds !== [] && ctype_upper($token[0] ?? '') && in_array(end($kinds)[0], ['item', 'enum'], TRUE)) {
+        $kinds[array_key_last($kinds)][1][] = $token;
+      }
+      elseif ($token !== '') {
+        $kinds[] = [$token, []];
+      }
+    }
+    foreach ($kinds as [$kind, $names]) {
+      $fits = match ($kind) {
+        'text' => is_string($value),
+        'number' => is_int($value) || is_float($value) || (is_string($value) && is_numeric($value)),
+        'url' => is_string($value) && Values::isHttpUrl($value),
+        'date', 'datetime' => is_string($value) && preg_match(self::DATE, $value, $m) && ($kind === 'date' || ($m[4] ?? '') !== '' || str_contains($is, 'date|')),
+        'duration' => is_string($value) && preg_match('/^P(?=\d|T\d)/', $value),
+        'bool' => is_bool($value),
+        'enum' => is_string($value) && in_array(preg_replace('~^https?://schema\.org/~', '', $value), $names, TRUE),
+        'item' => is_array($value) && !array_is_list($value) && self::isA((array) ($value['@type'] ?? []), $names)
+          && !array_filter((array) (is_array($spec) ? $spec['needs'] ?? [] : []), static fn (string $need): bool => self::at($value, $need, $index) === []),
+        default => TRUE,
+      };
+      if ($fits) {
+        return TRUE;
+      }
+    }
+    return $kinds === [];
+  }
+
+  /**
+   * Whether one of some types is one of others, or a kind of one.
+   *
+   * By the rules file's `subtypes`; "Thing" is any type.
+   */
+  public static function isA(array $types, array $of): bool {
+    $subtypes = self::searchFeatures()['subtypes'] ?? [];
+    foreach ($of as $one) {
+      if (in_array('*', $subtypes[$one] ?? [], TRUE) || array_intersect($types, [$one, ...$subtypes[$one] ?? []])) {
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * A text cut at a word boundary to at most $max characters.
+   */
+  public static function cutAtWord(string $text, int $max): string {
+    $cut = mb_substr($text, 0, $max + 1);
+    if (mb_strlen($cut) <= $max) {
+      return $cut;
+    }
+    $space = mb_strrpos(mb_substr($cut, 0, $max + 1), ' ');
+    return rtrim(mb_substr($cut, 0, $space === FALSE || $space === 0 ? $max : $space));
   }
 
   /**
@@ -1743,7 +2158,7 @@ final class SchemaGraph {
    *   The object, and whether it is nested.
    */
   private static function objects(array $node, bool $nested = FALSE): \Generator {
-    if (is_string($node['@type'] ?? NULL)) {
+    if (is_string($node['@type'] ?? NULL) || (is_array($node['@type'] ?? NULL) && $node['@type'] !== [])) {
       yield [$node, $nested];
     }
     foreach ($node as $key => $value) {

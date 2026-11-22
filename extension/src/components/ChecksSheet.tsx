@@ -25,6 +25,7 @@ const FIELDS: [RegExp, string][] = [
   [/^identity\./, 'site identity'],
   [/^schema\.type$/, 'kind of page'],
   [/^schema\.custom$/, 'JSON-LD added by hand'],
+  [/^schema\.extend\./, 'added details'],
 ];
 
 export const CHECKS_NOTE =
@@ -75,6 +76,10 @@ export function ChecksSheet() {
 
   const where = (jump: Jump) => {
     const key = jump.field.match(/^schema\.props\.(.+)$/)?.[1];
+    // A value inside hand-added JSON-LD: named by its path.
+    if (jump.at) {
+      return `${jump.at.path} in ${jump.field === 'schema.custom' ? 'your own JSON-LD' : 'the added details'}`;
+    }
     return (
       type.props
         ?.find((prop) => prop.key === key)

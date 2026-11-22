@@ -204,7 +204,8 @@ and the value's actual shape; the shape wins, so nothing is coerced. They are
   expects and by presence in the current graph; commands: "Describe it
   here", "Just a name"). A module item renders as a read-only linked box with
   "Add details to ‹name›";
-- an image: the image chooser writes `"{media.‹uuid›}"`, filled at render to
+- an image: `"{media.‹uuid›}"` written in JSON (there is no image chooser in
+  the sheet, proposal "Narrowed in review" 6), filled at render to
   the file's public address; at template scope a link to an image field;
 - at template scope any value can be linked: the whole value becomes
   `"{field.‹name›}"` or one reference hop `"{field.‹name›.‹name›}"`, filled
@@ -339,6 +340,44 @@ remove `extend` and `main` before downgrading; the previous cleaners refuse
 unknown keys on the next write, and re-sort custom JSON-LD when it is next
 saved.
 
+## Adapted during implementation
+
+- Paste reads script blocks with a regular expression on the pasted text,
+  not `DOMParser` (decision 8): a script element's content is raw text up to
+  its first `</script>`, nothing is parsed as markup, and the clean-up stays
+  testable without a DOM.
+- Drafts with a problem live in `extension/src/custom/drafts.ts` (memory for
+  the dialog's life, mirrored to storage), not in the model (decision 10):
+  only the sheet reads them.
+- `Values::clean()` gives the error paths through an optional by-reference
+  argument, so its two-element result stays as every caller reads it.
+- A stored value with a number that cannot be written out is refused by read
+  mode before output (decision 13): the head keeps every tag and only that
+  item goes. `Resolver::script()` still guards the encoding of the whole
+  graph.
+- The rules file marks the new entries `only: hand` (judged only on top-level
+  hand-added items) or `only: page` (Q&A, on the page node), adds `labels`
+  for types whose name in words is not a label, and `subtypes` for type
+  checks without the vocabulary.
+- The pinned vocabulary release is 30.1.
+
 ## Canvas internals relied on
 
 None new. Field links go through `Sources` (`link-values-to-fields`).
+
+## Review round 2: accepted edge
+
+A stored text that read mode partly refuses (an item stored before a rule,
+such as `1e400` from a config import) reaches the dialog as the read-mode
+text without that item, with "Show it" while `target.refused` names it. The
+next write of any value stores the working copy, so the refused item is gone
+for good, and "Show it" with it. Accepted: such values could not be stored
+through the dialog or the API, the item could never be output, and "Show it"
+offers it before any write. Carrying the stored text unchanged until the
+editor edits `schema.custom` would add a second source of truth to the draft
+for values the module never wrote.
+
+The fail-closed branch of the head (`schema.unencodable`) is reachable only
+through a value no fill gives: a number field filled as text keeps its
+digits as a string, and one filled as a number is finite. It stays as a
+guard, tested at `Resolver::script()`.

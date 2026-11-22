@@ -952,6 +952,15 @@ describe('rules that need the page preview', () => {
     // Two of them are told apart: a review by its author, else by its name.
     const two = hand([{ '@type': 'Review', author: { '@type': 'Person', name: 'Ann' } }, { '@type': 'Review', name: 'Pricing' }], [{ rule: 'own_reviews', item: 0, node: null }, { rule: 'own_reviews', item: 1, node: null }]);
     expect(two.filter((issue) => issue.id.startsWith('hand-reviews:')).map((issue) => issue.detail?.split(':')[0])).toEqual(['The review by Ann', 'Pricing']);
+    // Reviews added as details to the identity and the page: two rows, each
+    // opening its own Add details sheet.
+    const added = hand([], [{ rule: 'own_reviews', item: -1, node: 'https://www.example.com/#identity' }, { rule: 'own_reviews', item: -1, node: `${PAGE}#webpage` }]).filter((issue) => issue.id.startsWith('hand-reviews:'));
+    expect(added.map((issue) => issue.id)).toEqual(['hand-reviews:-1:#identity', 'hand-reviews:-1:#webpage']);
+    expect(added.map((issue) => issue.detail?.split(':')[0])).toEqual(["Your site's organization", 'This page']);
+    expect(added.map((issue) => issue.jump)).toEqual([
+      { scope: 'site', field: 'schema.extend.#identity', tab: 'schema' },
+      { scope: 'target', field: 'schema.extend.#webpage', tab: 'schema' },
+    ]);
     // A second identity points at the identity by its full address.
     const copy = hand([{ '@type': 'Organization', name: 'Pricing' }], [{ rule: 'second_identity', item: 0, node: null }]);
     expect(copy.find((issue) => issue.id === 'hand-identity:0')?.detail).toBe('This is your site\'s organization. Point to it with “@id”: “https://www.example.com/#identity” instead.');
@@ -972,6 +981,54 @@ describe('rules that need the page preview', () => {
       expect(odd.find((issue) => issue.id.startsWith('hand-rating'))?.message).toBe(`Couldn't find the rating ${value} on this page`);
     }
     expect(ids(hand([{ '@type': 'AggregateRating', name: 'Pricing', ratingValue: '(4.5' }], [], 'Pricing Rated (4,5) by many.')).filter((id) => id.startsWith('hand-rating'))).toEqual([]);
+  });
+
+  it('words what became of hand-added JSON-LD and added details', () => {
+    const report = (schema: Partial<Resolved['schema']>, target: SeoValues = {}, extra: Partial<ChecksInput> = {}) =>
+      checks(input({ target, resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, ...schema } }, input: extra }));
+    // A price clash: the page's own value is used.
+    const clash = report({ type: 'Product', clashes: [{ node: '#primary', path: 'offers.price', prop: 'offers_price' }] }, { schema: { type: 'Product', extend: { '#primary': '{"offers": {"price": 79}}' } } });
+    expect(clash.find((issue) => issue.id.startsWith('extend-clash:'))).toMatchObject({ severity: 'improve', message: "“offers.price” comes from the Price field, so the added value isn't used", jump: { field: 'schema.extend.#primary' } });
+    expect(report({ clashes: [{ node: '#identity', path: 'name' }] }).find((issue) => issue.id.startsWith('extend-clash:'))).toMatchObject({ message: "“name” comes from the site settings, so the added value isn't used", jump: { scope: 'site' } });
+    // A byline inside text: listed to improve, the sheet's amber.
+    const inside = report({}, { schema: { custom: '{"@type": "Book", "name": "By {field.field_byline}"}' } });
+    expect(inside.find((issue) => issue.id.startsWith('hand-inside:'))).toMatchObject({ severity: 'improve', message: 'This name is only filled when it is the whole value.' });
+    expect(ids(report({}, { schema: { custom: '{"@type": "Book", "name": "{field.field_byline}"}' } })).filter((id) => id.startsWith('hand-inside'))).toEqual([]);
+    // A review without a score.
+    const empty = checks(input({
+      target: { schema: { custom: '{"@type": "Review", "reviewRating": {"@type": "Rating", "ratingValue": "{field.field_score}"}}' } },
+      sources: [field('field_score', 'Score', { kinds: ['number'], status: 'empty', value: '' })],
+      resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, empty: [{ path: 'reviewRating.ratingValue', item: 0, name: 'field_score', status: 'empty' }] } },
+      input: { scope: 'template', typeLabel: 'Book review' },
+    }));
+    expect(empty.find((issue) => issue.id.startsWith('hand-empty:'))).toMatchObject({ severity: 'improve', message: 'No Score for this book review, so its rating is left out.', jump: { field: 'schema.custom', at: { item: 0, path: 'reviewRating.ratingValue' } } });
+    // The server names a field link with its prefix, and a node by its address.
+    const named = checks(input({
+      target: { schema: { custom: '{"@type": "Review", "reviewRating": {"@type": "Rating", "ratingValue": "{field.field_score}"}, "itemReviewed": {"@id": "#primary"}}' } },
+      sources: [field('field_score', 'Score', { kinds: ['number'], status: 'empty', value: '' })],
+      resolved: {
+        head: { title: '', meta: [], link: [], script: [] },
+        image: null,
+        schema: { ...EMPTY_SCHEMA, empty: [{ path: 'reviewRating.ratingValue', item: 0, name: 'field.field_score', status: 'empty' }, { path: 'itemReviewed', item: 0, name: 'https://site.example/node/92#primary', status: 'absent' }] },
+      },
+      input: { scope: 'template', typeLabel: 'Product' },
+    })).filter((issue) => issue.id.startsWith('hand-empty:'));
+    expect(named.map((issue) => issue.message)).toEqual(['No Score for this product, so its rating is left out.', "The product isn't output here, so its item reviewed is left out."]);
+    // Too much: to fix, with the other tags still output.
+    expect(report({ over: true }).find((issue) => issue.id === 'hand-over')).toMatchObject({ severity: 'fix', message: 'Your own JSON-LD was left out: the structured data would be over 256 KB.', detail: expect.stringContaining('The other tags are still output.') });
+    expect(report({ unencodable: true }, { schema: { custom: '{"@type": "Thing"}' } }).find((issue) => issue.id === 'schema-unencodable')).toMatchObject({ severity: 'fix', detail: 'The other tags are still output. Check your own JSON-LD and added details.' });
+    // A main thing not used.
+    expect(report({ main: { id: `${PAGE}#x`, ignored: 'kind' } }).find((issue) => issue.id === 'hand-main-kind')?.severity).toBe('info');
+    expect(report({ main: { id: `${PAGE}#x`, ignored: 'absent' } }).find((issue) => issue.id === 'hand-main-absent')?.severity).toBe('improve');
+    // French without the rating: good to know.
+    const french = report({}, {}, { source: { language: 'English', count: 2 } });
+    expect(french.find((issue) => issue.id === 'hand-translation')).toMatchObject({ severity: 'info', message: "The English version has 2 hand-added items this translation doesn't.", jump: { scope: 'target', field: 'schema.custom', tab: 'schema' } });
+    expect(ids(report({}, { schema: { custom: '{"@type": "Thing"}' } }, { source: { language: 'English', count: 2 } }))).not.toContain('hand-translation');
+    // Stored before a rule, and left unsaved in the sheet.
+    expect(report({}, {}, { refused: 'ratingValue: this number is too large to use.' }).find((issue) => issue.id === 'hand-refused')).toMatchObject({ severity: 'fix', detail: 'ratingValue: this number is too large to use.' });
+    expect(report({}, {}, { unsaved: true }).find((issue) => issue.id === 'hand-unsaved')).toMatchObject({ severity: 'fix', message: 'Not saved: your own JSON-LD has a problem' });
+    // A clash opens the added details on its value.
+    expect(clash.find((issue) => issue.id.startsWith('extend-clash:'))?.jump?.at).toEqual({ item: 0, path: 'offers.price' });
   });
 
   it('names what a site setting needs, by its own feature, for those who may set it', () => {
@@ -1121,11 +1178,15 @@ describe('rules that need the page preview', () => {
     expect(verdictText(server('CollectionPage'), { feature: 'course-list', node, verdict: 'needs', count: 2, of: 5, missing: [{ path: 'itemListElement' }] })).toBe(
       'Needs at least 3 courses: 2 of the 5 linked pages are complete courses',
     );
+    // A plain list with nothing linked: the need alone.
+    expect(verdictText(server('ItemList'), { feature: 'course-list', node, verdict: 'needs', count: 0, of: 0, missing: [{ path: 'itemListElement' }] })).toBe('Needs at least 3 courses');
     // Both are said in gray: nothing the editor can add here.
     expect(QUIET).toEqual(expect.arrayContaining(['closed', 'elsewhere']));
     // A detail is asked for by its label on this type: a job's Description.
     expect(verdictText(server('JobPosting'), { feature: 'job-posting', node, verdict: 'needs', missing: [{ path: 'description', prop: 'description' }] })).toBe('Needs a description');
     expect(verdictText(server('Event'), { feature: 'event', node, verdict: 'needs', missing: [{ path: 'location.address.addressCountry', prop: 'location_address_addressCountry' }] })).toBe('Needs a country');
+    // An either-or need is said as one.
+    expect(verdictText(server('WebPage'), { feature: 'employer-rating', node, verdict: 'needs', missing: [{ path: 'ratingCount' }] })).toBe('Needs a rating count or review count');
     // A country stored as a name: one from the list.
     const legacy = { ...server('Event'), resolved: { schema: { ...EMPTY_SCHEMA, type: 'Event', dropped: [{ key: 'location_address_addressCountry', value: 'Finland', kind: 'enum' }] } } } as unknown as StatePayload;
     expect(verdictText(legacy, { feature: 'event', node, verdict: 'needs', missing: [{ path: 'location.address.addressCountry', prop: 'location_address_addressCountry' }] })).toBe('Needs a country from the list');

@@ -96,7 +96,8 @@ Allowed keys per scope (`Values::KEYS`):
 | `canonical` | yes | no | no |
 | `social{title,description,image}` | yes | yes | no |
 | `robots{...}` | yes | yes | yes |
-| `schema{type,props,custom}` | yes | yes | no |
+| `schema{type,props,custom,skip,main}` | yes | yes | no |
+| `schema.extend` | `#primary`, `#webpage` | `#primary`, `#webpage` | `#identity` |
 
 A page's description is Canvas's own `description` field. The dialog edits it
 by dispatching into the editor's Page data form (section 9), so it is saved,
@@ -149,9 +150,12 @@ not change when nothing changed.
 - `schema.type` is a key of `data/schema-types.json` (read mode keeps a type
   the registry no longer has, so the dialog can say so; output is a web
   page); `schema.props` are that type's property keys; `schema.custom` is
-  custom JSON-LD text, re-encoded on write (section 7); `schema.skip` lists
+  custom JSON-LD text, stored as written (section 7); `schema.skip` lists
   the `@id`s, as written, of hand-added items left out until they are on
-  the page (cleaned against the custom JSON-LD on every read and write).
+  the page (cleaned against the custom JSON-LD on every read and write);
+  `schema.extend` holds details added to the module's own nodes, as written,
+  by short id; `schema.main` is the `@id` of the hand-added item a plain web
+  page is mainly about.
 - `canvas_metatag.site:currency` is an ISO 4217 code (`data/currencies.json`)
   or empty: the currency of every price that names none.
 
@@ -513,16 +517,47 @@ Property keys with underscores are paths (`location_address_streetAddress` is
 `https://schema.org/<Value>`; a date-time without an offset gets the site
 timezone's offset; ImageObjects leave out unmeasured (0) dimensions.
 
-Custom JSON-LD (`schema.custom`) is validated on write: at most 32 KB, 1 to 10
-nodes each with `@type`, depth at most 8, only `@type` and `@id` may start with
-`@`, an `@id` is http(s) or `#name`, and no string may start with a
-`javascript:`, `vbscript:`, `data:` or `file:` scheme. It is stored re-encoded
-with sorted keys, never as typed. On output, `#name` ids are put on `{url}`,
-`{name}` fact names in strings are filled (`Values::fillFacts()`; fields are
-not, and other brace text is kept), a top-level node whose
-`@id` is one of ours is dropped, and a nested reference to one of ours becomes
-a bare `{"@id": ...}`, or is removed when that node is not in the graph.
-Custom nodes can point at ours; they can never replace or extend them.
+Custom JSON-LD (`schema.custom`) and added details (`schema.extend`, by
+`#primary`, `#webpage` or, at Site scope, `#identity`) are checked by
+`Values::checkCustom()` on every read and write, and the dialog's
+`extension/src/custom/validate.ts` runs the same fixtures
+(`tests/fixtures/custom/`): valid JSON, at most 64 KB as written and 32 KB for
+all of a page's texts together counted minified, 1 to 10 objects each with an
+`@type` of one to four types, depth at most 8, no `null`, no number that
+cannot be written out, only `@type`, `@id` and (top level) a schema.org
+`@context` starting with `@`, an `@id` that is http(s) or `#name`, no string
+starting with `javascript:` or `vbscript:`, or with `data:` or `file:` followed
+by more text, and a re-encode probe with the output's flags. A refusal keeps
+its sentence in `errors` and adds `error_paths` ({item, path}). A hand-added
+item never takes an id of `SchemaGraph::MODULE_IDS` (`identity`, `logo`,
+`website`, `return-policy` on `{home}`; `webpage`, `primaryimage`, `primary`,
+`group` and the prefix `c-` on `{url}`), and two never share one; values
+stored before that rule are renamed `‹id›-2` when read
+(`Values::renameReserved()`) and by
+`canvas_metatag_post_update_own_jsonld_as_written`, which also writes stored
+text out with two spaces in its own key order. The text is stored as written,
+never re-encoded.
+
+On output (`SchemaGraph::preparer()`), `#name` ids are put on `{url}` except
+the short ids of the site's own items, which point at `{home}`; fixed names
+(`{title}` …) are filled anywhere in a text (`Values::fillFacts()`); a whole
+value `{field.‹name›}` or `{field.‹name›.‹name›}` is filled through `Sources`
+for the item being output (`Resolver::fill()`: dates in the site's zone with
+their offset, a number only where the name expects one, an absolute address
+only where the name expects one, text cut at 5,000 characters at a word; filled
+text that starts with a refused scheme is broken, as typed text would be
+refused), and `{media.‹uuid›}` with the file's public address; a
+fill that gives nothing leaves out the value, an object left with only its
+type, id and rating bounds, an emptied list, and an item left with only its
+type and id, each reported in `empty`. A nested reference to one of ours
+becomes a bare `{"@id": ...}`, or is removed and reported when that node is
+not in the graph. Added details merge into our nodes per leaf
+(`SchemaGraph::merge()`): objects at any depth, list selectors `offers[*]` and
+`offers[name=X]`, `@type` only added to; a value we emit wins and is reported
+in `clashes` with its path. `schema.main` makes one hand-added item the plain
+web page's `mainEntity`. A graph over 256 KB keeps only our own nodes
+(`over`); a graph that cannot be encoded leaves the head without its script
+and keeps every other tag (`Resolver::script()`, `unencodable`).
 
 ## 8. The emitted head
 
@@ -1034,6 +1069,10 @@ each row names the test that fails when it changes.
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
 | `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
+| `ExtendMergeTest`, `ModuleIdsTest`, `CustomFillTest`, `VocabularyTest`, `VocabularyRouteTest` | added details merged per leaf with clashes and selectors, the hand-added main thing; the module id list and short ids; whole-value fills and what an empty one leaves out; the trimmed schema.org vocabulary, its command, route and status line; `ValuesTest::testSharedFixtures` and `SearchFeaturesTest::testSharedFixtures` run `tests/fixtures/custom/` and `tests/fixtures/features/` | PHPUnit (unit, kernel) |
+| `extension/src/custom/*.test.ts`, `features.test.ts` (vitest) | the same red set as the server, one text edited by Form without moving other bytes (a property test), paste clean-up, problems with their line, path and fix, the same verdicts as the server; the sheet's pure parts: Back's names and tab memory, type search and its steering, rows (numbers while typed, zone offsets, positions), the reference menu and moving an item to its own, the item list, the caret line, the vocabulary | `npm run verify` |
+| `tests/e2e/custom-form.spec.ts` | an employer rating built with the keyboard only, Form ⇄ JSON with no byte change, the sheet's levels and Back to Output, Undo of a removal, a paste in Form; axe at 600 and 350 px tall and in a narrow frame | Playwright (`coupled`) |
+| `scripts/vocabulary-lint.php` (CI `vocabulary-lint`) | every type and name in the registry, the rules file (its `expects` too) and the graph fixtures is schema.org's, on the pinned release | CI |
 | `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks (verdict rows, parity with the page, hand-added items, what a node left out), the read-back, kinds, API client, host adapter parsing; `coverage.test.ts` (every offered detail has a control), `controls.test.ts` (controls by shape, durations, the hours grammar, pickers, group lines) | `npm run verify` |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
 | Playwright `coupled` (`page`, `template`, `site`, `access`, `schema`) |
