@@ -346,7 +346,7 @@ export function Guide(props: {
       ) : props.tone === 'improve' ? (
         <ExclamationTriangleIcon aria-hidden />
       ) : null}
-      <span className="seo-guide-text">{props.children}</span>
+      <span className="seo-guide-text" id={props.id ? `${props.id}-text` : undefined}>{props.children}</span>
       {props.count !== undefined && (
         <span className="seo-guide-count">{props.count}</span>
       )}
@@ -419,6 +419,12 @@ export function Field(
     /** Right after the label: the link button of a value that can be linked. */
     link?: ReactNode;
     meter?: Meter;
+    /** A composition with a field: its length is this item's ("event"); others vary. */
+    varies?: string;
+    /** Said on focus when nothing else is: "Type { to add a field". */
+    hint?: string;
+    /** The count is not of the refused value (a composer's): none beside an error. */
+    quietCount?: boolean;
     /** What a linked value gives, shown on focus when no preview shows it. */
     resolved?: string;
     /** The field has no preview of its own (Schema, Site). */
@@ -461,7 +467,7 @@ export function Field(
   let guide: ReactNode = null;
   if (field.message) {
     guide = (
-      <Guide id={guideId} tone="error" role="alert" count={count}>
+      <Guide id={guideId} tone="error" role="alert" count={props.quietCount ? undefined : count}>
         {field.message}
       </Guide>
     );
@@ -491,7 +497,7 @@ export function Field(
   } else if (field.focused && long) {
     guide = (
       <Guide id={guideId} count={count}>
-        May be cut off after “…{meter.after}”
+        May be cut off after “…{meter.after}”{props.varies && ` for this ${props.varies}; others vary`}
       </Guide>
     );
   } else if (
@@ -526,8 +532,11 @@ export function Field(
       ) : (
         <Guide id={guideId} count={count}>
           {meter.state === 'fits' && 'Fits in results'}
+          {props.varies && `${meter.state === 'fits' ? ' ' : ''}for this ${props.varies}; others vary`}
         </Guide>
       );
+  } else if (field.focused && props.hint) {
+    guide = <Guide id={guideId}>{props.hint}</Guide>;
   }
 
   // Kept while the line closes, so it folds away instead of vanishing.

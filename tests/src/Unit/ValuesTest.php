@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\canvas_metatag\Unit;
 
+use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
 use Drupal\Tests\UnitTestCase;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -40,7 +41,9 @@ final class ValuesTest extends UnitTestCase {
    * Write mode's check of a source: the two offered ones, each of its kind.
    */
   private static function accepts(): \Closure {
-    return static fn (array $source, string $kind): bool => ($source === self::SUMMARY && $kind === 'text') || ($source === self::HERO && $kind === 'image');
+    $text = ['text', 'words', 'line'];
+    return static fn (array $source, string $kind): bool => ($source === self::SUMMARY && in_array($kind, $text, TRUE))
+      || ($source === self::HERO && $kind === 'image');
   }
 
   /**
@@ -143,7 +146,12 @@ final class ValuesTest extends UnitTestCase {
     ];
     yield 'an unknown fact' => ['page', ['title_end' => ['fact' => 'nope']], 'title_end', $list];
     yield 'an image in text' => ['template', ['title' => ['fact' => 'image']], 'title', $list];
-    yield 'a date in text' => ['template', ['description' => ['fact' => 'published']], 'description', $list];
+    yield 'a date in a text that does not compose' => [
+      'template',
+      ['title_end' => ['fact' => 'published']],
+      'title_end',
+      $list,
+    ];
     yield 'a page links its main part' => ['page', ['title' => ['fact' => 'title']], 'title', $here];
     yield 'a page links its social image to its Image fact, its default' => [
       'page',
@@ -980,12 +988,13 @@ final class ValuesTest extends UnitTestCase {
    */
   #[DataProvider('providerTextCases')]
   public function testTexts(array $target, array $site, array $facts, array $links, string $separator, array $expect): void {
-    $text = static fn (array $value): string => match (array_key_first($value)) {
+    $read = static fn (array $value): string => match (array_key_first($value)) {
       'text' => $value['text'],
       'fact' => $facts[$value['fact']] ?? '',
       'source' => $links[$value['source']['expression']] ?? '',
       default => '',
     };
+    $text = static fn (array $value, string $form): string|array => isset($value['parts']) ? Values::compose($value['parts'], $read) : $read($value);
     $texts = Values::texts(Values::cascade($target, $site), $text, $separator, $site['title_end'] ?? NULL);
     foreach ($expect as $key => $expected) {
       self::assertSame($expected, $texts[$key], $key);
@@ -1007,6 +1016,206 @@ final class ValuesTest extends UnitTestCase {
         $case['expect'],
       ];
     }
+  }
+
+  /**
+   * The shared fixture's compositions: which words go with which field.
+   */
+  #[DataProvider('providerCompositions')]
+  public function testCompose(array $parts, array $values, array $long, int $room, string $expect): void {
+    $key = static fn (array $part): string => $part['fact'] ?? $part['source']['expression'];
+    $read = static fn (array $part): string => $values[$key($part)] ?? '';
+    $is_long = static fn (array $part): bool => in_array($key($part), $long, TRUE);
+    self::assertSame($expect, Values::plain(implode('', Values::compose($parts, $read, $is_long, $room)), PHP_INT_MAX));
+  }
+
+  /**
+   * Data provider for testCompose().
+   */
+  public static function providerCompositions(): \Generator {
+    foreach (self::fixture()['compositions'] as $row) {
+      yield $row['name'] => [$row['parts'], $row['values'], $row['long'] ?? [], $row['room'] ?? 0, $row['expect']];
+    }
+  }
+
+  /**
+   * The shared fixture's canonical forms of a composition.
+   */
+  #[DataProvider('providerCanon')]
+  public function testCanon(array $parts, ?array $expect): void {
+    self::assertSame($expect, Values::fold($parts));
+    // A write stores the same.
+    $accepts = static fn (): bool => TRUE;
+    [$clean] = Values::clean(['description' => ['parts' => $parts]], 'template', $accepts);
+    self::assertSame($expect, $clean['description'] ?? NULL);
+  }
+
+  /**
+   * Data provider for testCanon().
+   */
+  public static function providerCanon(): \Generator {
+    foreach (self::fixture()['canon'] as $row) {
+      yield $row['name'] => [$row['parts'], $row['expect']];
+    }
+  }
+
+  /**
+   * The shared fixture's places that compose.
+   */
+  public function testComposes(): void {
+    foreach (self::fixture()['composes'] as $row) {
+      $prop = str_starts_with($row['path'], 'schema.props.') ? SchemaGraph::prop($row['type'], substr($row['path'], 13)) : NULL;
+      self::assertSame($row['expect'], Values::composes($prop, $row['path'], $row['scope']), "{$row['type']} {$row['path']} {$row['scope']}");
+    }
+    self::assertTrue(Values::titleLike('schema.props.location_address_streetAddress'));
+    self::assertFalse(Values::titleLike('social.description'));
+    self::assertFalse(Values::titleLike('schema.props.description'));
+  }
+
+  /**
+   * A composition is checked part by part, in a place that composes.
+   */
+  #[DataProvider('providerParts')]
+  public function testParts(string $scope, array $input, array $errors, ?array $expected = NULL): void {
+    [$clean, $refused] = Values::clean($input, $scope, self::accepts());
+    self::assertSame($errors, $refused);
+    if ($expected !== NULL) {
+      self::assertSame($expected, $clean);
+    }
+  }
+
+  /**
+   * Data provider for testParts().
+   */
+  public static function providerParts(): \Generator {
+    $parts = static fn (array ...$parts): array => ['parts' => $parts];
+    $title = ['fact' => 'title'];
+    $summary = ['source' => self::SUMMARY];
+    $other = ['source' => ['expression' => 'ℹ︎␜entity:node:article␝field_other␞␟value', 'sourceType' => 'entity-field']];
+    $here = 'This setting is not available here.';
+    $invalid = 'This value is not valid.';
+    $fact = 'Choose a value from the list.';
+    $field = 'Choose a field from the list.';
+    $composed = $parts($title, ['text' => ' – '], $summary);
+    yield 'a composed title' => ['template', ['title' => $composed], [], ['title' => $composed]];
+    yield 'typed text is stripped of controls, never trimmed between fields' => [
+      'template',
+      ['description' => $parts(['text' => " \u{202E}Tickets:\u{0007} "], $title, ['text' => '  '], $summary, ['text' => ' '])],
+      [],
+      ['description' => $parts(['text' => 'Tickets: '], $title, ['text' => '  '], $summary)],
+    ];
+    $x = ['text' => ' x'];
+    yield 'a page' => ['page', ['title' => $parts($title, $x)], ['title' => $here]];
+    yield 'the title ending' => ['template', ['title_end' => $parts(['fact' => 'site'], $x)], ['title_end' => $here]];
+    yield 'the site' => ['site', ['title_end' => $parts(['fact' => 'site'], $x)], ['title_end' => $here]];
+    yield 'nine fields' => [
+      'template',
+      ['description' => $parts(...array_fill(0, 9, $title))],
+      ['description' => 'Use at most 8 fields in one value.'],
+    ];
+    yield 'eight fields' => ['template', ['description' => $parts(...array_fill(0, 8, $title))], []];
+    $image = $parts($title, ['fact' => 'image']);
+    yield 'an image in a composition' => ['template', ['title' => $image], ['title' => $fact]];
+    $address = $parts($title, ['fact' => 'url']);
+    yield 'a page address in a composition' => ['template', ['description' => $address], ['description' => $fact]];
+    $offered = $parts($title, ['text' => ' '], $other);
+    yield 'a field the menu does not offer' => ['template', ['title' => $offered], ['title' => $field]];
+    yield 'long text in a title' => [
+      'template',
+      ['title' => $parts($title, ['text' => ' – '], ['fact' => 'description'])],
+      ['title' => $field],
+    ];
+    yield 'long text in a description' => [
+      'template',
+      ['description' => $parts(['fact' => 'description'], ['text' => ' Free delivery.'])],
+      [],
+    ];
+    yield 'a media item as a part' => [
+      'template',
+      ['description' => $parts($title, ['media' => '6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44'])],
+      ['description' => $invalid],
+    ];
+    $nested = $parts($title, $parts($title));
+    yield 'a nested composition' => ['template', ['description' => $nested], ['description' => $invalid]];
+    yield 'a part with two keys' => [
+      'template',
+      ['description' => $parts(['text' => 'a', 'fact' => 'title'])],
+      ['description' => $invalid],
+    ];
+    yield 'no parts' => ['template', ['description' => ['parts' => []]], ['description' => $invalid]];
+    $event = static fn (string $key, array $value): array => [
+      'schema' => ['type' => 'Event', 'props' => [$key => $value]],
+    ];
+    yield 'a date detail' => ['template', $event('startDate', $parts($title, $x)), ['schema.props.startDate' => $here]];
+    yield 'a postal code' => [
+      'template',
+      $event('location_address_postalCode', $parts($title, $x)),
+      ['schema.props.location_address_postalCode' => $here],
+    ];
+    $name = $parts($title, ['text' => ' · '], ['fact' => 'published']);
+    yield 'a composed name' => ['template', $event('name', $name), []];
+    yield 'typed text counts against the length' => [
+      'template',
+      ['title' => $parts($title, ['text' => str_repeat('a', 256)])],
+      ['title' => 'Use at most 255 characters.'],
+    ];
+    yield 'one field and a space is that link' => [
+      'template',
+      ['description' => $parts($summary, ['text' => ' '])],
+      [],
+      ['description' => $summary],
+    ];
+    yield 'text alone is typed text' => [
+      'template',
+      ['title' => $parts(['text' => 'Plans '], ['text' => '{site}'])],
+      [],
+      ['title' => ['text' => 'Plans {site}']],
+    ];
+    // A detail only a field may give takes no typed text, also as parts.
+    yield 'typed text where only a field gives the value' => [
+      'template',
+      ['schema' => ['type' => 'JobPosting', 'props' => ['description' => $parts(['text' => 'Typed'])]]],
+      ['schema.props.description' => $here],
+    ];
+  }
+
+  /**
+   * Every value shape stored before compositions comes back byte for byte.
+   */
+  public function testShapesUnchanged(): void {
+    $values = [
+      'description' => ['source' => self::SUMMARY],
+      'robots' => ['noindex' => TRUE],
+      'schema' => [
+        'props' => [
+          'eventStatus' => ['text' => 'EventScheduled'],
+          'image' => ['media' => '6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44'],
+          'name' => ['fact' => 'title'],
+        ],
+        'type' => 'Event',
+      ],
+      'social' => ['image' => ['source' => self::HERO], 'title' => ['text' => ' Spaces kept ']],
+      'title' => ['text' => 'Plans {for teams} {site}'],
+      'title_end' => ['text' => ''],
+    ];
+    self::assertSame(json_encode($values), json_encode(Values::clean($values, 'template', NULL)[0]));
+    self::assertSame(json_encode($values), json_encode(Values::clean($values, 'template', self::accepts())[0]));
+  }
+
+  /**
+   * A text cut to a room ends at a whole sentence, else at a word.
+   */
+  public function testSentences(): void {
+    self::assertSame('One. Two.', Values::sentences('One. Two. Three is long.', 12));
+    self::assertSame('Short.', Values::sentences('Short.', 70));
+    self::assertSame('alpha beta…', Values::sentences('alpha beta gamma delta', 13));
+  }
+
+  /**
+   * The shared fixture file.
+   */
+  private static function fixture(): array {
+    return json_decode((string) file_get_contents(dirname(__DIR__, 2) . '/fixtures/text-cases.json'), TRUE, 64, JSON_THROW_ON_ERROR);
   }
 
   /**

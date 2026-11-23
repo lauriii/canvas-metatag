@@ -14,6 +14,7 @@ use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\canvas_metatag\Vocabulary;
+use Drupal\canvas_metatag\Words;
 use Drupal\Component\Utility\NestedArray;
 use Drupal\Component\Uuid\Uuid;
 use Drupal\Core\Cache\CacheableMetadata;
@@ -101,6 +102,7 @@ final class ApiController implements ContainerInjectionInterface {
     private readonly AccountInterface $currentUser,
     private readonly Sources $sources,
     private readonly Vocabulary $vocabulary,
+    private readonly Words $words,
   ) {}
 
   /**
@@ -177,6 +179,9 @@ final class ApiController implements ContainerInjectionInterface {
 
     return new JsonResponse([
       'ui' => $ui,
+      // The locale the dialog writes dates in: the one the server's words
+      // use for the item (Words), so a date reads one way in the dialog.
+      'date_locale' => str_replace('_', '-', $this->words->locale($entity?->language()->getId() ?? $this->languageManager->getDefaultLanguage()->getId())),
       'langcode' => $entity !== NULL && $entity->getEntityTypeId() === Page::ENTITY_TYPE_ID
         ? $entity->language()->getId()
         : $this->languageManager->getDefaultLanguage()->getId(),
@@ -388,7 +393,48 @@ final class ApiController implements ContainerInjectionInterface {
       return self::error(404, 'not_found', 'SEO settings exist only for the full content template of a content type.');
     }
     $bundle = $template->getTargetBundle();
-    return $this->putDraft($template, 'template', fn (array $source, string $kind): bool => $this->sources->accepts($bundle, $source, $kind), $body);
+    // A source stored in a value, as live or in the draft, that the type
+    // can no longer read stays savable there, at any position: one deleted
+    // field never locks the words around it. Any other source must fit
+    // where it is sent, as a new one must: a long text linked whole to a
+    // title is never a part of it.
+    $stored = [];
+    $draft = $this->autoSaveManager->getAutoSaveEntity($template, bypass_cache: TRUE)->entity;
+    foreach (array_filter([$template, $draft]) as $current) {
+      $values = Values::clean((array) $current->getThirdPartySetting('canvas_metatag', 'values', []), 'template', NULL)[0];
+      foreach (self::sourcesByPath($values) as $path => $sources) {
+        $stored[$path] = [...$stored[$path] ?? [], ...$sources];
+      }
+    }
+    $accepts = fn (array $source, string $kind, string $path): bool => $this->sources->accepts($bundle, $source, $kind)
+      || (in_array($source, $stored[$path] ?? [], TRUE) && $this->sources->problem($bundle, $source, 'words') !== NULL);
+    return $this->putDraft($template, 'template', $accepts, $body);
+  }
+
+  /**
+   * The sources each value holds, whole or as parts, by dotted path.
+   *
+   * @return array<string, list<array>>
+   *   Path => sources.
+   */
+  private static function sourcesByPath(array $values): array {
+    $found = [];
+    $paths = ['title', 'title_end', 'description', 'social.title', 'social.description', 'social.image'];
+    foreach (array_keys($values['schema']['props'] ?? []) as $key) {
+      $paths[] = "schema.props.$key";
+    }
+    foreach ($paths as $path) {
+      $value = NestedArray::getValue($values, explode('.', $path));
+      if (!is_array($value)) {
+        continue;
+      }
+      foreach ($value['parts'] ?? [$value] as $part) {
+        if (isset($part['source'])) {
+          $found[$path][] = $part['source'];
+        }
+      }
+    }
+    return $found;
   }
 
   /**
@@ -402,8 +448,8 @@ final class ApiController implements ContainerInjectionInterface {
    *   is never saved.
    * @param string $scope
    *   Either 'page' or 'template'.
-   * @param callable(array, string): bool $accepts
-   *   Whether a source may be stored for a value of a kind.
+   * @param callable(array, string, string): bool $accepts
+   *   Whether a source may be stored for a value of a kind, at a path.
    * @param array<string, mixed> $body
    *   The request body, as draftBody() returned it.
    * @param string $type
@@ -461,9 +507,10 @@ final class ApiController implements ContainerInjectionInterface {
   /**
    * The template's links that cannot be read, by dotted path.
    *
-   * @return array<string, array{field: string, reason: string}>
-   *   The machine name of the field each starts from, and why: `missing`,
-   *   `kind` or `error`.
+   * @return array<string, array{path: string, part?: int, field: string, reason: string}>
+   *   By the dotted path of the link: a value's, or a part of a composition
+   *   ("title.parts.2"). The value's path, the part's index, the machine name
+   *   of the field it starts from, and why: `missing`, `kind` or `error`.
    */
   private function broken(array $values, string $bundle): array {
     $kinds = [
@@ -474,16 +521,28 @@ final class ApiController implements ContainerInjectionInterface {
       'social.description' => 'text',
       'social.image' => 'image',
     ];
+    $props = [];
     // As saving and the head read it: a job description is formatted text.
     foreach (SchemaGraph::types()[$values['schema']['type'] ?? 'WebPage']['props'] ?? [] as $prop) {
       $kinds["schema.props.{$prop['key']}"] = Values::kindOf($prop);
+      $props["schema.props.{$prop['key']}"] = $prop;
     }
     $broken = [];
     foreach ($kinds as $path => $kind) {
-      $source = NestedArray::getValue($values, [...explode('.', $path), 'source']);
-      $reason = is_array($source) ? $this->sources->problem($bundle, $source, $kind) : NULL;
-      if ($reason !== NULL) {
-        $broken[$path] = ['field' => (string) Sources::machineName($source), 'reason' => $reason];
+      // A place that composes reads its fields as words.
+      $kind = Values::composes($props[$path] ?? NULL, $path, 'template') ? 'words' : $kind;
+      $value = NestedArray::getValue($values, explode('.', $path));
+      $links = is_array($value) && isset($value['parts']) ? $value['parts'] : [$value];
+      foreach ($links as $at => $link) {
+        $source = is_array($link) ? $link['source'] ?? NULL : NULL;
+        $reason = is_array($source) ? $this->sources->problem($bundle, $source, $kind) : NULL;
+        if ($reason !== NULL) {
+          $part = isset($value['parts']) ? ['part' => $at] : [];
+          $broken[$part ? "$path.parts.$at" : $path] = ['path' => $path] + $part + [
+            'field' => (string) Sources::machineName($source),
+            'reason' => $reason,
+          ];
+        }
       }
     }
     return $broken;
@@ -513,10 +572,13 @@ final class ApiController implements ContainerInjectionInterface {
    */
   private static function carry(array $sent, array $clean, array $errors, array $current, string $scope, string $type = 'WebPage'): array {
     $carried = [];
+    // Compared in canonical form: a value sent back with its keys in another
+    // order, or its composition written another way, is the same value.
+    $canonical = Values::clean($sent, $scope, NULL, $type)[0];
     foreach (array_keys($errors) as $path) {
       $parents = explode('.', (string) $path);
       $kept = NestedArray::getValue($current, $parents, $exists);
-      if ($exists && $kept === NestedArray::getValue($sent, $parents)) {
+      if ($exists && ($kept === NestedArray::getValue($sent, $parents) || $kept === NestedArray::getValue($canonical, $parents))) {
         NestedArray::setValue($clean, $parents, $kept);
         $carried[$path] = $errors[$path];
         unset($errors[$path]);

@@ -77,6 +77,7 @@ import type {
   Action,
   Fact,
   Measurer,
+  Part,
   Resolved,
   SeoValues,
   SourceRow,
@@ -86,6 +87,7 @@ import type {
   Value,
   Verdict,
 } from './types';
+import { compose } from './values';
 
 // Fixtures.
 
@@ -197,7 +199,7 @@ describe('text outputs (tests/fixtures/text-cases.json)', () => {
   };
   it.each(file.cases.map((row) => [row.name, row] as const))('%s', (_, row) => {
     const facts = { ...file.facts, ...row.facts };
-    const text = (value: Value) =>
+    const read = (value: Value | Part): string =>
       'text' in value
         ? value.text
         : 'fact' in value
@@ -205,6 +207,7 @@ describe('text outputs (tests/fixtures/text-cases.json)', () => {
           : 'source' in value
             ? (row.links?.[value.source.expression] ?? '')
             : '';
+    const text = (value: Value) => ('parts' in value ? compose(value.parts, read) : read(value));
     const site = row.site ?? file.site;
     const out = texts(
       cascade(row.target ?? {}, site),
@@ -1350,6 +1353,11 @@ describe('pending changes', () => {
         ['description'],
       ),
     ).toBeNull();
+    // A refused composition keeps its typed words: they exist nowhere else.
+    const composed = { parts: [{ fact: 'title' as const }, { text: ' in ' }, gone] };
+    expect(
+      pendingFor(null, '1', { title: t('Mine') }, { title: t('Mine'), description: composed }, ['description'])?.changes,
+    ).toEqual({ description: composed });
     expect(pendingFor(null, null, server, { title: t('x') })!.uid).toBe('');
   });
 

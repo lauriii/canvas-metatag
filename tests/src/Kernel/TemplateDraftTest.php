@@ -240,6 +240,61 @@ final class TemplateDraftTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A composition is valid configuration, also with a broken field in it.
+   *
+   * Template-seo "A composition": published through Canvas, exported and
+   * imported, the space between two fields kept.
+   */
+  public function testComposition(): void {
+    foreach (['field_first' => 'First name', 'field_last' => 'Last name'] as $name => $label) {
+      FieldStorageConfig::create(['field_name' => $name, 'entity_type' => 'node', 'type' => 'string'])->save();
+      FieldConfig::create(['field_name' => $name, 'entity_type' => 'node', 'bundle' => 'article', 'label' => $label])->save();
+    }
+    $field = static fn (string $name): array => [
+      'source' => ['expression' => "ℹ︎␜entity:node:article␝{$name}␞␟value", 'sourceType' => 'entity-field'],
+    ];
+    $values = ['title' => ['parts' => [$field('field_first'), ['text' => ' '], $field('field_last')]]];
+    self::assertSame(Response::HTTP_OK, $this->put($values, self::EDITOR)->getStatusCode());
+    FieldConfig::loadByName('node', 'article', 'field_last')?->delete();
+    $this->container->get('cache.static')->deleteAll();
+    $response = $this->makePublishAllRequest();
+    self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+    self::assertSame($values, $this->stored($this->template()));
+    self::assertEntityIsValid($this->template());
+
+    $this->copyConfig($this->container->get('config.storage'), $this->container->get('config.storage.sync'));
+    $this->template()->unsetThirdPartySetting('canvas_metatag', 'values')->save();
+    $this->configImporter()->import();
+    self::assertSame($values, $this->stored($this->template()));
+    self::assertSame([' '], array_column($this->template()->getThirdPartySetting('canvas_metatag', 'values')['title']['parts'], 'text'));
+    self::assertEntityIsValid($this->template());
+  }
+
+  /**
+   * A malformed composition fails validation at its path.
+   *
+   * Template-seo "A malformed composition": Canvas's and recipes' validation
+   * of the template refuse it, naming the path.
+   */
+  public function testMalformedComposition(): void {
+    $title = static fn (array $parts): array => ['title' => ['parts' => $parts]];
+    $fact = ['fact' => 'title'];
+    $base = 'third_party_settings.canvas_metatag.values.title';
+    foreach ([
+      'a part with two keys' => [$title([$fact, ['text' => 'a', 'fact' => 'site']]), "$base.parts.1"],
+      'nested parts' => [$title([$fact, ['parts' => [$fact]]]), "$base.parts.1.parts"],
+      'no parts' => [$title([]), $base],
+      'nine fields' => [$title(array_fill(0, 9, $fact)), $base],
+      'an image in a part' => [$title([$fact, ['fact' => 'image']]), "$base.parts.1.fact"],
+      'two keys in a value' => [['title' => ['text' => 'a', 'fact' => 'title']], $base],
+    ] as $case => [$values, $path]) {
+      $template = $this->template()->setThirdPartySetting('canvas_metatag', 'values', $values);
+      $paths = array_map(static fn ($violation): string => $violation->getPropertyPath(), iterator_to_array($template->getTypedData()->validate()));
+      self::assertContains($path, $paths, "$case: " . implode(', ', $paths));
+    }
+  }
+
+  /**
    * Only the full template of a node type has SEO settings.
    */
   public function testOtherTemplates(): void {

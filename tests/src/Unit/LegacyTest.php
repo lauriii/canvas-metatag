@@ -24,7 +24,7 @@ final class LegacyTest extends UnitTestCase {
    */
   private static function fields(): \Closure {
     return static fn (string $name, string $kind): ?array => match ("$name:$kind") {
-      'field_summary:text', 'field_byline:text' => [
+      'field_summary:text', 'field_byline:text', 'field_summary:words', 'field_byline:words', 'field_byline:line' => [
         'source' => ['expression' => "ℹ︎␜entity:node:article␝{$name}␞␟value", 'sourceType' => 'entity-field'],
       ],
       'body:text' => ['fact' => 'description'],
@@ -105,32 +105,69 @@ final class LegacyTest extends UnitTestCase {
       ['title' => 'Pricing | Example'],
       ['title' => ['text' => 'Pricing | Example'], 'title_end' => ['text' => '']],
     ];
+    // A separator before the last is typed separator text.
     yield 'the last separator splits' => [
       'template',
       ['title' => '{title} {sep} Guides {sep} Journal'],
-      ['title_end' => ['text' => 'Journal']],
-      ['title: kept its first part; dropped {sep}, typed text.'],
+      ['title' => ['parts' => [['fact' => 'title'], ['text' => ' | Guides']]], 'title_end' => ['text' => 'Journal']],
     ];
     yield 'a linked main part' => ['template', ['title' => '{field.field_byline} {sep} {site}'], ['title' => $byline]];
 
-    // Composites keep their first part.
-    yield 'title by byline' => [
+    // A template's composites are composed whole; a page's keep their
+    // first part.
+    yield 'a composite title' => [
       'template',
       ['title' => '{title} by {field.field_byline}'],
-      ['title_end' => ['text' => '']],
-      ['title: kept its first part; dropped typed text, {field.field_byline}.'],
+      ['title' => ['parts' => [['fact' => 'title'], ['text' => ' by '], $byline]], 'title_end' => ['text' => '']],
     ];
     yield 'byline: title' => [
       'template',
       ['title' => '{field.field_byline}: {title}'],
-      ['title' => $byline, 'title_end' => ['text' => '']],
-      ['title: kept its first part; dropped typed text, {title}.'],
+      ['title' => ['parts' => [$byline, ['text' => ': '], ['fact' => 'title']]], 'title_end' => ['text' => '']],
     ];
     yield 'title, oak' => [
       'template',
       ['title' => '{title}, oak'],
-      ['title_end' => ['text' => '']],
-      ['title: kept its first part; dropped typed text.'],
+      ['title' => ['parts' => [['fact' => 'title'], ['text' => ', oak']]], 'title_end' => ['text' => '']],
+    ];
+    yield 'a composite with a field the type no longer has' => [
+      'template',
+      ['description' => '{title} in {field.field_gone} {sep} {site}'],
+      ['description' => ['parts' => [['fact' => 'title'], ['text' => ' | '], ['fact' => 'site']]]],
+      ['description: composed of the parts that fit; dropped {field.field_gone}.'],
+    ];
+    yield 'an address inside a composite' => [
+      'template',
+      ['description' => '{title} at {url}'],
+      ['description' => ['fact' => 'title']],
+      ['description: composed of the parts that fit; dropped {url}.'],
+    ];
+    yield 'a long text in a composed title' => [
+      'template',
+      ['social' => ['title' => '{title}: {field.body}']],
+      [],
+      // What is left is the place's default: said as such.
+      ['social.title: uses its default; dropped {field.body}.'],
+    ];
+    yield 'nine fields' => [
+      'template',
+      ['description' => '{title} · {author} · {site} · {published} · {modified} · {title} · {author} · {site} · {published}'],
+      [
+        'description' => [
+          'parts' => [
+        ['fact' => 'title'], ['text' => ' · '], ['fact' => 'author'], ['text' => ' · '], ['fact' => 'site'], ['text' => ' · '],
+        ['fact' => 'published'], ['text' => ' · '], ['fact' => 'modified'], ['text' => ' · '], ['fact' => 'title'], ['text' => ' · '],
+        ['fact' => 'author'], ['text' => ' · '], ['fact' => 'site'],
+          ],
+        ],
+      ],
+      ['description: composed of the parts that fit; dropped {published}.'],
+    ];
+    yield 'a composite on a page' => [
+      'page',
+      ['title' => 'Plans for {site} teams'],
+      ['title' => ['text' => 'Plans for'], 'title_end' => ['text' => '']],
+      ['title: kept its first part; dropped {site}, typed text.'],
     ];
     yield 'never published: title' => [
       'page',
@@ -175,11 +212,12 @@ final class LegacyTest extends UnitTestCase {
       [],
       ['description: removed; dropped {field.field_starts}.'],
     ];
+    // Its lead-in goes with it.
     yield 'a field that is gone' => [
       'template',
       ['description' => 'Read {field.field_gone}'],
-      ['description' => ['text' => 'Read']],
-      ['description: kept its first part; dropped {field.field_gone}.'],
+      [],
+      ['description: removed; dropped {field.field_gone}.'],
     ];
     yield 'an unknown name' => [
       'template',
@@ -193,8 +231,13 @@ final class LegacyTest extends UnitTestCase {
       [],
       ['social.title: not available here; dropped.'],
     ];
-    yield 'a composite whose first part is the default' => [
+    yield 'a composite that starts with the default' => [
       'template',
+      ['social' => ['title' => '{title} {sep} {site}']],
+      ['social' => ['title' => ['parts' => [['fact' => 'title'], ['text' => ' | '], ['fact' => 'site']]]]],
+    ];
+    yield 'a composite on a page that starts with the default' => [
+      'page',
       ['social' => ['title' => '{title} {sep} {site}']],
       [],
       ['social.title: uses its default; dropped {sep}, {site}.'],

@@ -27,10 +27,12 @@ final class Legacy {
    *
    * Titles split at the last `{sep}`: the part before is the main part, the
    * part after the ending. A whole name becomes its fact, a whole
-   * `{field.NAME}` what $field makes of it, a media UUID a media item; a
-   * value made of several parts keeps its first part. A value equal to its
-   * default, and an ending equal to the one below, are not kept. Values
-   * already converted are left as they are.
+   * `{field.NAME}` what $field makes of it, a media UUID a media item. A
+   * value made of several parts becomes, on a template where the place
+   * composes, the composition of every part that fits text (composite());
+   * elsewhere it keeps its first part. A value equal to its default, and an
+   * ending equal to the one below, are not kept. Values already converted
+   * are left as they are.
    *
    * @param array $old
    *   The stored values.
@@ -38,23 +40,37 @@ final class Legacy {
    *   One of 'page', 'template', 'site'.
    * @param callable(string, string): ?array $field
    *   The value a whole field gives as a value of a kind (text, address,
-   *   date, number, image), or NULL when it cannot be linked.
+   *   date, number, image; `words` or `line` for a part of a composition),
+   *   or NULL when it cannot be linked.
    * @param array|null $below
    *   The converted ending of the layer below: the site's for a page or a
    *   template. NULL: the site name.
+   * @param string $separator
+   *   The identity's separator: what a `{sep}` that does not split a title
+   *   becomes in a composition.
    *
    * @return array{0: array, 1: list<string>}
    *   The values, cleaned in read mode, and one log line per loss, naming
    *   the key and what was dropped, never a value of the content.
    */
-  public static function convert(array $old, string $scope, callable $field, ?array $below = NULL): array {
+  public static function convert(array $old, string $scope, callable $field, ?array $below = NULL, string $separator = '|'): array {
     $log = [];
     $new = $old;
     // $default: what the place gives with nothing set; a first part equal to
     // it is not kept either.
-    $piece = static function (mixed $value, string $kind, string $path, ?array $default = NULL) use ($field, &$log): ?array {
+    $piece = static function (mixed $value, string $kind, string $path, ?array $default = NULL, ?array $prop = NULL) use ($field, $scope, $separator, &$log): ?array {
       if (!is_string($value)) {
         return is_array($value) ? $value : NULL;
+      }
+      // A composite where the place composes; a whole name is the link it
+      // always was.
+      if ($kind === 'text' && Values::composes($prop, $path, $scope) && preg_match(self::BRACES, $value) && !preg_match('/^\s*\{[^{}]*\}\s*$/D', $value)) {
+        [$converted, $dropped] = self::composite($value, $path, $field, $separator);
+        if ($dropped) {
+          $what = $converted === NULL ? 'removed' : ($converted === $default ? 'uses its default' : 'composed of the parts that fit');
+          $log[] = sprintf('%s: %s; dropped %s.', $path, $what, implode(', ', $dropped));
+        }
+        return $converted;
       }
       [$converted, $dropped, $kept] = self::piece($value, $kind, $field);
       if ($dropped) {
@@ -114,7 +130,7 @@ final class Legacy {
     }
     foreach (is_array($old['schema']['props'] ?? NULL) ? $old['schema']['props'] : [] as $key => $value) {
       $prop = self::prop((string) $key, $old['schema']['type'] ?? 'WebPage');
-      $value = $prop === NULL ? NULL : $piece($value, Values::KINDS[$prop['kind']], "schema.props.$key", $prop['default'] ?? NULL);
+      $value = $prop === NULL ? NULL : $piece($value, Values::KINDS[$prop['kind']], "schema.props.$key", $prop['default'] ?? NULL, $prop);
       $new['schema']['props'][$key] = $value === ($prop['default'] ?? NULL) ? NULL : $value;
     }
     if (is_string($old['schema']['custom'] ?? NULL) && str_contains($old['schema']['custom'], '{field.')) {
@@ -188,6 +204,63 @@ final class Legacy {
       array_unshift($dropped, self::describe($first));
     }
     return [$value, $dropped, $value !== NULL && $parts !== []];
+  }
+
+  /**
+   * Converts a stored text of several parts into a composition.
+   *
+   * Each `{field.NAME}` becomes what $field makes of it in words, each whole
+   * fact name that reads as words its fact, each `{sep}` typed separator
+   * text, and the text between them typed text. A part that cannot be
+   * converted (a field with no source, `{url}`, `{image}`, a name the module
+   * never had), and every field past the eighth, is dropped with the words
+   * that go with it (Values::compose()).
+   *
+   * @return array{0: ?array, 1: list<string>}
+   *   The value in canonical form, and the names dropped.
+   */
+  private static function composite(string $text, string $path, callable $field, string $separator): array {
+    $line = Values::titleLike($path);
+    $parts = [];
+    $dropped = [];
+    $fields = 0;
+    foreach (preg_split(self::BRACES, $text, -1, PREG_SPLIT_DELIM_CAPTURE) as $index => $piece) {
+      if ($index % 2 === 0) {
+        $parts[] = ['text' => $piece];
+        continue;
+      }
+      if ($piece === 'sep') {
+        $parts[] = ['text' => $separator];
+        continue;
+      }
+      $value = match (TRUE) {
+        str_starts_with($piece, 'field.') => $field(substr($piece, 6), $line ? 'line' : 'words'),
+        in_array($piece, Values::TEXT_FACTS, TRUE) => ['fact' => $piece],
+        default => NULL,
+      };
+      // Long text is no part of a title.
+      if ($value === NULL || ($line && $value === ['fact' => 'description']) || ++$fields > Values::MAX_PARTS) {
+        $dropped[] = '{' . $piece . '}';
+        $value = NULL;
+      }
+      // A dropped part stays in place until its words are left out with it.
+      $parts[] = $value ?? ['dropped' => $piece];
+    }
+    // The words that go with a dropped part go with it: what the rule of
+    // which words go with which field shows when that part gives nothing.
+    $marks = [];
+    $segments = Values::compose($parts, static function (array $part) use (&$marks): string {
+      if (isset($part['dropped'])) {
+        return '';
+      }
+      $marks[] = $part;
+      return "\x00" . (count($marks) - 1) . "\x00";
+    });
+    $kept = [];
+    foreach (preg_split('/\x00(\d+)\x00/', implode('', $segments), -1, PREG_SPLIT_DELIM_CAPTURE) as $index => $piece) {
+      $kept[] = $index % 2 === 0 ? ['text' => $piece] : $marks[(int) $piece];
+    }
+    return [Values::fold($kept), $dropped];
   }
 
   /**

@@ -282,8 +282,8 @@ the width is locked. At most one solid button per view.
   Multi-line grows (description min 52).
 - **Trailing in-field buttons**: absolute stack top-right (`top/right: 4`),
   24 × 24, icon `--seo-icon` → `--seo-ink` on hover/focus; input padding-right
-  40 for one button, 64 for two. Braces "Insert value"; sparkle "Suggest a
-  title / description" (page scope, AI available, writable).
+  40 for one button, 64 for two. Sparkle "Suggest a title / description"
+  (page scope, AI available, writable).
 - **Select**: in a field, a box like an input (chevron at right 10); in a list
   row, a ghost trigger (value + chevron, `--seo-ink-2`, hover fill). Content:
   `--seo-shadow-pop`, radius 12, items 32 tall, optional hint second line.
@@ -291,19 +291,51 @@ the width is locked. At most one solid button per view.
 - **Segmented**: only for short exclusive sets in Site (Represents,
   Separator). 32 tall, `--seo-hover` track, white thumb.
 
-### 5.4 Chips (dynamic values)
+### 5.4 Composer and chips
 
-Per the committed `seo-dialog` spec: a dynamic value shows as a chip with its
-label and stores its name. Chips are 20 tall, radius 4, blue-11 on blue-2 with
-an `inset 0 0 0 1px blue-a5` line, and keep the input's own 14/400 metrics so
-the caret stays on the text. An empty-value chip is transparent with an amber
-line and amber text. The caret never paints inside a chip; the chip's tooltip
-("Summary: …" / "Empty for this article") shows on hover only.
+A template's text that composes, holding typed words or several fields, is
+one control drawn as an input (§5.1 metrics, radius, ring) with two lines
+inside its border: the **chip line** (typed words and fields, wrapping) and
+the **result line** (13/18, the previewed item's whole result in `--seo-ink`,
+one line cut at its end, above a hairline). A title's result line leaves the
+ending out; the ending's button beside it shows it. Where a preview on screen
+shows the same text (Search, Social), the result line shows only while the
+composer or its menu is in use; at rest it keeps only "‹Field› left out for
+this ‹type›", or nothing. Details (Schema) keep it at rest. Empty, the
+composer shows what
+the item gets instead in `--seo-ink-2`, and its guidance says "Type { to add
+a field".
 
-The open change `link-values-to-fields` replaces chips with linked-value boxes
-(§5.5). When it is archived, delete this section.
+- **Chips**: the field's name as text in the flow, as tall as the line (padding
+  1 5, radius 4, 14/22 weight 500), so typed words and chips share a baseline
+  and the line never jumps; they wrap whole. Filled: `--seo-link-ink` on
+  blue-2 with an `inset 0 0 0 1px blue-a5` line. Empty or hidden for the item:
+  transparent, a dashed gray-a8 line, `--seo-ink-2`. Broken: red-a2,
+  `--seo-broken-line`, `--seo-broken-ink`, named by its machine name. With
+  nothing to preview: neutral gray. A path gives way from its start ("Venue ›
+  City"). `spellcheck="false"`, `translate="no"`. The tooltip says the value
+  or the state in words, and "Without ‹Field›: …" when there is another
+  field. Selected whole: an `inset 0 0 0 2px blue-9` ring.
+- **The words of a chip**: while a chip is hovered or the caret is beside it,
+  the chip and the words that go with it are tinted (`::highlight`, blue-a4;
+  the chip blue-3 with blue-12 words, 4.5:1), and the result line reads
+  "Without ‹Field›: …" in `--seo-ink-2`, keeping its height.
+- **The note**: parts left out for the item follow the result quietly, on a
+  line of their own that is never cut with it ("without City").
+- **The menu's rule**: "When an item doesn't have a field, the words joining
+  it are left out too." is the add menu's footer only while the value holds
+  at most one field, and not in a frame 420 px tall or less.
+- The composer is one `textbox` named by the label, with `aria-haspopup` and
+  `aria-keyshortcuts="Alt+ArrowDown"`; its description starts with the
+  result. No ARIA inside the editable content.
 
 ### 5.5 Linked-value box (from `link-values-to-fields` / `value-links`)
+
+One field, or the default a value follows, stays this box also where text
+composes: its keys, role and Tab stop never change. Composing is a step out
+of it: → or End (its field, or the default, becomes the first chip, the caret
+after it), `{` (the same, and the menu at the caret), or "Add words or
+fields" in its menu.
 
 A linked value replaces the input with a box the same size as an input
 (min-height 32, padding 5 12, radius 6) that names its source and shows the
@@ -401,19 +433,26 @@ another tooltip closes it. It opens below its button so it never covers the
 header, and the sentence is also the button's accessible description. Use one
 instead of a paragraph of explanation.
 
-### 5.13 Insert / value menu
+### 5.13 Link menu
 
 A popover anchored to the field that always opens **fully inside the
 dialog**, whatever column the field is in. Filter row 40 tall, no box, labelled
-"Insert into ‹label›" (on screen and to assistive technology), autofocused.
+"Find a field", autofocused. Its name says what a pick does: "Link ‹Field›"
+(the whole value; a box's menu adds the row "Add words or fields"), "Add a
+field to ‹Field›" (at the caret of a composer; a line above the list says
+where, "After “Summer Gala in”", also in short frames, and a footer line says
+once that the words joining a missing field are left out too), or "Replace
+‹Source›" (a chip's menu, with "Remove ‹Source›"). With eight fields the
+add menu says "At most 8 fields in one value." and its entries can't be
+picked.
 Groups (the type's fields at template scope, then Page, then Site), group
 labels 12/500 `--seo-ink-2`, sentence case, each group named by its label.
 Each entry shows its **value under its label**, across the menu's width, up to
 two lines, with the whole value on hover; an empty value reads "Empty for this
 ‹type›". Rows radius 6; the active row is `--seo-selected`, not a solid
-accent. A keyboard-hint row ("↑ ↓ move · ↵ insert · esc close") shows only in
-tall frames; it is dropped at 420 px and under, and at 200 % zoom. After a
-choice or Escape, focus is back in the field at the caret.
+accent. A keyboard-hint row ("↑ ↓ move · ↵ link / add / replace · esc
+close") shows only in tall frames; it is dropped at 420 px and under, and at
+200 % zoom. After a choice or Escape, focus is back in the field at the caret.
 
 ### 5.14 AI tray
 
@@ -482,7 +521,7 @@ marked not current.
   Say "search result", "link preview", "search engines".
 - One word per idea, the same everywhere: **Reset**, **Undo**, **Show**,
   **Suggest**, **Use**, **Try again**, **Discard**, **Change**, **Remove**,
-  **Choose image**, **View output**, **Insert value**.
+  **Choose image**, **View output**, **Add a field**.
 - Source words come from the one family in §5.2. Don't invent a new phrasing
   for a field.
 - Help text only where it decides something (a placeholder such as "One
@@ -504,7 +543,12 @@ marked not current.
   Home, End) → Checks button → notice buttons → caption buttons → each field
   (input, its in-field buttons, its aside buttons: focusable while faded,
   focus reveals them) → list rows → action bar.
-- **Keys**: `{` opens the insert menu; Backspace/Delete removes a chip whole;
+- **Keys**: in a composer, `{`, Alt+↓ and Enter open the menu at the caret
+  (`{{` types a brace); arrows step over a chip in one press and Shift
+  selects it whole; Backspace/Delete beside a chip removes it whole, said in
+  the status; a click or Enter on a selected chip opens "Replace ‹Source›";
+  Ctrl/Cmd+Z undoes typing and fields inside the composer. On a box, → and
+  End start composing.
   Ctrl/Cmd+Enter saves Site (never Hide site) and commits the page description,
   Profiles and Custom JSON-LD; Enter commits single-line held fields and never
   submits, reloads or navigates; Escape closes the innermost of menu, select,
@@ -541,7 +585,7 @@ The header stays put; the body is the only scroller; nothing scrolls sideways.
 | Frame | Rules |
 |---|---|
 | ≥ 480 px tall | As designed. |
-| ≤ 420 px tall (`@media (max-height: 420px)` in the frame) | Stage padding 10 14 12, caption margin 8, search title 16/22. Suggestion lists cap at 60 % of the height, scrolling the options only. The insert menu takes the frame's height from the column's left edge, as wide as the column, shows at least two entries whole plus part of the next as a cue, and drops the keyboard hints. Windows resized across 420 px close an open insert menu and return focus to its field. |
+| ≤ 420 px tall (`@media (max-height: 420px)` in the frame) | Stage padding 10 14 12, caption margin 8, search title 16/22. Suggestion lists cap at 60 % of the height, scrolling the options only. The link menu takes the frame's height from the column's left edge, as wide as the column, shows at least two entries whole plus part of the next as a cue, and drops the keyboard hints. Windows resized across 420 px close an open link menu and return focus to its field. A composer's result line stays one line, cut at its end, the whole of it in its description. |
 | 350 px tall | Same. The "→ resolved" guidance covers fields whose preview has scrolled away. The action bar stays 44 and floats; the body pads for it. Tab reaches the Title field with field and label whole. |
 | 200 % zoom (half width; `@container seo (max-width: 360px)`) | The header wraps: scope button + glyph + Checks (dot + count) on row 1, tabs full width on row 2. Field pairs stack. List rows wrap (value under label). The action bar wraps (text, then buttons right-aligned). Image rows wrap buttons under the name. The Output `dl` stacks. A caption keeps the previewed node named and shows an addition whole or moves it into the ⓘ; long text ends in an ellipsis. URLs and code use `overflow-wrap:anywhere`. |
 

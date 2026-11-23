@@ -276,6 +276,34 @@ final class SourcesTest extends CanvasKernelTestBase {
     $node->set('field_summary', "Mix\xC3\x28\nBake")->save();
     self::assertSame(['empty', []], $list('field_summary␞␟value'));
     $node->set('field_summary', 'How teams turn output into stories.')->save();
+    // In words, the form of a place that composes: a date and a decimal fit
+    // and give their machine values with how to read them, every item of a
+    // field of several values comes, an address and an image do not fit.
+    self::assertSame(['ok', ['items' => ['2026-07-01T19:00:00+03:00'], 'as' => 'date', 'scale' => 0]], $evaluate('field_when␞␟value', 'words'));
+    self::assertSame(['ok', ['items' => ['49.9'], 'as' => 'decimal', 'scale' => 2]], $evaluate('field_price␞␟value', 'words'));
+    self::assertSame(['ok', ['items' => ['AI', 'Writing'], 'as' => 'text', 'scale' => 0]], $evaluate('field_tags␞␟entity␜␜entity:taxonomy_term␝name␞␟value', 'words'));
+    self::assertSame(['ok', ['items' => ['<h2>Made to last</h2><p>Solid oak.</p>'], 'as' => 'html', 'scale' => 0]], $evaluate('field_body␞␟value', 'words'));
+    self::assertSame(['broken', NULL], $evaluate('field_more␞␟uri', 'words'));
+    self::assertSame(['broken', NULL], $evaluate('field_hero␞␟entity␜␜entity:media:image␝field_media_image␞␟{src↝entity␜␜entity:file␝uri␞␟value,alt↠alt,width↠width,height↠height}', 'words'));
+    $source = static fn (string $path): array => ['expression' => self::ARTICLE . $path, 'sourceType' => 'entity-field'];
+    // A part of a title takes no formatted text; a description does.
+    self::assertFalse($sources->accepts('article', $source('field_body␞␟value'), 'line'));
+    self::assertTrue($sources->accepts('article', $source('field_body␞␟value'), 'words'));
+    self::assertTrue($sources->accepts('article', $source('field_when␞␟value'), 'line'));
+    self::assertSame($source('field_when␞␟value'), $sources->sourceFor('article', 'field_when', 'words'));
+    // How Canvas offers a timestamp through a reference: Writer › Authored
+    // on is a number that is a point in time, read as a date in words.
+    $rows = $sources->vocabulary('article');
+    $authored = self::ARTICLE . 'field_writer␞␟entity␜␜entity:node␝created␞␟value';
+    // Canvas may stop offering the hop: the run then ends incomplete, named,
+    // never green with the pin skipped.
+    $hop = isset($rows[$authored]);
+    if ($hop) {
+      self::assertContains('number', $rows[$authored]['kinds']);
+      self::assertTrue($rows[$authored]['timestamp'] ?? FALSE);
+      [$status, $read] = $evaluate('field_writer␞␟entity␜␜entity:node␝created␞␟value', 'words');
+      self::assertSame(['ok', 'timestamp'], [$status, $read['as']]);
+    }
     // A job description is the stored markup.
     self::assertSame(['ok', '<h2>Made to last</h2><p>Solid oak.</p>'], $evaluate('field_body␞␟value', 'html'));
     // A reference gives what it references.
@@ -343,6 +371,9 @@ final class SourcesTest extends CanvasKernelTestBase {
     self::assertSame(['ok', '{site}'], $evaluate('field_byline␞␟value', 'text', $own));
     // Such a head is only ever shown to users who may view it: it varies.
     self::assertContains('user.permissions', $own->getCacheContexts());
+    if (!$hop) {
+      self::markTestIncomplete('Canvas no longer offers Writer › Authored on (a timestamp through a reference): the pin of how a timestamp hop reads as a date in words did not run.');
+    }
   }
 
   /**

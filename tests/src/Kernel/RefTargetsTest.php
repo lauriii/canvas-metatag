@@ -11,6 +11,8 @@ use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Sources;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
+use Drupal\language\ConfigurableLanguageManagerInterface;
+use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\Entity\Node;
 use Drupal\node\NodeInterface;
 use Drupal\Tests\canvas\Kernel\CanvasKernelTestBase;
@@ -18,7 +20,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
-// cspell:ignore Kallio Mannerheimintie Kungsgatan Ruisleipä
+// cspell:ignore Kallio Mannerheimintie Kungsgatan Ruisleipä Finlande Suède
+// cspell:ignore Émirats arabes unis
 /**
  * Every type, populated end to end on the complex fixture's content.
  *
@@ -110,6 +113,99 @@ final class RefTargetsTest extends CanvasKernelTestBase {
    */
   private function url(string $key): string {
     return 'http://localhost' . $this->complex['path'][$key];
+  }
+
+  /**
+   * A referenced page's composed details are read with its own facts.
+   *
+   * Structured-data "A venue's composed address on an event" and "The
+   * venue's own title".
+   */
+  public function testComposedDetails(): void {
+    $fresh = fn (string $key): NodeInterface => $this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($this->complex['node'][$key]);
+    self::describe('event', [
+      'type' => 'Event',
+      'props' => [
+        'startDate' => self::link('event', 'field_starts␞␟value'),
+        'location' => self::link('event', 'field_venue␞␟entity␜␜entity:node␝title␞␟value'),
+      ],
+    ]);
+    $address = [
+      'address_postalCode' => self::link('venue', 'field_postal_code␞␟value'),
+      'address_addressLocality' => self::link('venue', 'field_locality␞␟value'),
+      'address_addressCountry' => self::link('venue', 'field_country␞␟value'),
+    ];
+    // A street address from two fields.
+    self::describe('venue', [
+      'type' => 'LocalBusiness',
+      'props' => $address + [
+        'placeKind' => ['text' => 'EventVenue'],
+        'address_streetAddress' => [
+          'parts' => [
+            self::link('venue', 'field_street␞␟value'),
+            ['text' => ', PO '],
+            self::link('venue', 'field_postal_code␞␟value'),
+          ],
+        ],
+      ],
+    ]);
+    [$hall] = $this->read($this->node('venue_hall'));
+    self::assertSame('Mannerheimintie 13e, PO 00100', $hall['primary']['address']['streetAddress']);
+    [$event] = $this->read($fresh('event_full'));
+    self::assertSame('Mannerheimintie 13e, PO 00100', $event['primary']['location']['address']['streetAddress']);
+
+    // The venue's own title, never the event's.
+    self::describe('venue', [
+      'type' => 'LocalBusiness',
+      'props' => $address + [
+        'placeKind' => ['text' => 'EventVenue'],
+        'address_streetAddress' => [
+          'parts' => [['fact' => 'title'], ['text' => ', '], self::link('venue', 'field_street␞␟value')],
+        ],
+      ],
+    ]);
+    [$event] = $this->read($fresh('event_full'));
+    self::assertSame('Lakeside Concert Hall, Mannerheimintie 13e', $event['primary']['location']['address']['streetAddress']);
+
+    // In the referencing page's language: a French event reads the venue's
+    // country label in French, though the venue has no translation.
+    $this->enableModules(['language']);
+    $this->installConfig(['language']);
+    ConfigurableLanguage::createFromLangcode('fr')->save();
+    $languages = $this->container->get('language_manager');
+    \assert($languages instanceof ConfigurableLanguageManagerInterface);
+    $languages->getLanguageConfigOverride('fr', 'field.storage.node.field_country')
+      ->set('settings.allowed_values', [
+        ['label' => 'Finlande'],
+        ['label' => 'Suède'],
+        ['label' => 'Émirats arabes unis'],
+      ])
+      ->save();
+    self::describe('venue', [
+      'type' => 'LocalBusiness',
+      'props' => $address + [
+        'placeKind' => ['text' => 'EventVenue'],
+        'address_streetAddress' => [
+          'parts' => [
+            self::link('venue', 'field_street␞␟value'),
+            ['text' => ', '],
+            self::link('venue', 'field_country␞␟value'),
+          ],
+        ],
+      ],
+    ]);
+    $english = $fresh('event_full');
+    $english->addTranslation('fr', [
+      'title' => 'Concert de la Saint-Jean',
+      'status' => 1,
+      'field_venue' => $english->get('field_venue')->getValue(),
+      'field_starts' => $english->get('field_starts')->getValue(),
+    ])->save();
+    $this->container->get('cache.static')->deleteAll();
+    [$event] = $this->read($fresh('event_full'));
+    self::assertSame('Mannerheimintie 13e, Finland', $event['primary']['location']['address']['streetAddress']);
+    [$event] = $this->read($fresh('event_full')->getTranslation('fr'));
+    self::assertSame('Mannerheimintie 13e, Finlande', $event['primary']['location']['address']['streetAddress']);
   }
 
   /**

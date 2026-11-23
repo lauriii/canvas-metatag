@@ -192,8 +192,19 @@ final class ResolverTest extends CanvasKernelTestBase {
       'site' => ['label' => 'Site name', 'kind' => 'text', 'value' => 'Example'],
       'url' => ['label' => 'Page address', 'kind' => 'address', 'value' => 'http://localhost/pricing'],
       'author' => ['label' => 'Author', 'kind' => 'text', 'value' => 'Ada Writer'],
-      'published' => ['label' => 'First published', 'kind' => 'date', 'value' => self::PUBLISHED],
-      'modified' => ['label' => 'Last updated', 'kind' => 'date', 'value' => self::MODIFIED],
+      // A date also in words, as a place that composes reads it.
+      'published' => [
+        'label' => 'First published',
+        'kind' => 'date',
+        'value' => self::PUBLISHED,
+        'text' => 'March 2, 2026',
+      ],
+      'modified' => [
+        'label' => 'Last updated',
+        'kind' => 'date',
+        'value' => self::MODIFIED,
+        'text' => 'March 4, 2026',
+      ],
       'image' => ['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
       // The publisher, for references, by its name.
       'identity' => ['label' => 'This site', 'kind' => 'ref', 'value' => 'Example'],

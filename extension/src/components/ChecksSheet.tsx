@@ -75,7 +75,9 @@ export function ChecksSheet() {
   const type = typeOf(server.registry, app.view?.effective.schema?.type);
 
   const where = (jump: Jump) => {
-    const key = jump.field.match(/^schema\.props\.(.+)$/)?.[1];
+    // A part of a composition is shown in its value: "Show title".
+    const field = jump.field.replace(/\.parts\.\d+$/, '');
+    const key = field.match(/^schema\.props\.(.+)$/)?.[1];
     // A value inside hand-added JSON-LD: named by its path.
     if (jump.at) {
       return `${jump.at.path} in ${jump.field === 'schema.custom' ? 'your own JSON-LD' : 'the added details'}`;
@@ -85,7 +87,7 @@ export function ChecksSheet() {
         ?.find((prop) => prop.key === key)
         ?.label.toLowerCase() ??
       type.groups?.[key ?? '']?.label?.toLowerCase() ??
-      FIELDS.find(([pattern]) => pattern.test(jump.field))?.[1] ??
+      FIELDS.find(([pattern]) => pattern.test(field))?.[1] ??
       'field'
     );
   };
@@ -100,13 +102,16 @@ export function ChecksSheet() {
             variant="soft"
             onClick={(event) => {
               // The fixed row goes with its button: focus moves on to the
-              // next row of its group, on its sentence, never onto the same
-              // action there; else to the summary.
+              // next row of its group that has an action, on its sentence,
+              // never onto the same action there; else to the summary.
               const row = event.currentTarget.closest('li');
               const rows = Array.from(
                 row?.parentElement?.querySelectorAll(':scope > li') ?? [],
               );
-              const next = rows[rows.indexOf(row!) + 1]?.querySelector<HTMLElement>('.seo-check-title');
+              const next = rows
+                .slice(rows.indexOf(row!) + 1)
+                .find((one) => one.querySelector('button'))
+                ?.querySelector<HTMLElement>('.seo-check-title');
               dispatch({
                 type: 'apply',
                 scope: 'target',

@@ -60,6 +60,8 @@ const FLAGS: Record<string, string> = {
   headless: 'CANVAS_METATAG_E2E_HEADLESS=1',
   ai: 'CANVAS_METATAG_E2E_AI=1',
   complex: 'CANVAS_METATAG_E2E_COMPLEX=1',
+  'compose-firefox': 'CANVAS_METATAG_E2E_COMPLEX=1',
+  'compose-webkit': 'CANVAS_METATAG_E2E_COMPLEX=1',
   'schema-templates': 'CANVAS_METATAG_E2E_COMPLEX=1 CANVAS_METATAG_E2E_COURSES=1',
 };
 
@@ -205,6 +207,19 @@ export async function openTemplate(page: Page, previewId: number, bundle = 'arti
   await page.goto(`./canvas/template/node/${bundle}/full/${previewId}`);
   await expect(page.getByTestId('canvas-publish-review')).toBeVisible({ timeout: 60_000 });
   await expect(page.getByTestId('select-content-preview-item')).toBeVisible({ timeout: 60_000 });
+}
+
+/** Switches the template editor's preview to another node of the type. */
+export async function previewNode(page: Page, bundle: string, node: { id: number; title: string }): Promise<void> {
+  // By keyboard: a long previewed title lets Canvas's top bar cover the
+  // picker's button.
+  await page.getByTestId('select-content-preview-item').press('Enter');
+  await page.getByRole('menuitem', { name: node.title }).click();
+  await expect(page).toHaveURL(new RegExp(`/canvas/template/node/${bundle}/full/${node.id}$`));
+  // Until Canvas's menu has gone, its page takes no pointer events: a click
+  // into the dialog right after would be lost.
+  await expect(page.getByRole('menu')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents)).not.toBe('none');
 }
 
 /** Opens the SEO dialog from the Extensions panel. */

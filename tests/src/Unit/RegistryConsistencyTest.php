@@ -41,6 +41,29 @@ final class RegistryConsistencyTest extends UnitTestCase {
   }
 
   /**
+   * Only free text composes: no choice, code, list, join or markup.
+   *
+   * The joined text could never be one of the options, and a machine parses
+   * the rest.
+   */
+  public function testOnlyFreeTextComposes(): void {
+    $marked = 0;
+    foreach (SchemaGraph::types() as $id => $type) {
+      foreach ($type['props'] ?? [] as $prop) {
+        if (empty($prop['compose'])) {
+          continue;
+        }
+        $marked++;
+        self::assertSame('text', $prop['kind'], "$id.{$prop['key']}");
+        foreach (['options', 'pattern', 'list', 'join', 'html', 'codes'] as $flag) {
+          self::assertArrayNotHasKey($flag, $prop, "$id.{$prop['key']} composes and has $flag.");
+        }
+      }
+    }
+    self::assertGreaterThan(10, $marked);
+  }
+
+  /**
    * Every required detail is required by the type's least demanding feature.
    */
   public function testRequiredMeansRequired(): void {

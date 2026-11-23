@@ -51,7 +51,11 @@ export default defineConfig({
     },
     { name: 'headless', testMatch: 'headless.spec.ts', dependencies: ['host-contract'], use },
     { name: 'ai', testMatch: 'ai.spec.ts', dependencies: ['host-contract'], use },
-    { name: 'complex', testMatch: 'template-complex.spec.ts', dependencies: ['host-contract'], use },
+    { name: 'complex', testMatch: ['template-complex.spec.ts', 'compose.spec.ts'], dependencies: ['host-contract'], use },
+    // The composer's keys, caret and selection in the other engines (design
+    // D10 of compose-values-from-fields): the complex seed, one engine at a time.
+    { name: 'compose-firefox', testMatch: 'compose.spec.ts', dependencies: ['host-contract'], use: { browserName: 'firefox', viewport: use.viewport } },
+    { name: 'compose-webkit', testMatch: 'compose.spec.ts', dependencies: ['host-contract'], use: { browserName: 'webkit', viewport: use.viewport } },
     { name: 'schema-kinds', testMatch: 'schema-kinds.spec.ts', dependencies: ['host-contract'], use },
     {
       name: 'schema-templates',

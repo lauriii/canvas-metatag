@@ -13,6 +13,7 @@ import {
   openSeo,
   openTemplate,
   outputRows,
+  previewNode,
   publishAll,
   readHead,
   reviewRows,
@@ -153,19 +154,6 @@ async function expectActiveClear(frame: FrameLocator) {
     .toBe(true);
 }
 
-/** Switches the template editor's preview to another node of the type. */
-async function previewNode(page: Page, bundle: string, node: { id: number; title: string }): Promise<void> {
-  // By keyboard: a long previewed title lets Canvas's top bar cover the
-  // picker's button.
-  await page.getByTestId('select-content-preview-item').press('Enter');
-  await page.getByRole('menuitem', { name: node.title }).click();
-  await expect(page).toHaveURL(new RegExp(`/canvas/template/node/${bundle}/full/${node.id}$`));
-  // Until Canvas's menu has gone, its page takes no pointer events: a click
-  // into the dialog right after would be lost.
-  await expect(page.getByRole('menu')).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents)).not.toBe('none');
-}
-
 test('the Event template opens on its draft and offers the type fields with their values', async ({
   drupal,
   page,
@@ -198,7 +186,10 @@ test('the Event template opens on its draft and offers the type fields with thei
   const menu = await linkMenu(frame);
   await expect(menu.locator('.seo-menu-group')).toHaveText(['Event', 'Page']);
   await expect(menu.getByRole('option', { name: /^Status, / })).toContainText(event.status);
-  await expect(menu.getByRole('option', { name: /^Description, / })).toHaveCount(2);
+  // In a place that composes, the field labelled like the fact is told
+  // apart by its machine name.
+  await expect(menu.getByRole('option', { name: /^Description, / })).toHaveCount(1);
+  await expect(menu.getByRole('option', { name: /^Description \(body\), / })).toHaveCount(1);
   await menu.getByRole('textbox', { name: 'Find a field' }).fill('Poster › Image');
   await expect(menu.getByRole('option', { name: /^Poster › Image, / })).toHaveAttribute('aria-disabled', 'true');
   await menu.getByRole('textbox', { name: 'Find a field' }).fill('');
@@ -307,7 +298,11 @@ test('the Event template opens on its draft and offers the type fields with thei
   // Delete on Street address, then typing at once: the typed text.
   await box(frame, 'Street address').press('Delete');
   await page.keyboard.type('Main street 1');
-  await expect(textbox(frame, 'Street address')).toHaveValue('Main street 1');
+  // A street line composes: the typed text is in its composer.
+  await expect(textbox(frame, 'Street address')).toHaveText('Main street 1');
+  // Emptied, its menu links the whole value again.
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
   await page.keyboard.press('Alt+ArrowDown');
   await page.keyboard.type('Street address');
   await page.keyboard.press('Enter');
@@ -494,7 +489,7 @@ test('the dialog follows the previewed event, also through hidden references and
   await previewNode(page, 'event', event);
   await box(frame, UI.field.description).press('A');
   await page.keyboard.type(' change during the switch');
-  await expect(textbox(frame, UI.field.description)).toHaveValue('A change during the switch');
+  await expect(textbox(frame, UI.field.description)).toHaveText('A change during the switch');
   await expect.poll(draft, { timeout: 30_000 }).toEqual({ text: 'A change during the switch' });
   await button(frame, `Reset ${UI.field.description}`).click();
   await expect.poll(draft, { timeout: 30_000 }).toBeUndefined();
@@ -537,15 +532,17 @@ test('on a long event the link menu works by keyboard in a short window, long va
       const id = element.getAttribute('aria-activedescendant');
       return id ? (element.ownerDocument.getElementById(id)?.firstElementChild?.textContent ?? '') : '';
     });
-  await expect.poll(active).toBe('Description');
+  // The body is labelled like the Description fact: its machine name tells
+  // them apart where the description composes.
+  await expect.poll(active).toBe('Description (body)');
   await page.keyboard.press('ArrowDown');
   await expect.poll(active).toBe('Description › Summary');
   await expect(menu.getByRole('option', { name: /^Description › Summary/ })).toBeInViewport();
 
   // The 6 KB body is read as a short excerpt; its name carries the label and
   // at most 150 characters.
-  const entry = menu.getByRole('option', { name: /^Description, / }).first();
-  await expect(entry).toHaveAccessibleName(/^Description, .{0,150}…?$/su);
+  const entry = menu.getByRole('option', { name: /^Description \(body\), / }).first();
+  await expect(entry).toHaveAccessibleName(/^Description \(body\), .{0,150}…?$/su);
   const body = entry.locator('span').last();
   await expect(body).toHaveAttribute('title', /^Each work is introduced by the musicians who play it/);
   expect(((await body.getAttribute('title')) ?? '').length).toBeLessThanOrEqual(160);
@@ -614,14 +611,14 @@ test('in a short window the link menu shows its values', async ({ drupal, page }
     await expect(description).toHaveAccessibleDescription(/^Linked to Event › Performers › /);
     await page.keyboard.press('Backspace');
     await expect(textbox(frame, UI.field.description)).toBeFocused();
-    await expect(textbox(frame, UI.field.description)).toHaveValue('');
+    await expect(textbox(frame, UI.field.description)).toHaveText('');
     // In the empty input, `{` opens the menu; Escape, then a key at once,
     // types it.
     await page.keyboard.type('{');
     await expect(menu).toBeVisible();
     await page.keyboard.press('Escape');
     await page.keyboard.type('x');
-    await expect(textbox(frame, UI.field.description)).toHaveValue('x');
+    await expect(textbox(frame, UI.field.description)).toHaveText('x');
     await page.keyboard.press('Backspace');
     await textbox(frame, UI.field.description).blur();
     await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
@@ -694,7 +691,7 @@ test('in a short window the link menu shows its values', async ({ drupal, page }
   await page.keyboard.press('Escape');
   await page.keyboard.press('Backspace');
   await expect(textbox(frame, UI.field.description)).toBeFocused();
-  await expect(textbox(frame, UI.field.description)).toHaveValue('');
+  await expect(textbox(frame, UI.field.description)).toHaveText('');
   await textbox(frame, UI.field.description).blur();
   const titleBox = box(frame, UI.field.title);
   await titleBox.click();
@@ -801,7 +798,7 @@ test('a job posting: its group is named in the menu, its square logo makes a sma
   await expect(menu.locator('.seo-menu-group', { hasText: 'Job posting' })).toBeVisible();
   await expect(menu.getByRole('group', { name: 'Job posting' })).toBeVisible();
   await expect(menu.getByRole('group', { name: 'Page' }).getByRole('option', { name: /^Description, / })).toHaveCount(1);
-  await expect(menu.getByRole('group', { name: 'Job posting' }).getByRole('option', { name: /^Description, / })).toHaveCount(1);
+  await expect(menu.getByRole('group', { name: 'Job posting' }).getByRole('option', { name: /^Description \(\w+\), / })).toHaveCount(1);
   const { violations } = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
   expect(
     violations
@@ -1045,7 +1042,7 @@ test('text takes its own direction: right to left in previews and inputs, labels
   expect(await direction(recipe.locator('.seo-linked-value'))).toBe('rtl');
   await recipe.press('4');
   const input = textbox(frame, UI.field.description);
-  await expect(input).toHaveValue('4');
+  await expect(input).toHaveText('4');
   await page.keyboard.type(' ביצים ברוטב');
   expect(await direction(input)).toBe('rtl');
   expect(await direction(frame.locator('label', { hasText: /^Description$/ }).first())).toBe('ltr');

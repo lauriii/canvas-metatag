@@ -46,17 +46,34 @@ readFileSync('index.html', 'utf8')
       found.push(`index.html:${index + 1}: loads from another origin`);
   });
 
-// The bundle's budget: its gzipped size after extend-structured-data-by-id
-// and its review rounds (243,711 bytes) plus 5 KB. Raise it on purpose, never
-// by accident.
-const BUDGET = 243711 + 5 * 1024;
-const gzipped = gzipSync(readFileSync('dist/main.global.js'), { level: 9 }).length;
+// The budget of what every opening loads, gzipped: main.js and the chunks it
+// imports. 243,711 bytes before compose-values-from-fields; 256,426 after it
+// (+5.2 %, within design D10's 15 %: the composing rules in values.ts, words
+// in model.ts and checks.ts, and the composer's place in Value.tsx; the
+// editor library is its own chunk below), plus 5 KB. Raise it on purpose,
+// never by accident.
+const BUDGET = 256426 + 5 * 1024;
+const size = (file) => gzipSync(readFileSync(`dist/${file}`), { level: 9 }).length;
+const main = readFileSync('dist/main.js', 'utf8');
+const imported = [...main.matchAll(/from"\.\/([\w-]+\.js)"/g)].map((match) => match[1]);
+const gzipped = size('main.js') + imported.reduce((sum, file) => sum + size(file), 0);
 if (gzipped > BUDGET) {
-  found.push(`dist/main.global.js: ${gzipped} bytes gzipped, over the budget of ${BUDGET}`);
+  found.push(`dist/main.js and its chunks: ${gzipped} bytes gzipped, over the budget of ${BUDGET}`);
+}
+// The composer and its editor library load only where a value composes, as
+// their own chunk, never with every opening (design D10: at most 45 KB).
+const COMPOSER_BUDGET = 45 * 1024;
+const lazy = [...main.matchAll(/import\("\.\/(Composer-[\w-]+\.js)"\)/g)].map((match) => match[1]);
+if (lazy.length !== 1 || imported.some((file) => file.startsWith('Composer-'))) {
+  found.push('dist/main.js: the composer must be one chunk that main.js loads only when it is needed');
+}
+const composer = lazy.length === 1 ? size(lazy[0]) : 0;
+if (composer > COMPOSER_BUDGET) {
+  found.push(`dist/${lazy[0]}: ${composer} bytes gzipped, over the composer's budget of ${COMPOSER_BUDGET}`);
 }
 
 if (found.length) {
   console.error(`Forbidden patterns:\n${found.join('\n')}`);
   process.exit(1);
 }
-console.log(`No forbidden patterns. The bundle is ${gzipped} bytes gzipped (budget ${BUDGET}).`);
+console.log(`No forbidden patterns. Every opening loads ${gzipped} bytes gzipped (budget ${BUDGET}); the composer ${composer} (budget ${COMPOSER_BUDGET}).`);

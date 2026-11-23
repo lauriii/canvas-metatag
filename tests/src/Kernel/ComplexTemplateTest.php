@@ -672,7 +672,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $seen['again'] = $read();
     $publish('node', 'venue_hidden');
     $seen['venue published'] = $read();
-    // The first performer, not the second, who was there all along.
+    // The first performer joins the second, who was there all along.
     $publish('node', 'person_hidden');
     $seen['first performer published'] = $read();
     $publish('media', 'lamp_prototype');
@@ -682,17 +682,19 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $seen['venue deleted'] = $read();
 
     $title = 'Workshop 🎻 Strings for beginners 👩🏽‍🔬🇫🇮';
-    // With a performer hidden, the description is the node's own.
-    $own = 'Bring your own instrument. 🎶';
+    // In text a field gives every item visitors may see: the hidden first
+    // performer is left out, the second is kept.
+    $own = 'Mira Kallio';
     $image = $this->fileUrl('lamp_prototype');
+    $both = 'Unannounced guest, Mira Kallio';
     self::assertSame([
       'before' => ['MISS', "$title | Example", $own, 'MISS', NULL],
       'again' => ['HIT', "$title | Example", $own, 'HIT', NULL],
       'venue published' => ['MISS', "$title | Rehearsal Room B", $own, 'HIT', NULL],
-      'first performer published' => ['MISS', "$title | Rehearsal Room B", 'Unannounced guest', 'HIT', NULL],
+      'first performer published' => ['MISS', "$title | Rehearsal Room B", $both, 'HIT', NULL],
       // The same media item is the event's poster: its head is built again.
-      'first gallery image published' => ['MISS', "$title | Rehearsal Room B", 'Unannounced guest', 'MISS', $image],
-      'venue deleted' => ['MISS', "$title | Example", 'Unannounced guest', 'HIT', $image],
+      'first gallery image published' => ['MISS', "$title | Rehearsal Room B", $both, 'MISS', $image],
+      'venue deleted' => ['MISS', "$title | Example", $both, 'HIT', $image],
     ], $seen);
   }
 
@@ -743,7 +745,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $state = $this->state('node.recipe.full', 'recipe_bread');
     self::assertSame([FALSE, FALSE], [$state['target']['published'], $state['target']['has_draft']]);
     self::assertSame('Ruisleipä (Finnish rye bread) | Recipes', $state['resolved']['head']['title']);
-    self::assertSame('500 g rye flour', self::meta($state['resolved']['head'])['description']);
+    self::assertSame('500 g rye flour, 500 ml water, 100 g sourdough starter, 10 g salt', self::meta($state['resolved']['head'])['description']);
     self::assertSame($this->fileUrl('rye_bread'), self::meta($state['resolved']['head'])['og:image']);
 
     // Only the full template has SEO settings: the teaser has no state, and
@@ -867,7 +869,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
         'sourceType' => 'entity-field',
       ],
     ], $state['target']['values']['social']['image']);
-    self::assertSame(['field' => 'field_poster', 'reason' => 'missing'], $state['broken']['social.image']);
+    self::assertSame(['path' => 'social.image', 'field' => 'field_poster', 'reason' => 'missing'], $state['broken']['social.image']);
     self::assertNotContains('field_poster', array_column($state['sources'], 'field'));
     $values = $state['target']['values'];
     $response = $this->putTemplate($template, [
@@ -974,7 +976,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     self::assertContains(AutoSaveManager::CACHE_TAG, $response->getCacheableMetadata()->getCacheTags());
     $head = self::decodeResponse($this->content($this->complex['path']['recipe_bread']))['head'];
     self::assertSame('Ruisleipä (Finnish rye bread) | Recipes', $head['title']);
-    self::assertSame('500 g rye flour', self::meta($head)['description']);
+    self::assertSame('500 g rye flour, 500 ml water, 100 g sourdough starter, 10 g salt', self::meta($head)['description']);
   }
 
   /**

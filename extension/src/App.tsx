@@ -35,6 +35,7 @@ import { SiteView } from './components/SiteTab';
 import { SocialTab } from './components/SocialTab';
 import { Btn, InfoTip, Notice, reveal } from './components/ui';
 import { type Host, type HostContext, createHost } from './host';
+import { setDateLocale } from './readback';
 import {
   type DraftIO,
   type Footer,
@@ -219,6 +220,8 @@ export default function App() {
   const [state, rawDispatch] = useReducer(reducer, undefined, () =>
     initialState(host.context()),
   );
+  // Dates read as the server's words for the item do, before anything renders.
+  setDateLocale(state.server?.date_locale);
   const [sheet, setSheet] = useState<SheetState | null>(null);
   const opener = useRef<HTMLElement | null>(null);
   const [jump, setJump] = useState<AppContext['jump']>(null);
@@ -887,6 +890,7 @@ export default function App() {
       ai: server.capabilities.ai?.available === true,
       published: server.target.published,
       typeLabel: server.target.label,
+      languages: Object.keys(server.languages).length,
       defaultLanguage:
         server.languages[server.target.default_langcode ?? ''] ??
         'default-language',

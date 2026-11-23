@@ -17,8 +17,10 @@ use Drupal\Component\Uuid\Uuid;
  * both.
  *
  * A value is a map with exactly one key: `text` (typed, never scanned),
- * `fact` (one of FACTS), `media` (a media UUID, images only) or `source` (a
- * Canvas entity-field source, templates only; see Sources).
+ * `fact` (one of FACTS), `media` (a media UUID, images only), `source` (a
+ * Canvas entity-field source, templates only; see Sources) or `parts` (a
+ * composition of typed text with facts and sources, in a template text that
+ * composes; see composes()).
  */
 final class Values {
 
@@ -36,6 +38,24 @@ final class Values {
     'image' => 'image',
     'identity' => 'ref',
   ];
+
+  /**
+   * The facts that read as words in text: what a composition may hold.
+   */
+  public const TEXT_FACTS = ['title', 'description', 'site', 'author', 'published', 'modified'];
+
+  /**
+   * The fields and facts one composition may hold.
+   */
+  public const MAX_PARTS = 8;
+
+  /**
+   * The room a description-like composition gives a long text part.
+   *
+   * About a search snippet, and never less than the floor for that part.
+   */
+  public const LONG_ROOM = 155;
+  public const LONG_FLOOR = 70;
 
   /**
    * The value kind of each structured data property kind.
@@ -75,6 +95,7 @@ final class Values {
   private const IMAGE = 'Choose an image from the list.';
   private const FACT = 'Choose a value from the list.';
   private const FIELD = 'Choose a field from the list.';
+  private const TOO_MANY = 'Use at most 8 fields in one value.';
   private const CUSTOM_SHAPE = 'Use one object, or a list of up to 10 objects, each with "@type".';
   private const DEEP = 'Too deeply nested (items and lists count). Keep to 8.';
   private const AT_KEYS = 'Only “@type”, “@id” and a schema.org “@context” may start with @.';
@@ -126,11 +147,13 @@ final class Values {
    *   The sparse values object.
    * @param string $scope
    *   One of 'page', 'template', 'site'.
-   * @param (callable(array, string): bool)|null $accepts
+   * @param (callable(array, string, string): bool)|null $accepts
    *   Write mode: whether the template may store a source for a value of a
-   *   kind. NULL for read mode: any well-shaped source is kept (it reads as
-   *   broken when it cannot be read), and callers ignore the errors, because
-   *   every offending key is already left out of the clean values.
+   *   kind (`words` in a place that composes, `line` for a part of a
+   *   title-like one, which takes no long text), at a dotted path. NULL for
+   *   read mode: any well-shaped source is kept (it reads as broken when it
+   *   cannot be read), and callers ignore the errors, because every
+   *   offending key is already left out of the clean values.
    * @param string $inheritedType
    *   The structured-data type that applies when the values name none: a
    *   page translation's details belong to the type of the default one.
@@ -152,8 +175,8 @@ final class Values {
     $errors = [];
     $paths = [];
     $clean = [];
-    $value = static function (mixed $item, string $path, string $kind, int $max = 255) use ($scope, $accepts, &$errors): ?array {
-      return self::value($item, $path, $kind, $scope, $accepts, $max, $errors);
+    $value = static function (mixed $item, string $path, string $kind, int $max = 255, ?array $prop = NULL) use ($scope, $accepts, &$errors): ?array {
+      return self::value($item, $path, $kind, $scope, $accepts, $max, $errors, self::composes($prop, $path, $scope));
     };
     foreach ($input as $key => $item) {
       if (!in_array($key, self::KEYS[$scope] ?? [], TRUE)) {
@@ -338,12 +361,16 @@ final class Values {
    * The four text outputs, and the two parts of the title.
    *
    * A value that is not set, or that gives nothing for the item (an empty,
-   * hidden or broken link), gives its default.
+   * hidden or broken link, a composition whose fields all give nothing),
+   * gives its default.
    *
    * @param array $effective
    *   The result of cascade().
-   * @param callable(array): string $text
-   *   The text a value gives for the item; '' for none.
+   * @param callable(array, string): (string|list<string>) $text
+   *   What a value gives for the item, in a form: `line` for the title's main
+   *   part and the social title, `words` for the description and the social
+   *   description, `text` for the ending. A string, '' for none; for a
+   *   composition its segments (compose()), [] for none.
    * @param string $separator
    *   The identity's separator.
    * @param array|null $siteEnd
@@ -355,29 +382,262 @@ final class Values {
    *   the parts the title is made of, as they were cut.
    */
   public static function texts(array $effective, callable $text, string $separator, ?array $siteEnd = NULL): array {
-    $value = static function (?array $value, ?array $default, int $max) use ($text): string {
-      $out = $value === NULL ? '' : self::cut($text($value), $max);
-      return $out !== '' || $default === NULL ? $out : self::cut($text($default), $max);
+    $segments = static function (?array $value, ?array $default, string $form) use ($text): array {
+      $out = $value === NULL ? [] : (array) $text($value, $form);
+      return self::plain(implode('', $out), PHP_INT_MAX) !== '' || $default === NULL ? $out : (array) $text($default, $form);
     };
-    $main = $value($effective['title'] ?? NULL, ['fact' => 'title'], 255);
+    // A composition over its room loses whole fields from its end, with the
+    // words that go with them, before words: none of its words dangle.
+    $value = static fn (?array $value, ?array $default, int $max, string $form): string => self::cut(implode('', self::fit($segments($value, $default, $form), $max)), $max);
+    // The main part keeps its segments: a cut drops whole fields first.
+    $main = $segments($effective['title'] ?? NULL, ['fact' => 'title'], 'line');
     // Without an ending of its own, or with one that gives nothing for the
     // item, the site's; without one there, the site name. "No ending" is the
     // empty typed ending.
     $site_end = $siteEnd ?? ['fact' => 'site'];
     $ending = $effective['title_end'] ?? $site_end;
-    $end = $ending === ['text' => ''] ? '' : $value($ending, $site_end, 255);
+    $end = $ending === ['text' => ''] ? '' : $value($ending, $site_end, 255, 'text');
     [$title, $main, $end] = self::title($main, $end, $separator);
-    $description = $value($effective['description'] ?? NULL, ['fact' => 'description'], 1000);
+    $description = $value($effective['description'] ?? NULL, ['fact' => 'description'], 1000, 'words');
     $social = $effective['social'] ?? [];
-    $social_description = $value($social['description'] ?? NULL, NULL, 1000);
+    $social_description = $value($social['description'] ?? NULL, NULL, 1000, 'words');
     return [
-      'title' => $title !== '' ? $title : $value(['fact' => 'site'], NULL, 255),
+      'title' => $title !== '' ? $title : $value(['fact' => 'site'], NULL, 255, 'text'),
       'description' => $description,
-      'social_title' => $value($social['title'] ?? NULL, ['fact' => 'title'], 255),
+      'social_title' => $value($social['title'] ?? NULL, ['fact' => 'title'], 255, 'line'),
       'social_description' => $social_description !== '' ? $social_description : $description,
       'title_main' => $main,
       'title_end' => $end,
     ];
+  }
+
+  /**
+   * Whether a value in a place may be a composition (`parts`).
+   *
+   * At template scope: the title's main part, the description, the social
+   * texts, and a structured data detail the registry marks `compose`. Never
+   * the title ending, a page or the site.
+   *
+   * @param array|null $prop
+   *   The registry property of a structured data detail; NULL elsewhere.
+   * @param string $path
+   *   The value's dotted path.
+   * @param string $scope
+   *   One of 'page', 'template', 'site'.
+   */
+  public static function composes(?array $prop, string $path, string $scope): bool {
+    if ($scope !== 'template') {
+      return FALSE;
+    }
+    return in_array($path, ['title', 'description', 'social.title', 'social.description'], TRUE)
+      || (str_starts_with($path, 'schema.props.') && !empty($prop['compose']) && empty($prop['html']));
+  }
+
+  /**
+   * Whether a place that composes is title-like.
+   *
+   * The title's main part, the social title, a name, a headline, a street
+   * address line: at most two items of a field, and no long text. The
+   * description, the social description and a description detail are
+   * description-like.
+   */
+  public static function titleLike(string $path): bool {
+    return !preg_match('/(^|[._])description$/D', $path);
+  }
+
+  /**
+   * Joins a composition: which words go with which field.
+   *
+   * A run is the typed text between two fields or facts, before the first,
+   * or after the last. The run before the first goes with it, unless its
+   * last character that is not a space is label punctuation: then it shows
+   * whenever anything does. A run between two goes with the one after it,
+   * except a closing mark at its first character, which goes with the one
+   * before; it shows only when that one gives a value and one before it was
+   * kept. The run after the last goes with the last, and never shows when it
+   * holds only separators. A field or fact that gives nothing is left out
+   * with the runs that go with it; when every one gives nothing, so does the
+   * composition.
+   *
+   * @param list<array> $parts
+   *   Canonical parts (fold()).
+   * @param callable(array): string $read
+   *   What a fact or source part gives for the item, made plain on its own;
+   *   '' for nothing.
+   * @param (callable(array): bool)|null $long
+   *   Whether a part is long text: it gets the room the rest of the result
+   *   leaves of $room, cut at a sentence (sentences()). With no room it is
+   *   used as read.
+   * @param int $room
+   *   The room a description-like place has; 0 for none.
+   *
+   * @return list<string>
+   *   The segments: each kept field or fact with the runs that go with it,
+   *   in order. Joined, the composed text. [] when every part gives nothing.
+   */
+  public static function compose(array $parts, callable $read, ?callable $long = NULL, int $room = 0): array {
+    $runs = [''];
+    $fields = [];
+    foreach ($parts as $part) {
+      if (array_key_exists('text', $part)) {
+        $runs[count($fields)] .= (string) $part['text'];
+        continue;
+      }
+      $fields[] = $part;
+      $runs[] = '';
+    }
+    if ($fields === []) {
+      return [];
+    }
+    $values = array_map(static fn (array $part): string => (string) $read($part), $fields);
+    $kept = array_map(static fn (string $value): bool => !self::blank($value), $values);
+    if (!in_array(TRUE, $kept, TRUE)) {
+      return [];
+    }
+    $longs = $long === NULL ? [] : array_keys(array_filter($fields, $long));
+    if ($longs !== []) {
+      $rest = $values;
+      foreach ($longs as $at) {
+        $rest[$at] = '';
+      }
+      $used = mb_strlen(self::plain(implode('', self::join($runs, $rest, $kept)), PHP_INT_MAX));
+      $share = intdiv(max(0, $room - $used), count($longs));
+      foreach ($room > 0 ? $longs : [] as $at) {
+        $values[$at] = self::sentences($values[$at], max(self::LONG_FLOOR, $share));
+      }
+    }
+    return self::join($runs, $values, $kept);
+  }
+
+  /**
+   * The segments of a composition, from its runs and its fields' values.
+   *
+   * @param list<string> $runs
+   *   One more than the fields: before the first, between, after the last.
+   * @param list<string> $values
+   *   What each field or fact gives.
+   * @param list<bool> $kept
+   *   Whether each gave a value.
+   *
+   * @return list<string>
+   *   See compose().
+   */
+  private static function join(array $runs, array $values, array $kept): array {
+    $count = count($values);
+    $segments = [];
+    $lead = $runs[0];
+    // A label always shows; any other lead-in goes with the first field.
+    $label = (bool) preg_match('/[:.!?…|·•–—\-\/]\s*$/uD', $lead);
+    $pending = $label ? $lead : '';
+    $before = FALSE;
+    // A connector left out with an opening mark: the closing mark after its
+    // field goes too, so a bracket is never left unbalanced.
+    $orphan = FALSE;
+    $close = static fn (string $run): string => preg_match('/^(?:\p{Pe}|[\p{Pi}\p{Pf}"\'](?=$|[\s\p{P}]))/u', $run, $match) ? $match[0] : '';
+    for ($at = 0; $at < $count; $at++) {
+      $run = $at === 0 ? ($label ? '' : $lead) : $runs[$at];
+      // A closing bracket, or a quote followed by a space, punctuation or
+      // nothing, goes with the field before.
+      $mark = $at > 0 ? $close($run) : '';
+      if ($mark !== '') {
+        if ($kept[$at - 1] && !$orphan) {
+          $segments[array_key_last($segments)] .= $mark;
+        }
+        $run = substr($run, strlen($mark));
+      }
+      $orphan = FALSE;
+      if (!$kept[$at]) {
+        continue;
+      }
+      // A connector needs something kept before it; the lead-in does not.
+      $connector = $at > 0 && !$before;
+      $orphan = $connector && preg_match('/(?:\p{Ps}|\p{Pi}|(?:^|\s)["\'])$/u', $run) === 1;
+      $segments[] = $pending . ($connector ? '' : $run) . $values[$at];
+      $pending = '';
+      $before = TRUE;
+    }
+    // A separator left at the end never shows; a unit does.
+    $tail = $runs[$count];
+    if ($orphan) {
+      $tail = substr($tail, strlen($close($tail)));
+    }
+    if ($kept[$count - 1] && !preg_match('/^[\s·•|–—\-\/,;:]*$/uD', $tail)) {
+      $segments[array_key_last($segments)] .= $tail;
+    }
+    return $segments;
+  }
+
+  /**
+   * A text cut to a room at its last whole sentence, else at a word with "…".
+   *
+   * @param string $text
+   *   The text.
+   * @param int $room
+   *   The code points it may have.
+   */
+  public static function sentences(string $text, int $room): string {
+    $text = self::plain($text, PHP_INT_MAX);
+    if (mb_strlen($text) <= $room) {
+      return $text;
+    }
+    // The last sentence end within the room, followed by a space.
+    $start = mb_substr($text, 0, $room + 1);
+    if (preg_match_all('/[.!?…。！？][\p{Pe}\p{Pf}"\'»]*(?=\s)/u', $start, $ends, PREG_OFFSET_CAPTURE)) {
+      [$mark, $offset] = end($ends[0]);
+      return substr($start, 0, $offset + strlen($mark));
+    }
+    // Else at a word, with room for the ellipsis.
+    $cut = mb_substr($text, 0, max(1, $room - 1));
+    $space = mb_strrpos($cut, ' ');
+    if (mb_substr($text, mb_strlen($cut), 1) !== ' ' && $space !== FALSE && $space > 0) {
+      $cut = mb_substr($cut, 0, $space);
+    }
+    return rtrim($cut, ' ,;:') . '…';
+  }
+
+  /**
+   * The canonical form of a composition's parts.
+   *
+   * Adjacent text merges and empty text goes; whitespace before the
+   * first field or fact and after the last is trimmed, and kept between
+   * them. One fact or source and no text is that value; text alone is typed
+   * text.
+   *
+   * @param list<array> $parts
+   *   Parts that each have one key: text, fact or source.
+   *
+   * @return array|null
+   *   The value, or NULL for nothing.
+   */
+  public static function fold(array $parts): ?array {
+    $out = [];
+    foreach ($parts as $part) {
+      if (array_key_exists('text', $part)) {
+        if ($part['text'] === '') {
+          continue;
+        }
+        $last = array_key_last($out);
+        if ($last !== NULL && array_key_exists('text', $out[$last])) {
+          $out[$last]['text'] .= $part['text'];
+          continue;
+        }
+      }
+      $out[] = $part;
+    }
+    $fields = array_keys(array_filter($out, static fn (array $part): bool => !array_key_exists('text', $part)));
+    if ($fields === []) {
+      $text = (string) ($out[0]['text'] ?? '');
+      return self::blank($text) ? NULL : ['text' => $text];
+    }
+    if ($fields[0] > 0) {
+      $out[0]['text'] = (string) preg_replace('/^[\s\x{FEFF}]+/u', '', $out[0]['text']);
+    }
+    $last = count($out) - 1;
+    if (end($fields) < $last) {
+      $out[$last]['text'] = (string) preg_replace('/[\s\x{FEFF}]+$/u', '', $out[$last]['text']);
+    }
+    $out = array_values(array_filter($out, static fn (array $part): bool => ($part['text'] ?? NULL) !== ''));
+    return count($out) === 1 ? $out[0] : ['parts' => $out];
   }
 
   /**
@@ -502,22 +762,47 @@ final class Values {
   /**
    * Joins the title's parts; an empty part goes with its separator.
    *
-   * Over 255 characters the main part is shortened, by the rules of cut(),
-   * so that the ending stays whole.
+   * Over 255 characters the main part is shortened so that the ending stays
+   * whole: a composed main part first loses whole fields from its end, with
+   * the words that go with them, then words by the rules of cut().
+   *
+   * @param list<string> $main
+   *   The main part: its segments (compose()), or its text as one.
+   * @param string $end
+   *   The ending, cut.
+   * @param string $separator
+   *   The identity's separator.
    *
    * @return array{string, string, string}
    *   The title, and its main part and ending as used.
    */
-  private static function title(string $main, string $end, string $separator): array {
+  private static function title(array $main, string $end, string $separator): array {
+    $glue = ' ' . self::plain($separator, 3) . ' ';
+    $text = self::plain(implode('', $main), PHP_INT_MAX);
+    $room = $end === '' || $text === '' ? 255 : 255 - mb_strlen($glue) - mb_strlen($end);
+    $main = $room > 0 ? self::cut(implode('', self::fit($main, $room)), min(255, $room)) : '';
     if ($main === '' || $end === '') {
       return [$main . $end, $main, $end];
     }
-    $glue = ' ' . self::plain($separator, 3) . ' ';
-    $room = 255 - mb_strlen($glue) - mb_strlen($end);
-    if (mb_strlen($main) > $room) {
-      $main = $room > 0 ? self::cut($main, $room) : '';
+    return [$main . $glue . $end, $main, $end];
+  }
+
+  /**
+   * The segments of a composition that fit a room, dropped whole from its end.
+   *
+   * @param list<string> $segments
+   *   Its segments (compose()), or a text as one.
+   * @param int $room
+   *   The characters it may take once plain.
+   *
+   * @return list<string>
+   *   At least the first segment; cut() cuts what is still too long.
+   */
+  private static function fit(array $segments, int $room): array {
+    while (count($segments) > 1 && mb_strlen(self::plain(implode('', $segments), PHP_INT_MAX)) > $room) {
+      array_pop($segments);
     }
-    return $main === '' ? [$end, '', $end] : [$main . $glue . $end, $main, $end];
+    return $segments;
   }
 
   /**
@@ -548,7 +833,9 @@ final class Values {
     foreach ($values as $key => $value) {
       // The empty values that are stored: "No ending", and "Someone else"
       // not named yet (schema(): an organizer or author on a Canvas page).
-      if ($value === ['text' => ''] && in_array($key, ['title_end', 'organizer', 'author'], TRUE)) {
+      // A composition is canonical as fold() leaves it: a space between two
+      // fields is a part of its own.
+      if (($value === ['text' => ''] && in_array($key, ['title_end', 'organizer', 'author'], TRUE)) || ($key === 'parts' && is_array($value) && $value !== [])) {
         continue;
       }
       if (is_array($value)) {
@@ -590,8 +877,11 @@ final class Values {
    *   The length typed text may have.
    * @param array<string, string> $errors
    *   Collects path => sentence.
+   * @param bool $composes
+   *   The place composes (composes()): it reads fields and facts as words,
+   *   and takes a composition.
    */
-  private static function value(mixed $value, string $path, string $kind, string $scope, ?callable $accepts, int $max, array &$errors): ?array {
+  private static function value(mixed $value, string $path, string $kind, string $scope, ?callable $accepts, int $max, array &$errors, bool $composes = FALSE): ?array {
     if (!is_array($value) || count($value) !== 1) {
       $errors[$path] = self::INVALID;
       return NULL;
@@ -599,6 +889,13 @@ final class Values {
     $key = array_key_first($value);
     $item = $value[$key];
     switch ($key) {
+      case 'parts':
+        if (!$composes) {
+          $errors[$path] = self::NOT_HERE;
+          return NULL;
+        }
+        return self::parts($item, $path, $accepts, $max, $errors);
+
       case 'text':
         if ($kind === 'image') {
           $errors[$path] = self::IMAGE;
@@ -628,7 +925,8 @@ final class Values {
           'site' => $path === 'title_end',
           default => $path === 'title_end' || (str_starts_with($path, 'schema.props.') && $kind !== 'text'),
         };
-        $fits = is_string($item) && (self::FACTS[$item] ?? NULL) === $kind && ($path !== 'title_end' || $scope === 'template' || $item === 'site');
+        // In a place that composes, a date reads as words.
+        $fits = is_string($item) && ((self::FACTS[$item] ?? NULL) === $kind || ($composes && in_array($item, self::TEXT_FACTS, TRUE))) && ($path !== 'title_end' || $scope === 'template' || $item === 'site');
         $error = !$here ? self::NOT_HERE : (!$fits ? self::FACT : NULL);
         break;
 
@@ -642,7 +940,7 @@ final class Values {
         $error = match (TRUE) {
           $item === NULL => self::INVALID,
           $scope !== 'template' => self::NOT_HERE,
-          $accepts !== NULL && !$accepts($item, $kind) => self::FIELD,
+          $accepts !== NULL && !$accepts($item, $composes ? 'words' : $kind, $path) => self::FIELD,
           default => NULL,
         };
         break;
@@ -655,6 +953,71 @@ final class Values {
       return NULL;
     }
     return [$key => $item];
+  }
+
+  /**
+   * Cleans a composition, in canonical form (fold()).
+   *
+   * Each part is typed text, a fact that reads as words or a source that
+   * gives words; a title-like place takes no long text. At most MAX_PARTS
+   * facts and sources; the typed text of all parts counts against $max.
+   *
+   * @return array|null
+   *   The folded value, or NULL for nothing or a refusal.
+   */
+  private static function parts(mixed $parts, string $path, ?callable $accepts, int $max, array &$errors): ?array {
+    if (!is_array($parts) || $parts === [] || !array_is_list($parts)) {
+      $errors[$path] = self::INVALID;
+      return NULL;
+    }
+    $clean = [];
+    foreach ($parts as $part) {
+      $key = is_array($part) && count($part) === 1 ? array_key_first($part) : NULL;
+      $item = $key === NULL ? NULL : $part[$key];
+      if ($key === 'source') {
+        $item = Sources::wellShaped($item) ? ['expression' => $item['expression'], 'sourceType' => $item['sourceType']] : NULL;
+      }
+      if (!in_array($key, ['text', 'fact', 'source'], TRUE) || $item === NULL || ($key !== 'source' && !is_string($item))) {
+        // A media item, a picked page or another composition is no part.
+        $errors[$path] = $key === 'fact' ? self::FACT : self::INVALID;
+        return NULL;
+      }
+      $clean[] = [$key => $key === 'text' ? self::strip($item) : $item];
+    }
+    // One field and no text is that link, by the rules of a whole value.
+    $folded = self::fold($clean);
+    if (!isset($folded['parts'])) {
+      return $folded === NULL ? NULL : self::value($folded, $path, 'text', 'template', $accepts, $max, $errors, TRUE);
+    }
+    $clean = $folded['parts'];
+    $line = self::titleLike($path);
+    $many = count(array_filter($clean, static fn (array $part): bool => !isset($part['text']))) > self::MAX_PARTS;
+    foreach ($clean as $part) {
+      $error = $many ? self::TOO_MANY : match (array_key_first($part)) {
+        'text' => NULL,
+        // The Description fact is long text: never in a title.
+        'fact' => !in_array($part['fact'], self::TEXT_FACTS, TRUE) ? self::FACT : ($line && $part['fact'] === 'description' ? self::FIELD : NULL),
+        'source' => $accepts !== NULL && !$accepts($part['source'], $line ? 'line' : 'words', $path) ? self::FIELD : NULL,
+      };
+      if ($error !== NULL) {
+        $errors[$path] = $error;
+        return NULL;
+      }
+    }
+    // Typed text counts against the place's length; fields count as nothing
+    // until the output is cut. Too long is reported and cut from the end.
+    $typed = array_sum(array_map(static fn (array $part): int => isset($part['text']) ? mb_strlen($part['text']) : 0, $clean));
+    if ($typed > $max) {
+      $errors[$path] = sprintf('Use at most %d characters.', $max);
+      for ($at = count($clean) - 1; $at >= 0 && $typed > $max; $at--) {
+        if (isset($clean[$at]['text'])) {
+          $length = mb_strlen($clean[$at]['text']);
+          $clean[$at]['text'] = mb_substr($clean[$at]['text'], 0, max(0, $length - ($typed - $max)));
+          $typed -= $length - mb_strlen($clean[$at]['text']);
+        }
+      }
+    }
+    return self::fold($clean);
   }
 
   /**
@@ -794,7 +1157,15 @@ final class Values {
         if ($unit !== NULL) {
           unset($item['unit']);
         }
-        $item = $clean_value($item, $path, self::kindOf($prop), 2000);
+        $composed = is_array($item) && isset($item['parts']);
+        $item = $clean_value($item, $path, self::kindOf($prop), 2000, $prop);
+        // A composition folded to typed text is typed text: never where
+        // only a field may give the value.
+        $error = $composed && $item !== NULL ? self::propError($prop, $item, $scope) : NULL;
+        if ($error !== NULL) {
+          $errors[$path] = $error;
+          continue;
+        }
         // Typed text is checked now; a linked value when it is read. A
         // three-letter currency stored before the code list ("RMB"), and a
         // country typed as text before countries were codes ("Finland"),

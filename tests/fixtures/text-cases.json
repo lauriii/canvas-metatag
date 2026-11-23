@@ -593,6 +593,1590 @@
       "expect": {
         "title": "Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring | A very long ending that a site may set"
       }
+    },
+    {
+      "name": "a composed title",
+      "target": {
+        "title": {
+          "parts": [
+            {
+              "fact": "title"
+            },
+            {
+              "text": " in "
+            },
+            {
+              "source": {
+                "expression": "city",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " · "
+            },
+            {
+              "source": {
+                "expression": "starts",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        }
+      },
+      "links": {
+        "city": "Helsinki",
+        "starts": "20 June 2026"
+      },
+      "facts": {
+        "title": "Summer Gala"
+      },
+      "expect": {
+        "title": "Summer Gala in Helsinki · 20 June 2026 | Example",
+        "social_title": "Summer Gala"
+      }
+    },
+    {
+      "name": "a composed title without a city",
+      "target": {
+        "title": {
+          "parts": [
+            {
+              "fact": "title"
+            },
+            {
+              "text": " in "
+            },
+            {
+              "source": {
+                "expression": "city",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " · "
+            },
+            {
+              "source": {
+                "expression": "starts",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        }
+      },
+      "links": {
+        "city": "",
+        "starts": "20 June 2026"
+      },
+      "facts": {
+        "title": "Summer Gala"
+      },
+      "expect": {
+        "title": "Summer Gala · 20 June 2026 | Example"
+      }
+    },
+    {
+      "name": "a composed title whose fields are all empty gives the Title fact",
+      "target": {
+        "title": {
+          "parts": [
+            {
+              "source": {
+                "expression": "city",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " · "
+            },
+            {
+              "source": {
+                "expression": "starts",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        }
+      },
+      "links": {
+        "city": "",
+        "starts": ""
+      },
+      "expect": {
+        "title": "Pricing | Example"
+      }
+    },
+    {
+      "name": "a composed description whose fields are all empty gives the Description fact",
+      "target": {
+        "description": {
+          "parts": [
+            {
+              "text": "Tickets for "
+            },
+            {
+              "source": {
+                "expression": "performers",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " in "
+            },
+            {
+              "source": {
+                "expression": "city",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        }
+      },
+      "links": {
+        "performers": "",
+        "city": ""
+      },
+      "expect": {
+        "description": "Plans and prices.",
+        "social_description": "Plans and prices."
+      }
+    },
+    {
+      "name": "a composed title that is cut loses whole fields first",
+      "target": {
+        "title": {
+          "parts": [
+            {
+              "fact": "title"
+            },
+            {
+              "text": " – "
+            },
+            {
+              "source": {
+                "expression": "city",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " · "
+            },
+            {
+              "source": {
+                "expression": "starts",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        }
+      },
+      "links": {
+        "city": "Lakeside Concert Hall of the City of Helsinki",
+        "starts": "20 June 2026"
+      },
+      "facts": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is made"
+      },
+      "expect": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is made – Lakeside Concert Hall of the City of Helsinki | Example"
+      }
+    },
+    {
+      "name": "a composed social title",
+      "target": {
+        "social": {
+          "title": {
+            "parts": [
+              {
+                "fact": "title"
+              },
+              {
+                "text": " at "
+              },
+              {
+                "source": {
+                  "expression": "venue",
+                  "sourceType": "entity-field"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "links": {
+        "venue": "Royal Hall"
+      },
+      "expect": {
+        "social_title": "Pricing at Royal Hall",
+        "title": "Pricing | Example"
+      }
+    },
+    {
+      "name": "a composed social title that is cut loses whole fields, never leaving its words",
+      "target": {
+        "social": {
+          "title": {
+            "parts": [
+              {
+                "fact": "title"
+              },
+              {
+                "text": " first performed at "
+              },
+              {
+                "source": {
+                  "expression": "venue",
+                  "sourceType": "entity-field"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "links": {
+        "venue": "Lakeside Concert Hall of the City of Helsinki, Hakaniemi Market Square"
+      },
+      "facts": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is made"
+      },
+      "expect": {
+        "social_title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is made"
+      }
+    },
+    {
+      "name": "a composed description over its room loses whole fields first",
+      "target": {
+        "description": {
+          "parts": [
+            {
+              "source": {
+                "expression": "notes",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " Tickets for "
+            },
+            {
+              "source": {
+                "expression": "performers",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        }
+      },
+      "links": {
+        "notes": "An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. Doors open an hour before the concert and the bar stays open late after it.",
+        "performers": "Ada, Grace"
+      },
+      "expect": {
+        "description": "An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. Doors open an hour before the concert and the bar stays open late after it.",
+        "social_description": "An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. An evening of chamber music in which every work is introduced by the musicians who play it. Doors open an hour before the concert and the bar stays open late after it."
+      }
+    }
+  ],
+  "compositions": [
+    {
+      "name": "an event title",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " in "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala in Helsinki · 20 June 2026"
+    },
+    {
+      "name": "a missing city",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " in "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala · 20 June 2026"
+    },
+    {
+      "name": "a missing date",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " in "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala in Helsinki"
+    },
+    {
+      "name": "brackets",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " ("
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": ") · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala (Helsinki) · 20 June 2026"
+    },
+    {
+      "name": "brackets around a missing city",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " ("
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": ") · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala · 20 June 2026"
+    },
+    {
+      "name": "a unit after the last field",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " – "
+        },
+        {
+          "source": {
+            "expression": "price",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " €"
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala – 49 €"
+    },
+    {
+      "name": "a unit after a missing last field",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " – "
+        },
+        {
+          "source": {
+            "expression": "price",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " €"
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala"
+    },
+    {
+      "name": "a missing first field",
+      "parts": [
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "20 June 2026"
+    },
+    {
+      "name": "missing performers before a venue",
+      "parts": [
+        {
+          "source": {
+            "expression": "performers",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " at "
+        },
+        {
+          "source": {
+            "expression": "venue",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Royal Hall"
+    },
+    {
+      "name": "a lead-in that reads into a missing field",
+      "parts": [
+        {
+          "text": "Tickets for "
+        },
+        {
+          "source": {
+            "expression": "performers",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " in "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Helsinki"
+    },
+    {
+      "name": "a lead-in",
+      "parts": [
+        {
+          "text": "Tickets for "
+        },
+        {
+          "source": {
+            "expression": "performers",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " in "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Tickets for Ada, Grace in Helsinki"
+    },
+    {
+      "name": "a label before a missing first field",
+      "parts": [
+        {
+          "text": "Tickets: "
+        },
+        {
+          "source": {
+            "expression": "performers",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " in "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Tickets: Helsinki"
+    },
+    {
+      "name": "a label",
+      "parts": [
+        {
+          "text": "Tickets: "
+        },
+        {
+          "fact": "title"
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Tickets: Summer Gala"
+    },
+    {
+      "name": "a possessive without a brand",
+      "parts": [
+        {
+          "source": {
+            "expression": "brand",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": "'s "
+        },
+        {
+          "fact": "title"
+        }
+      ],
+      "values": {
+        "brand": "",
+        "title": "Lamp"
+      },
+      "expect": "Lamp"
+    },
+    {
+      "name": "a possessive",
+      "parts": [
+        {
+          "source": {
+            "expression": "brand",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": "'s "
+        },
+        {
+          "fact": "title"
+        }
+      ],
+      "values": {
+        "brand": "Oak & Co",
+        "title": "Lamp"
+      },
+      "expect": "Oak & Co's Lamp"
+    },
+    {
+      "name": "a quote around a missing field",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " \""
+        },
+        {
+          "source": {
+            "expression": "subtitle",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": "\""
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": ""
+      },
+      "expect": "Summer Gala"
+    },
+    {
+      "name": "a quote",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " \""
+        },
+        {
+          "source": {
+            "expression": "subtitle",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": "\""
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala \"Under the stars\""
+    },
+    {
+      "name": "German quotes around a missing field",
+      "parts": [
+        {
+          "text": "„"
+        },
+        {
+          "source": {
+            "expression": "subtitle",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": "“ · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": ""
+      },
+      "expect": "20 June 2026"
+    },
+    {
+      "name": "German quotes",
+      "parts": [
+        {
+          "text": "„"
+        },
+        {
+          "source": {
+            "expression": "subtitle",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": "“ · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "„Under the stars“ · 20 June 2026"
+    },
+    {
+      "name": "an opening quote before a missing field",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " – “"
+        },
+        {
+          "source": {
+            "expression": "subtitle",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": "”"
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": ""
+      },
+      "expect": "Summer Gala"
+    },
+    {
+      "name": "a separator left at the end",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " · "
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala"
+    },
+    {
+      "name": "a separator before a missing last field",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Summer Gala"
+    },
+    {
+      "name": "a first and a last name",
+      "parts": [
+        {
+          "source": {
+            "expression": "first",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " "
+        },
+        {
+          "source": {
+            "expression": "last",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "first": "Ada",
+        "last": "Lovelace"
+      },
+      "expect": "Ada Lovelace"
+    },
+    {
+      "name": "a last name only",
+      "parts": [
+        {
+          "source": {
+            "expression": "first",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " "
+        },
+        {
+          "source": {
+            "expression": "last",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "first": "",
+        "last": "Lovelace"
+      },
+      "expect": "Lovelace"
+    },
+    {
+      "name": "every field empty",
+      "parts": [
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "",
+        "starts": "",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": ""
+    },
+    {
+      "name": "a connector after a missing first field",
+      "parts": [
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": ", "
+        },
+        {
+          "source": {
+            "expression": "venue",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Royal Hall"
+    },
+    {
+      "name": "right-to-left text",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "عمر حداد",
+        "starts": "20 June 2026"
+      },
+      "expect": "عمر حداد · 20 June 2026"
+    },
+    {
+      "name": "a call to action after the body",
+      "parts": [
+        {
+          "source": {
+            "expression": "body",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " Free delivery."
+        }
+      ],
+      "values": {
+        "body": "Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. "
+      },
+      "expect": "Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. Free delivery.",
+      "long": [
+        "body"
+      ],
+      "room": 155
+    },
+    {
+      "name": "a long text with no sentence end",
+      "parts": [
+        {
+          "source": {
+            "expression": "body",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " Free delivery."
+        }
+      ],
+      "values": {
+        "body": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word word"
+      },
+      "expect": "word word word word word word word word word word word word word word word word word word word word word word word word word word word word… Free delivery.",
+      "long": [
+        "body"
+      ],
+      "room": 155
+    },
+    {
+      "name": "a long text keeps its floor",
+      "parts": [
+        {
+          "text": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "
+        },
+        {
+          "source": {
+            "expression": "body",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "body": "Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. Each lamp is made by hand in our workshop. The shade is linen and the base is oak. Every piece is signed by its maker. We ship within two days. Lamps come with a five year guarantee and free repairs. "
+      },
+      "expect": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA Each lamp is made by hand in our workshop.",
+      "long": [
+        "body"
+      ],
+      "room": 155
+    },
+    {
+      "name": "a long text that fits",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": ": "
+        },
+        {
+          "source": {
+            "expression": "body",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Lamp",
+        "body": "Made by hand."
+      },
+      "expect": "Lamp: Made by hand.",
+      "long": [
+        "body"
+      ],
+      "room": 155
+    },
+    {
+      "name": "a bracket around a field kept whole when the field before is empty",
+      "parts": [
+        {
+          "source": {
+            "expression": "performers",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " ("
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": ")"
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Helsinki"
+    },
+    {
+      "name": "a bracket around a field before more words when the field before is empty",
+      "parts": [
+        {
+          "source": {
+            "expression": "performers",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " ("
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": ") · "
+        },
+        {
+          "source": {
+            "expression": "starts",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Helsinki · 20 June 2026"
+    },
+    {
+      "name": "a bracket around a field with every field kept",
+      "parts": [
+        {
+          "source": {
+            "expression": "performers",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " ("
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": ")"
+        }
+      ],
+      "values": {
+        "title": "Summer Gala",
+        "city": "Helsinki",
+        "starts": "20 June 2026",
+        "price": "49",
+        "performers": "Ada, Grace",
+        "venue": "Royal Hall",
+        "subtitle": "Under the stars"
+      },
+      "expect": "Ada, Grace (Helsinki)"
+    }
+  ],
+  "canon": [
+    {
+      "name": "neighbouring text merges",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": " in"
+        },
+        {
+          "text": " "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "expect": {
+        "parts": [
+          {
+            "fact": "title"
+          },
+          {
+            "text": " in "
+          },
+          {
+            "source": {
+              "expression": "city",
+              "sourceType": "entity-field"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "empty text goes",
+      "parts": [
+        {
+          "fact": "title"
+        },
+        {
+          "text": ""
+        },
+        {
+          "text": " · "
+        },
+        {
+          "source": {
+            "expression": "city",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "expect": {
+        "parts": [
+          {
+            "fact": "title"
+          },
+          {
+            "text": " · "
+          },
+          {
+            "source": {
+              "expression": "city",
+              "sourceType": "entity-field"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "space between two fields is kept",
+      "parts": [
+        {
+          "source": {
+            "expression": "first",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " "
+        },
+        {
+          "source": {
+            "expression": "last",
+            "sourceType": "entity-field"
+          }
+        }
+      ],
+      "expect": {
+        "parts": [
+          {
+            "source": {
+              "expression": "first",
+              "sourceType": "entity-field"
+            }
+          },
+          {
+            "text": " "
+          },
+          {
+            "source": {
+              "expression": "last",
+              "sourceType": "entity-field"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "space around the ends is trimmed",
+      "parts": [
+        {
+          "text": "  Tickets: "
+        },
+        {
+          "fact": "title"
+        },
+        {
+          "text": " · "
+        }
+      ],
+      "expect": {
+        "parts": [
+          {
+            "text": "Tickets: "
+          },
+          {
+            "fact": "title"
+          },
+          {
+            "text": " ·"
+          }
+        ]
+      }
+    },
+    {
+      "name": "one field and a space is that link",
+      "parts": [
+        {
+          "source": {
+            "expression": "summary",
+            "sourceType": "entity-field"
+          }
+        },
+        {
+          "text": " "
+        }
+      ],
+      "expect": {
+        "source": {
+          "expression": "summary",
+          "sourceType": "entity-field"
+        }
+      }
+    },
+    {
+      "name": "one fact is that fact",
+      "parts": [
+        {
+          "text": " "
+        },
+        {
+          "fact": "title"
+        }
+      ],
+      "expect": {
+        "fact": "title"
+      }
+    },
+    {
+      "name": "text alone is typed text",
+      "parts": [
+        {
+          "text": "Plans "
+        },
+        {
+          "text": "{site}"
+        }
+      ],
+      "expect": {
+        "text": "Plans {site}"
+      }
+    },
+    {
+      "name": "nothing is no value",
+      "parts": [
+        {
+          "text": " "
+        },
+        {
+          "text": ""
+        }
+      ],
+      "expect": null
+    }
+  ],
+  "composes": [
+    {
+      "type": "Event",
+      "path": "title",
+      "scope": "template",
+      "expect": true
+    },
+    {
+      "type": "Event",
+      "path": "description",
+      "scope": "template",
+      "expect": true
+    },
+    {
+      "type": "Event",
+      "path": "social.title",
+      "scope": "template",
+      "expect": true
+    },
+    {
+      "type": "Event",
+      "path": "social.description",
+      "scope": "template",
+      "expect": true
+    },
+    {
+      "type": "Event",
+      "path": "schema.props.name",
+      "scope": "template",
+      "expect": true
+    },
+    {
+      "type": "Event",
+      "path": "schema.props.location_address_streetAddress",
+      "scope": "template",
+      "expect": true
+    },
+    {
+      "type": "Article",
+      "path": "schema.props.headline",
+      "scope": "template",
+      "expect": true
+    },
+    {
+      "type": "Event",
+      "path": "title_end",
+      "scope": "template",
+      "expect": false
+    },
+    {
+      "type": "Event",
+      "path": "schema.props.startDate",
+      "scope": "template",
+      "expect": false
+    },
+    {
+      "type": "Event",
+      "path": "schema.props.eventStatus",
+      "scope": "template",
+      "expect": false
+    },
+    {
+      "type": "Event",
+      "path": "schema.props.location_address_postalCode",
+      "scope": "template",
+      "expect": false
+    },
+    {
+      "type": "Event",
+      "path": "schema.props.location_address_addressCountry",
+      "scope": "template",
+      "expect": false
+    },
+    {
+      "type": "Product",
+      "path": "schema.props.sku",
+      "scope": "template",
+      "expect": false
+    },
+    {
+      "type": "JobPosting",
+      "path": "schema.props.description",
+      "scope": "template",
+      "expect": false
+    },
+    {
+      "type": "Event",
+      "path": "title",
+      "scope": "page",
+      "expect": false
+    },
+    {
+      "type": "Event",
+      "path": "schema.props.name",
+      "scope": "page",
+      "expect": false
+    },
+    {
+      "type": "WebPage",
+      "path": "title_end",
+      "scope": "site",
+      "expect": false
     }
   ]
 }

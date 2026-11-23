@@ -2,6 +2,8 @@
 
 - FROM: `### Requirement: A value is typed text or linked to one source`
 - TO: `### Requirement: A value is typed text, one source, or a composition`
+- FROM: `### Requirement: Field values are plain values of the first item`
+- TO: `### Requirement: Field values are plain values: the first item, every item on a list or in text`
 
 ## MODIFIED Requirements
 
@@ -102,7 +104,7 @@ in a composition. Recreating the field MUST make the link work again.
 - **WHEN** an editor changes " in " to " at " in that title while `field_city` is still deleted
 - **THEN** the write MUST be accepted, and the template MUST keep the link to `field_city` with the new words
 
-### Requirement: Field values are plain values of the first item
+### Requirement: Field values are plain values: the first item, every item on a list or in text
 
 A field link MUST give its first item, every item in field order on a list
 property, or in text every item visitors may see. Formatted text MUST become
@@ -179,7 +181,8 @@ which MUST stay a date. A number MUST keep the digits it is stored with. A link
 MUST be an absolute http(s) address, put on the public base when it is
 internal, or nothing. An entity reference MUST give the referenced entity's
 label, or its image when it references image media. In a value that can be
-composed, these MUST read as words ("Fields read as words in text").
+composed, a date, a number, a list and a reference's label MUST read as words
+("Fields read as words in text"); a link and an image do not fit text.
 
 #### Scenario: A date-only field
 
@@ -348,6 +351,11 @@ gives a value, in the head and the dialog alike.
 - **WHEN** "Every Event"'s title is Title, " in ", City, " · ", Starts, and "Summer Gala" in Helsinki has no start date
 - **THEN** its title MUST start with "Summer Gala in Helsinki" and MUST NOT hold "·"
 
+#### Scenario: A bracket whose opening went with an empty field before
+
+- **WHEN** the social description is Performers › Title, " (", Venue › City, ")" and the event has no performers
+- **THEN** it MUST be "Helsinki", never "Helsinki)": the closing mark goes with the opening one
+
 #### Scenario: Brackets
 
 - **WHEN** the title is Title, " (", City, ") · ", Starts, and "Summer Gala" on 20 June 2026 has no city
@@ -409,13 +417,13 @@ nothing, text alone MUST never be emitted.
 
 ### Requirement: Fields read as words in text
 
-In a value that can be composed, a date field, a timestamp offered as a number
-or a date fact MUST give its date without the time, in the long style of the
-item's locale (its language with its region, else the site's default country),
+In a value that can be composed, a date field, a timestamp Canvas offers as a
+number, or a date fact MUST give its date without the time, in the long style
+of the item's locale (its language with its region, else the site's country),
 in the site's timezone; a date-only field MUST never move a day. An integer
 MUST give its digits, a decimal its digits to its scale in the locale's marks,
-a text list its label in the item's language, with no configuration. The dialog
-MUST show the server's words.
+a text list its label in the item's language. The dialog MUST show the
+server's words.
 
 #### Scenario: A date in a title
 
@@ -449,23 +457,34 @@ MUST show the server's words.
 
 #### Scenario: A timestamp offered as a number
 
-- **WHEN** the title holds Venue › Authored on and the venue was created on 20 June 2026
+- **WHEN** Canvas offers Venue › Authored on as a number, the title holds it, and the venue was created on 20 June 2026
 - **THEN** the title MUST hold "20 June 2026", never the timestamp's digits
+- **AND** where Canvas offers no timestamp (today it offers neither a timestamp field nor a hop's Authored on on the fixture's types), the menu MUST NOT list one, and the contract test MUST end incomplete, named, rather than pass
 
 #### Scenario: A list label in the item's language
 
 - **WHEN** the dialog's language is English, the previewed event is French, and the description holds Event status
 - **THEN** the description, in the dialog and in the head, MUST hold the French label
 
+#### Scenario: One way of writing a date in the dialog
+
+- **WHEN** the site has no country, the previewed English event starts on 19 June 2027 at 19:00, and its title holds Starts
+- **THEN** the composed title, its menu row and the Starts detail's box MUST all write the date "June 19, 2027", the box adding its time
+
 ### Requirement: In text, a field gives every item visitors may see
 
 In a value that can be composed, alone or in a composition, a field with
 several values MUST give every item an anonymous visitor may see, in field
 order, joined with the list separator of the item's locale. In a title-like
-place (the title's main part, the social title, a name, a headline, an
-alternate name, a street address line) it MUST give at most two items and
+place (the title's main part, the social title, a name, a headline, a
+street address line) it MUST give at most two items and
 then a translatable, plural-aware "and ‹n› more". The dialog MUST show the
 server's words.
+
+#### Scenario: Items that end a sentence
+
+- **WHEN** the description holds Performers › Biography, and the first biography ends "…small ensembles."
+- **THEN** the next item MUST follow it after a space, never ".,"
 
 #### Scenario: Every performer in a description
 

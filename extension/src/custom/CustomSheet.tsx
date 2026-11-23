@@ -209,11 +209,22 @@ export function CustomSheet(props: { node?: CustomNode; start?: 'search'; from?:
     let placed = place(true);
     // A tab's panel mounts a frame later: the place is looked for again then.
     let tries = 0;
+    // A key pressed after the place is the person moving on (Tab to the
+    // next control): focus is theirs from then on.
+    let moved = false;
+    const onKey = () => {
+      moved = true;
+    };
+    document.addEventListener('keydown', onKey, true);
     // Again in the next frames: until the place is there, and when a key's
     // own handling moved focus after it.
     const retry = () => {
-      if ((placed?.exact && document.activeElement === placed.target && tries > 0) || ++tries > 5) return;
+      if (moved || (placed?.exact && document.activeElement === placed.target && tries > 0) || ++tries > 5) {
+        document.removeEventListener('keydown', onKey, true);
+        return;
+      }
       requestAnimationFrame(() => {
+        if (moved) return retry();
         placed = place(true);
         retry();
       });
@@ -224,7 +235,7 @@ export function CustomSheet(props: { node?: CustomNode; start?: 'search'; from?:
     setTimeout(() => {
       const active = document.activeElement;
       const target = placed?.target;
-      if (target?.isConnected && active !== target && (active === document.body || active === null || active.matches('[aria-haspopup="menu"]'))) place(false);
+      if (!moved && target?.isConnected && active !== target && (active === document.body || active === null || active.matches('[aria-haspopup="menu"]'))) place(false);
     }, 40);
     if (/^row-path:/.test(to)) setTimeout(() => setWashed(null), 900);
     // Never cleared by the next render (the panel's own mount is one): each

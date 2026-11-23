@@ -111,9 +111,10 @@ is offered only where that holds (a contract test pins it):
   order (ingredients, profile links, authors), and one formatted text gives
   its own list items, else its paragraphs, and one long plain text its
   lines. A text list is never typed, so
-  ingredients and steps are offered on content types only. A field of several
-  values on a single detail gives its first item, and the menu says "First of
-  ‹n›".
+  ingredients and steps are offered on content types only. Outside text that
+  composes, a field of several values on a single detail gives its first
+  item, and the menu says "First of ‹n›"; in text that composes, a list gives
+  its label and a field of several values every item visitors may see.
 - **Codes and durations.** Countries are picked from a searchable list;
   short lists of choices are checkboxes. A time is one box of hours and
   minutes; a linked one asks whether its field counts minutes or hours.
@@ -198,15 +199,41 @@ author, which is the account's login name unless something changes it. To
 publish another name, install a module that changes display names, or link
 "Author name" to a byline field in the template.
 
+In a template, the title's main part, the description, the social texts and
+the structured data details that are free text (a name, a headline, a
+description, a street address) can also be composed: typed words and up to
+eight fields or facts in one value, such as "‹Title› in ‹Venue › City› ·
+‹Starts›". A value that links one field keeps its box; press → or End on it,
+type `{`, or choose "Add words or fields" in its menu to start composing from
+it. In the composer, `{` (or Alt+↓, Enter or the + button by the label) adds a
+field at the caret; type `{{` for a brace. A field is moved, selected and
+removed as one unit; click it to replace or remove it.
+
+When an item lacks a field, the field is left out with the words that go with
+it: the words before a field go with it, the lead-in with the first field
+unless it ends in a label mark ("Tickets: "), a closing bracket or quote with
+the field before it, and a separator left at the end never shows. Only when
+every field of a composition gives nothing does the value give its default.
+The composer tints a field's words and shows what an item without it gets.
+
+In a place that composes, fields read as words: a date as the item's language
+writes it, in the language's own region or else the site's default country
+("20 June 2026" with the United Kingdom, "June 20, 2026" with the United
+States, "2026年6月20日" in Japanese), never with a time; a decimal with the
+language's marks ("1.234,50" in German); a whole number as stored ("2026"); a
+text list as its label. A field with several values gives every item visitors
+may see, joined ("Ada, Grace, Lin"), and at most two and "and 1 more" in a
+title-like place. Nothing needs configuring.
+
 A link reads what an anonymous visitor may see. A field or a referenced item
 visitors may not view gives nothing, and the value falls back to its default;
 Checks says so. A few things work differently from what you might expect:
 
-- A text list gives its stored key (`EventScheduled`), not its label, which is
-  what structured data needs.
-- On a single detail, a multi-value field gives its first item; on a list
-  (ingredients, steps, profile links) it gives every item. A multi-value
-  media field, such as a gallery, links only its first image.
+- Outside text that composes, a text list gives its stored key
+  (`EventScheduled`), not its label, which is what structured data needs.
+- On a single detail that is not text, a multi-value field gives its first
+  item; on a list (ingredients, steps, profile links) it gives every item. A
+  multi-value media field, such as a gallery, links only its first image.
 - While you preview an item visitors cannot see yet, its links are read with
   your access.
 - A field deleted after it was linked leaves the link in place; each item uses
@@ -252,7 +279,9 @@ cleaned again before it is rendered.
   inherited page type (a product's price) are the translation's own.
 - Its title and description are the translated page title and description.
 - Title endings and other values of templates and of the site are shared by
-  all languages.
+  all languages, the words typed in a composed template value included: use
+  punctuation ("‹Title› · ‹City›") where words would need translating. The
+  fields and dates in it read in each translation's language.
 - Published translations get reciprocal hreflang links and an `x-default`.
 
 ## AI suggestions (optional)
@@ -398,6 +427,20 @@ marked `UPSTREAM(canvas)`; ARCHITECTURE.md lists every ask:
   unless a name was typed; it now is by default on Canvas pages only, so the
   update stores the site as the organizer of every event content type that
   never set one (and of its draft): their heads stay as they were.
+- Composed values (release note). No stored value changes, but some output
+  does, as fixes: in a template's title, description, social texts and
+  free-text details, a text list gives its label instead of its key, a field
+  with several values gives every item visitors may see (at most two and
+  "and ‹n› more" in a title-like place) instead of its first, and dates and
+  numbers can be linked there and read as words. A composition is stored as a
+  list of `parts` in the template's configuration: internal configuration that
+  frontends never need, because the content API carries the joined head.
+  Brace values of earlier releases are now converted whole on templates, but
+  only on sites that had not yet run the update; on a site that already did,
+  only a database backup has the words it dropped.
+- Going back to a release before composed values needs the configuration
+  restored from before the update: the earlier schema refuses `parts`, and the
+  earlier dialog's first save deletes every composition.
 - To keep a staging site out of search engines, override the site setting in
   its `settings.php`. The dialog shows such pages as hidden and says the
   setting comes from outside:

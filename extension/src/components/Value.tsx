@@ -3,12 +3,14 @@ import {
   Cross2Icon,
   Link2Icon,
   LinkBreak2Icon,
+  PlusIcon,
 } from '@radix-ui/react-icons';
 import {
   type KeyboardEvent,
   type ReactNode,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -20,28 +22,69 @@ import {
   getPath,
   inSentence,
   setPath,
+  typeOf,
   wellFormed,
 } from '../model';
-import type { Kind, Scope, SeoValues, Value } from '../types';
+import type { Kind, Part, Scope, SeoValues, Value } from '../types';
 import {
   type Entry,
   FOLD,
   type Lookup,
+  MAX_PARTS,
   type Shown,
+  allEmptySaid,
+  andWords,
+  braceKey,
   brokenWhy,
+  composed,
+  compositionSaid,
+  composes,
   entriesFor,
+  entriesIn,
+  fieldsIn,
+  fitsPart,
+  fold,
   foldLabel,
+  formOf,
   kindReason,
   levelOf,
+  partsOf,
   resolve,
   sameValue,
   rowOf,
   tagOf,
   tree,
 } from '../values';
+import type { ChipView, ComposerHandle } from './Composer';
 import { Field, type FieldOptions, type FieldParts } from './Field';
 import { LinkMenu, type MenuItem } from './LinkMenu';
 import { Btn, IconBtn } from './ui';
+
+/**
+ * The composer and its editor library: their own chunk, loaded where a value
+ * composes (a template), and fetched as soon as one is shown.
+ */
+let composerModule: typeof import('./Composer') | null = null;
+let composerLoad: Promise<typeof import('./Composer')> | null = null;
+/**
+ * The composer's chunk, fetched once. A failed fetch (the network, or a
+ * chunk an update removed while the dialog stayed open) is forgotten, so the
+ * next try fetches again.
+ */
+const loadComposer = () =>
+  (composerLoad ??= import('./Composer').then(
+    (module) => {
+      composerModule = module;
+      return module;
+    },
+    (error: unknown) => {
+      composerLoad = null;
+      throw error;
+    },
+  ));
+
+/** Said under a field that composes when the composer's chunk did not load. */
+export const LOAD_FAILED = 'The editor could not load. Reload the editor.';
 
 /** What a typed input gets from its field. */
 export interface InputProps {
@@ -79,6 +122,42 @@ export function stateWords(status: Shown['status'], type: string, broken = 'no l
 
 /** A sentence that ends once: a value may end with its own mark. */
 const sentence = (text: string) => (/[.!?…。！？]["'”’)\]]*$/u.test(text) ? text : `${text}.`);
+
+/**
+ * The end of a text, at most `max` characters, from the start of a word:
+ * never a cut word, and the words right before the caret always whole.
+ */
+const tail = (text: string, max: number): string => {
+  const graphemes = typeof Intl.Segmenter === 'function'
+    ? [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)].map((one) => one.segment)
+    : Array.from(text);
+  if (graphemes.length <= max) {
+    return text;
+  }
+  const end = graphemes.slice(-max).join('');
+  const space = end.search(/\s\S/u);
+  return `…${(space >= 0 ? end.slice(space + 1) : end).trimStart()}`;
+};
+
+/**
+ * The Tab stop after an element (or before it), outside it: where focus goes
+ * on when the stop it was heading for has gone.
+ */
+function nextStop(from: HTMLElement | null, forward: boolean): HTMLElement | null {
+  if (!from) {
+    return null;
+  }
+  const stops = [...from.ownerDocument.querySelectorAll<HTMLElement>('a[href], button, input, select, textarea, [tabindex], [contenteditable="true"]')].filter(
+    (one) => one.tabIndex >= 0 && !one.matches(':disabled') && !one.closest('[inert], [hidden]') && one.getClientRects().length > 0 && !from.contains(one),
+  );
+  const after = (one: HTMLElement) => !!(from.compareDocumentPosition(one) & Node.DOCUMENT_POSITION_FOLLOWING);
+  return forward ? (stops.find(after) ?? null) : (stops.filter((one) => !after(one)).at(-1) ?? null);
+}
+
+
+/** What a value's default gives for the item, in a form. */
+const byDefaultFor = (byDefault: Value | null | undefined, words: { text: string } | undefined, lookup: Lookup, form: 'words' | 'line') =>
+  byDefault ? resolve(byDefault, form, lookup).text : (words?.text ?? '');
 
 /** What unlinking turns a value of a kind into. */
 const UNLINKED: Record<Kind | 'choice', string> = {
@@ -149,7 +228,7 @@ export interface LinkOptions {
 
 /** The link button, the menu and the box of one value. */
 function useLink(options: LinkOptions) {
-  const { state, dispatch, view, locked, jump } = useApp();
+  const { state, dispatch, view, locked, jump, stageVisible } = useApp();
   const server = state.server!;
   // None in Site with no page in context: the title there links nothing.
   const target = server.target ?? { scope: 'page' as const, label: 'Page' };
@@ -158,15 +237,17 @@ function useLink(options: LinkOptions) {
   const type = template ? inSentence(target.label) : 'page';
   const { path, kind, label } = options;
   const value = getPath(state.edits.target, path) as Value | undefined;
-  const linked = !!value && !('text' in value) && !(kind === 'image' && 'media' in value) && !(options.who && 'fact' in value);
+  const linked = !!value && !('text' in value) && !('parts' in value) && !(kind === 'image' && 'media' in value) && !(options.who && 'fact' in value);
   const [editing, setEditing] = useState(false);
   const [menu, setMenu] = useState(false);
   const [seed, setSeed] = useState('');
-  const [said, setSaid] = useState('');
+  const [said, setSaid] = useState({ text: '', n: 0 });
   const box = useRef<HTMLDivElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const boxButton = useRef<HTMLButtonElement>(null);
   const menuId = useId();
+  // The words of a composer's guidance, without its button.
+  const guideWords = useId();
   const linkButton = useRef<HTMLButtonElement>(null);
   const disabled = locked.target;
   // Nothing to preview: the value is said at rest, with no menu to open.
@@ -174,12 +255,67 @@ function useLink(options: LinkOptions) {
   // A template's value, and a page's value that may be linked, follows its
   // default while nothing is set: shown as a box.
   const byDefault = !value && (template || options.linkable) ? options.byDefault : null;
-  const showBox = kind !== 'image' && !editing && (linked || !!byDefault || (!value && !!options.defaultWords && template));
+
+  // A template's text that composes: typed text and fields in one composer,
+  // a lone field or the default in the box, as everywhere else.
+  const prop = path.startsWith('schema.props.')
+    ? typeOf(server.registry, state.edits.target.schema?.type).props?.find((one) => one.key === path.slice(13))
+    : null;
+  const composing = options.linkable && kind === 'text' && !options.choices && !options.who && composes(prop, path, template ? 'template' : 'page');
+  const form = formOf(path);
+  // The composer's chunk: loaded where a value composes. Until it is there
+  // the composer shows its parts at rest; if it can't load, it says so and
+  // the dialog goes on.
+  const [, setLoaded] = useState(!!composerModule);
+  const [loadFailed, setLoadFailed] = useState(false);
+  // Composing was tried from a box while the chunk could not load.
+  const [tried, setTried] = useState(false);
+  const load = () =>
+    loadComposer().then(
+      () => {
+        setLoadFailed(false);
+        setLoaded(true);
+        return true;
+      },
+      () => {
+        setLoadFailed(true);
+        return false;
+      },
+    );
+  useEffect(() => {
+    if (composing && !composerModule) {
+      void load();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composing]);
+  // Composing started from a box (its field, or the default, as a chip), or
+  // the composer has focus: it stays while focus is in it.
+  const [started, setStarted] = useState<Part[] | null>(null);
+  const [inside, setInside] = useState(false);
+  const [mode, setMode] = useState<'link' | 'add' | 'replace'>('link');
+  const [replacing, setReplacing] = useState(-1);
+  const [near, setNear] = useState<number | null>(null);
+  const composer = useRef<ComposerHandle>(null);
+  // Composing began by a key before the composer's chunk had loaded: it takes
+  // focus, the caret at the end, as it mounts.
+  const focusOnMount = useRef(false);
+  // The undo words of the next change the composer reports: a menu's.
+  const menuUndo = useRef<string | null>(null);
+  // Focus leaving the composer: where to, and by Tab which way.
+  const tabbing = useRef<'forward' | 'back' | null>(null);
+  const leaving = useRef<{ to: HTMLElement | null; tab: 'forward' | 'back' | null } | null>(null);
+  // What a paste left out, shown under the field until focus leaves it.
+  const [pasteNote, setPasteNote] = useState('');
+  const typedOrComposed = !!value && ('text' in value || 'parts' in value);
+  const showComposer = composing && (started !== null || inside || editing || typedOrComposed);
+  const ComposerOf = composerModule?.Composer;
+  const showBox = kind !== 'image' && !editing && !showComposer && (linked || !!byDefault || (!value && !!options.defaultWords && template));
 
   // What the box shows: the link's, or the default's.
   const shownValue = linked ? value : (byDefault ?? undefined);
   const shown: Shown = shownValue
-    ? resolve(shownValue, kind, lookup)
+    // Where text composes, a field reads as words: a date, every item.
+    ? resolve(shownValue, composing ? form : kind, lookup)
     : lookup.resolvable
       ? { status: 'ok', value: options.defaultWords?.text ?? '', text: options.defaultWords?.text ?? '', image: null }
       : { status: 'none', value: '', text: '', image: null };
@@ -197,6 +333,16 @@ function useLink(options: LinkOptions) {
         : `${template ? `each ${type}'s` : `the ${type}'s`} ${source.toLowerCase()}`
       : `the ${source.toLowerCase()}`;
   const why = brokenWhy(lookup.broken?.[path]?.reason, kind);
+  // What Reset goes back to on a template: the default it follows.
+  const resetTip = !template
+    ? undefined
+    : options.byDefault && 'fact' in options.byDefault
+      ? options.byDefault.fact === 'site'
+        ? 'the site name'
+        : `each ${type}'s ${tagOf(options.byDefault, lookup).toLowerCase()}`
+      : options.byDefault || options.defaultWords
+        ? 'the default'
+        : undefined;
   // Hidden through a reference: for this item only.
   const row = rowOf(lookup, shownValue);
   const item = !!row?.hop;
@@ -218,10 +364,16 @@ function useLink(options: LinkOptions) {
         : `Type ${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label.toLowerCase()}`
   }${template ? ` for every ${target.label}` : ''}`;
 
+  // Each saying is a new node in the region, so the same words are said
+  // again and two quick ones are both said. Said once: the region is emptied
+  // after a while, so nothing stale is read again during later edits.
+  const sayTimer = useRef<ReturnType<typeof setTimeout>>();
   const say = (text: string) => {
-    setSaid('');
-    requestAnimationFrame(() => setSaid(text));
+    clearTimeout(sayTimer.current);
+    setSaid((last) => ({ text, n: last.n + 1 }));
+    sayTimer.current = setTimeout(() => setSaid((last) => ({ text: '', n: last.n + 1 })), 5000);
   };
+  useEffect(() => () => clearTimeout(sayTimer.current), []);
   const write = (next: Value | undefined, undo: string) =>
     dispatch({
       type: 'apply',
@@ -237,28 +389,99 @@ function useLink(options: LinkOptions) {
   };
   const fieldId = useRef('');
 
-  function openMenu(from: HTMLElement | null, filter = '') {
+  function openMenu(from: HTMLElement | null, filter = '', how: 'link' | 'add' | 'replace' = 'link', at = -1) {
     opener.current = from;
     setSeed(filter);
+    setMode(how);
+    setReplacing(at);
     setMenu(true);
   }
   function pick(entry: { value: Value; full: string }) {
     if (disabled) {
       return;
     }
-    // The box takes the next key at once, not when the menu has gone.
+    if (mode === 'add' || mode === 'replace') {
+      // At the caret: focus is back in the composer at once, the caret after
+      // the field, and the next key flows on.
+      const part = entry.value as Part;
+      const old = mode === 'replace' ? chipParts[replacing] : undefined;
+      flushSync(() => {
+        menuUndo.current = old ? `Replaced ${tagOf(old, lookup)}` : `Added ${entry.full}`;
+        if (old) {
+          composer.current?.replace(replacing, part);
+        } else {
+          composer.current?.insert(part);
+        }
+        setMenu(false);
+      });
+      say(old ? `${tagOf(old, lookup)} replaced by ${entry.full}.` : `${entry.full} added to ${label}.`);
+      return;
+    }
+    // The box takes the next key at once, not when the menu has gone; from
+    // a composer too.
     flushSync(() => {
       write(entry.value, `Linked to ${entry.full}`);
       setEditing(false);
+      setStarted(null);
+      setInside(false);
     });
     (kind === 'image' ? linkButton.current : boxButton.current)?.focus();
     setMenu(false);
     say(`${label} linked to ${entry.full}.`);
   }
+  /**
+   * Composing, a step out of the box: its field, or the default's fact, as a
+   * chip with the caret after it. With `add`, the menu at the caret.
+   */
+  function compose(add = false, pasted?: DataTransfer) {
+    if (disabled) {
+      return;
+    }
+    if (!composerModule) {
+      // Composing, once the chunk is here; if it can't load, said, and the
+      // box stays.
+      void load().then((ok) => {
+        if (ok) {
+          compose(add, pasted);
+        } else {
+          setTried(true);
+          say(LOAD_FAILED);
+        }
+      });
+      return;
+    }
+    // A value a composition can't hold as a part (the description in a
+    // title) is not carried over: composing starts empty. A paste replaces
+    // the box, as a typed key does.
+    const value_ = linked ? value : (byDefault ?? undefined);
+    const first = !pasted && value_ && partsOf(value_).every((part) => fitsPart(part, form, lookup)) ? value_ : undefined;
+    focusOnMount.current = true;
+    flushSync(() => {
+      setStarted(first ? partsOf(first) : []);
+      setMenu(false);
+    });
+    composer.current?.focusEnd();
+    if (pasted) {
+      composer.current?.root()?.dispatchEvent(new ClipboardEvent('paste', { clipboardData: pasted, bubbles: true, cancelable: true }));
+    }
+    if (add) {
+      openMenu(composer.current?.root() ?? null, '', first ? 'add' : 'link');
+    }
+  }
+  function removeChip(at: number) {
+    const old = chipParts[at];
+    flushSync(() => {
+      menuUndo.current = `Removed ${tagOf(old, lookup)}`;
+      composer.current?.remove(at);
+      setMenu(false);
+    });
+    say(`${tagOf(old, lookup)} removed from ${label}.`);
+  }
   function unlink(typed?: string) {
     if (disabled) {
       return;
     }
+    focusOnMount.current = composing;
     flushSync(() => {
       // A default left for an empty input changes nothing until something is typed.
       if (linked || typed !== undefined) {
@@ -268,6 +491,10 @@ function useLink(options: LinkOptions) {
     });
     setMenu(false);
     focusInput();
+    // A choice's control is not found by its id: the first control there.
+    if (document.activeElement === document.body) {
+      box.current?.querySelector<HTMLElement>('button, input, textarea, select, [tabindex="0"]')?.focus();
+    }
     if (linked) {
       say(`${label} unlinked.`);
     }
@@ -276,17 +503,32 @@ function useLink(options: LinkOptions) {
   // "Link another field" in Checks: the field, then its menu.
   const handled = useRef(jump?.seq ?? 0);
   useEffect(() => {
-    if (jump && jump.seq !== handled.current && jump.link && jump.field === path && jump.scope === 'target') {
+    if (jump && jump.seq !== handled.current && jump.scope === 'target' && jump.field.startsWith(`${path}.parts.`)) {
+      // "Replace field" and Show: that chip, selected, and its menu.
+      handled.current = jump.seq;
+      const at = fieldsIn(partsOf(value).slice(0, Number(jump.field.slice(path.length + 7)))).length;
+      requestAnimationFrame(() => {
+        composer.current?.select(at);
+        openMenu(composer.current?.root() ?? null, '', 'replace', at);
+      });
+    } else if (jump && jump.seq !== handled.current && jump.link && jump.field === path && jump.scope === 'target') {
       handled.current = jump.seq;
       requestAnimationFrame(() => openMenu(boxButton.current ?? linkButton.current));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump?.seq]);
 
-  const entries = options.linkable
-    ? entriesFor(path, kind, template ? 'template' : 'page', lookup, target.label, options.choices, options.items, label).filter((entry) => !(options.noSite && entry.key === 'fact:identity'))
+  // What the composer holds: what was started from a box, else the value.
+  const composerParts = started ?? partsOf(value);
+  const chipParts = fieldsIn(composerParts);
+  const full = chipParts.length >= MAX_PARTS;
+  const allEntries = options.linkable
+    ? entriesFor(path, kind, template ? 'template' : 'page', lookup, target.label, options.choices, options.items, label, composing ? form : undefined).filter((entry) => !(options.noSite && entry.key === 'fact:identity'))
     : [];
-  const current = linked ? value : byDefault ?? undefined;
+  // What the menu lists in its mode: long text waits in the last row while
+  // a part is added or replaced.
+  const entries = entriesIn(allEntries, mode);
+  const current = mode === 'replace' ? chipParts[replacing] as Value | undefined : mode === 'add' ? undefined : linked ? value : byDefault ?? undefined;
   const toItem = (entry: Entry, deep: boolean): MenuItem => ({
     key: entry.key,
     label: deep ? entry.full : entry.label,
@@ -305,16 +547,71 @@ function useLink(options: LinkOptions) {
             : stateWords(entry.status === 'ok' ? 'empty' : entry.status, type)),
     subEmpty: !entry.shown && !entry.image,
     group: entry.group,
-    disabled: entry.disabled,
+    // With eight fields, nothing more is added; a field is still replaced.
+    disabled: entry.disabled ?? (mode === 'add' && full ? `At most ${MAX_PARTS} fields in one value` : undefined),
     current: !!current && sameValue(entry.value, current),
     run: () => pick(entry),
   });
   const items = (filter: string, level: string | null): MenuItem[] => {
     const rows = menuRows(entries, kind, filter, level, toItem);
+    // A chip's menu opens where its field is: Remove is there too.
+    if (level !== null && level !== FOLD && filter.trim() === '' && mode === 'replace' && chipParts[replacing]) {
+      rows.unshift({ key: '#remove', label: `Remove ${tagOf(chipParts[replacing], lookup)}`, group: '', run: () => removeChip(replacing) });
+    }
     if (level === null && filter.trim() === '') {
-      if (linked) {
+      const name = (part: Part | Value | undefined) => (part ? tagOf(part, lookup) : '');
+      if (mode === 'replace' && chipParts[replacing]) {
+        const old = name(chipParts[replacing]);
+        // Under the filter, in sight however long the list.
+        rows.unshift({ key: '#remove', label: `Remove ${old}`, group: '', pin: true, run: () => removeChip(replacing) });
+      } else if (mode === 'add' && composerParts.length && !chipParts.length) {
+        // Text only: the field can take its place. A step on the whole
+        // value, first.
+        rows.unshift({ key: '#replace-text', label: 'Replace the text with a field', sub: 'Then pick the field', group: '', pin: true, run: () => setMode('link') });
+      } else if (composing && mode === 'link' && showBox) {
+        // The headline step, first: under the filter.
+        const first = linked ? value : byDefault;
+        const kept = !!first && partsOf(first).every((part) => fitsPart(part, form, lookup));
+        // "Start from Description" on Description goes in a circle.
+        const from = name(first ?? undefined);
+        rows.unshift({
+          key: '#compose',
+          label: 'Add words or fields',
+          sub: !kept ? 'Type words and add fields' : linked ? `Keep ${from} and add to it` : from === label ? 'Keep the default and add to it' : `Start from ${from}`,
+          group: '',
+          // In sight when the menu opens on the current entry, far below.
+          pin: true,
+          run: () => compose(),
+        });
+      }
+      // The social title may copy a composed search title: the copy is then
+      // its own, and nothing follows anything. A step on the whole value, so
+      // first with "Add words or fields".
+      const main = state.edits.target.title;
+      if (path === 'social.title' && composing && mode === 'link' && main && 'parts' in main) {
+        rows.splice(rows[0]?.key === '#compose' ? 1 : 0, 0, {
+          key: '#copy-title',
+          label: 'Copy the search title',
+          pin: true,
+          // As it reads, the fields by name: "Title at Venue › City, Starts".
+          sub: main.parts.map((part) => ('text' in part ? part.text : tagOf(part, lookup))).join('').replace(/\s+/g, ' ').trim(),
+          group: '',
+          run: () => {
+            flushSync(() => {
+              write(main, 'Copied the search title');
+              setMenu(false);
+            });
+            composer.current?.focusEnd();
+            say(`${label} copied from the search title.`);
+          },
+        });
+      }
+      if (mode !== 'link') {
+        // Nothing else on the add and replace menus.
+      } else if (linked) {
         rows.push({ key: '#unlink', label: 'Unlink', sub: unlinked, group: '', run: () => unlink() });
-      } else if (byDefault && kind !== 'image') {
+      } else if (byDefault && kind !== 'image' && !composing) {
+        // Where text composes, "Add words or fields" types one's own.
         rows.push({ key: '#own', label: typeOwn, sub: 'Instead of the default', group: '', run: () => unlink() });
       }
       if (options.library) {
@@ -329,7 +626,13 @@ function useLink(options: LinkOptions) {
     return rows;
   };
   const boxed = showBox || (kind === 'image' && linked);
-  const buttonName = boxed ? `Change the link for ${label}` : `Link ${label} to a field`;
+  // The button's name follows the value alone, never where a caret was.
+  const adding = showComposer && composerParts.length > 0;
+  const buttonName = adding ? `Add a field to ${label}` : boxed ? `Change the link for ${label}` : `Link ${label} to a field`;
+  // "Title, “in”, Venue › City": what a composition is made of.
+  const madeOf = (parts: Part[]) =>
+    parts.map((part) => ('text' in part ? `“${part.text.trim()}”` : tagOf(part, lookup))).filter((one) => one !== '“”').join(', ');
+  const openFromButton = (from: HTMLElement) => openMenu(from, '', adding ? 'add' : 'link');
 
   // One name, and the tooltip says it first.
   const button = options.linkable && !atRest && (
@@ -338,7 +641,7 @@ function useLink(options: LinkOptions) {
       label={buttonName}
       tip={
         !boxed
-          ? buttonName
+          ? adding && chipParts.length ? `${buttonName} · Made of ${madeOf(composerParts)}` : buttonName
           : `${buttonName} · ${
               !linked
                 ? `Follows the default: ${defaultName}`
@@ -353,26 +656,40 @@ function useLink(options: LinkOptions) {
       tabIndex={showBox ? -1 : undefined}
       aria-haspopup="dialog"
       aria-expanded={menu}
-      onClick={(event) => openMenu(event.currentTarget)}
+      onClick={(event) => openFromButton(event.currentTarget)}
       onKeyDown={(event) => {
         if (event.altKey && event.key === 'ArrowDown') {
           event.preventDefault();
-          openMenu(event.currentTarget);
+          openFromButton(event.currentTarget);
         }
       }}
     >
-      {linked && shown.status === 'broken' ? <LinkBreak2Icon aria-hidden /> : <Link2Icon aria-hidden />}
+      {adding ? <PlusIcon aria-hidden /> : linked && shown.status === 'broken' ? <LinkBreak2Icon aria-hidden /> : <Link2Icon aria-hidden />}
     </IconBtn>
   );
 
+  // In add mode the menu says where the field goes, and the rule once.
+  // As the item reads: "After “Summer Gala in”".
+  // What the item shows before the caret; when that is nothing, the parts
+  // by name.
+  const beforeParts = menu && mode === 'add' ? (composer.current?.before() ?? []) : [];
+  const before = beforeParts.length
+    ? (lookup.resolvable && resultOf(beforeParts, -1, false)) || beforeParts.map((part) => ('text' in part ? part.text : tagOf(part, lookup))).join('').replace(/\s+/g, ' ').trim()
+    : '';
   const menuNode = options.linkable && (
     <LinkMenu
       open={menu}
-      onClose={() => setMenu(false)}
+      onClose={(how) => {
+        setMenu(false);
+        // Back in the composer with the caret it had.
+        if (how === 'escape' && composer.current && (mode !== 'link' || opener.current === composer.current.root())) {
+          composer.current.restore();
+        }
+      }}
       box={box}
       opener={opener}
       id={menuId}
-      name={`Link ${label}`}
+      name={mode === 'add' ? `Add a field to ${label}` : mode === 'replace' ? `Replace ${tagOf(chipParts[replacing] ?? { text: '' }, lookup)}` : `Link ${label}`}
       filterLabel="Find a field"
       typeLabel={target.label}
       items={items}
@@ -381,6 +698,16 @@ function useLink(options: LinkOptions) {
       levelTitle={(level) => (level === FOLD ? "Can't be linked here" : level)}
       empty={(filter) => `No field matches “${filter.trim()}”.`}
       readOnly={disabled}
+      verb={mode === 'add' ? 'add' : mode === 'replace' ? 'replace' : 'link'}
+      header={disabled ? 'Read-only: nothing can be picked.' : mode === 'add' ? (full ? `At most ${MAX_PARTS} fields in one value.` : before ? `After “${tail(before, 40)}”` : 'At the start') : undefined}
+      // The rule once, while a composition takes its first or second field;
+      // after that its tint and "Without" line teach it.
+      footer={mode === 'add' && chipParts.length <= 1 && !disabled ? <span className="seo-menu-rule">{"When an item doesn't have a field, the words joining it are left out too."}</span> : undefined}
+      onBrace={showComposer ? () => {
+        // `{{` types one brace.
+        flushSync(() => setMenu(false));
+        composer.current?.brace();
+      } : undefined}
     />
   );
 
@@ -447,10 +774,34 @@ function useLink(options: LinkOptions) {
             aria-haspopup="dialog"
             aria-expanded={menu}
             onClick={(event) => openMenu(event.currentTarget)}
+            onPaste={(event) => {
+              // Where text composes, a paste on the box replaces it, as a
+              // key does: the composer takes what it can.
+              if (!composing || disabled || !event.clipboardData) {
+                return;
+              }
+              event.preventDefault();
+              // The clipboard is readable during the event only: a copy.
+              const copy = new DataTransfer();
+              for (const type of event.clipboardData.types.filter((one) => one !== 'Files')) {
+                copy.setData(type, event.clipboardData.getData(type));
+              }
+              compose(false, copy);
+            }}
             onKeyDown={(event) => {
               if (event.altKey && event.key === 'ArrowDown') {
                 event.preventDefault();
                 openMenu(event.currentTarget);
+              } else if (
+                composing &&
+                !disabled &&
+                (braceKey(event) || ((event.key === 'ArrowRight' || event.key === 'End') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey))
+              ) {
+                // A step out of the box: its field or the default as a chip,
+                // the caret after it; `{` adds a field there at once, with
+                // whatever keys the layout types it with.
+                event.preventDefault();
+                compose(event.key === '{');
               } else if ((event.key === 'Backspace' || event.key === 'Delete') && !disabled) {
                 event.preventDefault();
                 unlink();
@@ -525,11 +876,268 @@ function useLink(options: LinkOptions) {
     );
   };
 
+  // The composer: what each chip gives, the item's result, and what an item
+  // without the chip at the caret would get.
+  const brokenPath = (field: number) => {
+    const stored = partsOf(value);
+    let seen = -1;
+    const at = stored.findIndex((part) => !('text' in part) && ++seen === field);
+    return at >= 0 ? `${path}.parts.${at}` : undefined;
+  };
+  const chipView = (part: Part, field: number): ChipView & { why: string } => {
+    // A field labelled like a fact, or like another field, as the menu says
+    // it: "Description (body)".
+    const entry = 'source' in part ? entries.find((one) => one.key === part.source.expression) : undefined;
+    const tag = tagOf(part, lookup, brokenPath(field));
+    const name = entry && tag === rowOf(lookup, part)?.label ? entry.full : tag;
+    const one = resolve(part, form, lookup);
+    const why = 'source' in part ? brokenWhy(lookup.broken?.[brokenPath(field) ?? '']?.reason, 'text') : 'no longer exists';
+    const state = !lookup.resolvable ? 'none' : one.status;
+    const own = state === 'ok' ? one.text : stateWords(state, type, why, !!rowOf(lookup, part)?.hop);
+    return {
+      label: name,
+      state,
+      why,
+      // Its value, and what the item gets without it; a field that gives
+      // nothing for the item, its state only: the result already goes
+      // without it.
+      title: lookup.resolvable && chipParts.length > 1 && state === 'ok' ? `${own}\nWithout ${name}: ${withoutOf(field)}` : own,
+    };
+  };
+  /** What the item gives without the field at an index: its default when nothing is left. */
+  function withoutOf(field: number): string {
+    return resultOf(composerParts, field) || byDefaultFor(options.byDefault, options.defaultWords, lookup, form) || 'nothing';
+  }
+  function resultOf(parts: Part[], without = -1, ends = true): string {
+    let seen = -1;
+    const kept = parts.map((part) => ('text' in part || ++seen !== without ? part : { source: { sourceType: 'entity-field' as const, expression: '#without' } }));
+    if (!ends) {
+      // Up to the caret: the words typed after the last field still show.
+      return composed({ parts: [...kept, { text: '\u0000' }] }, form, lookup).join('').replace('\u0000', '').replace(/\s+/g, ' ').trim();
+    }
+    const folded = fold(kept);
+    if (!folded) {
+      return '';
+    }
+    return 'parts' in folded ? composed(folded, form, lookup).join('').replace(/\s+/g, ' ').trim() : resolve(folded, form, lookup).text;
+  }
+  const result = lookup.resolvable ? resultOf(composerParts) : '';
+  const views = chipParts.map((part, at) => chipView(part, at));
+  const leftOut = views.filter((one) => one.state !== 'ok' && one.state !== 'none').map((one) => one.label);
+  // What a default gives, when every field gives nothing.
+  const fallbackText = byDefaultFor(options.byDefault, options.defaultWords, lookup, form);
+  // The broken field the guidance names: said there, never twice.
+  const brokenAt = views.findIndex((one) => one.state === 'broken');
+  const guided = showComposer && lookup.resolvable && chipParts.length > 0 ? brokenAt : -1;
+  // Every field empty: the guidance names them all ("… are empty for this
+  // event, so its default title is used."), never the description too.
+  const allEmptyGuided = showComposer && lookup.resolvable && chipParts.length > 0 && brokenAt < 0 && !pasteNote && !result;
+  const composerSaid = !lookup.resolvable
+    ? `No ${type} to preview.`
+    : compositionSaid(type, result, fallbackText, allEmptyGuided ? [] : views.filter((_, at) => at !== guided).map((one) => ({ label: one.label, status: one.state, why: one.why })));
+  // What the item gives without a chip: while it is hovered, selected whole
+  // or being replaced. Never for the only field, whose "without" is the
+  // default.
+  const aside = menu && mode === 'replace' ? replacing : near;
+  const without = aside !== null && aside >= 0 && views[aside]?.state === 'ok' && chipParts.length > 1 ? `Without ${views[aside].label}: ${withoutOf(aside)}` : null;
+
+  // Where a preview shows the result (the Search and Social tabs), the line
+  // under the fields shows only while the composer is in use, or while that
+  // preview is out of sight; at rest it keeps only the fields left out for
+  // the item, which no preview says. A detail has no preview: it keeps it.
+  const staged = !path.startsWith('schema.');
+  // One adopted field and no words: its chip and the preview say it all.
+  const saysMore = composerParts.some((part) => 'text' in part) || chipParts.length > 1;
+  const resultAtRest = !staged || ((inside || menu) && saysMore) || !stageVisible;
+  const leftOutNote = leftOut.length ? `${andWords(leftOut)} left out for this ${type}` : '';
+
+  /** The composer: typed text and fields as chips, the item's result inside its border. */
+  const composerNode = (field: FieldParts & { describedBy?: string }, opts: { multiline?: boolean; lang?: string; placeholder?: string; trailing?: ReactNode } = {}) => {
+    fieldId.current = field.id;
+    const said = `${field.id}-said`;
+    // Described by its result sentence and the words of its guidance: never
+    // the aside's Reset button or the length count.
+    const described = [
+      said,
+      // The guidance's words: never its "Replace field" button.
+      ...(field.describedBy ?? '').split(' ').filter((id) => id && id !== field.asideId).map((id) => (id === `${field.id}-guide` ? (guided >= 0 ? guideWords : `${id}-text`) : id)),
+    ].join(' ');
+    const showResult = (chipParts.length > 0 || !lookup.resolvable) && (resultAtRest || !lookup.resolvable);
+    return (
+      <div
+        className="seo-typed seo-composed"
+        ref={box}
+        data-multiline={opts.multiline || undefined}
+        onKeyDown={(event) => {
+          // Which way Tab leaves, if it does.
+          tabbing.current = event.key === 'Tab' ? (event.shiftKey ? 'back' : 'forward') : null;
+        }}
+        onFocus={(event) => {
+          focusOnMount.current = false;
+          setInside(true);
+          // Clear of the action bar in a short frame (the body's scroll
+          // padding).
+          event.currentTarget.scrollIntoView?.({ block: 'nearest' });
+        }}
+        onBlur={(event) => {
+          const next = event.relatedTarget;
+          if (event.currentTarget.contains(next) || next?.closest('.seo-menu')) {
+            return;
+          }
+          // Where focus went, and from which side: the box that comes back
+          // never takes it from there (layout effect below).
+          leaving.current = { to: next instanceof HTMLElement ? next : null, tab: tabbing.current };
+          tabbing.current = null;
+          // Leaving: a lone field shows as its box again, nothing as the
+          // default, and the default adopted as a chip is no value.
+          setInside(false);
+          setStarted(null);
+          setEditing(false);
+          setNear(null);
+          setPasteNote('');
+          if (value && options.byDefault && sameValue(value, options.byDefault)) {
+            dispatch({ type: 'edit', scope: 'target', path, value: undefined });
+          }
+        }}
+      >
+        <div
+          className="seo-composer-box"
+          data-invalid={field.invalid || undefined}
+          data-readonly={disabled || undefined}
+          data-near={near ?? undefined}
+        >
+          {atRest || !ComposerOf ? (
+            // Nothing to preview, or the editor not loaded (yet): its parts,
+            // said as they are.
+            <div id={field.id} className="seo-composer" role="group" aria-labelledby={field.labelId} aria-describedby={described} aria-busy={(!atRest && !loadFailed) || undefined}>
+              {composerParts.map((part, at) =>
+                'text' in part ? (
+                  <span key={at}>{part.text}</span>
+                ) : (
+                  <span key={at} className="seo-field-chip" data-state={atRest ? 'none' : views[fieldsIn(composerParts.slice(0, at)).length]?.state} dir="auto">
+                    {chipView(part, fieldsIn(composerParts.slice(0, at)).length).label}
+                  </span>
+                ),
+              )}
+            </div>
+          ) : (
+            <ComposerOf
+              ref={composer}
+              autoFocus={focusOnMount.current}
+              keepCaret={menu}
+              id={field.id}
+              labelId={field.labelId}
+              describedBy={described}
+              parts={composerParts}
+              readOnly={disabled}
+              invalid={field.invalid}
+              lang={opts.lang}
+              placeholder={opts.placeholder}
+              chip={(part, at) => chipView(part, at)}
+              onChange={(parts) => {
+                const next = fold(parts.map((part) => ('text' in part ? { text: wellFormed(part.text) } : part)));
+                const undo = menuUndo.current;
+                menuUndo.current = null;
+                setStarted(null);
+                setEditing(true);
+                if (undo) {
+                  dispatch({ type: 'apply', scope: 'target', values: setPath<SeoValues>(state.edits.target, path, next), undo });
+                } else {
+                  dispatch({ type: 'edit', scope: 'target', path, value: next });
+                }
+              }}
+              onAdd={(from) => openMenu(from, '', composerParts.length ? 'add' : 'link')}
+              onReplace={(at, from) => openMenu(from, '', 'replace', at)}
+              onRemoved={(part) => say(`${tagOf(part, lookup)} removed from ${label}.`)}
+              onUndone={(part, added) => say(`${tagOf(part, lookup)} ${added ? 'added to' : 'removed from'} ${label}.`)}
+              onNear={setNear}
+              plain={(parts) => resultOf(parts) || parts.map((part) => ('text' in part ? part.text : '')).join('')}
+              // The fields this place can take, as its menu offers them.
+              accepts={(part): part is Part => fitsPart(part, form, lookup)}
+              max={MAX_PARTS}
+              onLeftOut={(labels) => {
+                // Said, and shown under the field until focus leaves.
+                const words = `${andWords(labels)} ${labels.length === 1 ? "isn't" : "aren't"} available here, so ${labels.length === 1 ? 'it was' : 'they were'} left out.`;
+                setPasteNote(words);
+                say(words);
+              }}
+            />
+          )}
+          {showResult ? (
+            <div className="seo-composer-result" aria-hidden data-quiet={!!without || !result || undefined} title={result || undefined} dir="auto" onMouseDown={(event) => {
+              // A click on the result puts the caret at the end.
+              event.preventDefault();
+              composer.current?.focusEnd();
+            }}>
+              {/* The result gives way at its end; the note keeps a line. */}
+              <span className="seo-composer-text">
+                {!lookup.resolvable ? `No ${type} to preview` : without ?? (result || `Default: ${fallbackText || 'nothing'}`)}
+              </span>
+              {lookup.resolvable && !without && result && leftOutNote && <span className="seo-composer-note">{leftOutNote}</span>}
+            </div>
+          ) : leftOutNote && lookup.resolvable ? (
+            <div className="seo-composer-result" aria-hidden data-quiet="" dir="auto" onMouseDown={(event) => {
+              event.preventDefault();
+              composer.current?.focusEnd();
+            }}>
+              <span className="seo-composer-text">{leftOutNote}</span>
+            </div>
+          ) : null}
+          {opts.trailing && <div className="seo-trail">{opts.trailing}</div>}
+        </div>
+        <span id={said} hidden>
+          {composerSaid}
+        </span>
+        {menuNode}
+      </div>
+    );
+  };
+
+  const hadComposer = useRef(false);
+  useLayoutEffect(() => {
+    const lost = !document.activeElement || document.activeElement === document.body;
+    const left = leaving.current;
+    leaving.current = null;
+    if (hadComposer.current && !showComposer && left?.tab && (!lost || left.to?.isConnected)) {
+      // Tab or Shift+Tab on its way out: focus goes on, never back to the box.
+    } else if (hadComposer.current && !showComposer && left?.tab) {
+      // Where Tab was going is gone (Reset, once the value is the default
+      // again): the next stop on that side.
+      nextStop(box.current, left.tab === 'forward')?.focus();
+    } else if (hadComposer.current && !showComposer && lost) {
+      (boxButton.current ?? document.getElementById(fieldId.current))?.focus();
+    }
+    hadComposer.current = showComposer;
+  });
+
   /** Under the field: what is used instead of a link that gives nothing. */
   const fallback = options.byDefault || options.defaultWords || kind === 'image'
     ? `each ${type} uses its default ${label.toLowerCase()}`
     : `the detail is left out for each ${type}`;
-  const note: ReactNode = linked && shown.status === 'broken' ? (
+  // Under a composer, only what changes the whole value: a field that no
+  // longer exists, or every field empty. The length guidance stays.
+  const composerNote: ReactNode = !showComposer || !lookup.resolvable
+    ? null
+    : !chipParts.length ? (
+      pasteNote || null
+    ) : brokenAt >= 0 ? (
+      <>
+        <span id={guideWords}>{`${views[brokenAt].label} ${'source' in chipParts[brokenAt] ? brokenWhy(lookup.broken?.[brokenPath(brokenAt) ?? '']?.reason, 'text') : 'no longer exists'}, so it is left out of every ${type}'s ${label.toLowerCase()}.`}</span>
+        {!disabled && (
+          <Btn variant="ghost" size={24} data-own-line="" onClick={() => {
+            composer.current?.select(brokenAt);
+            openMenu(composer.current?.root() ?? null, '', 'replace', brokenAt);
+          }}>
+            Replace field
+          </Btn>
+        )}
+      </>
+    ) : pasteNote ? (
+      pasteNote
+    ) : !result ? (
+      allEmptySaid(views.map((one) => one.label), type, label)
+    ) : null;
+  const note: ReactNode = (composing && loadFailed && (showComposer || tried) ? LOAD_FAILED : null) ?? composerNote ?? (linked && shown.status === 'broken' ? (
     <>
       {`${tag} ${why}, so ${fallback}.`}
       {!disabled && (
@@ -543,11 +1151,11 @@ function useLink(options: LinkOptions) {
     shown.status === 'empty'
       ? `This ${type} has no ${tag}, so ${options.instead}.`
       : `So ${options.instead}.`
-  ) : null;
+  ) : null);
 
   const live = (
     <span className="seo-visually-hidden" role="status">
-      {said}
+      <span key={said.n}>{said.text}</span>
     </span>
   );
 
@@ -563,7 +1171,13 @@ function useLink(options: LinkOptions) {
   /** An image row's value line when the link gives nothing. */
   const imageState = linked && shown.status !== 'ok' ? stateWords(shown.status, type, why, item) : undefined;
 
-  return { button, boxNode, inputNode, showBox, note, live, linked, shown, tag, value, openMenu, pick, unlink, entries, linkButton, menuNode, box, disabled, imageTag, imageState };
+  // The length of a composition with a field is this item's.
+  const varies = showComposer && chipParts.some((part) => !('fact' in part) || part.fact !== 'site') ? type : undefined;
+  // Where text composes, the brace is said where nothing else is.
+  const hint = composing && !disabled && !atRest && (showBox || (showComposer && !chipParts.length)) ? 'Type { to add a field' : undefined;
+  // An empty composer has no length of its own: its guidance is the brace.
+  const empty = showComposer && composerParts.length === 0;
+  return { hint, varies, empty, resetTip, button, boxNode, inputNode, composerNode, showComposer, showBox, note, live, linked, shown, tag, value, openMenu, pick, unlink, entries, linkButton, menuNode, box, disabled, imageTag, imageState };
 }
 
 /** The plain typed input of a text value: one line, or several. */
@@ -641,6 +1255,11 @@ export function ValueField(
       explain={link.note}
       note={props.note}
       group={props.group}
+      varies={link.varies}
+      hint={link.hint}
+      meter={link.empty ? undefined : props.meter}
+      quietCount={link.showComposer}
+      resetTip={props.resetTip ?? link.resetTip}
       // A linked box, and a linked image's row, has its own × to go back.
       noReset={props.noReset || ((link.showBox || !!props.image) && link.linked && !link.disabled)}
     >
@@ -653,7 +1272,9 @@ export function ValueField(
                 {link.menuNode}
               </div>
             )
-            : link.showBox
+            : link.showComposer
+              ? link.composerNode(field, { multiline: props.multiline, lang: state.server?.langcode, placeholder: props.placeholder, trailing: props.trailing })
+              : link.showBox
               ? link.boxNode(field, props.lines, props.oneLine)
               : link.inputNode(field, (input) =>
                   props.input ? props.input(input) : (
@@ -907,6 +1528,7 @@ export function TitleField(
   const template = props.scope === 'target' && server.target?.scope === 'template';
   // Only the ending set: the aside names it, and what Reset goes back to.
   const endingOnly = state.edits.target.title === undefined && state.edits.target.title_end !== undefined;
+  const bothSet = state.edits.target.title !== undefined && state.edits.target.title_end !== undefined;
   const link = useLink({
     path: 'title',
     label: 'Title',
@@ -943,10 +1565,14 @@ export function TitleField(
             : `Ending set for every ${server.target?.label}`
           : undefined
       }
-      resetTip={endingOnly ? 'the site ending' : undefined}
+      // Reset clears both parts: said where both are set.
+      resetTip={endingOnly ? 'the site ending' : bothSet ? `the default title and the site ending` : undefined}
       resetWhat={endingOnly ? 'title ending' : undefined}
       link={link.button}
-      meter={props.meter}
+      meter={link.empty ? undefined : props.meter}
+      quietCount={link.showComposer}
+      varies={link.varies}
+      hint={link.hint}
       onSuggest={props.onSuggest}
       after={props.after}
       explain={link.note}
@@ -964,7 +1590,9 @@ export function TitleField(
       {(field) => (
         <div className="seo-title-parts">
           <div className="seo-title-main">
-            {link.showBox
+            {link.showComposer
+              ? link.composerNode(field, { lang: server.langcode, placeholder: props.placeholder, trailing: props.trailing })
+              : link.showBox
               ? link.boxNode(field, 1, true)
               : link.inputNode(field, (input) => (
                   <TextInput

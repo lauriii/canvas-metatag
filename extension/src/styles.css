@@ -2021,6 +2021,196 @@ textarea.seo-textarea:not([data-multiline]) {
   top: 4px;
   right: 4px;
 }
+/* The composer: typed words and fields as chips on the first lines, the
+   item's result on the last, inside one input's border. */
+.seo-composer-box {
+  position: relative;
+  box-sizing: border-box;
+  min-height: var(--seo-control-h);
+  /* The padding of every input: its line sits where the box's did. */
+  padding: 6px 12px;
+  border-radius: var(--seo-radius-control);
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 0 0 1px var(--seo-control-border);
+  transition: box-shadow var(--seo-fast) var(--seo-ease);
+}
+.seo-composer-box:hover {
+  box-shadow: inset 0 0 0 1px var(--seo-control-border-hover);
+}
+.seo-composer-box:focus-within {
+  box-shadow: var(--seo-ring);
+}
+.seo-composer-box[data-invalid] {
+  box-shadow: inset 0 0 0 1px var(--red-9), 0 0 0 3px rgba(229, 72, 77, 0.12);
+}
+.seo-composer-box[data-readonly] {
+  background: var(--gray-a2);
+}
+.seo-composer,
+:is(.seo-app, .seo-proof) .seo-composer:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+.seo-composer {
+  min-height: 20px;
+  color: var(--seo-ink);
+  font-size: 14px;
+  line-height: 20px;
+  outline: none;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  cursor: text;
+}
+.seo-composed[data-multiline] .seo-composer-box {
+  min-height: 68px;
+}
+.seo-composer-line {
+  margin: 0;
+}
+/* Empty, it shows what the item gets instead, in the placeholder's colour.
+   The editor's one empty line holds a <br>: the words are drawn over it, by
+   the composer, which holds them. */
+.seo-composer {
+  position: relative;
+}
+.seo-composer:empty::before,
+.seo-composer:has(> .seo-composer-line:only-child > br:only-child)::before {
+  content: attr(data-placeholder);
+  position: absolute;
+  inset: 0 0 auto 0;
+  overflow: hidden;
+  color: var(--seo-ink-2);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+/* A chip: the field's name as text in the flow, as tall as the line, whole
+   when the line wraps. Filled is the link colour; empty or hidden muted
+   with a dashed line; broken red with its machine name. */
+.seo-field-chip {
+  /* Inline, never an inline block: the caret's Home, End and arrows treat
+     it as words. 13 px on 2 px padding is 20 px tall. */
+  padding: 2px 6px;
+  border-radius: var(--seo-radius-chip, 4px);
+  background: var(--blue-2);
+  box-shadow: inset 0 0 0 1px var(--blue-a5);
+  color: var(--seo-link-ink);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  cursor: pointer;
+}
+.seo-field-chip[data-state="empty"],
+.seo-field-chip[data-state="hidden"] {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed var(--gray-a8);
+  outline-offset: -1px;
+  color: var(--seo-ink-2);
+}
+.seo-field-chip[data-state="broken"] {
+  background: var(--red-a2);
+  box-shadow: inset 0 0 0 1px var(--seo-broken-line);
+  color: var(--seo-broken-ink);
+}
+.seo-field-chip[data-state="none"] {
+  background: var(--gray-a2);
+  box-shadow: inset 0 0 0 1px var(--gray-a5);
+  color: var(--seo-ink);
+}
+/* Beside the caret: a tint, its words darker so that they keep 4.5:1. */
+.seo-field-chip[data-near] {
+  background: var(--blue-3);
+  box-shadow: inset 0 0 0 1px var(--blue-a7);
+  color: var(--blue-12);
+}
+/* Selected whole (Shift and an arrow): a ring, not the tint of "near". */
+.seo-field-chip::selection {
+  background: transparent;
+}
+.seo-composer .seo-field-chip[data-selected] {
+  box-shadow: inset 0 0 0 2px var(--blue-9);
+}
+/* A separator after the last field, and the words of a field that gives
+   nothing for the item: left out of the output, drawn muted. */
+.seo-composer [data-dropped] {
+  color: var(--seo-ink-2);
+}
+::highlight(seo-chip-dropped) {
+  color: var(--seo-ink-2);
+}
+/* Focus elsewhere: a selection left behind never looks active. */
+.seo-composer:not(:focus) ::selection {
+  background: var(--gray-a4);
+}
+/* The words that go with the chip at the caret, where the browser can mark
+   them without changing the text. */
+::highlight(seo-chip-words) {
+  background-color: var(--blue-a4);
+}
+/* The item's result, in the box's value colour: never edited; a click puts
+   the caret at the end. One line, cut at its end; the whole of it is in the
+   description and the tooltip. */
+.seo-composer-result {
+  margin-top: 2px;
+  padding-top: 2px;
+  box-shadow: inset 0 1px 0 var(--seo-line-soft);
+  color: var(--seo-ink);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+/* The result gives way at its end; the note of what is left out keeps a
+   line of its own. */
+.seo-composer-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.seo-composer-note {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-height: 420px) {
+  .seo-composer-text {
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+  }
+}
+.seo-composer-result[data-quiet],
+.seo-composer-note {
+  color: var(--seo-ink-2);
+}
+.seo-composed .seo-trail {
+  top: 4px;
+}
+/* In a short frame the entries need the room: the footer with the rule
+   gives way (the menu says it in a taller frame, and the tint and the
+   "Without" line show it). */
+@media (max-height: 420px) {
+  .seo-menu-foot:has(> .seo-menu-rule) {
+    display: none;
+  }
+}
+/* Where the field goes: cut from its start at a word (Value.tsx), never at
+   its end; it wraps rather than hide the words before the caret. */
+.seo-menu-where {
+  flex: none;
+  margin-bottom: 4px;
+  padding: 4px 10px 0;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+}
+
 /* The link button by the label: gray, red when the link is broken. */
 .seo-label [data-link][data-look="broken"] {
   color: var(--seo-broken-ink);
@@ -2133,7 +2323,10 @@ textarea.seo-textarea:not([data-multiline]) {
   flex-direction: column;
   width: min(340px, calc(100vw - 16px));
   min-width: 0;
-  max-height: min(360px, var(--radix-popover-content-available-height));
+  /* Never past the frame's edge, at 200 % zoom too. */
+  max-width: var(--radix-popover-content-available-width, calc(100vw - 16px));
+  /* Never taller than the frame it is in, however it is placed. */
+  max-height: min(360px, var(--radix-popover-content-available-height), calc(100vh - 16px));
   padding: 0;
   overflow: hidden;
   border-radius: var(--seo-radius-surface);
@@ -2142,7 +2335,7 @@ textarea.seo-textarea:not([data-multiline]) {
 /* Above its field, opened by a key, it keeps the room it has: the filter
    never moves. */
 .seo-menu.rt-PopoverContent[data-fixed] {
-  height: min(360px, var(--radix-popover-content-available-height));
+  height: min(360px, var(--radix-popover-content-available-height), calc(100vh - 16px));
 }
 /* Closed by a resize: gone at once. */
 .seo-menu.rt-PopoverContent[data-gone] {
@@ -2179,6 +2372,17 @@ textarea.seo-textarea:not([data-multiline]) {
   overflow-y: auto;
   /* The active entry stays clear of the fade below. */
   scroll-padding-bottom: 24px;
+}
+/* Steps on the whole value ("Add words or fields", "Remove ‹field›") stay
+   under the filter: in sight when the menu opens on an entry far below. */
+.seo-menu-pinned {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  margin: 0 -6px 4px;
+  padding: 0 6px 4px;
+  background: var(--color-panel-solid);
+  box-shadow: inset 0 -1px 0 var(--gray-a3);
 }
 /* More values below than the list shows: its end fades. */
 .seo-menu-list[data-more] {

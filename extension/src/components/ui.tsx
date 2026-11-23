@@ -66,7 +66,8 @@ export const IconBtn = forwardRef<HTMLButtonElement, IconBtnProps>(
     );
     // tip="": a name that says it all ("Back") needs no tooltip.
     return tip === '' ? button : (
-      <Tooltip content={tip ?? label} side={side}>
+      // A long tip wraps inside the frame, at 200 % zoom too.
+      <Tooltip content={tip ?? label} side={side} maxWidth="min(360px, var(--radix-tooltip-content-available-width, calc(100vw - 16px)))" collisionPadding={8}>
         {button}
       </Tooltip>
     );

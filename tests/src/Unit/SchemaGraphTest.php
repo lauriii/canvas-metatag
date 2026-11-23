@@ -1658,4 +1658,49 @@ final class SchemaGraphTest extends UnitTestCase {
     ], ['field_pages' => [$course('a')]])['graph']['@graph'][2]);
   }
 
+  /**
+   * A free-text detail of a template composes: read in words, kept literal.
+   *
+   * The joined text is checked as typed text of the detail is, so one that
+   * is too long is cut; compositions never pass through fillFacts(), while
+   * hand-added JSON-LD keeps filling its whole-value names.
+   */
+  public function testComposedDetails(): void {
+    $composition = ['parts' => [['fact' => 'title'], ['text' => ' {site} · '], self::link('field_city')]];
+    $asked = [];
+    $read = static function (array $value, string $kind) use (&$asked): string {
+      if (!isset($value['parts'])) {
+        return '';
+      }
+      $asked[] = $kind;
+      return $kind === 'line' ? 'Hello {site} · Helsinki' : str_repeat('Long words ', 300);
+    };
+    $custom = (string) json_encode([['@type' => 'WebSite', '@id' => '#search', 'name' => '{site} search']]);
+    $schema = [
+      'type' => 'Article',
+      'props' => [
+        'headline' => $composition,
+        'description' => ['parts' => [['fact' => 'description'], ['text' => ' Free delivery.']]],
+      ],
+      'custom' => $custom,
+    ];
+    $ctx = ['scope' => 'template', 'facts' => ['site' => 'Example']] + self::CTX;
+    $built = SchemaGraph::build($ctx, $schema, $read);
+    $main = self::main($built);
+    // A headline is title-like: a line; a description: words.
+    self::assertSame(['line', 'words'], array_slice($asked, 0, 2));
+    // Text a field holds, braces included, is never filled.
+    self::assertSame('Hello {site} · Helsinki', $main['headline']);
+    // Longer than a detail allows: cut as typed text is, never reported.
+    self::assertSame(2000, mb_strlen($main['description']));
+    self::assertSame([], $built['dropped']);
+    // Hand-added JSON-LD fills its whole-value names.
+    self::assertSame('Example search', array_column($built['graph']['@graph'], 'name', '@id')[self::URL . '#search']);
+
+    // On a page a detail is asked in its own kind, never in words.
+    $asked = [];
+    SchemaGraph::build(['scope' => 'page'] + $ctx, ['type' => 'Article', 'props' => ['headline' => $composition]], $read);
+    self::assertSame(['text'], $asked);
+  }
+
 }

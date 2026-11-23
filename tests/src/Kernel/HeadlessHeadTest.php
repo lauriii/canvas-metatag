@@ -394,6 +394,33 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A composed title: the content API's is the coupled head's.
+   */
+  public function testComposedTitle(): void {
+    $this->createField('field_byline', 'string', 'Byline');
+    $byline = ['expression' => 'ℹ︎␜entity:node:article␝field_byline␞␟value', 'sourceType' => 'entity-field'];
+    $this->createTemplate(TRUE, [
+      'title' => [
+        'parts' => [['fact' => 'title'], ['text' => ' by '], ['source' => $byline]],
+      ],
+    ]);
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'Hello',
+      'uid' => $this->author->id(),
+      'field_byline' => 'Grace & Ada',
+      'status' => 1,
+    ]);
+    $node->save();
+    $head = self::decodeResponse($this->content('/node/' . $node->id()))['head'];
+    self::assertSame('Hello by Grace & Ada | Example', $head['title']);
+    self::assertSame($this->resolver()->resolve(Node::load($node->id()))['head']['title'], $head['title']);
+    // An item without the field leaves out the words that go with it.
+    $node->set('field_byline', NULL)->save();
+    self::assertSame('Hello | Example', self::decodeResponse($this->content('/node/' . $node->id()))['head']['title']);
+  }
+
+  /**
    * Everything that is not a canonical route of an owned entity is Canvas's.
    */
   public function testOtherRoutesAreUntouched(): void {

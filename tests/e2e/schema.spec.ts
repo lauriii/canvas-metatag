@@ -230,7 +230,8 @@ test('an event names itself after the page, and its withheld proof reads its val
   await expect(line).toHaveAccessibleName(/^Event result: Needs/, { timeout: 30_000 });
   await line.click();
   const proof = frame.getByRole('dialog', { name: 'Event result' });
-  await expect(proof).toContainText('19 June 2027, 19:00');
+  // In the locale of the server's words: the site's country, else the language.
+  await expect(proof).toContainText(/19 June 2027, 19:00|June 19, 2027, 19:00/);
   await expect(proof).toContainText('Turku');
   const unset = proof.locator('.seo-proof-facts > div').filter({ hasText: 'Not set' });
   await expect(unset).toHaveCount(1);
@@ -378,13 +379,13 @@ test('your own JSON-LD lives behind Code, read back and checked item by item', a
   await expect(frame.getByText(UI.schema.moved)).toHaveCount(0);
   await expect(button(frame, UI.schema.code)).toBeFocused();
   await expect(stage(frame)).toContainText('Added by hand: FAQ');
-  await expect(button(frame, 'FAQ: Not shown since 7 May 2026')).toBeVisible();
+  await expect(button(frame, /^FAQ: Not shown since (7 May 2026|May 7, 2026)$/)).toBeVisible();
 
   // Output: the graph as an outline, then the test of a draft.
   await button(frame, UI.schema.code).click();
   const output = sheet(frame, 'Output');
   const rows = output.getByRole('list', { name: 'Structured data' }).getByRole('listitem');
-  await expect(rows.filter({ hasText: 'FAQPage' })).toContainText('Not shown since 7 May 2026');
+  await expect(rows.filter({ hasText: 'FAQPage' })).toContainText(/Not shown since (7 May 2026|May 7, 2026)/);
   await expect(rows.filter({ hasText: 'FAQPage' })).toContainText('Added by hand');
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   const popup = page.waitForEvent('popup');
