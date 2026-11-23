@@ -47,6 +47,8 @@ function canvas_metatag_post_update_values_as_parts(array &$sandbox): string {
     [$site, $lines] = Legacy::convert(is_array($values) ? $values : [], 'site', $none);
     $config->set('values', $site)->save();
     $log('canvas_metatag.site', $lines);
+    // A {sep} inside a composed template value is the separator, typed.
+    $separator = Values::cleanIdentity((array) $config->get('identity'))[0]['separator'];
 
     // Templates and their drafts. Saving a template drops its draft, so both
     // are converted first (a failure then fails the update with nothing
@@ -66,9 +68,9 @@ function canvas_metatag_post_update_values_as_parts(array &$sandbox): string {
       $kept = \Drupal::keyValue(AutoSaveManager::AUTO_SAVE_STORE)->get(AutoSaveManager::getAutoSaveKey($template));
       $values = $template->getThirdPartySetting('canvas_metatag', 'values');
       $saved = is_array($values) && $values;
-      $stored = $saved ? Legacy::convert($values, 'template', $field, $site['title_end'] ?? NULL) : NULL;
+      $stored = $saved ? Legacy::convert($values, 'template', $field, $site['title_end'] ?? NULL, $separator) : NULL;
       $values = $entity?->getThirdPartySetting('canvas_metatag', 'values');
-      $drafted = $entity && ($saved || is_array($values)) ? Legacy::convert(is_array($values) ? $values : [], 'template', $field, $site['title_end'] ?? NULL) : NULL;
+      $drafted = $entity && ($saved || is_array($values)) ? Legacy::convert(is_array($values) ? $values : [], 'template', $field, $site['title_end'] ?? NULL, $separator) : NULL;
       if ($stored) {
         [$new, $lines] = $stored;
         $new ? $template->setThirdPartySetting('canvas_metatag', 'values', $new) : $template->unsetThirdPartySetting('canvas_metatag', 'values');
@@ -208,7 +210,9 @@ function _canvas_metatag_post_update_fields(string $bundle): callable {
     $first['image'] ??= $image ? $name : NULL;
   }
   return static function (string $name, string $kind) use ($sources, $bundle, $first): ?array {
-    if ($kind === 'text' && $name === $first['text']) {
+    // The first formatted text with a summary is the Description fact, also
+    // as a part of a description; never in a title.
+    if (($kind === 'text' || $kind === 'words') && $name === $first['text']) {
       return ['fact' => 'description'];
     }
     $source = $sources->sourceFor($bundle, $name, $kind, TRUE);

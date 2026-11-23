@@ -8,6 +8,7 @@ import { durationText, groupLine, hoursLine, parseHours } from './controls';
 import { dateWords } from './readback';
 import { set as setJson, value as readJson } from './custom/doc';
 import {
+  type Form,
   type Lookup,
   type ShownImage,
   rowOf,
@@ -46,10 +47,10 @@ type Obj = Record<string, unknown>;
 const isObj = (value: unknown): value is Obj =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-/** Whether a map is one value: typed text, a fact, a media item or a link. */
+/** Whether a map is one value: typed text, a fact, a media item, a link or a composition. */
 const isValue = (value: Obj) => {
   const keys = Object.keys(value);
-  return keys.length === 1 && ['text', 'fact', 'media', 'source'].includes(keys[0]);
+  return keys.length === 1 && ['text', 'fact', 'media', 'source', 'parts'].includes(keys[0]);
 };
 
 // The type registry and the search features come with the state, in the
@@ -403,6 +404,11 @@ function pruned(value: unknown, key?: string): unknown {
   if ((key === 'title_end' || key === 'organizer' || key === 'author') && isObj(value) && value.text === '' && Object.keys(value).length === 1) {
     return value;
   }
+  // A composition is canonical as fold() leaves it: a space between two
+  // fields is a part of its own (Values::canon()).
+  if (key === 'parts' && Array.isArray(value) && value.length) {
+    return value;
+  }
   if (Array.isArray(value)) {
     const list = value.map((item) => pruned(item)).filter((item) => item !== undefined);
     return list.length ? list : undefined;
@@ -575,43 +581,57 @@ function cut(text: string, max: number): string {
  */
 export function texts(
   effective: SeoValues,
-  text: (value: Value) => string,
+  /**
+   * What a value gives in a form (`line` for the title's main part and the
+   * social title, `words` for the descriptions, `text` for the ending); a
+   * composition its segments.
+   */
+  text: (value: Value, form: Form) => string | string[],
   separator: string,
   siteEnd?: Value,
 ): Texts {
-  const value = (own: Value | undefined, fallback: Value | null, max: number) => {
-    const out = own ? cut(text(own), max) : '';
-    return out !== '' || !fallback ? out : cut(text(fallback), max);
+  const segments = (own: Value | undefined, fallback: Value | null, form: Form): string[] => {
+    const out = own ? [text(own, form)].flat() : [];
+    return plain(out.join(''), Infinity) !== '' || !fallback ? out : [text(fallback, form)].flat();
   };
-  let main = value(effective.title, { fact: 'title' }, 255);
+  // A composition over its room loses whole fields from its end, with the
+  // words that go with them, before words: none of its words dangle.
+  const fit = (parts: string[], room: number) => {
+    while (parts.length > 1 && Array.from(plain(parts.join(''), Infinity)).length > room) {
+      parts = parts.slice(0, -1);
+    }
+    return parts.join('');
+  };
+  const value = (own: Value | undefined, fallback: Value | null, max: number, form: Form) =>
+    cut(fit(segments(own, fallback, form), max), max);
+  // The main part keeps its segments: a cut drops whole fields first.
+  const parts = segments(effective.title, { fact: 'title' }, 'line');
   // Without an ending of its own, or with one that gives nothing for the
   // item, the site's; without one there, the site name. "No ending" is the
   // empty typed ending.
   const siteEnding = siteEnd ?? { fact: 'site' };
   const ending = effective.title_end ?? siteEnding;
-  let end =
-    'text' in ending && ending.text === '' ? '' : value(ending, siteEnding, 255);
-  let title = main + end;
-  if (main !== '' && end !== '') {
-    // Over 255 characters the main part loses words; the ending stays whole.
-    const glue = ` ${plain(separator, 3)} `;
-    const room = 255 - Array.from(glue).length - Array.from(end).length;
-    if (Array.from(main).length > room) {
-      main = room > 0 ? cut(main, room) : '';
-    }
-    title = main === '' ? end : main + glue + end;
-  }
+  const end =
+    'text' in ending && ending.text === '' ? '' : value(ending, siteEnding, 255, 'text');
+  // Over 255 characters the main part loses whole fields from its end, then
+  // words; the ending stays whole.
+  const glue = ` ${plain(separator, 3)} `;
+  const full = plain(parts.join(''), Infinity);
+  const room = end === '' || full === '' ? 255 : 255 - Array.from(glue).length - Array.from(end).length;
+  const main = room > 0 ? cut(fit(parts, room), Math.min(255, room)) : '';
+  const title = main === '' || end === '' ? main + end : main + glue + end;
   const description = value(
     effective.description,
     { fact: 'description' },
     1000,
+    'words',
   );
   return {
-    title: title || value({ fact: 'site' }, null, 255),
+    title: title || value({ fact: 'site' }, null, 255, 'text'),
     description,
-    social_title: value(effective.social?.title, { fact: 'title' }, 255),
+    social_title: value(effective.social?.title, { fact: 'title' }, 255, 'line'),
     social_description:
-      value(effective.social?.description, null, 1000) || description,
+      value(effective.social?.description, null, 1000, 'words') || description,
     title_main: main,
     title_end: end,
   };
@@ -1211,8 +1231,8 @@ export interface View {
   facts: StatePayload['facts'];
   /** What values are resolved against. */
   lookup: Lookup;
-  /** The text a value gives for the previewed item. */
-  text(value: Value): string;
+  /** The text a value gives for the previewed item in a form; a composition's segments. */
+  text(value: Value, form?: Form): string | string[];
   effective: SeoValues;
   texts: Texts;
   source(path: string): Source;
@@ -1502,7 +1522,9 @@ export function pendingFor(
       ([path, value]) =>
         !only ||
         (only.includes(path) &&
-          !(isObj(value) && isValue(value) && !('text' in value))),
+          // A link, fact or image can be picked again; typed words, alone or
+          // in a composition, exist nowhere else.
+          !(isObj(value) && isValue(value) && !('text' in value) && !('parts' in value))),
     ),
   );
   return Object.keys(changes).length
@@ -2143,8 +2165,8 @@ export function siteTexts(state: State, shown: View): Texts {
   const name = identity.name.trim();
   return texts(
     cascade({}, values),
-    (value) =>
-      name && 'fact' in value && value.fact === 'site' ? identity.name : shown.text(value),
+    (value, form) =>
+      name && 'fact' in value && value.fact === 'site' ? identity.name : shown.text(value, form),
     // As the server stores it.
     identity.separator.trim(),
     values.title_end,

@@ -19,7 +19,7 @@ The ending MUST NOT be composed. Reset MUST remove both parts.
 #### Scenario: A template's title
 
 - **WHEN** an editor opens the Search tab of "Every Event" on the site "Example"
-- **THEN** the Title field MUST be the box "Default · Title" and one button named "Title ending: Example"
+- **THEN** the Title field MUST be the box "Default", described "Follows the default: each event's title.", and one button named "Title ending: Example"
 
 #### Scenario: A template's composed title
 

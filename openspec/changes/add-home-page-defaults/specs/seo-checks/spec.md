@@ -7,9 +7,9 @@ from the values the dialog shows, unsaved edits and Canvas's live page title
 and description included. At template scope they MUST be about the node the
 editor previews, named once on one line of the Checks sheet and called "this
 ‹type›" in its issues; when the template renders the front page (front-page),
-the front page visibility rules MUST judge the front node. A value empty for
-the previewed node MUST be stated as a fact, good to know and not counted. The
-Site scope MUST have no checks of its own.
+the front page visibility rules MUST judge the front node. A value, or a
+field of a composition, empty for the previewed node MUST be stated as a fact,
+good to know and not counted. The Site scope MUST have no checks of its own.
 
 #### Scenario: Typing changes the checks
 
@@ -28,8 +28,8 @@ Site scope MUST have no checks of its own.
 
 #### Scenario: A value empty for the previewed node
 
-- **WHEN** "Every Event"'s description holds {Performers} and the previewed event has no performers
-- **THEN** the issue MUST say "Performers is empty for this event", not "Fill in Performers", and be good to know, not counted in the Checks button; the same MUST hold for a value the title or the social texts use
+- **WHEN** "Every Event"'s description is Title, " with ", Performers, and the previewed event has no performers
+- **THEN** the issue MUST say "Performers is empty for this event", not "Fill in Performers", and be good to know, not counted in the Checks button; the same MUST hold for a field the title or the social texts hold
 
 #### Scenario: A description linked to a field empty for the previewed node
 
@@ -55,6 +55,11 @@ Site scope MUST have no checks of its own.
 
 - **WHEN** the dialog shows the Site scope, or the editor's next page is still loading
 - **THEN** the Checks button MUST NOT be shown
+
+#### Scenario: Every field of a composition empty
+
+- **WHEN** "Every Event"'s title is Venue › Title, " · ", Starts, and the previewed event has neither
+- **THEN** the issue MUST say "Venue › Title and Starts are empty for this event, so the title is its default", good to know and not counted
 
 #### Scenario: A template that renders the home page
 
@@ -152,8 +157,18 @@ MUST ask for a description of the whole site.
 
 #### Scenario: Repeating the title
 
-- **WHEN** the description equals the title without the site name, ignoring case and punctuation
+- **WHEN** the description equals the title without the site name, or one contains the other as whole words and the two differ by fewer than 20 letters, ignoring case and punctuation
 - **THEN** "Make the description say more" MUST be listed to improve
+
+#### Scenario: A description that holds the title
+
+- **WHEN** "Every Event"'s description is Title, " in ", City, "." and its title is Title
+- **THEN** "Make the description say more" MUST be listed to improve
+
+#### Scenario: A description that names the title and goes on
+
+- **WHEN** a page or a template is titled "Pricing" and its description is "Pricing for teams of every size, billed monthly or yearly, with every feature included and a free month to try it before you decide which plan fits."
+- **THEN** "Make the description say more" MUST NOT be listed
 
 #### Scenario: No description on the home page
 

@@ -19,8 +19,18 @@ from the identity MUST be named as the site's description.
 
 #### Scenario: Repeating the title
 
-- **WHEN** the description equals the title without the site name, ignoring case and punctuation
+- **WHEN** the description equals the title without the site name, or one contains the other as whole words and the two differ by fewer than 20 letters, ignoring case and punctuation
 - **THEN** "Make the description say more" MUST be listed to improve
+
+#### Scenario: A description that holds the title
+
+- **WHEN** "Every Event"'s description is Title, " in ", City, "." and its title is Title
+- **THEN** "Make the description say more" MUST be listed to improve
+
+#### Scenario: A description that names the title and goes on
+
+- **WHEN** a page or a template is titled "Pricing" and its description is "Pricing for teams of every size, billed monthly or yearly, with every feature included and a free month to try it before you decide which plan fits."
+- **THEN** "Make the description say more" MUST NOT be listed
 
 #### Scenario: The site's description on the home page
 

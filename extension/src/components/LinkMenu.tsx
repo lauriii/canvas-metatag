@@ -61,6 +61,11 @@ export interface MenuItem {
   level?: string;
   /** A row of no importance: the fold of entries that do not fit. */
   quiet?: boolean;
+  /**
+   * A step on the whole value, first: it stays under the filter while the
+   * list scrolls, so it is in sight when the menu opens far below it.
+   */
+  pin?: boolean;
   run?(): void;
 }
 
@@ -99,6 +104,12 @@ export function LinkMenu(props: {
   seed?: string;
   /** A level's heading, when not its name. */
   levelTitle?(level: string): string;
+  /** What Enter does to a value row: link (the default), add or replace. */
+  verb?: 'link' | 'add' | 'replace';
+  /** A line above the list: where an added field goes. Shown in short frames too. */
+  header?: ReactNode;
+  /** `{` in the empty filter: the menu closes and a brace is typed instead. */
+  onBrace?(): void;
 }) {
   const [filter, setFilter] = useState('');
   const [level, setLevel] = useState<string | null>(null);
@@ -168,7 +179,10 @@ export function LinkMenu(props: {
     // The current entry has focus, in its level (after "Back"); a key that
     // opened the menu, the best match.
     const rows = props.items(seed, start);
-    setActive(seed ? first(rows) : Math.max(0, rows.findIndex((row) => row.current) + (start === null ? 0 : 1)));
+    // Without a current entry, the first one after the pinned steps: Enter
+    // at once picks a field, never a step on the whole value.
+    const current = rows.findIndex((row) => row.current);
+    setActive(seed ? first(rows) : current >= 0 ? current + (start === null ? 0 : 1) : Math.max(0, rows.findIndex((row) => !row.pin)) + (start === null ? 0 : 1));
     const rect = props.box.current?.getBoundingClientRect();
     const fits = window.innerHeight > SHORT_FRAME;
     // The action bar's top edge is the frame's bottom while it shows, in a
@@ -342,6 +356,9 @@ export function LinkMenu(props: {
     } else if (event.key === 'Enter') {
       event.preventDefault();
       run(at);
+    } else if (event.key === '{' && filter === '' && props.onBrace) {
+      event.preventDefault();
+      props.onBrace();
     } else if (event.key === 'ArrowRight' && at?.level && event.currentTarget.selectionStart === filter.length) {
       event.preventDefault();
       open(at.level);
@@ -376,14 +393,30 @@ export function LinkMenu(props: {
     watch.current?.observe(element!);
   }, []);
   useEffect(cue, [filter, level]);
+  // Rows pinned under the filter: the active row is brought into sight
+  // below them.
+  const pinRef = useCallback((element: HTMLDivElement | null) => {
+    const scroller = element?.parentElement ?? list.current;
+    if (scroller) {
+      scroller.style.scrollPaddingTop = element ? `${element.offsetHeight + 4}px` : '';
+    }
+  }, []);
   // The active row stays in sight as the arrows move; the first row of a
   // group brings its heading along.
   const showActive = useRef(() => {});
   showActive.current = () => {
     const item = document.getElementById(`${menuId}-${index}`);
     const group = item?.parentElement?.closest('[role="group"]');
-    if (index === 0 && list.current) {
+    // On opening, an active entry in sight from the top keeps the rows above
+    // it, such as "Add words or fields", in sight too.
+    const fromTop = item && list.current ? item.getBoundingClientRect().bottom - list.current.getBoundingClientRect().top + list.current.scrollTop : Infinity;
+    if (list.current && (index === 0 || (!moved.current && fromTop <= list.current.clientHeight - 12))) {
       list.current.scrollTop = 0;
+      // As it opens with the active row in sight, the list starts at its
+      // top: its first heading whole, never nudged under the header.
+      if (!moved.current) {
+        return;
+      }
     } else {
       reveal(group?.querySelector('[role="option"]') === item ? group : item);
     }
@@ -460,6 +493,7 @@ export function LinkMenu(props: {
         // Closed, it is gone at once: a menu still closing would take the
         // next Escape, or focus, from what comes after it.
         data-gone={gone || !props.open || undefined}
+        data-readonly={props.readOnly || undefined}
         align={placed.align}
         side={placed.side}
         avoidCollisions={false}
@@ -529,6 +563,11 @@ export function LinkMenu(props: {
             onKeyDown={onKeyDown}
           />
         </div>
+        {props.header && !inLevel && (
+          <div className="seo-menu-where" id={`${menuId}-where`}>
+            {props.header}
+          </div>
+        )}
         {inLevel && (
           <div className="seo-menu-level" role="heading" aria-level={2}>
             {props.levelTitle?.(level!) ?? level}
@@ -540,6 +579,7 @@ export function LinkMenu(props: {
           role="listbox"
           id={menuId}
           aria-label={inLevel ? (props.levelTitle?.(level!) ?? level!) : props.name}
+          aria-describedby={props.header && !inLevel ? `${menuId}-where` : undefined}
           onScroll={cue}
         >
           {groups.map((group) => {
@@ -604,7 +644,14 @@ export function LinkMenu(props: {
             const id = `${menuId}-g-${group.index}`;
             // Each group is named by its heading, also to assistive
             // technology; rows that are not values come after a line.
-            return group.name === undefined ? (
+            // The first rows, when they are steps on the whole value, stay
+            // under the filter.
+            const pinned = group.index === 0 && group.name === '' && group.rows.every(({ row }) => row.pin);
+            return pinned ? (
+              <div key={id} role="presentation" className="seo-menu-pinned" ref={pinRef}>
+                {options}
+              </div>
+            ) : group.name === undefined ? (
               <Fragment key={id}>{options}</Fragment>
             ) : group.name ? (
               <div key={id} role="group" aria-labelledby={id}>
@@ -615,7 +662,8 @@ export function LinkMenu(props: {
               </div>
             ) : (
               <div key={id} role="presentation">
-                <div className="seo-menu-sep" aria-hidden />
+                {/* A line only between rows: never under the filter. */}
+                {group.index > 0 && <div className="seo-menu-sep" aria-hidden />}
                 {options}
               </div>
             );
@@ -632,10 +680,13 @@ export function LinkMenu(props: {
             <kbd className="seo-kbd">↑</kbd>
             <kbd className="seo-kbd">↓</kbd>move
           </span>
-          <span>
-            <kbd className="seo-kbd">↵</kbd>
-            {at?.level ? 'open' : at && !at.key.startsWith('#') ? 'link' : 'choose'}
-          </span>
+          {/* Read-only, Enter only opens a level. */}
+          {(!props.readOnly || at?.level) && (
+            <span>
+              <kbd className="seo-kbd">↵</kbd>
+              {at?.level ? 'open' : at && !at.key.startsWith('#') ? (props.verb ?? 'link') : 'choose'}
+            </span>
+          )}
           <span>
             <kbd className="seo-kbd">esc</kbd>close
           </span>

@@ -1,0 +1,6 @@
+name: 'Canvas Metatag count test'
+type: module
+description: 'Counts the access checks a head makes for anonymous visitors.'
+package: Testing
+core_version_requirement: ^11
+hidden: true

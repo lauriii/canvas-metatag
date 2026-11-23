@@ -104,11 +104,23 @@ export function valueAt(
   return at === '' || at === null ? undefined : at;
 }
 
+/** The server's locale for dates, once the state has said it. */
+let serverDates: string | null = null;
+
 /**
- * The locale the dialog writes dates in: its language, and for English the
- * style its fields use ("19 June 2027, 19:00").
+ * Writes dates as the server's words do for the item (its language and the
+ * site's country): a date reads one way in the boxes, the menus and the
+ * composed result. Called as the state arrives.
  */
-export const dateLocale = (ui: string) => (ui === 'en' ? 'en-GB' : ui);
+export const setDateLocale = (locale: string | undefined) => {
+  serverDates = locale && /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(locale) ? locale : null;
+};
+
+/**
+ * The locale the dialog writes dates in: the server's for the item, else its
+ * language, and for English the style its fields use ("19 June 2027, 19:00").
+ */
+export const dateLocale = (ui: string) => serverDates ?? (ui === 'en' ? 'en-GB' : ui);
 
 /**
  * "2026-07-01T18:00+02:00" as the wall time it names, the one way the whole

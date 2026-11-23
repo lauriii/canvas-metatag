@@ -560,6 +560,13 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
         ],
       ],
     ])->save();
+    // A composed title on a type with no content yet, as configuration
+    // import gives one: shown at rest, with nothing to preview.
+    $announcement = ContentTemplate::load('node.announcement.full');
+    \assert($announcement instanceof ContentTemplate);
+    $announcement->setThirdPartySetting('canvas_metatag', 'values', [
+      'title' => ['parts' => [['fact' => 'title'], ['text' => ' · '], ['fact' => 'site']]],
+    ] + $announcement->getThirdPartySetting('canvas_metatag', 'values', []))->save();
   }
 
   /**

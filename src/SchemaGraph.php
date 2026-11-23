@@ -100,7 +100,7 @@ final class SchemaGraph {
     'key', 'label', 'kind', 'default', 'level', 'options', 'option_labels', 'pattern', 'ai', 'emit',
     'list', 'max', 'codes', 'unit', 'units', 'item', 'join', 'pair', 'html', 'link_only', 'per_item', 'inline',
     'scopes', 'accept', 'as', 'site', 'page_default', 'when', 'under', 'range', 'format', 'suggest',
-    'meter', 'group', 'part', 'short',
+    'meter', 'group', 'part', 'short', 'compose',
   ];
 
   /**
@@ -653,11 +653,14 @@ final class SchemaGraph {
    *   The effective `schema` value, cleaned.
    * @param callable(array, string, bool, int): mixed $value
    *   What a value gives for this entity, by kind: text, or for the image
-   *   kind an image array; '' or NULL for nothing. With TRUE for a list
-   *   property, the list of what it gives, in order (NULL for an item that
-   *   cannot be used, such as a private image). For the ref kind always a
-   *   list of targets: ['identity' => TRUE] for the publisher, NULL for a
-   *   page visitors may not see, or {name, url?, type?, id?, address?};
+   *   kind an image array; '' or NULL for nothing. A free-text detail of a
+   *   template (Values::composes()) is asked in the form `words`, or `line`
+   *   where it is title-like, and may be a composition: its joined text.
+   *   With TRUE for a list property, the list of what it gives, in order
+   *   (NULL for an item that cannot be used, such as a private image). For
+   *   the ref kind always a list of targets: ['identity' => TRUE] for the
+   *   publisher, NULL for a page visitors may not see, or {name, url?, type?,
+   *   id?, address?};
    *   once the property's cap (the fourth argument) of targets is read,
    *   FALSE for each one left, counted as over the cap.
    *
@@ -730,7 +733,10 @@ final class SchemaGraph {
     foreach ($props as $prop) {
       $key = $prop['key'];
       $default = $prop['default'] ?? NULL;
-      $kind = Values::kindOf($prop);
+      // A free-text detail of a template reads its fields as words, and may
+      // be a composition.
+      $path = "schema.props.$key";
+      $kind = Values::composes($prop, $path, $scope) ? (Values::titleLike($path) ? 'line' : 'words') : Values::kindOf($prop);
       $list = !empty($prop['list']) || isset($prop['join']) || $prop['kind'] === 'ref';
       $max = $prop['max'] ?? ($list ? 100 : 1);
       // The Description fact is the page's own description, as search shows

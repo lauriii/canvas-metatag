@@ -48,33 +48,6 @@ link button another, as a typed input and its button are.
 - **WHEN** an editor tabs into "Every Event"'s composed title
 - **THEN** the link button, the composer and the ending's button MUST each take one Tab, in that order
 
-### Requirement: A box keeps one layout per kind of field
-
-A one-line value (a title) MUST show its source before its value on one line,
-one control high, its source never squeezed by a long value; any other value
-MUST show its source over its value, never shorter than the input it turns
-into. Beside another detail neither line MUST wrap or move with focus: the path
-MUST give way from its start, so that the field it ends at stays in sight, and
-the value MUST be cut at its end, with the whole path and value in its
-description and tooltip. A composer beside another detail MUST cut its line of
-fields and its result line at their ends, one line each, with both whole in its
-description and tooltip.
-
-#### Scenario: Linked a pair of details
-
-- **WHEN** "Every Event"'s Venue and Street address, side by side, are linked to Venue › Title and Venue › Street address
-- **THEN** each box MUST show its path over its value, the path giving way from its start so that "City" or "Street address" stays, the value cut at its end, and focusing a box MUST NOT change its height
-
-#### Scenario: A long title at rest
-
-- **WHEN** "Every Article"'s title follows its default and the previewed article's title is longer than the box
-- **THEN** the box MUST show the whole tag "Default" and cut only the title
-
-#### Scenario: A composed street address in a pair
-
-- **WHEN** "Every Venue"'s Street address, beside another detail, is Street, " ", Number
-- **THEN** its fields and its result MUST each take one line, and the pair's two cells MUST keep the same height
-
 ### Requirement: Picking an entry links the value at once
 
 Picking an entry MUST store it in the draft at once, show its value straight
@@ -130,6 +103,32 @@ selection it had.
 - **WHEN** an editor focuses an empty template description, types `{`, "summ", Enter and then "x"
 - **THEN** the description MUST hold the typed text "x", as a key on any box replaces it, and Undo MUST restore the link
 
+### Requirement: A list fact links every item
+
+The link menu of a list of text MUST start with a "Suggested" group of
+multi-value fields whose label matches the fact. A multi-value field MUST be
+noted "All ‹n›, in order", and one long text "Each list item, in order". A
+single short value, a field or a fact, MUST be disabled with "One value, not
+a list". A list of codes MUST take a list field of codes, of one value or
+several, and never one long text's items. On other facts outside text a
+multi-value field MUST keep "First of ‹n›"; in a place that composes, the
+menu MUST show its joined items instead.
+
+#### Scenario: Ingredients
+
+- **WHEN** a builder opens the Ingredients link menu on a Recipe type with a multi-value Ingredients field and a formatted Method field
+- **THEN** Ingredients MUST be first, under "Suggested", noted "All 8, in order", and Method MUST be noted "Each list item, in order"
+
+#### Scenario: A summary on a list fact
+
+- **WHEN** the type has a one-line Summary field
+- **THEN** it MUST be listed disabled with "One value, not a list", and so MUST the page title
+
+#### Scenario: One employment type per job
+
+- **WHEN** a job type has a single-value Employment list field holding PART_TIME
+- **THEN** Employment type MUST link to it, and a job holding PART_TIME MUST emit `employmentType` `PART_TIME`
+
 ## ADDED Requirements
 
 ### Requirement: Text on a template is a composer unless it is one field
@@ -162,7 +161,8 @@ A composer that holds a field MUST show the previewed item's whole result on a
 line inside its border, under its fields and text, not editable; a title's
 result MUST leave out the ending its button already shows. A click on that line
 MUST put the caret at the end. Fields left out for the item MUST be named in a
-quiet note after the result.
+quiet note on a line of its own after the result, never cut with it:
+"‹Source› left out for this ‹type›", as at rest.
 
 #### Scenario: A composed title at rest
 
@@ -172,16 +172,36 @@ quiet note after the result.
 #### Scenario: A city the event lacks
 
 - **WHEN** the previewed event has no city and the title is Title, " in ", Venue › City, " · ", Starts
-- **THEN** the result line MUST read "Summer Gala · 20 June 2026" with the note "without Venue › City"
+- **THEN** the result line MUST read "Summer Gala · 20 June 2026" with the note "Venue › City left out for this event"
+
+### Requirement: Beside a preview, a composer at rest says only what is left out
+
+Where a preview on screen shows the same result (the Search and Social tabs),
+a composer's result line MUST show only while the composer or its menu is in
+use and says more than its chip (typed words, or a second field); otherwise
+it MUST keep only the fields left out for the item, "‹Source› left out for
+this ‹type›", and nothing when none is. A detail, which has no preview, MUST
+keep its result line at rest.
+
+#### Scenario: The composed title at rest
+
+- **WHEN** the previewed event has no city, the title is Title, " in ", Venue › City, and focus is elsewhere on the Search tab
+- **THEN** the title's line MUST read "Venue › City left out for this event", and the search preview MUST show the result
 
 ### Requirement: Composing starts from a box
 
 In a place that can be composed, Arrow right or End on a box, or "Add words or
-fields" at the top of its menu, MUST turn it into a composer holding its field,
+fields" at the top of its menu, which stays under the filter and in sight
+however far below the current entry is, MUST turn it into a composer holding its field,
 or the default's fact as a real field, with the caret after it. `{` on such a
 box MUST do the same and open "Add a field to ‹Field›" at the caret. Leaving
 the composer before anything is added MUST show the box again and store
 nothing new.
+
+#### Scenario: The brace is said
+
+- **WHEN** an editor focuses the box of a detail that can be composed, where no other guidance shows
+- **THEN** the guidance MUST say "Type { to add a field"
 
 #### Scenario: Starting from the default
 
@@ -201,21 +221,27 @@ nothing new.
 #### Scenario: From the Default box's menu
 
 - **WHEN** an editor opens the menu of "Every Event"'s untouched title
-- **THEN** it MUST offer "Add words or fields" with "Start from Title"
+- **THEN** it MUST offer "Add words or fields" with "Keep the default and add to it" (never "Start from Title" on Title), in sight as the menu opens
+
+#### Scenario: A default named like its field
+
+- **WHEN** an editor opens the menu of "Every Event"'s untouched description, whose default is the Description fact
+- **THEN** it MUST offer "Add words or fields" with "Keep the default and add to it"
 
 #### Scenario: Nothing added
 
 - **WHEN** an editor presses End on the untouched title and then Tab
-- **THEN** the title MUST show its Default box again, and the draft MUST NOT hold a title
+- **THEN** the title MUST show its Default box again, the draft MUST NOT hold a title, and focus MUST be on the ending's button, where Tab sent it
 
 ### Requirement: Fields are added at the caret
 
 In a composer that holds anything, Alt+Down, `{` or Enter, or the link button,
 MUST open "Add a field to ‹Field›", which puts the pick at the caret, or for
-the button at the last caret, else at the end. Its header MUST say where, its
-hints MUST say "↵ add", and its footer MUST state the empty-field rule. An
-empty composer MUST open "Link ‹Field›". `{` MUST NOT be typed; `{` in the empty
-filter MUST close the menu and type one. Escape MUST type nothing.
+the button at the last caret, else at the end. Its header MUST say where and its
+hints MUST say "↵ add". An empty composer MUST open "Link ‹Field›". `{`, typed
+with whatever keys the keyboard layout needs (Shift, Option, AltGr), MUST NOT
+be typed; `{` in the empty filter MUST close the menu and type one. Escape MUST
+type nothing.
 
 #### Scenario: Composing a title by keyboard
 
@@ -237,15 +263,22 @@ filter MUST close the menu and type one. Escape MUST type nothing.
 - **WHEN** an editor types `{`, Escape and "x" in an empty composer
 - **THEN** the field MUST read "x"
 
-#### Scenario: The rule said once
-
-- **WHEN** an editor opens "Add a field to Title"
-- **THEN** its footer MUST say "When an item doesn't have a field, the words joining it are left out too."
-
 #### Scenario: The eighth field
 
 - **WHEN** a composer holds eight fields and the editor opens its menu
 - **THEN** the menu MUST say "At most 8 fields in one value." and no entry MUST be pickable, except to replace a selected field
+
+### Requirement: The empty-field rule is said while a value takes its first fields
+
+While the value holds at most one field, "Add a field to ‹Field›" MUST state
+the empty-field rule in its footer, except in a frame 420 px tall or less,
+where the entries keep the room. From the second field on, the tint and the
+"Without" line show the rule, and the footer MUST be gone.
+
+#### Scenario: The rule said once
+
+- **WHEN** an editor opens "Add a field to Title" on a title that holds only Title
+- **THEN** its footer MUST say "When an item doesn't have a field, the words joining it are left out too.", and once the title holds two fields the footer MUST be gone
 
 ### Requirement: An old token typed from memory finds its field
 
@@ -264,7 +297,8 @@ select it whole, and no selection MUST end inside one. Backspace or Delete
 beside a field MUST remove it whole and announce "‹Source› removed from
 ‹Field›."; "‹Field› unlinked." MUST be announced only when the value becomes
 empty. A click on a field, or Enter with it selected, MUST open "Replace
-‹Source›" with "↵ replace" in its hints and "Remove ‹Source›" among its rows.
+‹Source›" with "↵ replace" in its hints and "Remove ‹Source›" as its first
+row, under the filter.
 
 #### Scenario: Stepping over a field
 
@@ -312,8 +346,10 @@ Pasted text MUST be plain, braces literal.
 ### Requirement: Copying keeps the fields a target can take
 
 A copy inside the dialog MUST keep the fields the target can take, and leave
-out, with their words and a message, those it can't; a field MUST never be
-pasted as its label. The plain text of any copy MUST be the previewed item's
+out, with their words and a message, those it can't; the message MUST be
+announced and shown under the field until focus leaves it. A field MUST never
+be pasted as its label. A paste on a box that can be composed MUST replace it,
+as a typed key does. The plain text of any copy MUST be the previewed item's
 result for the selection.
 
 #### Scenario: Copying a composition
@@ -371,6 +407,36 @@ item to preview, fields MUST NOT be called empty.
 - **WHEN** the Event type has no event yet
 - **THEN** the composer's result MUST say "No event to preview", and no field MUST say it is empty
 
+### Requirement: A field keeps its ring while its menu is open
+
+A field whose "Replace ‹Source›" menu is open MUST keep its ring, whether a
+click or a key opened it, and Escape MUST leave it selected, so that Enter
+opens its menu again.
+
+#### Scenario: A click, then Escape
+
+- **WHEN** an editor clicks Venue › City in the composed title, then presses Escape
+- **THEN** Venue › City MUST show its ring while the menu is open and stay selected after, and Enter MUST open "Replace Venue › City"
+
+### Requirement: A field's tooltip says what the item gets without it
+
+While the composition holds another field, a field's tooltip MUST also say
+what the item gets without it, "Without ‹Source›: …"; a field that gives
+nothing for the item MUST say its state only, as the result already goes
+without it. The words that go with such a field MUST be drawn muted, as a
+separator left at the end is. A field selected whole
+MUST show a ring, so that what Backspace, Enter or a key acts on is seen.
+
+#### Scenario: Hovering the city
+
+- **WHEN** an editor hovers Venue › City in Title, " in ", Venue › City, " · ", Starts
+- **THEN** its tooltip MUST say "Helsinki" and "Without Venue › City: Summer Gala · 20 June 2026"
+
+#### Scenario: Selecting a field whole
+
+- **WHEN** an editor selects Venue › City whole with Shift and an arrow
+- **THEN** Venue › City MUST show a ring
+
 ### Requirement: The guidance under a composer keeps its length
 
 The guidance under a composer MUST say what is left out only when every field
@@ -396,23 +462,30 @@ and the description, never in the guidance.
 ### Requirement: A composer shows which words go with a field
 
 While a field in a composer is hovered or beside the caret, it MUST be marked
-together with the words that go with it, and the result line MUST show what an
-item without it gets, at the same height. A separator left out at the end MUST
-be drawn as left out.
+together with the words that go with it. While it is hovered, selected whole or
+being replaced, and the composition holds another field, the result line MUST
+show what an item without it gets, at the same height; otherwise it MUST show
+the result. A separator left out at the end MUST be drawn as left out.
 
 #### Scenario: Seeing the words that go with a field
 
 - **WHEN** the description is "Tickets for ", Performers, " in ", Venue › City, and the caret is beside Performers
-- **THEN** Performers and "Tickets for " MUST be marked, and the result line MUST read "Without Performers: Helsinki"
+- **THEN** Performers and "Tickets for " MUST be marked, and the result line MUST show the result
+
+#### Scenario: An item without a field
+
+- **WHEN** the editor hovers Performers in that description, or selects it whole
+- **THEN** the result line MUST read "Without Performers: Helsinki"
 
 ### Requirement: A composer reads well to assistive technology
 
 A composer MUST be a single-line textbox named for its field, with a dialog
 popup and Alt+ArrowDown as its key shortcut, whose fields read as their names
 and are neither translated nor spellchecked. Its description MUST start with
-the item's result, then say each field that gives nothing and why, with one
-full stop at the end. Adding, removing and replacing a field MUST be announced
-politely; moving the caret MUST NOT be.
+the item's result, then say once each field that gives nothing and why,
+with one full stop at the end, then only its guidance's words. Adding,
+removing and replacing a field MUST be announced politely; moving the caret
+MUST NOT be.
 
 #### Scenario: Reading the composed title
 
@@ -424,6 +497,11 @@ politely; moving the caret MUST NOT be.
 - **WHEN** a screen reader focuses that title on an event without a city
 - **THEN** its description MUST be "This event: Summer Gala · 20 June 2026. Venue › City is empty for this event."
 
+#### Scenario: Reading a composition whose every field is empty
+
+- **WHEN** a screen reader focuses a composed description whose only field, Performers › Title, is empty for the previewed event
+- **THEN** its description MUST name Performers › Title once, in the guidance's words "Performers › Title is empty for this event, so its default description is used."
+
 #### Scenario: An automated scan
 
 - **WHEN** the Search tab of "Every Event" is scanned with the title's menu open in add mode
@@ -433,8 +511,9 @@ politely; moving the caret MUST NOT be.
 
 When the target is read-only, or a template value is overridden elsewhere, a
 composer MUST stay focusable, marked read-only and not editable, with its
-result line and description; a click on a field or Enter MUST open its menu
-with every entry disabled. When the type has nothing to preview, a composer
+result line and description; a click on a field, Enter or Alt+Down MUST open
+its menu with every entry disabled and its header saying "Read-only: nothing
+can be picked."; its levels still open, to look. When the type has nothing to preview, a composer
 MUST be a group that cannot be edited, its fields neutral and its result "No
 ‹type› to preview".
 
@@ -450,11 +529,11 @@ MUST be a group that cannot be edited, its fields neutral and its result "No
 
 ### Requirement: In text, dates and numbers fit
 
-In the link menu of a value that can be composed, date and number fields and
-the date facts MUST fit, each with its value in words for the previewed item.
-In a title-like place, long text MUST wait in the last row with "Too long for a
-title". Images, addresses and every other kind MUST wait in the last row with
-their reason. A field with several values MUST show its joined items, never
+In the menu of a value that can be composed, date and number fields and the
+date facts MUST fit, with their words for the previewed item. Adding to a
+title-like place, long text (a field or the Description fact) MUST wait in
+the last row with "Too long for a title"; every other kind that does not fit,
+with its reason. A field with several values MUST show its joined items, never
 "First of ‹n›". A field labelled like a fact MUST add its machine name, in the
 menu and on its chip.
 
@@ -492,8 +571,9 @@ title, so a composition can start from it.
 ### Requirement: The social title can copy the search title
 
 While a template's title main part is composed, the social title's menu MUST
-offer "Copy the search title", which puts a copy of that composition into the
-social title. The copy MUST NOT follow later changes to the search title. The
+offer "Copy the search title" right after "Add words or fields", its detail the
+composition as it reads with its fields by name ("Title at Venue › City,
+Starts"), which puts a copy of that composition into the social title. The copy MUST NOT follow later changes to the search title. The
 social title's default MUST say that it is each item's own title, not the
 search title.
 

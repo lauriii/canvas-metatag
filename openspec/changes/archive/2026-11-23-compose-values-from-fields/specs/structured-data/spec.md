@@ -2,13 +2,11 @@
 
 ### Requirement: Free-text details can be composed
 
-On a template, a structured data detail the registry marks as free text, such
-as a name, a headline, a description or a street address, MAY be composed.
-The joined text MUST then be checked as typed text of that detail is, and a
-result that fails MUST be dropped and reported. A composition that holds a
-field MUST count as given by each item, never as the same text on every item.
-A Description fact inside it MUST read the same description as a detail
-linked to the Description fact alone.
+On a template, a free-text detail the registry marks (a name, a headline, a
+description, a street address) MAY be composed. The joined text MUST be
+checked and cut as typed text of that detail is. A composition holding a field
+MUST count as given by each item. A Description fact in it MUST read as a
+detail linked to the Description fact alone does.
 
 #### Scenario: A street address from two fields
 
@@ -18,12 +16,12 @@ linked to the Description fact alone.
 #### Scenario: A product name from the brand and the title
 
 - **WHEN** "Every Product"'s name detail is Brand, " ", Title
-- **THEN** the dialog MUST NOT say the name is the same for every product, and each product's `name` MUST be its brand and title
+- **THEN** each product's `name` MUST be its brand and title, and a product without a brand MUST be named by its title alone, with no space before it
 
 #### Scenario: A result that fails its detail
 
 - **WHEN** a composed detail's result is longer than the detail allows
-- **THEN** it MUST be cut as typed text of that detail is, and a result that still fails MUST be left out and listed in the report
+- **THEN** it MUST be cut as typed text of that detail is, and it MUST NOT be reported as left out
 
 #### Scenario: Words after the description
 

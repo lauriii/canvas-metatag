@@ -91,6 +91,7 @@ final class Resolver {
     private readonly AliasManagerInterface $aliasManager,
     private readonly Sources $sources,
     private readonly LoggerChannelFactoryInterface $loggers,
+    private readonly Words $words,
   ) {
     $this->resolved = new \WeakMap();
     $this->anonymous = new AnonymousUserSession();
@@ -181,13 +182,17 @@ final class Resolver {
    *   The entity, or NULL for the facts with empty values.
    * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
    *   Collects what the values depend on.
+   * @param string|null $langcode
+   *   The language its words are read in: a referencing page's, for a page
+   *   it names (target()); NULL for the entity's own.
    *
-   * @return array<string, array{label: string, kind: string, value: string, image?: ?array, via?: string}>
+   * @return array<string, array{label: string, kind: string, value: string, text?: string, image?: ?array, via?: string}>
    *   Name => fact. The Image fact has an empty `value` and an `image`: the
    *   image array without `source`, or NULL. `via`: the label of the field
-   *   a node's Description or Image fact is taken from.
+   *   a node's Description or Image fact is taken from. `text`: a date fact
+   *   in words, as a place that composes reads it (Words).
    */
-  public function facts(?ContentEntityInterface $entity, CacheableMetadata $cacheability): array {
+  public function facts(?ContentEntityInterface $entity, CacheableMetadata $cacheability, ?string $langcode = NULL): array {
     $facts = [];
     foreach (Values::FACTS as $name => $kind) {
       $facts[$name] = ['label' => self::LABELS[$name], 'kind' => $kind, 'value' => ''] + ($kind === 'image' ? ['image' => NULL] : []);
@@ -202,13 +207,14 @@ final class Resolver {
       return $facts;
     }
 
-    $langcode = $entity->language()->getId();
+    $langcode ??= $entity->language()->getId();
     $cacheability->addCacheableDependency($this->configFactory->get('system.date'));
     $facts['title']['value'] = (string) $entity->label();
     $facts['url']['value'] = $this->url($entity, $cacheability);
     $facts['author']['value'] = $this->label($entity instanceof EntityOwnerInterface ? $entity->getOwner() : NULL, $langcode, $cacheability);
     foreach (['published' => 'created', 'modified' => 'changed'] as $name => $field) {
       $facts[$name]['value'] = $entity->hasField($field) ? $this->date($entity->get($field)->value) : '';
+      $facts[$name]['text'] = $facts[$name]['value'] === '' ? '' : $this->words->date($facts[$name]['value'], $langcode, $cacheability);
     }
 
     if ($entity->getEntityTypeId() === 'canvas_page') {
@@ -266,12 +272,25 @@ final class Resolver {
    * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
    *   Collects what the values depend on.
    *
-   * @return list<array{source: array, label: string, path: list<string>, field: string, hop: bool, kinds: list<string>, status: string, value: string, image?: ?array, list?: true, shown?: string}>
+   * @return list<array{source: array, label: string, path: list<string>, field: string, hop: bool, kinds: list<string>, status: string, value: string, image?: ?array, list?: true, shown?: string, text?: string, line?: string, long?: true, part?: string}>
    *   In the order of the form. `status`: ok, empty, hidden, or none without
    *   a node. A hidden entry has no value. `list`: a list field, whose value
-   *   is a key and `shown` its label.
+   *   is a key and `shown` its label. `text`: what the row gives a place
+   *   that composes, the server's words for the item (a date in the item's
+   *   language, every item visitors may see, joined); `line`: the same in a
+   *   title-like place, when it differs (at most two items). `long`: long
+   *   text, which a title-like composition does not take; `part`: enough of
+   *   its start in words for a description to cut it.
    */
   public function sourceRows(?ContentEntityInterface $node, string $bundle, CacheableMetadata $cacheability): array {
+    // Whether visitors may view the node is asked once for every row.
+    return $this->sources->reading(fn (): array => $this->rowsFor($node, $bundle, $cacheability));
+  }
+
+  /**
+   * The rows of sourceRows(), read while host access is held.
+   */
+  private function rowsFor(?ContentEntityInterface $node, string $bundle, CacheableMetadata $cacheability): array {
     $rows = [];
     foreach ($this->sources->vocabulary($bundle) as $expression => $row) {
       $source = ['expression' => $expression, 'sourceType' => 'entity-field'];
@@ -279,7 +298,9 @@ final class Resolver {
       // reference's target come beside its text (SourcesTest::testVocabulary).
       $kind = $row['kinds'][0];
       [$status, $value] = $node === NULL ? ['none', NULL] : $this->link($source, $node, $kind, $cacheability);
-      $out = ['source' => $source] + array_diff_key($row, ['html' => TRUE, 'decimal' => TRUE, 'shown' => TRUE]) + [
+      // Sources' own metadata stays here: the dialog never reads it.
+      $internal = array_fill_keys(['html', 'decimal', 'shown', 'storage', 'scale', 'timestamp'], TRUE);
+      $out = ['source' => $source] + array_diff_key($row, $internal) + [
         'status' => $status,
         'value' => is_string($value) ? $value : '',
       ];
@@ -296,9 +317,146 @@ final class Resolver {
       if (isset($row['many']) && $node !== NULL && $status === 'ok') {
         $out['count'] = count((array) $this->link($source, $node, $kind, $cacheability, TRUE)[1]);
       }
+      // What a place that composes reads, in the server's words: the dialog
+      // never formats a value.
+      if (array_intersect(['text', 'date', 'number'], $row['kinds'])) {
+        if (isset($row['html'])) {
+          $out['long'] = TRUE;
+        }
+        // One read, put in words for each form.
+        [$found, $value] = $node === NULL ? ['none', NULL] : $this->sources->evaluate($source, $node, 'words', $cacheability);
+        if ($node !== NULL) {
+          $words = fn (bool $line, bool $whole): string => $found === 'ok'
+            ? $this->words->items($value['items'], $value['as'], $value['scale'], $node->language()->getId(), $line, $whole, $cacheability)
+            : '';
+          $out['text'] = $words(FALSE, FALSE);
+          // At most two items in a title-like place: only several differ.
+          $line = isset($row['many']) ? $words(TRUE, FALSE) : $out['text'];
+          if ($line !== $out['text']) {
+            $out['line'] = $line;
+          }
+          // As a part of a description it gets the room the rest leaves, at
+          // most Values::LONG_ROOM: enough of its start to cut it there.
+          if (isset($row['html'])) {
+            $out['part'] = mb_substr($words(FALSE, TRUE), 0, 2 * Values::LONG_ROOM);
+          }
+        }
+      }
       $rows[] = $out;
     }
     return $rows;
+  }
+
+  /**
+   * What a source gives in words for a node.
+   *
+   * @param array $source
+   *   The stored source.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $node
+   *   The node.
+   * @param bool $line
+   *   A title-like place: at most two items, then "and ‹n› more".
+   * @param bool $whole
+   *   A part of a composition: formatted text gives all its text.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the words depend on.
+   * @param string|null $langcode
+   *   The language to read in; NULL for the node's own.
+   *
+   * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: string, 2: string}
+   *   The status, the words ('' for none), and how they were read (`html`:
+   *   long text).
+   */
+  private function wordsOf(array $source, ContentEntityInterface $node, bool $line, bool $whole, CacheableMetadata $cacheability, ?string $langcode = NULL): array {
+    [$status, $value] = $this->sources->evaluate($source, $node, 'words', $cacheability, langcode: $langcode);
+    if ($status !== 'ok') {
+      return [$status, '', ''];
+    }
+    $text = $this->words->items($value['items'], $value['as'], $value['scale'], $langcode ?? $node->language()->getId(), $line, $whole, $cacheability);
+    return [$text === '' ? 'empty' : 'ok', $text, $value['as']];
+  }
+
+  /**
+   * What a value of any shape gives for an entity, in a form.
+   *
+   * The one reader of the head, of a referenced page's details (target())
+   * and of a composition's parts. A source is read once per entity, field
+   * and form.
+   *
+   * @param array $value
+   *   A clean value.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The entity whose fields and facts are read.
+   * @param array $facts
+   *   That entity's facts (facts()).
+   * @param string $kind
+   *   The kind of value wanted, or the form of a place that composes:
+   *   `words`, or `line` for a title-like place.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the value depends on.
+   * @param array $memo
+   *   What was read, by entity, field and form.
+   * @param bool $list
+   *   Every item (link()).
+   * @param int $max
+   *   For the ref kind, the cap (link()).
+   * @param bool $part
+   *   A part of a composition: long text gives all of it, to be cut to the
+   *   room the rest leaves.
+   * @param string|null $langcode
+   *   The language words are read in; NULL for the entity's own.
+   *
+   * @return mixed
+   *   What link() gives for the kind; in words a string ('' for nothing),
+   *   and for a composition its segments (Values::compose()).
+   */
+  private function read(array $value, ContentEntityInterface $entity, array $facts, string $kind, CacheableMetadata $cacheability, array &$memo, bool $list = FALSE, int $max = PHP_INT_MAX, bool $part = FALSE, ?string $langcode = NULL): mixed {
+    $words = $kind === 'words' || $kind === 'line';
+    if (isset($value['parts'])) {
+      $form = $kind === 'line' ? 'line' : 'words';
+      $read = function (array $one) use ($entity, $facts, $form, $cacheability, &$memo, $langcode): string {
+        $found = $this->read($one, $entity, $facts, $form, $cacheability, $memo, part: TRUE, langcode: $langcode);
+        return is_string($found) ? $found : '';
+      };
+      // Long text: the Description fact, or formatted text (read by now).
+      $long = function (array $one) use ($entity, $form, &$memo): bool {
+        return isset($one['fact'])
+          ? $one['fact'] === 'description'
+          : ($memo[$this->memoKey($one['source'] ?? [], $entity, $form, TRUE)][2] ?? '') === 'html';
+      };
+      return Values::compose($value['parts'], $read, $long, $form === 'line' ? 0 : Values::LONG_ROOM);
+    }
+    return match (array_key_first($value)) {
+      'text' => $value['text'],
+      'fact' => match (TRUE) {
+        $kind === 'image' => $facts[$value['fact']]['image'] ?? NULL,
+        $words => Values::plain((string) ($facts[$value['fact']]['text'] ?? $facts[$value['fact']]['value'] ?? ''), PHP_INT_MAX),
+        default => $facts[$value['fact']]['value'] ?? '',
+      },
+      'media' => $this->image($value['media'], $cacheability),
+      'source' => $entity->getEntityTypeId() !== 'node' ? NULL : ($words
+        // A long text part of a description gets the room the rest leaves:
+        // read whole. Elsewhere, its start, as a whole link gives it.
+        ? ($memo[$this->memoKey($value['source'], $entity, $kind, $part)] ??= $this->wordsOf($value['source'], $entity, $kind === 'line', $part && $kind === 'words', $cacheability, $langcode))[1]
+        : ($memo[$this->memoKey($value['source'], $entity, $kind, $part, $list, $max)] ??= $this->link($value['source'], $entity, $kind, $cacheability, $list, $max))[1]),
+      default => NULL,
+    };
+  }
+
+  /**
+   * The memo key of a source read for an entity in a form.
+   */
+  private function memoKey(array $source, ContentEntityInterface $entity, string $kind, bool $part, bool $list = FALSE, int $max = PHP_INT_MAX): string {
+    return implode("\x1F", [
+      $entity->getEntityTypeId(),
+      $entity->id(),
+      $entity->language()->getId(),
+      $source['expression'] ?? '',
+      $kind,
+      (int) $part,
+      (int) $list,
+      $max,
+    ]);
   }
 
   /**
@@ -392,13 +550,29 @@ final class Resolver {
     if (!isset($type['primary_type'])) {
       return $target;
     }
-    $text = function (string $key) use ($schema, $type_id, $entity, $cacheability): string {
-      $value = $schema['props'][$key] ?? SchemaGraph::prop($type_id, $key)['default'] ?? NULL;
-      $found = match (array_key_first($value ?? [])) {
-        'text' => $value['text'],
-        'source' => $entity->getEntityTypeId() === 'node' ? $this->link($value['source'], $entity, 'text', $cacheability)[1] : NULL,
-        default => NULL,
-      };
+    // The page's own details, read by the reader of its own head, with its
+    // own facts: a venue's composed name reads the venue's title.
+    $facts = NULL;
+    $memo = [];
+    $scope = $entity->getEntityTypeId() === 'node' ? 'template' : 'page';
+    // In the referencing page's language: a French event reads its venue's
+    // dates and list labels in French, whether or not the venue has a
+    // translation.
+    $text = function (string $key) use ($schema, $type_id, $entity, $scope, $langcode, $cacheability, &$facts, &$memo): string {
+      $prop = SchemaGraph::prop($type_id, $key);
+      $value = $schema['props'][$key] ?? $prop['default'] ?? NULL;
+      if ($value === NULL) {
+        return '';
+      }
+      $path = "schema.props.$key";
+      $form = Values::composes($prop, $path, $scope) ? (Values::titleLike($path) ? 'line' : 'words') : 'text';
+      // The page's facts only for a value that reads one: they depend on its
+      // author, media and files.
+      if (isset($value['fact']) || array_filter($value['parts'] ?? [], static fn (array $part): bool => isset($part['fact']))) {
+        $facts ??= $this->facts($entity, $cacheability, $langcode);
+      }
+      $found = $this->read($value, $entity, $facts ?? [], $form, $cacheability, $memo, langcode: $langcode);
+      $found = is_array($found) ? implode('', $found) : $found;
       return is_string($found) ? Values::plain($found, 255) : '';
     };
     // A kind of place linked to a field is used only when it is one of the
@@ -418,7 +592,7 @@ final class Resolver {
       }
     }
     if ($type_id === 'Course') {
-      $target['complete'] = $text('description') !== '' || $this->facts($entity, $cacheability)['description']['value'] !== '';
+      $target['complete'] = $text('description') !== '' || ($facts ??= $this->facts($entity, $cacheability, $langcode))['description']['value'] !== '';
     }
     return $target;
   }
@@ -534,26 +708,27 @@ final class Resolver {
       ->addCacheableDependency($entity)
       ->addCacheContexts(['languages:language_content']);
     $layers = $this->layers($entity, $draft, $cacheability);
-    $identity = $layers['identity'];
     $effective = Values::cascade(array_replace_recursive($layers['from_default'], $layers['target']), $layers['site']);
     $facts = $this->facts($entity, $cacheability);
 
-    // What a value gives for this entity, by kind; each value is read once.
+    // What a value gives for this entity, by kind or form; each field is read
+    // once per form, and anonymous access to the entity is asked once.
+    return $this->sources->reading(fn (): array => $this->head($entity, $draft, $request, $cacheability, $layers, $effective, $facts));
+  }
+
+  /**
+   * Builds the head of resolve(), with the layers and facts it read.
+   */
+  private function head(ContentEntityInterface $entity, bool $draft, ?object $request, CacheableMetadata $cacheability, array $layers, array $effective, array $facts): array {
+    $identity = $layers['identity'];
     $memo = [];
-    $value = function (array $value, string $kind, bool $list = FALSE, int $max = PHP_INT_MAX) use ($entity, $facts, $cacheability, &$memo): mixed {
-      $key = json_encode([$value, $kind, $list, $max]);
-      if (!array_key_exists($key, $memo)) {
-        $memo[$key] = match (array_key_first($value)) {
-          'text' => $value['text'],
-          'fact' => $kind === 'image' ? $facts[$value['fact']]['image'] ?? NULL : $facts[$value['fact']]['value'] ?? '',
-          'media' => $this->image($value['media'], $cacheability),
-          'source' => $entity->getEntityTypeId() === 'node' ? $this->link($value['source'], $entity, $kind, $cacheability, $list, $max)[1] : NULL,
-          default => NULL,
-        };
-      }
-      return $memo[$key];
+    $value = function (array $value, string $kind, bool $list = FALSE, int $max = PHP_INT_MAX) use ($entity, &$facts, $cacheability, &$memo): mixed {
+      return $this->read($value, $entity, $facts, $kind, $cacheability, $memo, $list, $max);
     };
-    $texts = Values::texts($effective, static fn (array $v): string => (string) (is_string($found = $value($v, 'text')) ? $found : ''), $identity['separator'], $layers['site']['title_end'] ?? NULL);
+    $texts = Values::texts($effective, static function (array $v, string $form) use ($value): string|array {
+      $found = $value($v, $form);
+      return is_array($found) ? $found : (is_string($found) ? $found : '');
+    }, $identity['separator'], $layers['site']['title_end'] ?? NULL);
     $site_name = Values::plain($facts['site']['value'], 255);
 
     // The canonical may point elsewhere. The entity's own URL stays the
@@ -620,7 +795,16 @@ final class Resolver {
       'facts' => ['sep' => $identity['separator'], 'image' => $facts['image']['image']['url'] ?? '']
       + array_map(static fn (array $fact): string => $fact['value'], array_diff_key($facts, ['image' => TRUE])),
       'fill' => $entity->getEntityTypeId() === 'node' ? fn (string $name, string $expects): array => $this->fill($name, $expects, $entity, $cacheability) : NULL,
-    ], ['extend' => ($effective['schema']['extend'] ?? []) + ($layers['site']['schema']['extend'] ?? [])] + ($effective['schema'] ?? []), $value);
+    ], ['extend' => ($effective['schema']['extend'] ?? []) + ($layers['site']['schema']['extend'] ?? [])] + ($effective['schema'] ?? []), function (array $v, string $kind, bool $list = FALSE, int $max = PHP_INT_MAX) use ($value, $entity, $facts, $texts, $cacheability, &$memo): mixed {
+      if (!isset($v['parts'])) {
+        return $value($v, $kind, $list, $max);
+      }
+      // A Description part reads the head's description, as a whole
+      // Description link does.
+      $own = $facts;
+      $own['description']['value'] = $texts['description'];
+      return implode('', (array) $this->read($v, $entity, $own, $kind, $cacheability, $memo));
+    });
     $og_type = SchemaGraph::types()[$effective['schema']['type'] ?? 'WebPage']['og_type'] ?? 'website';
     // Where the front page's identity and website nodes are judged, and the
     // addresses report() judges them with.

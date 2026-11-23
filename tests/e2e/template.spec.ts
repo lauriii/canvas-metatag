@@ -108,7 +108,8 @@ test('type-level values are linked to fields, follow the previewed article and p
   await page.keyboard.press('Enter');
   await page.keyboard.press('Backspace');
   await expect(typed).toBeFocused();
-  await expect(typed).toHaveValue('');
+  // Where the description composes, its input is the composer.
+  await expect(typed).toHaveText('');
   await expect(frame.getByRole('status').filter({ hasText: 'Description unlinked.' })).toHaveCount(1);
   // Undo brings the link back: a box that says its source and this
   // article's summary, ending with one full stop.

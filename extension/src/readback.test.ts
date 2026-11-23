@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { REGISTRY, RULES } from './data.test-helper';
-import { type Part, dateWords, itemKind, itemName, judged, readback, valueAt } from './readback';
+import { type Part, dateWords, itemKind, itemName, judged, readback, setDateLocale, valueAt } from './readback';
 import type { GraphNode } from './types';
 
 const HOME = 'https://example.com/';
@@ -160,5 +160,21 @@ describe('readback()', () => {
     expect(dateWords('2027-06-19T19:00:00+02:00', 'en')).toBe('19 June 2027, 19:00');
     expect(dateWords('2026-05-07', 'en')).toBe('7 May 2026');
     expect(dateWords('2026-05-07', 'fi')).toBe('7. toukokuuta 2026');
+  });
+
+  it('writes dates in the locale of the server\'s words, so a box and a composed result agree', () => {
+    // A site with no country: the server says "June 19, 2027" in text.
+    setDateLocale('en');
+    try {
+      expect(dateWords('2027-06-19T19:00:00+02:00', 'en')).toBe('June 19, 2027, 19:00');
+      expect(dateWords('2027-06-19', 'en')).toBe('June 19, 2027');
+      setDateLocale('en-GB');
+      expect(dateWords('2027-06-19', 'en')).toBe('19 June 2027');
+      // Nothing usable: by the dialog's language.
+      setDateLocale('not a locale');
+      expect(dateWords('2027-06-19', 'en')).toBe('19 June 2027');
+    } finally {
+      setDateLocale(undefined);
+    }
   });
 });

@@ -4,25 +4,35 @@
 
 Each field and fact of a composition MUST become plain text on its own before
 the parts are joined; typed text MUST NOT be stripped of markup. The joined text
-MUST then be made plain, escaped and cut as any text of its place. A composed
-title main part that is too long MUST first lose whole fields, with the text
-that goes with them, from its end, and only then words. Fixed names MUST never
-be filled in it.
+MUST then have its whitespace collapsed, and be escaped and cut as any text of
+its place. Fixed names MUST never be filled in it.
 
 #### Scenario: Markup in a field and in typed text
 
 - **WHEN** "Every Event"'s description is Title, " <3 ", Notes, " ", Body, an event's plain text Notes hold `</script><b>VIP</b>`, and its formatted Body holds `<p>Doors <b>open</b></p>`
 - **THEN** the description meta tag MUST carry "<3", `</script><b>VIP</b>` and "Doors open" as text, and the HTML MUST contain no element created from them
 
+#### Scenario: A field that holds a fixed name
+
+- **WHEN** an event's Notes field holds `{site}` and the description holds Notes
+- **THEN** the description MUST hold `{site}` literally
+
+### Requirement: A composed text too long for its place loses whole fields first
+
+A composed text that is too long for its place, the title's main part, the
+social title or a description, MUST first lose whole fields, with the text that
+goes with them, from its end, and only then words: none of its joining words
+MUST be left dangling.
+
 #### Scenario: A cut composed title
 
 - **WHEN** a composed main part is Title, " in ", City, and an event's title with the ending fills the 255 characters
 - **THEN** the title MUST leave out " in ‹city›" before it loses any word of the event's title, and MUST NOT end in " in"
 
-#### Scenario: A field that holds a fixed name
+#### Scenario: A cut composed social title
 
-- **WHEN** an event's Notes field holds `{site}` and the description holds Notes
-- **THEN** the description MUST hold `{site}` literally
+- **WHEN** the social title is Title, " first performed at ", Venue, and an event's title and venue together pass 255 characters
+- **THEN** `og:title` MUST be the event's title alone, never ending in " first performed at" or a cut venue
 
 ### Requirement: A composed value depends on every field it names
 

@@ -307,8 +307,9 @@ The rule runs in `Values::compose()` and in its twin in `values.ts`, and
 both test suites read.
 
 **The rule is visible while editing** (D9): a hovered chip, or the chip beside
-the caret, is tinted together with the words that go with it, and the result
-line shows what an item without it gets ("Without Performers: Helsinki").
+the caret, is tinted together with the words that go with it, and while a chip
+is hovered, selected whole or being replaced the result line shows what an item
+without it gets ("Without Performers: Helsinki").
 So a builder sees the bad case before any item has it. The link menu's footer
 in add mode says the rule once: "When an item doesn't have a field, the words
 joining it are left out too."
@@ -408,6 +409,17 @@ the fix.
 - *A data file of decimal marks by language.* It misses regional variants
   and grouping, and duplicates the locale data `intl` already has.
 
+**Two date forms in one dialog (review round 2).** Dates in text that
+composes are the server's words, as visitors read them in the item's
+language and the site's country ("June 19, 2027" on a site without a
+default country). The dialog's own date details (Starts, Ends) and the
+Checks that name them keep the dialog's date form with the time ("19 June
+2027, 19:00"), as before this change: they show the machine value a date
+detail stores, not text. Moving those onto the server's words would change
+every date box and Check outside this change; it is left to a change of its
+own, and the README says that dates in text follow the language and the
+site's country.
+
 ### D6. A field with several values gives every item visitors may see
 
 Taken with the recommended option on 2026-11-17 (proposal, decision 16). In
@@ -458,7 +470,10 @@ to two. The release note says so (D13). The archived dynamic-values scenario
 "A field with several values" ("Ada") is reversed by this change's MODIFIED
 block of "Field values are plain values of the first item", written on the
 text `populate-every-schema-type` leaves, and the new requirement "In text, a
-field gives every item visitors may see" holds the rule.
+field gives every item visitors may see" holds the rule. Its title no longer
+fits its text, so a RENAMED block names it "Field values are plain values:
+the first item, every item on a list or in text" (fix round 3); no open
+change rebuilds on the old name.
 
 **Alternatives.**
 
@@ -568,7 +583,8 @@ box.
 - `{` does the same and opens "Add a field to ‹Field›" at the caret;
 - the link menu's top level, with an empty filter, has one more row beside
   Unlink: "Add words or fields", with the detail "Keep ‹Summary› and add to
-  it" (on the Default box: "Start from ‹Title›"), which does the same.
+  it" (on the Default box: "Start from ‹default›", or "Keep the default and
+  add to it" where the default is named like the field), which does the same.
 
 The social title's menu has one more row while the title's main part is
 composed: "Copy the search title", its detail the parts ("Title, “in”, Venue
@@ -597,9 +613,12 @@ Leaving a composer that still holds only the adopted field gives the box back
   City". A trailing separator run that rule 4 of D4
   leaves out is drawn muted, with the tooltip "Left out at the end".
 - While a chip is hovered, or the caret is beside it, the chip is tinted
-  together with the words that go with it (D4), and the result line reads
-  "Without Performers: Helsinki", in the quiet style. The line keeps its
-  height; it returns to the result when the caret moves on.
+  together with the words that go with it (D4). While it is hovered, selected
+  whole or being replaced, and the composition holds another field, the result
+  line reads "Without Performers: Helsinki", in the quiet style. The caret
+  alone never changes the line: after a pick the caret is beside the new chip,
+  and the builder needs to see the result then (review round 1). The line keeps
+  its height, up to two lines, one in a frame 420 px tall or less.
 
 **A chip** shows its source as the link menu names it (a path gives way from
 its start, so "City" stays in sight), drawn with the box tag's colours. A
@@ -732,12 +751,27 @@ composer is one stop and its button another, as a typed input and its button
 are, because the button is how a keyboard user finds fields without knowing
 `{` or Alt+Down.
 
-**Small heights, zoom and pairs.** The menu keeps every short-frame rule. At
-420 px tall and under, the composer's result line stays one line, cut at its
-end with the whole result in the description. At 200 % zoom chips wrap whole
-and nothing overflows sideways. A composed detail in a `.seo-pair` cell cuts
-its chip line and its result line at their ends, one line each, with both in
-full in the description and tooltip, so the pair never becomes uneven.
+**Less at rest (review round 2).** On the Search and Social tabs the stage
+already shows each composed result, so the result line shows only while the
+composer or its menu is in use, or the stage is out of sight; at rest it keeps
+only "‹Field› left out for this ‹type›", which no preview says. Schema details
+keep the line. The add menu's rule ("When an item doesn't have a field…")
+is its footer only while the value holds at most one field; from the second
+on, the tint and the "Without" line teach it and the entries keep the room.
+"Copy the search title" sits right under "Add words or fields", its detail
+the composition as it reads. A chip's tooltip adds what the item gets without
+it (a native tooltip: chips are the editor's DOM, outside React, so the
+dialog's Radix tooltip cannot wrap them). Reset on a title whose main part
+and ending are both set still clears both, as seo-dialog requires, and now
+says so: "Back to the default title and the site ending".
+
+**Small heights and zoom.** The menu keeps every short-frame rule. At 420 px
+tall and under, the composer's result line stays one line, cut at its end
+with the whole result in the description. At 200 % zoom chips wrap whole and
+nothing overflows sideways. No composer sits beside another detail: the
+dialog pairs only numbers, a price with its currency, a currency with a
+choice, and a date with its time, never text that composes (review round 2
+dropped the pair rule this design had, which no screen could reach).
 
 ### D10. An editor library, chosen by a spike
 
@@ -776,15 +810,16 @@ merge request and in this section:
   description starting with the result;
 - announcements, read from a log of the field's live region: added, removed,
   replaced, linked and unlinked, each once and in the words of D9;
-- macOS text replacement and smart quotes next to a chip, spellcheck, and page
+- the platform's text replacement and smart quotes next to a chip, spellcheck, and page
   translation never rewrite a chip's text;
 - undo and redo group typing and chip changes correctly;
 - the custom caret, selection and boundary handlers stay small: their lines
   are counted and reported;
-- the bundle grows by at most 15 % of `main.global.js` gzipped on the main
-  branch (about 30 kB today). If the build can load the composer only at
-  template scope, the bundle pages load must not grow, and the composer's own
-  chunk is capped at 45 kB gzipped;
+- the bundle grows by at most 15 % of the page bundle gzipped on the main
+  branch (`main.global.js` there, about 30 kB of growth; the build is now ES
+  modules, `extension/dist/main.js` plus a `Composer-*.js` chunk). If the
+  build can load the composer only at template scope, the page bundle must
+  not grow, and the composer's own chunk is capped at 45 kB gzipped;
 - the 468 px frame wraps a long composition without splitting a chip.
 
 Phase 3 starts once a library passes every automated criterion. It does not
@@ -804,6 +839,92 @@ If neither library passes the automated criteria, stop and report to the
 owner rather than hand-write a `contenteditable` editor (decision 20). The
 library is wrapped in one component, `Composer.tsx`, so nothing else imports
 it.
+
+**Spike result (2026-11-22).** Built in the tree, so what was measured is
+what ships: `extension/src/components/Composer.tsx` on `lexical`,
+`@lexical/plain-text` and `@lexical/history`, chips as token-mode text nodes.
+
+- *Size.* The current `lexical` (0.53.0) fails: its core alone is 70 kB
+  gzipped, the composer 73 kB. `lexical` 0.17.1, the same API for what the
+  composer uses, passes: the composer and its library are 37 kB gzipped. The
+  build is now ES modules with code splitting: the composer is its own chunk,
+  loaded and prefetched only where a value composes (a template), so pages
+  load no editor at all. What every opening loads grew from 243,711 to
+  256,426 bytes gzipped (+5.2 %, within the 15 % criterion; measured after
+  review round 2): the composing rules in `values.ts`, words in `model.ts`
+  and `checks.ts`, and the composer's place in `Value.tsx`, not the library.
+  The composer's chunk is 38,753 bytes. `check-patterns.mjs` budgets both:
+  every opening at that size plus 5 kB, and the composer chunk at 45 kB.
+  ProseMirror was not needed.
+- *Keys, caret, selection* (Chromium, `compose.spec.ts`, all pass):
+  composing from a box with End, `{` opening the menu at the caret and `{{`
+  typing a brace, a chip stepped over in one Arrow press, Shift selecting it
+  whole, Backspace removing it whole, Enter or a click opening "Replace
+  ‹Source›", Escape keeping the selection, Ctrl+Z bringing a removed chip
+  back, the bar's Undo, copy into another composer keeping its chips, and a
+  pasted brace pattern and line break staying text. The caret is read from
+  the browser at each key, as the editor's own may lag behind keys pressed in
+  quick succession.
+- *Input method* (Chromium, `Input.imeSetComposition` over the protocol):
+  composition beside a chip keeps every key.
+- *Accessibility*: the tree has one `textbox` named by the label, not
+  multi-line, with `aria-haspopup` and `aria-keyshortcuts`, its chips' labels
+  as text in the flow, and its description starting with the result; an axe
+  scan at rest and with the menu open; announcements read from the status
+  region ("‹Source› added to ‹Field›.", "‹Source› removed from ‹Field›.").
+- *Custom handlers*: about 100 lines (stepping over a chip, snapping a
+  selection out of one, the chip at the caret).
+- *Firefox* (`compose.spec.ts`, project `compose-firefox`): composing by
+  keyboard, the result, the description and the announcements, reload and the
+  head pass; stepping over a chip, Shift selection, the replace menu, Escape
+  and Backspace removing a chip pass. Open: when Backspace removes the last
+  chip, Firefox also deletes the character before it and the caret is lost,
+  so Ctrl+Z in the composer does not bring the chip back (the bar's Undo
+  does). Recorded as a failing criterion. Review round 1: the cause was a
+  chip left selected by undo, which that engine's End did not collapse, so
+  the next key replaced the chip. The composer now owns Home and End, and
+  treats a caret at a chip's edge as beside it; the key, caret, undo, paste
+  and preview cases of `compose.spec.ts` pass in that engine. Its axe scan
+  crashed the page because of an engine defect. After Playwright's world
+  reads `ariaLabelledByElements`, a read from the page crashes it. Since the
+  repair after the gate, the scan reads the attributes there, and all eight
+  tests pass.
+- *WebKit* (project `compose-webkit`): Playwright's WebKit build could not
+  set up a page against the farm site (the fixture timed out before the
+  editor loaded), so the key script did not run there. Run again in review
+  round 2 (2026-11-23): the same timeout setting up the page, before any
+  step. It cannot run on the farm: the engine's network process never
+  finishes starting there (it waits forever on a look-up of the system's
+  analytics service), so no page opens, even a blank one. The key script in a
+  WebKit browser joins the owner's merge check below.
+- *Platform insertions* (review round 2, Chromium, through the protocol's
+  text input, the path input methods use): a smart quote right after a
+  chip and a text replacement of a selected word keep every chip whole; a
+  `{` that arrives as text input only (AltGr on one system reports Ctrl and
+  Alt, so no key handler takes it) opens the menu and types nothing, its
+  `beforeinput` listener running in the capture phase, before the editor's.
+  A `{` that needs Shift or Option on a box now composes instead of typing a
+  brace over it.
+- *468 px*: eight chips wrap whole in the dialog, none split, nothing
+  sideways.
+- Phase 3 was built on these results. The WebKit run is the open part of
+  the gate (task 1.5). The PR body records that
+  WebKit coverage of the composer's keys, caret and selection is part of the
+  owner's merge check, beside the screen reader steps (fix round 3).
+- *Screen readers*: none runs on the farm. Whether a chip can be told from a
+  typed word of the same text could not be decided from the tree alone (a
+  chip is text in the flow, by design), so the description does not add
+  "Made of …" until the owner's check says it is needed.
+
+The owner's merge check, for the PR body: with a WebKit browser and its
+platform's screen reader, and with an open-source screen reader in a
+Chromium browser, on "Every Event"'s composed title: Tab into it and confirm
+it is read as one text box named "Title" with its result in the description;
+step over a chip with one Arrow press and hear its whole name; type a word
+equal to a chip's label and confirm the two can be told apart; remove a chip
+with Backspace and hear "‹Source› removed from Title."; and type with a real
+Japanese input method beside a chip without losing a key. A failure is a
+blocking follow-up before merge, recorded here. Also run `compose.spec.ts` in the `compose-webkit` project where WebKit runs (not on the farm), and copy and paste by hand in Firefox.
 
 ### D11. Checks
 
@@ -844,8 +965,12 @@ it.
     type has a date property ("Keep the date out of the event's name; Starts
     already gives it.").
 - **Description and title.** "Make the description say more" also fires when
-  one text contains the other after normalisation, not only when they are
-  equal, so "‹Title› in ‹City›." next to the same title is caught.
+  one text contains the other as whole words after normalisation and says
+  fewer than 20 letters more, not only when they are equal, so "‹Title› in
+  ‹City›." next to the same title is caught. A description that names its
+  subject and goes on ("Pricing for teams of every size, …" under "Pricing",
+  or a body excerpt that opens with the item's name) is good writing and is
+  never listed (fix round 3: containment alone listed it on every scope).
 - **Lengths.** Guidance on focus for the previewed item, measured on the
   composed result, as today. When the composition holds a field, the sentence
   adds "for this ‹type›; others vary". When "Shorten the title" finds the cut

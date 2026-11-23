@@ -258,10 +258,10 @@ export function TextSuggest(props: {
         },
       },
       // A page's description is Canvas's own: its Description fact.
-      (value) =>
+      (value, form) =>
         variant.description !== undefined && 'fact' in value && value.fact === 'description'
           ? variant.description
-          : view.text(value),
+          : view.text(value, form),
       server.separator,
       server.site.values.title_end,
     );

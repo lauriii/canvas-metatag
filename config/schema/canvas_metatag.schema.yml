@@ -1,7 +1,47 @@
+canvas_metatag.value_part:
+  type: mapping
+  label: 'A part of a composition: typed text, a fact or a field source'
+  constraints:
+    CanvasMetatagValue:
+      part: true
+  mapping:
+    text:
+      type: string
+      label: 'Typed text'
+      requiredKey: false
+    fact:
+      type: string
+      label: 'Fact'
+      requiredKey: false
+      constraints:
+        Choice: [title, description, site, author, published, modified]
+    source:
+      type: mapping
+      label: 'Canvas entity-field source'
+      requiredKey: false
+      mapping:
+        expression:
+          type: string
+          label: 'Expression'
+        sourceType:
+          type: string
+          label: 'Source type'
+          constraints:
+            Choice: [entity-field]
+
 canvas_metatag.value:
   type: mapping
-  label: 'Value: typed text, a fact, a media item or a field source'
+  label: 'Value: typed text, a fact, a media item, a field source or a composition'
+  constraints:
+    CanvasMetatagValue: {}
   mapping:
+    parts:
+      type: sequence
+      label: 'A composition: typed text, facts and field sources, in order'
+      requiredKey: false
+      sequence:
+        type: canvas_metatag.value_part
+        label: 'Part'
     text:
       type: string
       label: 'Typed text'

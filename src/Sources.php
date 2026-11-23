@@ -22,8 +22,10 @@ use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Entity\TypedData\EntityDataDefinition;
+use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Http\Exception\CacheableAccessDeniedHttpException;
 use Drupal\Core\Language\LanguageManagerInterface;
+use Drupal\language\ConfigurableLanguageManagerInterface;
 use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\Core\Theme\Component\ComponentMetadata;
@@ -85,6 +87,13 @@ final class Sources {
    */
   private const LEFT_OUT = ['title', 'created', 'changed', 'uid', 'revision_uid', 'revision_user', 'canvas_metatag'];
 
+  /**
+   * Anonymous access to each host, while reading() runs.
+   *
+   * @var \WeakMap<\Drupal\Core\Entity\ContentEntityInterface, \Drupal\Core\Access\AccessResultInterface>|null
+   */
+  private ?\WeakMap $held = NULL;
+
   public function __construct(
     private readonly PropSourceSuggester $suggester,
     private readonly EntityFieldManagerInterface $entityFieldManager,
@@ -120,9 +129,12 @@ final class Sources {
    *   out. `hop`: the source follows a reference. `html`: the value is
    *   formatted text. `decimal`: the module's own row for a decimal field,
    *   read as its stored digits. `shown`: the
-   *   expression whose value names a stored list key. `names`: it is the
-   *   referenced item's own name. `many`: a field of several values.
-   *   `lines`: one long plain text, which gives its lines to a list.
+   *   expression whose value names a stored list key, and `storage` the
+   *   cache tag of that list's field storage, which translates its labels.
+   *   `names`: it is the referenced item's own name. `many`: a field of
+   *   several values. `lines`: one long plain text, which gives its lines
+   *   to a list. `timestamp`: a number that is a point in time. `scale`: a
+   *   decimal's digits after the point.
    *
    * @throws \Throwable
    *   With $strict, when Canvas could not suggest: an update that converts
@@ -189,6 +201,21 @@ final class Sources {
   }
 
   /**
+   * Whether a row gives a value of a kind.
+   *
+   * `words`, the form of a place that composes: text, a date or a number,
+   * read for people. `line`: the same without long text, for a part of a
+   * title-like place.
+   */
+  private static function fits(array $row, string $kind): bool {
+    return match ($kind) {
+      'words' => (bool) array_intersect(['text', 'date', 'number'], $row['kinds']),
+      'line' => !isset($row['html']) && (bool) array_intersect(['text', 'date', 'number'], $row['kinds']),
+      default => in_array($kind, $row['kinds'], TRUE),
+    };
+  }
+
+  /**
    * Why a stored source cannot be used for a value of this kind.
    *
    * @return 'missing'|'kind'|'error'|null
@@ -198,7 +225,7 @@ final class Sources {
   public function problem(string $bundle, array $source, string $kind): ?string {
     $row = $this->vocabulary($bundle)[$source['expression'] ?? ''] ?? NULL;
     if ($row !== NULL && ($source['sourceType'] ?? '') === 'entity-field') {
-      return in_array($kind, $row['kinds'], TRUE) ? NULL : 'kind';
+      return self::fits($row, $kind) ? NULL : 'kind';
     }
     $field = self::machineName($source);
     return $field === NULL || !isset($this->entityFieldManager->getFieldDefinitions('node', $bundle)[$field]) ? 'missing' : 'error';
@@ -237,16 +264,21 @@ final class Sources {
    * @return array{sourceType: string, expression: string}|null
    *   The first source of that field and kind, one that stays on the host
    *   first, else one that ends at the referenced entity's label; NULL when
-   *   the field offers none.
+   *   the field offers none. For `words`, among those of each standing,
+   *   text before a date before a number.
    */
   public function sourceFor(string $bundle, string $field, string $kind, bool $strict = FALSE): ?array {
     $best = NULL;
-    $rank = 3;
+    $rank = PHP_INT_MAX;
     foreach ($this->vocabulary($bundle, $strict) as $expression => $row) {
-      if ($row['field'] !== $field || !in_array($kind, $row['kinds'], TRUE)) {
+      if ($row['field'] !== $field || !self::fits($row, $kind)) {
         continue;
       }
-      $this_rank = !$row['hop'] ? 0 : (isset($row['names']) ? 1 : 2);
+      $this_rank = (!$row['hop'] ? 0 : (isset($row['names']) ? 1 : 2)) * 3 + match (TRUE) {
+        $kind !== 'words' && $kind !== 'line', in_array('text', $row['kinds'], TRUE) => 0,
+        in_array('date', $row['kinds'], TRUE) => 1,
+        default => 2,
+      };
       if ($this_rank < $rank) {
         [$best, $rank] = [$expression, $this_rank];
       }
@@ -275,21 +307,31 @@ final class Sources {
    *   Every item in field order, instead of the first. One formatted text
    *   gives its own list items, else its paragraphs; one plain text its
    *   lines.
+   * @param string|null $langcode
+   *   The `words` form: the language a text list's labels are read in; NULL
+   *   for the host's own (a referencing page passes its own).
    *
    * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: string|array|null}
    *   The status and the value: a string, for an image the array
    *   {uri, alt, width, height}, for formatted text (the html kind) the
    *   stored markup; with $list a list of those. Addresses are returned as
    *   stored; the resolver puts them on the public base. The ref kind gives
-   *   the list of referenced entities (targets()).
+   *   the list of referenced entities (targets()). The `words` form gives
+   *   `{items, as, scale}`: the machine value of every item visitors may
+   *   see, in field order, and how to read them for people (`as`: date,
+   *   timestamp, decimal, number, html or text; a text list gives its
+   *   label in the host's language). Formatting is the Resolver's (Words).
    */
-  public function evaluate(array $source, ContentEntityInterface $host, string $kind, CacheableMetadata $cacheability, bool $list = FALSE): array {
+  public function evaluate(array $source, ContentEntityInterface $host, string $kind, CacheableMetadata $cacheability, bool $list = FALSE, ?string $langcode = NULL): array {
     $row = self::wellShaped($source) ? $this->vocabulary($host->bundle(), FALSE, $cacheability)[$source['expression']] ?? NULL : NULL;
-    if ($row === NULL || !in_array($kind, $row['kinds'], TRUE)) {
+    if ($row === NULL || !self::fits($row, $kind)) {
       return ['broken', NULL];
     }
     if ($kind === 'ref') {
       return $this->targets($row['field'], $host, $cacheability);
+    }
+    if ($kind === 'words' || $kind === 'line') {
+      return $this->words($source['expression'], $row, $host, $cacheability, $langcode ?? $host->language()->getId());
     }
     [$status, $value] = $this->read($source['expression'], $host, $cacheability);
     if ($status !== 'ok') {
@@ -309,6 +351,101 @@ final class Sources {
     }
     $items = array_values(array_filter(array_map(fn (mixed $item): string|array|null => $this->normalize($item, $kind, $row, TRUE), $items), static fn (mixed $item): bool => $item !== NULL && $item !== ''));
     return [$items === [] ? 'empty' : 'ok', $items];
+  }
+
+  /**
+   * Every item of a source visitors may see, as machine values to read.
+   *
+   * A field of several values on the host is read item by item, so that an
+   * item visitors may not see (a referenced page that is unpublished) is
+   * left out and the others are kept.
+   *
+   * @return array{0: 'ok'|'empty'|'hidden'|'broken', 1: array{items: list<string>, as: string, scale: int}|null}
+   *   See evaluate().
+   */
+  private function words(string $expression, array $row, ContentEntityInterface $host, CacheableMetadata $cacheability, string $langcode): array {
+    $as = match (TRUE) {
+      in_array('date', $row['kinds'], TRUE) => 'date',
+      isset($row['timestamp']) => 'timestamp',
+      isset($row['decimal']) => 'decimal',
+      in_array('number', $row['kinds'], TRUE) && !in_array('text', $row['kinds'], TRUE) => 'number',
+      isset($row['html']) => 'html',
+      default => 'text',
+    };
+    // A text list gives its label in the host's language (or a referencing
+    // page's), from its field storage and that storage's translation. Not
+    // Canvas's label: it is read in the language of the interface, which a
+    // public head never varies by, and kept for the request.
+    $labels = $this->labels($row, $langcode);
+    $read = $labels === NULL ? ($row['shown'] ?? $expression) : $expression;
+    if (isset($row['storage'])) {
+      $cacheability->addCacheTags([$row['storage']]);
+    }
+    $expressions = [$read];
+    // One read per item of a field of several values on the host, at most
+    // 50: a delta in the expression.
+    $marker = "␝{$row['field']}␞␟";
+    if (isset($row['many']) && $host->hasField($row['field']) && str_contains($read, $marker)) {
+      $count = min(50, $host->get($row['field'])->count());
+      $expressions = [];
+      for ($delta = 0; $delta < $count; $delta++) {
+        $expressions[] = preg_replace('/' . preg_quote($marker, '/') . '/u', "␝{$row['field']}␞{$delta}␟", $read, 1);
+      }
+    }
+    $items = [];
+    $hidden = FALSE;
+    foreach ($expressions as $one) {
+      [$status, $value] = $this->read($one, $host, $cacheability);
+      if ($status === 'broken') {
+        return ['broken', NULL];
+      }
+      $hidden = $hidden || $status === 'hidden';
+      foreach (is_array($value) && array_is_list($value) ? $value : [$value] as $item) {
+        $item = is_scalar($item) || $item instanceof \Stringable ? (string) $item : NULL;
+        if ($item === NULL || trim($item) === '') {
+          continue;
+        }
+        $items[] = match (TRUE) {
+          $labels !== NULL => $labels[$item] ?? $item,
+          $as === 'date' => $this->date($item),
+          $as === 'decimal' => (string) self::digits($item),
+          default => $item,
+        };
+      }
+    }
+    $items = array_values(array_filter($items, static fn (string $item): bool => $item !== ''));
+    if ($items === []) {
+      return [$hidden ? 'hidden' : 'empty', NULL];
+    }
+    return ['ok', ['items' => $items, 'as' => $as, 'scale' => (int) ($row['scale'] ?? 0)]];
+  }
+
+  /**
+   * A text list's labels by key, in a language; NULL when it has none.
+   *
+   * From its field storage, with that language's translation of it over it.
+   * A list whose options come from a function has none here.
+   */
+  private function labels(array $row, string $langcode): ?array {
+    if (!isset($row['storage'])) {
+      return NULL;
+    }
+    $name = substr($row['storage'], strlen('config:'));
+    $allowed = $this->configFactory->get($name)->getOriginal('settings.allowed_values', FALSE);
+    if (!is_array($allowed) || $allowed === []) {
+      return NULL;
+    }
+    $translated = $this->languageManager instanceof ConfigurableLanguageManagerInterface
+      ? $this->languageManager->getLanguageConfigOverride($langcode, $name)->get('settings.allowed_values')
+      : NULL;
+    $labels = [];
+    foreach ($allowed as $at => $option) {
+      $label = $translated[$at]['label'] ?? $option['label'] ?? NULL;
+      if (isset($option['value']) && is_scalar($label)) {
+        $labels[(string) $option['value']] = (string) $label;
+      }
+    }
+    return $labels;
   }
 
   /**
@@ -403,8 +540,12 @@ final class Sources {
         if ($kind === 'image') {
           $stored = str_replace(self::IMAGE_FROM, self::IMAGE_TO, $expression);
         }
+        // A timestamp offered as a number reads as a date in words.
+        $leaf = $this->leaf($source->expression);
+        $timestamp = $kind === 'number' && in_array($leaf?->getType(), ['timestamp', 'created', 'changed'], TRUE);
         if (isset($rows[$stored])) {
           $rows[$stored]['kinds'] = array_values(array_unique([...$rows[$stored]['kinds'], $kind]));
+          $rows[$stored] += $timestamp ? ['timestamp' => TRUE] : [];
           continue;
         }
         $path = self::path($source, $host);
@@ -421,6 +562,9 @@ final class Sources {
           'kinds' => [$kind],
           'weight' => [$order[$field] ?? PHP_INT_MAX, count($rows)],
         ] + ($html ? ['html' => TRUE] : []) + ($shown !== NULL ? ['shown' => $shown] : []) +
+          ($timestamp ? ['timestamp' => TRUE] : []) +
+          // A label in text is translated with its field storage.
+          ($shown !== NULL && $leaf !== NULL ? ['storage' => "config:field.storage.{$leaf->getTargetEntityTypeId()}.{$leaf->getName()}"] : []) +
           // The referenced item's own name.
           ($hop && preg_match('/␝(?:title|name)␞␟value$/u', $stored) ? ['names' => TRUE] : []);
       }
@@ -439,6 +583,7 @@ final class Sources {
           'kinds' => ['number'],
           'weight' => [$order[$name], count($rows)],
           'decimal' => TRUE,
+          'scale' => (int) $definition->getFieldStorageDefinition()->getSetting('scale'),
         ];
       }
     }
@@ -533,6 +678,13 @@ final class Sources {
    * The field type a source ends at.
    */
   private function leafType(Expr $expression): ?string {
+    return $this->leaf($expression)?->getType();
+  }
+
+  /**
+   * The definition of the field a source ends at.
+   */
+  private function leaf(Expr $expression): ?FieldDefinitionInterface {
     while ($expression instanceof ReferencePropExpressionInterface) {
       $expression = $expression->getTargetExpression();
     }
@@ -542,7 +694,7 @@ final class Sources {
     $definition = $expression->getHostEntityDataDefinition();
     $bundles = $definition->getBundles() ?? [];
     $fields = $this->entityFieldManager->getFieldDefinitions((string) $definition->getEntityTypeId(), (string) (reset($bundles) ?: $definition->getEntityTypeId()));
-    return ($fields[$expression->getFieldName()] ?? NULL)?->getType();
+    return $fields[$expression->getFieldName()] ?? NULL;
   }
 
   /**
@@ -552,9 +704,16 @@ final class Sources {
    *   The status and Canvas's value.
    */
   private function read(string $expression, ContentEntityInterface $host, CacheableMetadata $cacheability): array {
-    // Asked each time: a host may be published or unpublished between two
-    // reads in a long-running process.
-    $anonymous = $this->hostAccess($host);
+    // Asked once per host while reading() runs; else each time: a host may
+    // be published or unpublished between two reads in a long-running
+    // process.
+    if ($this->held !== NULL) {
+      $anonymous = $this->held[$host] ?? NULL;
+      $anonymous ??= $this->held[$host] = $this->hostAccess($host);
+    }
+    else {
+      $anonymous = $this->hostAccess($host);
+    }
     $public = $anonymous->isAllowed();
     $cacheability
       ->addCacheTags([...$anonymous->getCacheTags(), 'config:user.role.anonymous'])
@@ -590,6 +749,33 @@ final class Sources {
     finally {
       if ($public) {
         $this->accountSwitcher->switchBack();
+      }
+    }
+  }
+
+  /**
+   * Runs a function that reads sources, asking access to each host once.
+   *
+   * A head reads every field of a composition, in several places: whether
+   * anonymous visitors may view the host is asked once for all of them.
+   *
+   * @param callable(): T $read
+   *   What reads.
+   *
+   * @return T
+   *   What it returns.
+   *
+   * @template T
+   */
+  public function reading(callable $read): mixed {
+    $outer = $this->held === NULL;
+    $this->held ??= new \WeakMap();
+    try {
+      return $read();
+    }
+    finally {
+      if ($outer) {
+        $this->held = NULL;
       }
     }
   }

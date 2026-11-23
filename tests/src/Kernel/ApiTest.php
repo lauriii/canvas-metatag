@@ -230,8 +230,11 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame('application/json', $response->headers->get('Content-Type'));
     self::assertStringContainsString('"from_default":{}', (string) $response->getContent());
     $state = self::decodeResponse($response);
+    // Dates in the dialog follow the locale of the server's words.
+    self::assertMatchesRegularExpression('/^en(-[A-Z]{2})?$/', $state['date_locale']);
     self::assertSame([
       'ui',
+      'date_locale',
       'langcode',
       'languages',
       'origin',
@@ -305,8 +308,18 @@ final class ApiTest extends CanvasKernelTestBase {
         'site' => ['label' => 'Site name', 'kind' => 'text', 'value' => 'Example'],
         'url' => ['label' => 'Page address', 'kind' => 'address', 'value' => 'http://localhost/pricing'],
         'author' => ['label' => 'Author', 'kind' => 'text', 'value' => 'Ada Writer'],
-        'published' => ['label' => 'First published', 'kind' => 'date', 'value' => self::PUBLISHED],
-        'modified' => ['label' => 'Last updated', 'kind' => 'date', 'value' => self::MODIFIED],
+        'published' => [
+          'label' => 'First published',
+          'kind' => 'date',
+          'value' => self::PUBLISHED,
+          'text' => 'March 2, 2026',
+        ],
+        'modified' => [
+          'label' => 'Last updated',
+          'kind' => 'date',
+          'value' => self::MODIFIED,
+          'text' => 'March 4, 2026',
+        ],
         'image' => ['label' => 'Image', 'kind' => 'image', 'value' => '', 'image' => $this->imageOf($hero)],
         'identity' => ['label' => 'This site', 'kind' => 'ref', 'value' => 'Example'],
       ],
@@ -507,6 +520,7 @@ final class ApiTest extends CanvasKernelTestBase {
     $state = self::decodeResponse($this->request(Request::create(self::STATE . $query)));
     self::assertSame([
       'ui',
+      'date_locale',
       'langcode',
       'languages',
       'origin',
@@ -583,6 +597,8 @@ final class ApiTest extends CanvasKernelTestBase {
         'kinds' => ['text'],
         'status' => 'ok',
         'value' => 'Grace Hopper',
+        // What a place that composes reads: the server's words.
+        'text' => 'Grace Hopper',
       ],
       $rows['Byline'],
     );
@@ -685,10 +701,12 @@ final class ApiTest extends CanvasKernelTestBase {
     ]), self::CLIENT);
     self::assertSame([
       'description' => [
+        'path' => 'description',
         'field' => 'field_gone',
         'reason' => 'missing',
       ],
       'schema.props.description' => [
+        'path' => 'schema.props.description',
         'field' => 'field_byline',
         'reason' => 'kind',
       ],
@@ -782,6 +800,7 @@ final class ApiTest extends CanvasKernelTestBase {
     $state = self::decodeResponse($response);
     self::assertSame([
       'ui',
+      'date_locale',
       'langcode',
       'languages',
       'origin',
@@ -1203,8 +1222,6 @@ final class ApiTest extends CanvasKernelTestBase {
           'sourceType' => 'entity-field',
         ],
       ],
-      // A date as text.
-      $this->linkTo('When', 'date'),
       // A field that is gone, newly linked.
       ['source' => ['expression' => 'ℹ︎␜entity:node:article␝field_other_gone␞␟value', 'sourceType' => 'entity-field']],
     ];
@@ -1213,6 +1230,23 @@ final class ApiTest extends CanvasKernelTestBase {
       self::assertSame(422, $response->getStatusCode());
       self::assertSame(['description' => 'Choose a field from the list.'], self::decodeResponse($response)['error']['fields']);
     }
+    // A date reads as words in the description, which composes; never as
+    // the title ending, which doesn't.
+    $response = $this->putDraft($path, $template, ['title_end' => $this->linkTo('When', 'date')]);
+    self::assertSame(['title_end' => 'Choose a field from the list.'], self::decodeResponse($response)['error']['fields']);
+    self::assertSame(200, $this->putDraft($path, $template, ['description' => $this->linkTo('When', 'date')])->getStatusCode());
+    // The lone date link gives the date in words, and is not broken.
+    $this->config('system.date')->set('country.default', 'GB')->save();
+    $dated = Node::create([
+      'type' => 'article',
+      'title' => 'Dated',
+      'status' => 1,
+      'field_when' => '2026-06-20T09:00:00',
+    ]);
+    $dated->save();
+    $state = self::decodeResponse($this->request(Request::create(self::STATE . '?entity_type=content_template&id=' . $template->id() . '&preview=' . $dated->id())));
+    self::assertSame('20 June 2026', self::meta($state['resolved']['head'])['description']);
+    self::assertArrayNotHasKey('description', $state['broken']);
     $response = $this->putDraft($path, $template, ['description' => $this->linkTo('Byline')]);
     self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
     // Undo back to the stored link while the draft holds another: the value

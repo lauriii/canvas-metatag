@@ -46,15 +46,33 @@ const focusInSheet = (frame: FrameLocator) =>
     return !!active && active !== body && !!active.closest('.seo-sheet');
   });
 
-/** Opens the sheet from Output, as an editor finds it. */
-async function openSheet(page: Page): Promise<FrameLocator> {
+/**
+ * Opens the sheet from Output, as an editor finds it. With `slowFrames`, the
+ * dialog's animation frames come 300 ms late while the sheet opens, as on a
+ * busy machine (undone with `fastFrames`).
+ */
+async function openSheet(page: Page, slowFrames = false): Promise<FrameLocator> {
   await openPage(page, ID);
   const frame = await openSeo(page);
   await tab(frame, UI.tab.schema).click();
   await button(frame, UI.schema.code).click();
+  if (slowFrames) {
+    await frame.locator('body').evaluate((body) => {
+      const view = body.ownerDocument.defaultView as Window & { fastFrames?: typeof requestAnimationFrame };
+      view.fastFrames = view.requestAnimationFrame.bind(view);
+      view.requestAnimationFrame = (callback) => view.setTimeout(() => callback(view.performance.now()), 300);
+    });
+  }
   await sheet(frame, 'Output').getByRole('button', { name: UI.schema.ownJsonLd, exact: true }).click();
   return frame;
 }
+
+/** Undoes openSheet's slow frames. */
+const fastFrames = (frame: FrameLocator) =>
+  frame.locator('body').evaluate((body) => {
+    const view = body.ownerDocument.defaultView as Window & { fastFrames?: typeof requestAnimationFrame };
+    if (view.fastFrames) view.requestAnimationFrame = view.fastFrames;
+  });
 
 test('an employer rating of another company, built with the keyboard only', async ({ page }) => {
   await writeDraft(page, `canvas_page/${ID}`, `layout/canvas_page/${ID}`, {});
@@ -185,12 +203,19 @@ test('levels: one item opens on it, Back goes to the list, then closes', async (
 
 test('a paste in Form is cleaned up, opens its item, and Undo clean-up restores it', async ({ page }) => {
   await writeDraft(page, `canvas_page/${ID}`, `layout/canvas_page/${ID}`, {});
-  const frame = await openSheet(page);
+  const frame = await openSheet(page, true);
   const own = sheet(frame, UI.schema.ownJsonLd);
-  // The sheet opens with focus in "What is it?"; Paste JSON-LD is next.
+  // The sheet opens with focus in "What is it?"; Paste JSON-LD is next. A Tab
+  // pressed before the sheet's next frames keeps its place: the sheet never
+  // takes focus back (it once did on a busy machine).
   await expect(own.getByRole('combobox', { name: 'What is it?' })).toBeFocused();
   await page.keyboard.press('Tab');
-  await expect(own.getByRole('button', { name: 'Paste JSON-LD', exact: true })).toBeFocused();
+  const paste = own.getByRole('button', { name: 'Paste JSON-LD', exact: true });
+  await expect(paste).toBeFocused();
+  // Longer than the slowed frames: focus is still where the Tab put it.
+  await page.waitForTimeout(1000);
+  await expect(paste).toBeFocused();
+  await fastFrames(frame);
   await page.keyboard.press('Enter');
   const box = own.getByRole('textbox', { name: 'Paste JSON-LD' });
   await box.fill('<script type="application/ld+json">{"@context": "https://schema.org", "@type": "Organization", "name": "Acme Logistics"}</script>');

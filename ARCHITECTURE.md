@@ -137,8 +137,10 @@ not change when nothing changed.
 
 - Every value (title, title ending, description, social title, description
   and image, each `schema.props` entry) is a map with exactly one key
-  (section 5): `{"text": ...}`, `{"fact": ...}`, `{"media": uuid}` or
-  `{"source": {"expression", "sourceType"}}`. `{"text": ""}` is stored only as
+  (section 5): `{"text": ...}`, `{"fact": ...}`, `{"media": uuid}`,
+  `{"source": {"expression", "sourceType"}}` or, at template scope where the
+  place composes, `{"parts": [...]}`: typed text, facts that read as words
+  and sources, in order (section 5). `{"text": ""}` is stored only as
   `title_end`, where it means "No ending". Lengths of typed text: title 255,
   description 1000, social title 255, social description 1000, a schema
   property 2000.
@@ -281,6 +283,66 @@ read as sentences, not as one run-on line.
 The dialog shows a link or a default as a box that names its source and the
 previewed value; the link button and the box open a menu of the type's fields
 (levels for references) and the page's facts (`LinkMenu.tsx`, `Value.tsx`).
+
+### Compositions
+
+`Values::composes($prop, $path, $scope)` says where a value may be a
+composition: at template scope the title's main part, the description, the
+social texts, and a structured data detail the registry marks `compose`
+(`RegistryConsistencyTest` allows it only on free text). `Values::titleLike()`
+splits those places: title-like (at most two items of a field, no long text)
+and description-like.
+
+- **Storage.** `{"parts": [...]}`, folded to canonical form by
+  `Values::fold()` (adjacent text merged, whitespace trimmed before the
+  first field and after the last, kept between them; one field alone is that
+  link, text alone typed text), so every value stored before is already
+  canonical. `Values::canon()` and `model.ts prune()` leave a part list as
+  folded. The config schema types `canvas_metatag.value_part`, and the
+  `CanvasMetatagValue` constraint (`src/Plugin/Validation/Constraint`) refuses
+  a malformed shape wherever the template is validated (Canvas, recipes,
+  validation tools): one key per value and part, no empty list, at most
+  `Values::MAX_PARTS` fields and facts. Whether the bundle offers a source is
+  checked on write only (`Values::clean()` with `accepts`).
+- **The `words` form.** A place that composes reads fields as words for
+  people: `Sources` takes the forms `words` and `line` (a title-like part:
+  no formatted text), fitting a row that gives text, a date or a number.
+  `Sources::evaluate()` in words returns every item visitors may see as
+  machine values (a field of several values is read item by item, a delta in
+  the expression, so one hidden item never hides the rest; a text list's
+  label is read with the configuration language of the host, or of the page
+  that names it) and how to read
+  them; `Words` (Resolver side, the only formatter) gives dates in the long
+  style of the item's locale (its language with its region, else the site's
+  default country) through `intl`, decimals to their scale, and joins items
+  with the locale's list separator from ICU data, two and a plural "and ‹n›
+  more" where title-like. `Resolver::sourceRows()` sends those words as each
+  row's `text` (`line` when it differs, `part` for a long text), and the
+  dialog never formats them; the state's `date_locale` (`Words::locale()`
+  for the item) is the locale the dialog writes its own dates in, so a date
+  reads one way everywhere.
+- **Joining.** `Values::compose()` (and `compose()` in `values.ts`, pinned by
+  the compositions of `tests/fixtures/text-cases.json`) keeps a field or fact
+  with its words: the lead-in with the first unless it ends in label
+  punctuation, a run between two with the one after it except a closing mark
+  at its start, which goes with the one before, a run that goes with the field
+  after it only once one before was kept (and the closing mark of an opening
+  mark left out with it), and never a trailing run of separators. It returns segments: `Values::texts()` keeps them for the
+  title's main part, so a cut drops whole fields before words. A long text in
+  a description-like composition gets the room the rest leaves
+  (`Values::sentences()`).
+- **One reader.** `Resolver::read()` reads every value shape for an entity,
+  memoised by entity, field and form; `resolve()` uses it with the host's
+  facts and `target()` with the referenced page's own. `Sources::reading()`
+  asks anonymous access to each host once while a head is built.
+- **Writes.** `ApiController::putTemplate()` accepts a source already stored
+  in the same value, at any position, so the words around a deleted field
+  stay editable; `carry()` compares canonical forms. `broken()` reports a
+  composition's parts by `path.parts.N`.
+
+No Canvas API is used beyond those listed in section 11: a composition is the
+module's own list of the source shape Canvas already stores
+(`BoundaryTest`).
 
 ## 6. Inheritance and output
 
@@ -756,6 +818,7 @@ loudly.
 | `Entity\Page`: base fields `description`, `image`, `created`, `changed`, owner; route `entity.canvas_page.canonical` | `Resolver::facts()`, hooks | facts and the coupled head | `ResolverTest::testFacts`, `CoupledHeadTest::testPage` |
 | Stored shape `{expression, sourceType: 'entity-field'}` and the expression grammar | template values and their drafts | a stored link reads nothing (broken, each node its default) | `SourcesTest::testEvaluate` (round trip per field type), the `phpunit (canvas dev)` CI job |
 | `PropSource::parse()`, `EntityFieldPropSource::evaluate($host, FALSE)`, `EvaluationResult` | `Sources::evaluate()` | links read nothing | `SourcesTest::testEvaluate` |
+| The expression grammar's field-item delta (`␝field␞0␟…`): one item of a field of several values; a hop through a multi-value reference fails as a whole when one target is denied | `Sources::words()` reads such a field item by item, so a hidden item is left out and the rest kept | in words a field of several values gives nothing, or every item is hidden | `ComposeTest::testComposedHead` (a hidden performer), `testCacheability` |
 | Evaluator behavior: `view` access per hop for the current user, `CacheableAccessDeniedHttpException`; other exceptions | statuses hidden and broken | caught as broken (`\Throwable`) | `SourcesTest::testEvaluate` (statuses) |
 | `PropSourceSuggester::suggest()` with a synthetic `ComponentMetadata`; its matches kept in `cache.static` for the request | `Sources::vocabulary()` | no fields to link (logged once, kept five minutes, empty menu); the post_update stops instead | `SourcesTest::testVocabulary`, `testSuggesterFailure` |
 | `PropSourceSuggester`'s constructor parameter `entityDisplayRepository`, and properties named as its parameters | `SourcesTest::testSuggesterFailure` only | that test cannot build its failing suggester | the test itself |
@@ -1127,12 +1190,13 @@ limitations of the implementation:
   Fine at today's sizes.
 - The settings-file public base needs a cache rebuild when changed.
 - Dialog: one offer of an unsaved change at a time.
-- Links: a text list gives its stored key, not its label; a reference is read
-  only when visitors may view it (else each node uses its default); an
-  unpublished preview node is read with the editor's access; a multi-value
-  media field (a gallery) is not offered as an image, the Image fact covers
-  it; a multi-value formatted text field is not offered; a multi-value field
-  gives its first item.
+- Links: outside text that composes, a text list gives its stored key, not its
+  label, and a multi-value field gives its first item (in text that composes,
+  a list gives its label and a multi-value field every item visitors may
+  see); a reference is read only when visitors may view it (else each node
+  uses its default); an unpublished preview node is read with the editor's
+  access; a multi-value media field (a gallery) is not offered as an image,
+  the Image fact covers it; a multi-value formatted text field is not offered.
 - Not exercised in a browser: a multilingual site, screen readers, Firefox and
   Safari.
 

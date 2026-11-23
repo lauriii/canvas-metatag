@@ -4,6 +4,7 @@ services:
     autoconfigure: true
   Drupal\canvas_metatag\Resolver: {}
   Drupal\canvas_metatag\Sources: {}
+  Drupal\canvas_metatag\Words: {}
   Drupal\canvas_metatag\Vocabulary: {}
   # Removed from the container when canvas_headless is not installed.
   Drupal\canvas_metatag\Controller\HeadlessContentController:

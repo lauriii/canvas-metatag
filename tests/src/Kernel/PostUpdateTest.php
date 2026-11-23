@@ -195,10 +195,12 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
     ];
     $stored = ContentTemplate::load('node.article.full');
     \assert($stored instanceof ContentTemplate);
-    // In the order of the config schema, as configuration stores it.
+    // In the order of the config schema, as configuration stores it. A
+    // template's composite is converted whole where the place composes.
     self::assertSame([
       'title_end' => ['text' => 'Journal'],
       'description' => $summary,
+      'social' => ['title' => ['parts' => [['fact' => 'title'], ['text' => ' by '], $byline]]],
       'schema' => [
         'type' => 'Article',
         'props' => ['author_name' => $byline],
@@ -254,7 +256,7 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
     self::assertSame('Pricing plans for every team | Example', $this->resolver()->resolve($storage->loadUnchanged($page->id()))['head']['title']);
 
     // What lost text is logged, by entity and key, never with the value.
-    self::assertContains('node.article.full: social.title: uses its default; dropped typed text, {field.field_byline}.', $this->logged);
+    self::assertEmpty(preg_grep('/^node\.article\.full: social\.title/', $this->logged));
     self::assertContains('node.article.full: schema.custom: names a field. A whole value is filled from its field; a name inside other text stays as written.', $this->logged);
     self::assertContains("canvas_page {$page->id()} (en, revision {$page->getRevisionId()}): title: kept its first part; dropped {title}.", $this->logged);
     self::assertContains("canvas_page {$page->id()} (fr, revision $first): social.title: kept its first part; dropped typed text.", $this->logged);
@@ -269,6 +271,13 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
       $this->config('canvas_metatag.site')->get('values'),
       ContentTemplate::load('node.article.full')?->getThirdPartySetting('canvas_metatag', 'values'),
     ];
+    // Byte for byte, as configuration export writes them: single links,
+    // typed text, "No ending" and a composition alike.
+    $exported = static fn (): string => serialize([
+      $config->read('canvas_metatag.site'),
+      $config->read('canvas.content_template.node.article.full'),
+    ]);
+    $raw = $exported();
     $this->logged = [];
     $sandbox = [];
     do {
@@ -279,6 +288,7 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
       ContentTemplate::load('node.article.full')?->getThirdPartySetting('canvas_metatag', 'values'),
     ]);
     self::assertSame(['node.article.full: schema.custom: names a field. A whole value is filled from its field; a name inside other text stays as written.'], $this->logged);
+    self::assertSame($raw, $exported());
   }
 
   /**

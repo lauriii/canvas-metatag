@@ -58,7 +58,7 @@ scope MUST have no checks of its own.
 #### Scenario: Every field of a composition empty
 
 - **WHEN** "Every Event"'s title is Venue › Title, " · ", Starts, and the previewed event has neither
-- **THEN** the issue MUST say "Venue › Title and Starts are empty for this event, so the title is its default.", good to know and not counted
+- **THEN** the issue MUST say "Venue › Title and Starts are empty for this event, so the title is its default", good to know and not counted
 
 ### Requirement: A broken link is listed to fix
 
@@ -174,7 +174,7 @@ and says more than the title.
 
 #### Scenario: Repeating the title
 
-- **WHEN** the description equals the title without the site name, or one contains the other, ignoring case and punctuation
+- **WHEN** the description equals the title without the site name, or one contains the other as whole words and the two differ by fewer than 20 letters, ignoring case and punctuation
 - **THEN** "Make the description say more" MUST be listed to improve
 
 #### Scenario: A description that holds the title
@@ -182,25 +182,25 @@ and says more than the title.
 - **WHEN** "Every Event"'s description is Title, " in ", City, "." and its title is Title
 - **THEN** "Make the description say more" MUST be listed to improve
 
+#### Scenario: A description that names the title and goes on
+
+- **WHEN** a page or a template is titled "Pricing" and its description is "Pricing for teams of every size, billed monthly or yearly, with every feature included and a free month to try it before you decide which plan fits."
+- **THEN** "Make the description say more" MUST NOT be listed
+
 ## ADDED Requirements
 
 ### Requirement: Words typed in a composition are noted on a multilingual site
 
-When the site has more than one language, the type can be translated, and a
-composition on the template holds typed letters, Checks MUST note once per
-value, good to know and not counted, that those words are the same in every
-language, whatever item is previewed. The detail MUST show a translation of the
-previewed item when there is one. No fix MUST be offered.
+When the site has more than one language and a composition on the template
+holds typed letters, Checks MUST note once per value, good to know and not
+counted, that those words are the same in every language, whatever item is
+previewed, with the detail "Translations of each ‹type› keep these words." No
+fix MUST be offered.
 
-#### Scenario: A French event
+#### Scenario: A multilingual site
 
-- **WHEN** "Every Event"'s title is Title, " in ", City, and the editor previews the French translation of "Summer Gala"
-- **THEN** "The words typed in the title are the same in every language" MUST be listed as good to know, with the detail "French events read “Gala d'été in Paris”."
-
-#### Scenario: Previewing the original
-
-- **WHEN** the editor previews the English "Summer Gala", which has no translation, on a site with English and French
-- **THEN** the same note MUST be listed, with the detail "Translations of each event keep these words."
+- **WHEN** "Every Event"'s title is Title, " in ", City, on a site with English and French
+- **THEN** "The words typed in the title are the same in every language" MUST be listed as good to know, with the detail "Translations of each event keep these words."
 
 #### Scenario: Punctuation only
 
@@ -211,8 +211,8 @@ previewed item when there is one. No fix MUST be offered.
 
 Checks MUST list to improve, for a composition on a template: a description
 mostly made of typed letters; a title main part whose lead-in holds letters; a
-composed name, headline or alternate name detail that holds the Site name,
-or a date when the type has a date detail. When "Shorten the title" finds the
+composed name or headline detail of the item itself that holds the Site
+name, or a date when the type has a date detail other than its publication date. When "Shorten the title" finds the
 cut inside a composed main part, its detail MUST name the field that is cut.
 
 #### Scenario: A boilerplate description
@@ -234,3 +234,26 @@ cut inside a composed main part, its detail MUST name the field that is cut.
 
 - **WHEN** the title is Title, " · ", Starts, and it may be cut off inside the date
 - **THEN** the detail of "Shorten the title" MUST say "Starts is cut off."
+
+### Requirement: A composed detail is looked for on the page field by field
+
+A composed detail MUST NOT be looked for on the page as joined text: each of
+its fields that gives a value MUST be looked for on its own (a date in any of
+its written forms, a field of several values by its first item too), typed
+words never, and only the fields not found MUST be named, with their values.
+A field another detail holds whole MUST be named by that detail only, once.
+
+#### Scenario: A composed name whose fields are on the page
+
+- **WHEN** "Every Event"'s name detail is Title, " with ", Performers, and the page shows the title and each performer but never the joined text
+- **THEN** no "Couldn't find" issue MUST be listed for the name
+
+#### Scenario: A field of a composed name not on the page
+
+- **WHEN** the name detail is Title, " in ", City, and the page never mentions "Helsinki"
+- **THEN** "Couldn't find City (Helsinki) on this page" MUST be listed to improve
+
+#### Scenario: A date in a composed name and in its own detail
+
+- **WHEN** "Every Event"'s name detail is Title, " · ", Starts, its start date detail is Starts, and the page never shows the date
+- **THEN** only the start date detail MUST say "Couldn't find the date …", never the name too

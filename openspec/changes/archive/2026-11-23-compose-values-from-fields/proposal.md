@@ -218,7 +218,9 @@ records them.
     flow, where screen readers and the caret behave; then the schema-based
     toolkit. If neither passes the spike's automated criteria, stop and
     report rather than hand-write an editor. Not taken: a hand-written
-    `contenteditable="plaintext-only"` editor.
+    `contenteditable="plaintext-only"` editor. Built (design D10, spike
+    result): `lexical` 0.17.1 in a chunk of its own, loaded only where a
+    value composes; the current release is twice the size budget.
 21. **Typed words on translated items: shared by all languages** (D12), with
     a good-to-know check on any multilingual site, and punctuation glue
     suggested in the composer's help. Not taken, and for a later change: a
@@ -332,6 +334,28 @@ are each releasable:
    shows it read-only.
 3. The composer.
 4. Checks, docs, the design system and manual QA.
+
+## Follow-ups (from the gate, 23 Nov 2026)
+
+- The composer in WebKit (`compose-webkit`) never ran. Playwright's WebKit
+  build cannot create any page on the farm's host, even a blank one in a bare
+  script. The repair after the gate traced it: the engine's network process
+  hangs while it starts, before any page exists. Its loader thread waits
+  forever on a look-up of the system's analytics service, a look-up an
+  ordinary process gets at once. No fix in this module can reach that. It
+  joins the owner's merge check beside the screen reader steps (design D10):
+  run the `compose-webkit` project where WebKit runs, before merge.
+- Firefox's axe step (`compose-firefox`, `compose.spec.ts` test 3) crashed
+  that engine's page (`Target crashed`). The repair after the gate found the
+  cause, an engine defect: once Playwright's own world reads an element's
+  `ariaLabelledByElements` (every query by role and name does), a read from
+  the page crashes it. A blank page with one labelled `div` crashes the same
+  way, so the composer is not the cause. The scan now hides those properties
+  from the page in Firefox, so axe reads the `aria-*` attributes. The
+  extension only sets attributes, so the scan sees the same names. All eight
+  Firefox tests pass. A clipboard event made by a script carries no data in
+  that engine, so its scripted copy and paste steps are annotated as not run
+  there. Copy and paste by hand in Firefox before merge.
 
 ## Out of scope and non-goals
 

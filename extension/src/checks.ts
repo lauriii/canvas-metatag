@@ -34,7 +34,7 @@ import type {
   Value,
   Verdict,
 } from './types';
-import { type Lookup, PROP_KINDS, brokenWhy, kindOf, resolve, rowOf, tagOf } from './values';
+import { type Lookup, PROP_KINDS, brokenWhy, composed as composedText, composes, fieldsIn, formOf, kindOf, resolve, rowOf, sameValue, tagOf } from './values';
 
 /**
  * What a group misses, said one way under its box, in its sheet and in
@@ -107,6 +107,8 @@ export interface ChecksInput {
   published: boolean;
   /** The content type's name at template scope ("Article"). */
   typeLabel: string;
+  /** How many languages the site has: typed words in a composition are shared by all. */
+  languages?: number;
   /** The name of the default language, for a setting inherited from it. */
   defaultLanguage: string;
   /** The robots settings are sent: `resolved`'s robots tag describes them. */
@@ -129,6 +131,9 @@ const normal = (text: string) =>
     .toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
+
+/** Letters a description holding the title must add to say more than it. */
+const REPEAT_FLOOR = 20;
 
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -284,16 +289,37 @@ export function checks(input: ChecksInput): Issue[] {
       : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
   const broken: string[] = [];
   const hidden: string[] = [];
+  const composed: [string, Tab, NonNullable<Extract<Value, { parts: unknown }>['parts']>][] = [];
   // Hidden links, by what hides them: a reference whose item visitors may
   // not see for this item, or a field visitors may never see.
-  const hiddenBy = new Map<string, { paths: string[]; tab: Tab; reference: boolean }>();
+  // `parts`: compositions that leave out a field it hides, by the path of
+  // the first such part.
+  const hiddenBy = new Map<string, { paths: string[]; parts: Map<string, string>; tab: Tab; reference: boolean }>();
   for (const [path, tab] of onPage ? [] : paths) {
     const value = path.split('.').reduce<unknown>((at, key) => (at as Record<string, unknown> | undefined)?.[key], effective) as Value | undefined;
+    if (value && 'parts' in value) {
+      composed.push([path, tab, value.parts]);
+      value.parts.forEach((part, at) => {
+        const row = rowOf(lookup, part);
+        if (row && resolve(part, formOf(path), lookup).status === 'hidden') {
+          const by = row.hop ? row.path[0] : row.label;
+          const group = hiddenBy.get(by) ?? { paths: [] as string[], parts: new Map<string, string>(), tab, reference: row.hop };
+          if (!group.parts.has(path)) {
+            group.parts.set(path, `${path}.parts.${at}`);
+          }
+          hiddenBy.set(by, group);
+          hidden.push(path);
+        }
+      });
+      continue;
+    }
     if (!value || !('source' in value)) {
       continue;
     }
     const kind = kindOf(path, registry[effective.schema?.type ?? 'WebPage']?.props);
-    const shown = resolve(value, kind, lookup);
+    // Where text composes, a field reads as words: a date fits there.
+    const place = registry[effective.schema?.type ?? 'WebPage']?.props?.find((one) => `schema.props.${one.key}` === path);
+    const shown = resolve(value, kind === 'text' && composes(place, path, 'template') ? formOf(path) : kind, lookup);
     const what = fieldName(path);
     if (shown.status === 'broken') {
       broken.push(path);
@@ -309,7 +335,7 @@ export function checks(input: ChecksInput): Issue[] {
       hidden.push(path);
       const row = rowOf(lookup, value)!;
       const by = row.hop ? row.path[0] : row.label;
-      const group = hiddenBy.get(by) ?? { paths: [], tab, reference: row.hop };
+      const group = hiddenBy.get(by) ?? { paths: [] as string[], parts: new Map<string, string>(), tab, reference: row.hop };
       group.paths.push(path);
       hiddenBy.set(by, group);
     }
@@ -319,8 +345,9 @@ export function checks(input: ChecksInput): Issue[] {
     const left = group.paths.filter((path) => !fallsBack(path)).map(fieldName);
     const kept = group.paths.filter(fallsBack).map(fieldName);
     const withheld = group.paths.some((path) => required.has(path));
+    const within = [...group.parts.keys()].map(fieldName);
     // What is left out, said once: the whole type's details when a required
-    // one is among them.
+    // one is among them, and the compositions that leave it out.
     const what = [
       withheld
         ? `${registry[effective.schema?.type ?? 'WebPage']?.label ?? 'Structured data'} details are left out for ${page}${
@@ -328,19 +355,116 @@ export function checks(input: ChecksInput): Issue[] {
           }`
         : left.length && `${listed(left)} ${left.length === 1 ? 'is' : 'are'} left out`,
       kept.length && `${listed(kept)} ${kept.length === 1 ? 'uses its default' : 'use their defaults'}`,
+      within.length && (group.reference
+        ? `the ${listed(within)} ${within.length === 1 ? 'skips' : 'skip'} it and the words that go with it`
+        : `it is left out of every ${inSentence(input.typeLabel)}'s ${listed(within)}`),
     ].filter(Boolean).join('; ');
+    const first = group.paths[0] ?? [...group.parts.values()][0];
     issues.push({
-      id: `link-hidden:${group.paths[0]}`,
+      id: `link-hidden:${first}`,
       severity: 'improve',
       // A reference: only this item's is hidden; a field: every item's.
       message: group.reference ? `${by} is hidden from visitors for ${page}` : `${by} is hidden from visitors`,
-      detail: `${what[0].toUpperCase()}${what.slice(1)}. ${
+      detail: `${!group.reference && !group.paths.length ? 'So ' : ''}${!group.reference && !group.paths.length ? what : `${what[0].toUpperCase()}${what.slice(1)}`}. ${
         group.reference
           ? `Publish the ${by.toLowerCase()} or preview another ${inSentence(input.typeLabel)}.`
-          : 'Link a field visitors can see.'
+          : group.paths.length ? 'Link a field visitors can see.' : 'Use a field visitors can see.'
       }`,
-      jump: jump(group.tab, group.paths[0]),
+      jump: jump(group.tab, first),
     });
+  }
+
+  // Compositions: a broken field to replace, a hidden one to improve, what
+  // gives nothing for this item to know, and what makes one read better.
+  const type = inSentence(input.typeLabel);
+  const props = registry[effective.schema?.type ?? 'WebPage']?.props ?? [];
+  for (const [path, tab, parts] of composed) {
+    const form = formOf(path);
+    const what = fieldName(path);
+    const fields = fieldsIn(parts);
+    const at = (field: number) => parts.indexOf(fields[field]);
+    const states = fields.map((part) => resolve(part, form, lookup));
+    const name = (field: number) => tagOf(fields[field], lookup, `${path}.parts.${at(field)}`);
+    fields.forEach((_, field) => {
+      const partPath = `${path}.parts.${at(field)}`;
+      if (states[field].status === 'broken') {
+        broken.push(path);
+        const machine = lookup.broken?.[partPath]?.field ?? name(field);
+        issues.push({
+          id: `link-broken:${partPath}`,
+          severity: 'fix',
+          message: `Replace ${machine} in the ${what}`,
+          detail: `It ${brokenWhy(lookup.broken?.[partPath]?.reason, 'text')}, so each ${type}'s ${what} leaves it out.`,
+          jump: jump(tab, partPath),
+          fix: { label: 'Replace field', link: true },
+        });
+      }
+      // A hidden part is said with the links its field or reference hides.
+    });
+    const empty = fields.map((_, field) => field).filter((field) => states[field].status === 'empty');
+    const given = states.filter((one) => one.status === 'ok').length;
+    if (lookup.resolvable && empty.length && !states.some((one) => one.status === 'broken')) {
+      issues.push({
+        id: `parts-empty:${path}`,
+        severity: 'info',
+        message: given
+          ? `${andList(empty.map(name))} ${empty.length === 1 ? 'is' : 'are'} empty for ${page}`
+          : `${andList(empty.map(name))} ${empty.length === 1 ? 'is' : 'are'} empty for ${page}, so the ${what} is its default`,
+        detail: given
+          ? `${page[0].toUpperCase()}${page.slice(1)}'s ${what} leaves ${empty.length === 1 ? 'it' : 'them'} out with the words that go with ${empty.length === 1 ? 'it' : 'them'}.`
+          : `Other ${type}s that have ${empty.length === 1 ? 'it use it' : 'them use them'}.`,
+        jump: jump(tab, path),
+      });
+    }
+    // Typed words are shared by every language.
+    const typed = parts.filter((part): part is { text: string } => 'text' in part).map((part) => part.text).join('');
+    if ((input.languages ?? 1) > 1 && /\p{L}/u.test(typed)) {
+      issues.push({
+        id: `parts-language:${path}`,
+        severity: 'info',
+        message: `The words typed in the ${what} are the same in every language`,
+        detail: `Translations of each ${type} keep these words.`,
+        jump: jump(tab, path),
+      });
+    }
+    // Steering toward a good composition.
+    if (path === 'title' && /\p{L}/u.test(parts[0] && 'text' in parts[0] ? parts[0].text : '')) {
+      issues.push({
+        id: 'title-lead-in',
+        severity: 'improve',
+        message: `Start the title with what differs per ${type}`,
+        detail: 'Words before the first field push what is particular to each item toward the end, where results cut titles.',
+        jump: jump(tab, path),
+      });
+    }
+    if ((path === 'description' || path === 'social.description') && lookup.resolvable) {
+      const text = texts[path === 'description' ? 'description' : 'social_description'];
+      const letters = (one: string) => (one.match(/\p{L}/gu) ?? []).length;
+      // Only the typed words this item shows: words that go with an empty
+      // field are left out with it.
+      const shown = parts.filter((part): part is { text: string } => 'text' in part && normal(text).includes(normal(part.text))).map((part) => part.text).join('');
+      if (text && letters(shown) * 2 > letters(text)) {
+        issues.push({
+          id: `parts-boilerplate:${path}`,
+          severity: 'improve',
+          message: `Most of this ${what} is the same on every ${type}`,
+          detail: 'Search engines show text that describes each item; let fields give most of it.',
+          jump: jump(tab, path),
+        });
+      }
+    }
+    const prop = path.startsWith('schema.props.') ? props.find((one) => `schema.props.${one.key}` === path) : undefined;
+    // The item's own name or headline; an organizer's or a brand's name is
+    // another thing's.
+    if (prop && composes(prop, path, 'template') && /^(name|headline)$/.test(prop.key)) {
+      const noun = prop.key;
+      const dated = fields.find((part) => ('fact' in part && (part.fact === 'published' || part.fact === 'modified')) || rowOf(lookup, part)?.kinds.includes('date'));
+      if (fields.some((part) => 'fact' in part && part.fact === 'site')) {
+        issues.push({ id: `name-site:${path}`, severity: 'improve', message: `Keep the site name out of the ${type}'s ${noun}`, detail: 'The site is named as the publisher already.', jump: jump(tab, path) });
+      } else if (dated && props.some((one) => one.kind === 'date' && one.key !== 'datePublished')) {
+        issues.push({ id: `name-date:${path}`, severity: 'improve', message: `Keep the date out of the ${type}'s ${noun}`, detail: `${tagOf(dated, lookup)} already gives it.`, jump: jump(tab, path) });
+      }
+    }
   }
 
   if (site && texts.title.toLowerCase().split(site.toLowerCase()).length > 2) {
@@ -348,7 +472,11 @@ export function checks(input: ChecksInput): Issue[] {
     // the ending is the site name: no ending. A main part linked to a field
     // would apply one item's text to every item, so it gets none.
     const main = input.sources('title') === 'target' ? effective.title : undefined;
-    const typed = !!main && 'text' in main && new RegExp(escape(site), 'i').test(main.text);
+    // Typed text, or a composition holding the Site name or typing it.
+    const typed = !!main && (
+      ('text' in main && new RegExp(escape(site), 'i').test(main.text)) ||
+      ('parts' in main && main.parts.some((part) => ('fact' in part && part.fact === 'site') || ('text' in part && new RegExp(escape(site), 'i').test(part.text))))
+    );
     const endsWithSite = normal(texts.title_end) === normal(site);
     issues.push({
       id: 'title-site-twice',
@@ -402,13 +530,29 @@ export function checks(input: ChecksInput): Issue[] {
       texts.title_main !== '' &&
       texts.title_end !== '' &&
       meter('title', texts.title, input.measurer).shown >= texts.title_main.length;
+    // A cut inside a composed main part: the field it falls in.
+    const main = effective.title;
+    let within = '';
+    if (!lost && main && 'parts' in main && lookup.resolvable) {
+      const shown = meter('title', texts.title, input.measurer).shown;
+      const fields = fieldsIn(main.parts).filter((part) => resolve(part, 'line', lookup).value.trim() !== '');
+      let end = 0;
+      composedText(main, 'line', lookup).some((segment, at) => {
+        end += segment.length;
+        if (end > shown && fields[at]) {
+          within = ` ${tagOf(fields[at], lookup)} is cut off.`;
+          return true;
+        }
+        return false;
+      });
+    }
     issues.push({
       id: 'title-long',
       severity: 'info',
       message: 'Shorten the title',
       detail: lost
         ? `${titleCut} The ending “${texts.title_end}” is the part that gets lost.`
-        : titleCut,
+        : `${titleCut}${within}`,
       jump: jump('search', 'title'),
     });
   }
@@ -437,7 +581,15 @@ export function checks(input: ChecksInput): Issue[] {
         fix: suggest('description'),
       });
     }
-    if (bare && normal(texts.description) === normal(bare)) {
+    // The same text, or one holding the other and saying little more
+    // ("‹Title› in ‹City›."). Naming the subject in a description that goes
+    // on is good writing, never a repeat.
+    const [description, title] = [normal(texts.description), normal(bare)];
+    // Whole words only: "Art" is not in "Start your day".
+    const holds = (text: string, part: string) => part.length > 0 && ` ${text} `.includes(` ${part} `);
+    const letters = (text: string) => text.replace(/ /g, '').length;
+    const little = Math.abs(letters(description) - letters(title)) < REPEAT_FLOOR;
+    if (bare && (description === title || (little && (holds(description, title) || holds(title, description))))) {
       issues.push({
         id: 'description-title',
         severity: 'improve',
@@ -1267,6 +1419,36 @@ function structured(
       detail: `${linked ? `It comes from ${linked}. ` : ''}Structured data should describe what visitors see.`,
       jump: prop(item.key),
     });
+    // Joined text is never on the page as it is: each field of a composition
+    // is looked for on its own, typed words never, and the missing ones are
+    // named with their values.
+    if ('parts' in stored) {
+      const form = formOf(`schema.props.${item.key}`);
+      const missing = fieldsIn(stored.parts).flatMap((part) => {
+        const one = resolve(part, form, lookup);
+        // A field another detail holds whole is said there, once.
+        const elsewhere = Object.entries(schema.props ?? {}).some(
+          ([key, other]) => key !== item.key && !!other && sameValue(other, part as Value),
+        );
+        if (one.status !== 'ok' || elsewhere) {
+          return [];
+        }
+        const row = 'source' in part ? rowOf(lookup, part) : undefined;
+        const raw = 'fact' in part ? (lookup.facts[part.fact]?.value ?? '') : (row?.value ?? '');
+        const dated = 'fact' in part ? part.fact === 'published' || part.fact === 'modified' : !!row?.kinds.includes('date') && !row.kinds.includes('text');
+        const found =
+          onThePage(one.text) ||
+          // A field of several values: its first item, as the page lists them.
+          (!!row?.many && !!raw && onThePage(raw)) ||
+          (dated && !!raw && dateForms(raw, input.langcode).some(onThePage));
+        const value = one.text.length > 40 ? `${one.text.slice(0, 40).trimEnd()}…` : one.text;
+        return found ? [] : [`${tagOf(part, lookup)} (${value})`];
+      });
+      if (missing.length) {
+        issues.push({ ...notFound(andList(missing)), detail: 'Structured data should describe what visitors see.' });
+      }
+      continue;
+    }
     // Formatted text is compared, and quoted, as its words; a long value is
     // quoted by its start.
     const words = item.html ? plainText(shown.value) : shown.value;

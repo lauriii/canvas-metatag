@@ -7,10 +7,226 @@ import type {
   Fact,
   FactInfo,
   Kind,
+  Part,
   SchemaProp,
+  SourceRef,
   SourceRow,
   Value,
 } from './types';
+
+/** The shape of a value: which of its one keys it has. */
+export type Shape = 'text' | 'fact' | 'media' | 'source' | 'parts';
+
+/** Which shape a value is; every caller switches over all of them. */
+export function shapeOf(value: Value): Shape {
+  if ('parts' in value) return 'parts';
+  if ('source' in value) return 'source';
+  if ('fact' in value) return 'fact';
+  if ('media' in value) return 'media';
+  return 'text';
+}
+
+/** For a switch that handles every shape: TypeScript refuses a missing one. */
+export function assertNever(value: never): never {
+  throw new Error(`Unhandled ${String(value)}`);
+}
+
+/** The facts that read as words in text: what a composition may hold. As Values::TEXT_FACTS. */
+export const TEXT_FACTS: Fact[] = ['title', 'description', 'site', 'author', 'published', 'modified'];
+
+/** The fields and facts one composition may hold. As Values::MAX_PARTS. */
+export const MAX_PARTS = 8;
+
+/** The room a description-like composition gives a long text part. As Values. */
+export const LONG_ROOM = 155;
+const LONG_FLOOR = 70;
+
+/**
+ * Whether a value in a place may be a composition. As Values::composes(): at
+ * template scope the title's main part, the description, the social texts and
+ * a structured data detail the registry marks `compose`.
+ */
+export function composes(prop: SchemaProp | null | undefined, path: string, scope: 'page' | 'template' | 'site'): boolean {
+  if (scope !== 'template') {
+    return false;
+  }
+  return ['title', 'description', 'social.title', 'social.description'].includes(path)
+    || (path.startsWith('schema.props.') && !!prop?.compose && !prop.html);
+}
+
+/** Whether a place that composes is title-like (Values::titleLike()). */
+export const titleLike = (path: string) => !/(^|[._])description$/.test(path);
+
+/** The form a place reads its fields in: `line` title-like, `words` else. */
+export const formOf = (path: string): 'line' | 'words' => (titleLike(path) ? 'line' : 'words');
+
+const blank = (text: string) => /^[\s﻿]*$/u.test(text);
+
+/**
+ * The canonical form of a composition's parts. As Values::fold(): adjacent
+ * text merges, empty text goes, whitespace before the first field and after
+ * the last is trimmed and kept between them; one fact or source and no text is
+ * that value, text alone typed text.
+ */
+export function fold(parts: Part[]): Value | undefined {
+  const out: Part[] = [];
+  for (const part of parts) {
+    if ('text' in part) {
+      if (part.text === '') continue;
+      const last = out.at(-1);
+      if (last && 'text' in last) {
+        out[out.length - 1] = { text: last.text + part.text };
+        continue;
+      }
+    }
+    out.push(part);
+  }
+  const fields = out.flatMap((part, at) => ('text' in part ? [] : [at]));
+  if (!fields.length) {
+    const text = out[0] && 'text' in out[0] ? out[0].text : '';
+    return blank(text) ? undefined : { text };
+  }
+  if (fields[0] > 0) {
+    out[0] = { text: (out[0] as { text: string }).text.replace(/^[\s﻿]+/u, '') };
+  }
+  const end = out.length - 1;
+  if (fields.at(-1)! < end) {
+    out[end] = { text: (out[end] as { text: string }).text.replace(/[\s﻿]+$/u, '') };
+  }
+  const kept = out.filter((part) => !('text' in part) || part.text !== '');
+  return kept.length === 1 ? kept[0] : { parts: kept };
+}
+
+/** The parts of a value: a composition's, one part for any other text value. */
+export const partsOf = (value: Value | undefined): Part[] =>
+  !value ? [] : 'parts' in value ? value.parts : 'media' in value ? [] : [value as Part];
+
+/** Fields and facts in a list of parts. */
+export const fieldsIn = (parts: Part[]) => parts.filter((part) => !('text' in part));
+
+/**
+ * Whether a key is `{`, which adds a field where text composes: with Shift,
+ * Option or AltGr as a keyboard layout needs, never a shortcut with Ctrl or
+ * Cmd (AltGr reports Ctrl and Alt on one system).
+ */
+export const braceKey = (event: { key: string; ctrlKey: boolean; metaKey: boolean; getModifierState(key: string): boolean }) =>
+  event.key === '{' && (!(event.ctrlKey || event.metaKey) || event.getModifierState('AltGraph'));
+
+/**
+ * Joins a composition: which words go with which field. As Values::compose().
+ * `read` gives what a field or fact gives, plain, '' for nothing; `long` says
+ * a part is long text, cut to the room the rest of `room` leaves. The
+ * segments: each kept field with its words; [] when every field gives nothing.
+ */
+export function compose(
+  parts: Part[],
+  read: (part: Part) => string,
+  long?: (part: Part) => boolean,
+  room = 0,
+): string[] {
+  const runs = [''];
+  const fields: Part[] = [];
+  for (const part of parts) {
+    if ('text' in part) {
+      runs[fields.length] += part.text;
+      continue;
+    }
+    fields.push(part);
+    runs.push('');
+  }
+  if (!fields.length) {
+    return [];
+  }
+  const values = fields.map((part) => read(part));
+  const kept = values.map((value) => !blank(value));
+  if (!kept.includes(true)) {
+    return [];
+  }
+  const longs = long ? fields.flatMap((part, at) => (long(part) ? [at] : [])) : [];
+  if (longs.length && room > 0) {
+    const rest = values.map((value, at) => (longs.includes(at) ? '' : value));
+    const used = Array.from(plainText(joinRuns(runs, rest, kept).join(''))).length;
+    const share = Math.floor(Math.max(0, room - used) / longs.length);
+    for (const at of longs) {
+      values[at] = sentences(values[at], Math.max(LONG_FLOOR, share));
+    }
+  }
+  return joinRuns(runs, values, kept);
+}
+
+function joinRuns(runs: string[], values: string[], kept: boolean[]): string[] {
+  const segments: string[] = [];
+  const lead = runs[0];
+  // A label always shows; any other lead-in goes with the first field.
+  const label = /[:.!?…|·•–—\-/]\s*$/u.test(lead);
+  let pending = label ? lead : '';
+  let before = false;
+  // A connector left out with an opening mark: the closing mark after its
+  // field goes too, so a bracket is never left unbalanced.
+  let orphan = false;
+  const close = (run: string) => /^(?:\p{Pe}|[\p{Pi}\p{Pf}"'](?=$|[\s\p{P}]))/u.exec(run)?.[0] ?? '';
+  for (let at = 0; at < values.length; at++) {
+    let run = at === 0 ? (label ? '' : lead) : runs[at];
+    // A closing bracket, or a quote followed by a space, punctuation or
+    // nothing, goes with the field before.
+    const mark = at > 0 ? close(run) : '';
+    if (mark) {
+      if (kept[at - 1] && !orphan) {
+        segments[segments.length - 1] += mark;
+      }
+      run = run.slice(mark.length);
+    }
+    orphan = false;
+    if (!kept[at]) {
+      continue;
+    }
+    // A connector needs something kept before it; the lead-in does not.
+    const connector = at > 0 && !before;
+    orphan = connector && /(?:\p{Ps}|\p{Pi}|(?:^|\s)["'])$/u.test(run);
+    segments.push(pending + (connector ? '' : run) + values[at]);
+    pending = '';
+    before = true;
+  }
+  // A separator left at the end never shows; a unit does.
+  let tail = runs[values.length];
+  if (orphan) {
+    tail = tail.slice(close(tail).length);
+  }
+  if (kept[values.length - 1] && !/^[\s·•|–—\-/,;:]*$/u.test(tail)) {
+    segments[segments.length - 1] += tail;
+  }
+  return segments;
+}
+
+/** Whitespace collapsed and trimmed, controls removed: Values::plain() without a cut. */
+const plainText = (text: string) =>
+  text
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F‪-‮⁦-⁩]/g, '')
+    .replace(/[ \t\n\r]+/g, ' ')
+    .replace(/^ +| +$/g, '');
+
+/**
+ * A text cut to a room at its last whole sentence, else at a word with "…".
+ * As Values::sentences().
+ */
+export function sentences(text: string, room: number): string {
+  const points = Array.from(plainText(text));
+  if (points.length <= room) {
+    return points.join('');
+  }
+  const start = points.slice(0, room + 1).join('');
+  const ends = [...start.matchAll(/[.!?…。！？][\p{Pe}\p{Pf}"'»]*(?=\s)/gu)];
+  const last = ends.at(-1);
+  if (last) {
+    return start.slice(0, last.index! + last[0].length);
+  }
+  let cut = points.slice(0, Math.max(1, room - 1));
+  const space = cut.lastIndexOf(' ');
+  if (points[cut.length] !== ' ' && space > 0) {
+    cut = cut.slice(0, space);
+  }
+  return cut.join('').replace(/[ ,;:]+$/, '') + '…';
+}
 
 /** The kind of value each fact gives. As Values::FACTS. */
 export const FACT_KINDS: Record<Fact, Kind> = {
@@ -92,17 +308,30 @@ export function kindOf(path: string, props: SchemaProp[] = []): Kind {
 }
 
 /** The row of a stored source, when the menu still offers it. */
-export const rowOf = (lookup: Lookup, value: Value | undefined) =>
+export const rowOf = (lookup: Lookup, value: Value | Part | undefined) =>
   value && 'source' in value
     ? lookup.sources.find(
         (row) => row.source.expression === value.source.expression,
       )
     : undefined;
 
-/** What a value gives, of a kind, for the previewed item. */
+/**
+ * The form a value is read in: a kind, or in a place that composes `words`
+ * (`line` where it is title-like): every field and fact as words for people.
+ */
+export type Form = Kind | 'words' | 'line';
+
+/** Whether a row gives words: text, a date or a number (Sources::fits()). */
+export const givesWords = (row: SourceRow) => row.kinds.some((kind) => kind === 'text' || kind === 'date' || kind === 'number');
+
+/**
+ * What a value gives, of a kind or in a form, for the previewed item. In
+ * words, a field gives the server's words for the item (its row's `text`),
+ * never a value formatted here; a composition its joined text.
+ */
 export function resolve(
-  value: Value | undefined,
-  kind: Kind,
+  value: Value | Part | undefined,
+  kind: Form,
   lookup: Lookup,
 ): Shown {
   if (!value) {
@@ -114,35 +343,90 @@ export function resolve(
     text,
     image,
   });
-  if ('text' in value) {
-    return found(kind === 'image' ? '' : value.text);
-  }
-  if ('media' in value) {
-    return found('', kind === 'image' ? (lookup.media[value.media] ?? null) : null);
-  }
-  if ('fact' in value) {
-    const fact = lookup.facts[value.fact];
-    if (!lookup.resolvable && value.fact !== 'site') {
-      return NONE;
+  const words = kind === 'words' || kind === 'line';
+  const shape = shapeOf(value as Value);
+  switch (shape) {
+    case 'text':
+      return found(kind === 'image' ? '' : (value as { text: string }).text);
+    case 'media':
+      return found('', kind === 'image' ? (lookup.media[(value as { media: string }).media] ?? null) : null);
+    case 'parts': {
+      if (!lookup.resolvable) {
+        return NONE;
+      }
+      const joined = composed(value as { parts: Part[] }, kind === 'line' ? 'line' : 'words', lookup).join('');
+      return found(plainText(joined));
     }
-    return FACT_KINDS[value.fact] !== kind
-      ? { ...NONE, status: 'broken' }
-      : found(fact?.value ?? '', kind === 'image' ? (fact?.image ?? null) : null);
+    case 'fact': {
+      const name = (value as { fact: Fact }).fact;
+      const fact = lookup.facts[name];
+      if (!lookup.resolvable && name !== 'site') {
+        return NONE;
+      }
+      if (words) {
+        return TEXT_FACTS.includes(name) ? found(fact?.text ?? fact?.value ?? '') : { ...NONE, status: 'broken' };
+      }
+      return FACT_KINDS[name] !== kind
+        ? { ...NONE, status: 'broken' }
+        : found(fact?.value ?? '', kind === 'image' ? (fact?.image ?? null) : null);
+    }
+    case 'source': {
+      const row = rowOf(lookup, value);
+      if (!row || !(words ? givesWords(row) : row.kinds.includes(kind as Kind))) {
+        return { ...NONE, status: 'broken' };
+      }
+      if (row.status === 'none') {
+        return NONE;
+      }
+      // Several items: those visitors may see, though the first is hidden.
+      const said = words ? (kind === 'line' ? (row.line ?? row.text) : row.text) : undefined;
+      if (row.status === 'hidden' && !said) {
+        return { ...NONE, status: 'hidden' };
+      }
+      if (words) {
+        // The server's words. Plain text reads as itself; a date or a number
+        // without them gives nothing: only the server formats.
+        return found(said ?? (row.kinds.includes('date') || row.kinds.includes('number') ? '' : row.shown || row.value));
+      }
+      const shown = found(row.value, kind === 'image' ? (row.image ?? null) : null);
+      return { ...shown, text: row.shown || shown.text };
+    }
+    default:
+      return assertNever(shape);
   }
-  const row = rowOf(lookup, value);
-  if (!row || !row.kinds.includes(kind)) {
-    return { ...NONE, status: 'broken' };
-  }
-  if (row.status === 'none' || row.status === 'hidden') {
-    return { ...NONE, status: row.status };
-  }
-  const shown = found(row.value, kind === 'image' ? (row.image ?? null) : null);
-  return { ...shown, text: row.shown || shown.text };
 }
 
-/** The text a value gives for the item, '' for none: what texts() takes. */
-export const textOf = (lookup: Lookup) => (value: Value) =>
-  resolve(value, 'text', lookup).value;
+/**
+ * The segments of a composition for the previewed item: each kept field or
+ * fact with the words that go with it (compose()). A long part of a
+ * description gets the room the rest leaves.
+ */
+export function composed(value: { parts: Part[] }, form: 'words' | 'line', lookup: Lookup): string[] {
+  const long = (part: Part) => ('fact' in part ? part.fact === 'description' : !!rowOf(lookup, part)?.long);
+  return compose(
+    value.parts,
+    (part) => {
+      const row = rowOf(lookup, part);
+      // A long part of a description is cut from its start, as the server
+      // cuts the whole text.
+      if (form === 'words' && row?.long && row.part !== undefined && row.status === 'ok') {
+        return plainText(row.part);
+      }
+      return plainText(resolve(part, form, lookup).value);
+    },
+    long,
+    form === 'line' ? 0 : LONG_ROOM,
+  );
+}
+
+/**
+ * The text a value gives for the item in a form, '' for none; a
+ * composition's segments: what texts() takes.
+ */
+export const textOf = (lookup: Lookup) => (value: Value, form: Form = 'text'): string | string[] =>
+  'parts' in value
+    ? composed(value, form === 'line' ? 'line' : 'words', lookup)
+    : resolve(value, form, lookup).value;
 
 /** Canonical JSON of a value, keys sorted. */
 const canonical = (value: unknown): string =>
@@ -157,14 +441,23 @@ export const sameValue = (a?: Value, b?: Value) =>
   canonical(a ?? null) === canonical(b ?? null);
 
 /** A key that is the same for the same value: React keys, entry ids. */
-export const keyOf = (value: Value): string =>
-  'fact' in value
-    ? `fact:${value.fact}`
-    : 'source' in value
-      ? `source:${value.source.expression}`
-      : 'media' in value
-        ? `media:${value.media}`
-        : `text:${value.text}`;
+export function keyOf(value: Value | Part): string {
+  const shape = shapeOf(value as Value);
+  switch (shape) {
+    case 'fact':
+      return `fact:${(value as { fact: Fact }).fact}`;
+    case 'source':
+      return `source:${(value as { source: { expression: string } }).source.expression}`;
+    case 'media':
+      return `media:${(value as { media: string }).media}`;
+    case 'text':
+      return `text:${(value as { text: string }).text}`;
+    case 'parts':
+      return `parts:${(value as { parts: Part[] }).parts.map(keyOf).join('\u001F')}`;
+    default:
+      return assertNever(shape);
+  }
+}
 
 /** "An image", "A date": the start of a sentence about a kind. */
 const A: Record<Kind, string> = {
@@ -227,6 +520,35 @@ export interface Entry {
   note?: string;
   /** The referenced item's own name: what a filter for the reference finds first. */
   names?: true;
+  /** Long text, linked whole: never added to a title-like composition. */
+  long?: true;
+}
+
+/** Why long text is never a part of a title-like composition. */
+export const TOO_LONG = 'Too long for a title';
+
+/**
+ * Whether a part fits a composition in a form, as Values::parts() checks it:
+ * one key; typed text a string; a fact that reads as words; a field the menu
+ * offers that gives words. A title-like place takes no long text.
+ */
+export function fitsPart(part: unknown, form: 'words' | 'line', lookup: Lookup): part is Part {
+  if (!part || typeof part !== 'object' || Array.isArray(part) || Object.keys(part).length !== 1) {
+    return false;
+  }
+  const one = part as Record<string, unknown>;
+  if ('text' in one) {
+    return typeof one.text === 'string';
+  }
+  if ('fact' in one) {
+    return TEXT_FACTS.includes(one.fact as Fact) && !(form === 'line' && one.fact === 'description');
+  }
+  const source = one.source as { sourceType?: unknown; expression?: unknown } | undefined;
+  if (!source || source.sourceType !== 'entity-field' || typeof source.expression !== 'string') {
+    return false;
+  }
+  const row = rowOf(lookup, { source: source as SourceRef });
+  return !!row && givesWords(row) && !(form === 'line' && row.long);
 }
 
 /** What each fact is, in words. */
@@ -287,9 +609,16 @@ export function entriesFor(
   items?: 'list' | 'one',
   /** The place's own label: a list's fields named like it are suggested first. */
   placeLabel?: string,
+  /**
+   * In a place that composes, the form it reads in: dates and numbers fit
+   * with their words, several values show joined, and a title-like place
+   * takes no long text.
+   */
+  form?: 'words' | 'line',
 ): Entry[] {
-  const facts: Entry[] = factsFor(path, kind, scope).map((fact) => {
-    const shown = resolve({ fact }, kind, lookup);
+  const factNames = form && scope === 'template' ? TEXT_FACTS : factsFor(path, kind, scope);
+  const facts: Entry[] = factNames.map((fact) => {
+    const shown = resolve({ fact }, form ?? kind, lookup);
     return {
       key: `fact:${fact}`,
       value: { fact },
@@ -304,16 +633,19 @@ export function entriesFor(
       status: shown.status === 'none' ? 'none' : shown.status === 'ok' ? 'ok' : 'empty',
       // A fact is one value: never a list of text.
       disabled: choices ? NOT_AN_OPTION : items === 'list' && kind === 'text' ? ONE_VALUE : undefined,
+      // The description is long text: linked whole, never a part of a title.
+      ...(form === 'line' && fact === 'description' ? { long: true as const } : {}),
     };
   });
   if (scope !== 'template') {
     return facts;
   }
   const fields: Entry[] = lookup.sources.map((row) => {
-    const own = row.kinds.includes(kind) ? kind : row.kinds[0];
+    const own = (form ? givesWords(row) : row.kinds.includes(kind)) ? kind : row.kinds[0];
     // A reference is its field, one Enter away: "Location", its page.
     const page = kind === 'ref' && own === 'ref';
-    const shown = row.status === 'ok' ? row.shown || row.value : '';
+    // In words, the server's words: a date as people read it, every item.
+    const shown = row.status !== 'ok' ? '' : form ? resolve({ source: row.source }, form, lookup).text : row.shown || row.value;
     return {
       key: row.source.expression,
       value: { source: row.source },
@@ -322,9 +654,11 @@ export function entriesFor(
       group: typeLabel,
       level: row.hop && !page ? row.path[0] : null,
       kind: own,
-      shown: row.status === 'ok' ? row.shown || row.value : '',
+      shown,
       image: own === 'image' ? (row.image ?? null) : null,
       status: row.status,
+      // Long text is linked whole, never a part of a title (entriesIn()).
+      ...(form === 'line' && row.long && own === kind ? { long: true as const } : {}),
       disabled:
         // A choice is filled by one of its options only, whatever the kind.
         choices && (own !== kind || !row.list || (row.status === 'ok' && !choices.includes(row.value)))
@@ -337,7 +671,7 @@ export function entriesFor(
               ? 'Hidden from visitors'
               : undefined,
       names: row.names,
-      note: page ? (shown ? `Its page: ${shown}` : 'Its page') : own === kind && !choices ? itemsNote(row, items) : undefined,
+      note: page ? (shown ? `Its page: ${shown}` : 'Its page') : own === kind && !choices && !form ? itemsNote(row, items) : undefined,
     };
   });
   // A list of text takes many values, or one formatted text's items; a list
@@ -361,10 +695,16 @@ export function entriesFor(
     }
     fields.sort((a, b) => Number(b.group === 'Suggested') - Number(a.group === 'Suggested'));
   }
-  // Two fields with one label are told apart by their machine names.
+  // Two fields with one label are told apart by their machine names; in a
+  // place that composes, so is a field labelled like a fact.
   const counts: Record<string, number> = {};
   for (const entry of fields) {
     counts[entry.full] = (counts[entry.full] ?? 0) + 1;
+  }
+  if (form) {
+    for (const entry of facts) {
+      counts[entry.full] = (counts[entry.full] ?? 0) + (counts[entry.full] ? 1 : 0);
+    }
   }
   for (const entry of fields) {
     if (counts[entry.full] > 1) {
@@ -386,6 +726,14 @@ export function entriesFor(
   // is for. A reference's publisher comes before them.
   return kind === 'ref' ? [...facts, ...fields] : [...fields, ...facts];
 }
+
+/**
+ * The entries of a menu in its mode. Linking takes long text whole; adding
+ * or replacing a part of a title-like composition never does: a long field
+ * and the Description fact alike wait in the last row, with the reason.
+ */
+export const entriesIn = (entries: Entry[], mode: 'link' | 'add' | 'replace'): Entry[] =>
+  mode === 'link' ? entries : entries.map((entry) => (entry.long && !entry.disabled ? { ...entry, disabled: TOO_LONG } : entry));
 
 const NOT_AN_OPTION = 'Not one of the options';
 const ONE_VALUE = 'One value, not a list';
@@ -470,12 +818,19 @@ function rank(entry: Entry, query: string): number | null {
  * listed at the top with its path.
  */
 export function tree(entries: Entry[], level: string | null, filter: string): MenuRow[] {
-  const query = folded(filter.trim());
+  // An old token typed from memory: "{title}" finds Title.
+  const query = folded(filter.trim()).replace(/^\{|\}$/g, '');
   if (query) {
     return entries
       .map((entry, index) => ({ entry, index, rank: rank(entry, query) }))
       .filter((one) => one.rank !== null)
-      .sort((a, b) => Number(!!a.entry.disabled) - Number(!!b.entry.disabled) || a.rank! - b.rank! || a.index - b.index)
+      // Of two entries labelled alike, the item's own first: "title" finds
+      // Title before Venue › Title.
+      .sort((a, b) =>
+        Number(!!a.entry.disabled) - Number(!!b.entry.disabled)
+        || a.rank! - b.rank!
+        || (folded(a.entry.label) === folded(b.entry.label) ? Number(a.entry.level !== null) - Number(b.entry.level !== null) : 0)
+        || a.index - b.index)
       .map(({ entry }) => ({ type: 'entry', entry, deep: entry.level !== null }));
   }
   if (level !== null) {
@@ -529,12 +884,15 @@ const machineName = (expression: string) =>
  * while the stored link at `path` is this value, else the one in the link.
  */
 export function tagOf(
-  value: Value,
+  value: Value | Part,
   lookup: Lookup,
   path?: string,
   /** A reference is named by its field: "Location", not "Location › Title". */
   kind?: Kind,
 ): string {
+  if ('parts' in value) {
+    return 'Words and fields';
+  }
   if ('text' in value) {
     return 'Typed text';
   }
@@ -554,4 +912,37 @@ export function tagOf(
     field ??
     'A field'
   );
+}
+
+/** "City and Starts", "City, Venue and Starts". */
+export const andWords = (items: string[]) => new Intl.ListFormat('en-GB', { type: 'conjunction' }).format(items);
+
+/** Under a composer whose every field gives nothing for the item: its default is used. */
+export const allEmptySaid = (labels: string[], type: string, field: string) =>
+  `${andWords(labels)} ${labels.length === 1 ? 'is' : 'are'} empty for this ${type}, so its default ${field.toLowerCase()} is used.`;
+
+/** What a part of a composition that gives nothing says, in a sentence. */
+export const partSentence = (label: string, status: Shown['status'], type: string, why = 'no longer exists') =>
+  status === 'broken'
+    ? `${label} ${why}`
+    : status === 'hidden'
+      ? `${label} is hidden from visitors`
+      : `${label} is empty for this ${type}`;
+
+/**
+ * A composer's description: the item's result (else what its default gives),
+ * then each part that gives nothing and why, one full stop at the end.
+ */
+export function compositionSaid(
+  type: string,
+  result: string,
+  fallback: string,
+  parts: { label: string; status: Shown['status']; why?: string }[],
+): string {
+  // Each sentence ends once: a result may end with its own mark.
+  const ended = (text: string) => (/[.!?…。！？]["'”’)\]]*$/u.test(text) ? text : `${text}.`);
+  return [
+    `This ${type}: ${result || fallback || 'nothing'}`,
+    ...parts.filter((one) => one.status !== 'ok' && one.status !== 'none').map((one) => partSentence(one.label, one.status, type, one.why)),
+  ].map(ended).join(' ');
 }

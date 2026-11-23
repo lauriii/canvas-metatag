@@ -637,7 +637,11 @@ function ItemValue(props: ItemFormProps & { path: Path; value: unknown; label: s
             collisionPadding={8}
             className="seo-scope-menu"
             onCloseAutoFocus={(event) => {
-              if (moving.current) event.preventDefault();
+              // Once the menu has let go of focus (its closing frames trap it).
+              if (moving.current) {
+                event.preventDefault();
+                focusFirstNeed(props.path);
+              }
               moving.current = false;
             }}
           >
@@ -674,7 +678,6 @@ function ItemValue(props: ItemFormProps & { path: Path; value: unknown; label: s
                 props.onChange(props.path, { '@type': itemTypeOf(props.expects), ...(nameOnly ? { name: value } : {}) });
                 props.onCommit();
                 moving.current = true;
-                focusFirstNeed(props.path);
               }}
             >
               Describe it here

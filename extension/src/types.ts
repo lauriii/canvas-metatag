@@ -22,15 +22,20 @@ export interface SourceRef {
   expression: string;
 }
 
+/** One part of a composition: typed text, a fact or a field. */
+export type Part = { text: string } | { fact: Fact } | { source: SourceRef };
+
 /**
  * A value: typed text (never scanned for names), a fact, a chosen media item
- * (images only) or a link to a field (templates only).
+ * (images only), a link to a field (templates only), or a composition of
+ * typed text, facts and fields (a template's text that composes).
  */
 export type Value =
   | { text: string }
   | { fact: Fact }
   | { media: string }
-  | { source: SourceRef; unit?: 'minute' | 'hour' };
+  | { source: SourceRef; unit?: 'minute' | 'hour' }
+  | { parts: Part[] };
 
 /** One shape at every scope. Every key is optional and absent means "inherit". */
 export interface SeoValues {
@@ -124,6 +129,8 @@ export interface SchemaProp {
   pair?: string;
   /** Formatted text, linked only. */
   html?: true;
+  /** Free text: on a template it may be composed of fields and typed text. */
+  compose?: true;
   link_only?: true;
   /** Each page has its own: on a template only a field gives it (a closing date, performers). */
   per_item?: true;
@@ -362,6 +369,8 @@ export interface FactInfo {
   image?: ImageInfo | null;
   /** The field a node's Description or Image fact is taken from. */
   via?: string;
+  /** A date fact in words, as a place that composes reads it: the server's. */
+  text?: string;
 }
 
 /** A field a template value can link to, with the previewed node's value. */
@@ -391,10 +400,24 @@ export interface SourceRow {
   /** One long plain text: a list takes its lines. */
   lines?: true;
   count?: number;
+  /**
+   * What a place that composes reads, in the server's words: a date in the
+   * item's language, every item visitors may see, joined.
+   */
+  text?: string;
+  /** The same in a title-like place, when it differs: at most two items. */
+  line?: string;
+  /** Long text: a title-like composition does not take it. */
+  long?: true;
+  /** Long text: enough of its start for a description to cut it. */
+  part?: string;
 }
 
 /** A stored link that cannot be read, and why. */
 export interface BrokenLink {
+  /** The value's path; for a part of a composition, its index. */
+  path?: string;
+  part?: number;
   field: string;
   reason: 'missing' | 'kind' | 'error';
 }
@@ -494,6 +517,11 @@ export type AiOffReason = 'no_provider' | 'not_usable' | 'no_prompt';
 export interface StatePayload {
   /** The dialog's own language. */
   ui: string;
+  /**
+   * The locale the dialog writes dates in: the server's for the item
+   * ("en-GB", "en"), so a date reads one way everywhere. Absent: by `ui`.
+   */
+  date_locale?: string;
   langcode: string;
   languages: Record<string, string>;
   origin: { url: string; source: 'settings' | 'frontend' | 'request' };

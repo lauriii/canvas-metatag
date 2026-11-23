@@ -12,6 +12,7 @@ import type {
   Issue,
   Resolved,
   SeoValues,
+  Part,
   SourceRow,
   StatePayload,
 } from './types';
@@ -1581,19 +1582,20 @@ describe('rules with conditions', () => {
   });
 
   it('says why a link is broken by its reason, naming the machine name', () => {
-    const starts = field('field_starts', 'Starts', { kinds: ['date'] });
-    // The field still exists, as a date: it no longer gives text.
+    const poster = field('field_poster', 'Poster', { kinds: ['image'] });
+    // The field still exists, as an image: it no longer gives text. (A date
+    // gives words in the description, which composes.)
     expect(
       find(
         {
-          target: { description: { source: starts.source } },
-          sources: [starts],
-          broken: { description: { field: 'field_starts', reason: 'kind' } },
+          target: { description: { source: poster.source } },
+          sources: [poster],
+          broken: { description: { field: 'field_poster', reason: 'kind' } },
           input: { scope: 'template', typeLabel: 'Event' },
         },
         'link-broken:description',
       )?.detail,
-    ).toBe('It was linked to field_starts, which no longer gives text. Each event uses its default until another field is linked.');
+    ).toBe('It was linked to field_poster, which no longer gives text. Each event uses its default until another field is linked.');
   });
 
   it('says a field visitors may never view in its own row, leading to the value', () => {
@@ -1790,5 +1792,172 @@ describe('identity-incomplete', () => {
       tab: 'identity',
       field: 'identity.logo',
     });
+  });
+});
+
+describe('compositions (compose-values-from-fields)', () => {
+  const template = { scope: 'template', typeLabel: 'Event' } as const;
+  const city = field('field_city', 'City', { text: 'Helsinki' });
+  const starts = field('field_starts', 'Starts', { kinds: ['date'], value: '2026-06-20T19:00:00+03:00', text: '20 June 2026' });
+  const title = (...parts: Part[]): SeoValues => ({ title: { parts } });
+
+  it('lists a deleted field of a composition to replace, and selects it', () => {
+    const row = find(
+      {
+        target: title({ fact: 'title' }, { text: ' in ' }, { source: { sourceType: 'entity-field', expression: 'ℹ︎␜entity:node:article␝field_gone␞␟value' } }),
+        broken: { 'title.parts.2': { path: 'title', part: 2, field: 'field_gone', reason: 'missing' } },
+        input: template,
+      },
+      'link-broken:title.parts.2',
+    )!;
+    expect(row).toMatchObject({
+      message: 'Replace field_gone in the title',
+      detail: "It no longer exists, so each event's title leaves it out.",
+      jump: { field: 'title.parts.2' },
+      fix: { label: 'Replace field', link: true },
+    });
+  });
+
+  it('lists a hidden field of a composition to improve', () => {
+    const notes = field('field_notes', 'Notes', { status: 'hidden', value: '' });
+    expect(find({ target: title({ fact: 'title' }, { text: ' · ' }, { source: notes.source }), sources: [notes], input: template }, 'link-hidden:title.parts.2')).toMatchObject({
+      severity: 'improve',
+      message: 'Notes is hidden from visitors',
+      detail: "So it is left out of every event's title. Use a field visitors can see.",
+      jump: { field: 'title.parts.2' },
+    });
+  });
+
+  it('says what one hidden reference leaves out in one row', () => {
+    const venueCity = { ...field('field_venue', 'Venue › City', { status: 'hidden', value: '' }), path: ['Venue', 'City'], hop: true };
+    const street = { ...venueCity, source: { sourceType: 'entity-field' as const, expression: 'ℹ︎␜entity:node:article␝field_venue␞␟street' }, label: 'Venue › Street', path: ['Venue', 'Street'] };
+    const composedCity = { parts: [{ fact: 'title' as const }, { text: ' in ' }, { source: venueCity.source }] };
+    const issues = checks(input({
+      target: { title: composedCity, social: { title: composedCity }, description: { source: street.source } },
+      sources: [venueCity, street],
+      input: template,
+    }));
+    const rows = issues.filter((issue) => issue.id.startsWith('link-hidden'));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].message).toBe('Venue is hidden from visitors for this event');
+    expect(rows[0].detail).toBe('Description uses its default; the title and social title skip it and the words that go with it. Publish the venue or preview another event.');
+  });
+
+  it('keeps the items visitors may see of a field with one hidden', () => {
+    // The first performer is unpublished: the row's own value is hidden, its
+    // words hold the others.
+    const performers = { ...field('field_performers', 'Performers › Title', { status: 'hidden', value: '', text: 'Mira Kallio', many: true }), path: ['Performers', 'Title'], hop: true };
+    const issues = checks(input({ target: title({ text: 'Tickets for ' }, { source: performers.source }), sources: [performers], input: template }));
+    expect(ids(issues).filter((id) => id.startsWith('link-hidden'))).toEqual([]);
+  });
+
+  it('says a field empty for this item as good to know, and every field empty as the default', () => {
+    const empty = { ...city, status: 'empty' as const, value: '', text: '' };
+    expect(find({ target: title({ fact: 'title' }, { text: ' in ' }, { source: city.source }), sources: [empty], input: template }, 'parts-empty:title')).toMatchObject({
+      severity: 'info',
+      message: 'City is empty for this event',
+    });
+    const none = { ...starts, status: 'empty' as const, value: '', text: '' };
+    expect(find({ target: title({ source: city.source }, { text: ' · ' }, { source: starts.source }), sources: [empty, none], input: template }, 'parts-empty:title')?.message).toBe(
+      'City and Starts are empty for this event, so the title is its default',
+    );
+    expect(find({ target: title({ source: city.source }, { text: ' · Tickets' }), sources: [empty], input: template }, 'parts-empty:title')?.detail).toBe(
+      'Other events that have it use it.',
+    );
+  });
+
+  it('notes typed words on a multilingual site, never punctuation alone', () => {
+    const words = title({ fact: 'title' }, { text: ' in ' }, { source: city.source });
+    expect(find({ target: words, sources: [city], input: { ...template, languages: 2 } }, 'parts-language:title')).toMatchObject({
+      message: 'The words typed in the title are the same in every language',
+      detail: 'Translations of each event keep these words.',
+    });
+    expect(ids(checks(input({ target: title({ fact: 'title' }, { text: ' · ' }, { source: city.source }), sources: [city], input: { ...template, languages: 2 } })))).not.toContain('parts-language:title');
+    expect(ids(checks(input({ target: words, sources: [city], input: template })))).not.toContain('parts-language:title');
+  });
+
+  it('steers a composition: a lead-in, boilerplate, the site name or a date in a name', () => {
+    expect(find({ target: title({ text: 'Tickets: ' }, { fact: 'title' }), sources: [city], input: template }, 'title-lead-in')?.message).toBe('Start the title with what differs per event');
+    expect(
+      find({ target: { description: { parts: [{ source: city.source }, { text: ' — book early, seats are limited and the doors open an hour before.' }] } }, sources: [city], input: template }, 'parts-boilerplate:description')?.message,
+    ).toBe('Most of this description is the same on every event');
+    expect(find({ target: { schema: { type: 'Event', props: { name: { parts: [{ fact: 'title' }, { text: ' · ' }, { fact: 'site' }] } } } }, input: template }, 'name-site:schema.props.name')?.message).toBe(
+      "Keep the site name out of the event's name",
+    );
+    expect(
+      find({ target: { schema: { type: 'Event', props: { name: { parts: [{ fact: 'title' }, { text: ' · ' }, { source: starts.source }] } } } }, sources: [starts], input: template }, 'name-date:schema.props.name')?.message,
+    ).toBe("Keep the date out of the event's name");
+    // Another thing's name is not the item's own.
+    expect(ids(checks(input({ target: { schema: { type: 'Event', props: { organizer_name: { parts: [{ fact: 'site' }, { text: ' Events' }] } } } }, input: template })))
+      .filter((id) => id.startsWith('name-'))).toEqual([]);
+    // Typed words this item leaves out with an empty field are not counted.
+    const empty = { ...city, status: 'empty' as const, value: '', text: '' };
+    expect(ids(checks(input({
+      target: { description: { parts: [{ fact: 'title' }, { text: ' in the heart of ' }, { source: city.source }, { text: ', a stage for everybody who loves music' }] } },
+      sources: [empty],
+      input: template,
+    })))).not.toContain('parts-boilerplate:description');
+  });
+
+  it('names the field a cut falls in', () => {
+    const issue = find({
+      target: { title: { parts: [{ fact: 'title' }, { text: ' · ' }, { source: starts.source }] }, title_end: t('') },
+      facts: { title: long(13) },
+      sources: [starts],
+      input: template,
+    }, 'title-long');
+    expect(issue?.detail).toMatch(/^May be cut off after “…[^”]+”\. Starts is cut off\.$/);
+  });
+
+  it('offers to remove the repeat of a Site name part, and of the site name typed in one', () => {
+    for (const parts of [[{ fact: 'title' }, { text: ' · ' }, { fact: 'site' }], [{ fact: 'title' }, { text: ' at Example' }]] as Part[][]) {
+      const setup: Setup = { target: { title: { parts } }, sources: [city], input: template };
+      const fix = find(setup, 'title-site-twice')?.fix;
+      expect(fix?.label).toBe('Remove the repeat');
+      // The template's ending becomes "No ending"; its title stays.
+      expect(fix && 'apply' in fix && fix.apply(setup.target!)).toEqual({ title: { parts }, title_end: { text: '' } });
+    }
+  });
+
+  it('lists a description that holds the title', () => {
+    expect(find({ target: { description: { parts: [{ fact: 'title' }, { text: ' in ' }, { source: city.source }, { text: '.' }] } }, sources: [city], input: template }, 'description-title')?.message).toBe(
+      'Make the description say more',
+    );
+    // Whole words only.
+    expect(find({ target: { title: t('Art'), description: t('Start your day with coffee.') } }, 'description-title')).toBeUndefined();
+  });
+
+  it('keeps quiet about a description that names the title and goes on', () => {
+    const named = 'Pricing for teams of every size, billed monthly or yearly, with every feature included and a free month to try it before you decide which plan fits.';
+    expect(named.length).toBeGreaterThan(140);
+    // On a page, and on a template whose description starts with its title.
+    expect(find({ target: { title: t('Pricing'), description: t(named) } }, 'description-title')).toBeUndefined();
+    expect(find({ target: { description: { parts: [{ fact: 'title' }, { text: named.slice('Pricing'.length) }] } }, sources: [city], input: template }, 'description-title')).toBeUndefined();
+    // A few words more still repeat it.
+    expect(find({ target: { title: t('Pricing'), description: t('Pricing for teams.') } }, 'description-title')?.detail).toBe('It repeats the title.');
+  });
+
+  it('looks for each field of a composed detail on the page, never the joined text', () => {
+    const performers = field('field_performers', 'Performers', { value: 'Mira Kallio', text: 'Mira Kallio, Omar Haddad', many: true });
+    const name = (...parts: Part[]): Setup => ({
+      target: { schema: { type: 'Event', props: { name: { parts } } } },
+      sources: [city, starts, performers],
+      input: { ...template, facts: { h1: ['Pricing'], imagesWithoutAlt: [], text: 'Pricing. With Mira Kallio and Omar Haddad on 20 June 2026.' } },
+    });
+    // Each field is on the page, though "Pricing with Mira Kallio, Omar
+    // Haddad · 20 June 2026" is not: nothing to say.
+    expect(find(name({ fact: 'title' }, { text: ' with ' }, { source: performers.source }, { text: ' · ' }, { source: starts.source }), 'schema-not-on-page:name')).toBeUndefined();
+    // A field that is not: named, with its value.
+    expect(find(name({ fact: 'title' }, { text: ' in ' }, { source: city.source }), 'schema-not-on-page:name')).toMatchObject({
+      message: "Couldn't find City (Helsinki) on this page",
+      detail: 'Structured data should describe what visitors see.',
+    });
+    // A field another detail holds whole is said there, once.
+    const both: Setup = {
+      target: { schema: { type: 'Event', props: { name: { parts: [{ fact: 'title' }, { text: ' · ' }, { source: starts.source }] }, startDate: { source: starts.source } } } },
+      sources: [city, starts, performers],
+      input: { ...template, facts: { h1: ['Pricing'], imagesWithoutAlt: [], text: 'Pricing.' } },
+    };
+    expect(find(both, 'schema-not-on-page:name')).toBeUndefined();
   });
 });

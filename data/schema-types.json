@@ -4,7 +4,7 @@
       "type": "PostalAddress",
       "requires": [["streetAddress", "addressLocality"], ["addressCountry"]],
       "parts": [
-        { "key": "streetAddress", "label": "Street address", "kind": "text" },
+        { "key": "streetAddress", "label": "Street address", "kind": "text", "compose": true },
         { "key": "postalCode", "label": "Postal code", "kind": "text" },
         { "key": "addressLocality", "label": "City", "kind": "text" },
         { "key": "addressRegion", "label": "Region", "kind": "text" },
@@ -15,7 +15,7 @@
       "type": "Place",
       "requires": [["name", "address"]],
       "parts": [
-        { "key": "name", "label": "Name", "kind": "text" },
+        { "key": "name", "label": "Name", "kind": "text", "compose": true },
         { "key": "address", "label": "Address", "use": "address" }
       ]
     },
@@ -23,7 +23,7 @@
       "type": "Thing",
       "requires": [["name"]],
       "parts": [
-        { "key": "name", "label": "Name", "kind": "text", "ai": false },
+        { "key": "name", "label": "Name", "kind": "text", "compose": true, "ai": false },
         { "key": "url", "label": "Website", "kind": "url" }
       ]
     },
@@ -100,8 +100,8 @@
     "variants": "Kind of article",
     "refs": { "publisher": "identity" },
     "props": [
-      { "key": "headline", "label": "Headline", "kind": "text", "default": { "fact": "title" } },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "headline", "label": "Headline", "kind": "text", "compose": true, "default": { "fact": "title" } },
+      { "key": "description", "label": "Summary", "kind": "text", "compose": true, "default": { "fact": "description" } },
       { "key": "image", "label": "Image", "kind": "image", "list": true, "max": 10, "default": { "fact": "image" } },
       { "key": "datePublished", "label": "Published", "kind": "date", "default": { "fact": "published" } },
       { "key": "dateModified", "label": "Updated", "kind": "date", "default": { "fact": "modified" } },
@@ -143,11 +143,11 @@
     "kind": { "label": "An event people attend in person", "name": "an event", "earn": "Can show in event listings with its date and place.", "not_for": "Not for events that happen only online.", "icon": "calendar", "order": 4 },
     "main": ["startDate", "location"],
     "props": [
-      { "key": "name", "label": "Event name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "name", "label": "Event name", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
       { "key": "startDate", "label": "Starts", "kind": "date", "level": "required" },
       { "key": "endDate", "label": "Ends", "kind": "date" },
       { "group": "location", "use": "venue", "label": "Venue", "level": "required", "ref": { "label": "Venue page", "accept": ["Place"], "inline": "address", "per_item": true } },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "description", "label": "Summary", "kind": "text", "compose": true, "default": { "fact": "description" } },
       { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
       { "key": "eventStatus", "label": "Status", "kind": "enum", "options": ["EventScheduled", "EventCancelled", "EventPostponed", "EventRescheduled"], "option_labels": { "EventScheduled": "scheduled", "EventCancelled": "cancelled", "EventPostponed": "postponed", "EventRescheduled": "rescheduled" }, "ai": false },
       { "group": "offers", "use": "tickets", "label": "Tickets" },
@@ -175,15 +175,15 @@
     "refs": { "offers_seller": { "to": "identity", "if": { "sold_here": "yes" } } },
     "nested": { "offers": "Offer", "brand": "Brand" },
     "props": [
-      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "name", "label": "Name", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
+      { "key": "description", "label": "Summary", "kind": "text", "compose": true, "default": { "fact": "description" } },
       { "key": "image", "label": "Image", "kind": "image", "list": true, "max": 10, "default": { "fact": "image" } },
       { "key": "offers_price", "label": "Price", "kind": "number", "level": "required", "ai": false },
       { "key": "offers_priceCurrency", "label": "Currency", "kind": "currency", "ai": false },
       { "key": "billing", "label": "Billed", "kind": "enum", "options": ["once", "P1M", "P1Y"], "option_labels": { "once": "once", "P1M": "every month", "P1Y": "every year" }, "emit": false, "ai": false },
       { "key": "sold_here", "label": "Bought on this page", "kind": "enum", "options": ["yes", "no"], "option_labels": { "yes": "yes, from us", "no": "no" }, "emit": false, "ai": false },
       { "key": "offers_availability", "label": "Availability", "kind": "enum", "options": ["InStock", "OutOfStock", "PreOrder", "BackOrder", "SoldOut", "Discontinued"], "option_labels": { "InStock": "in stock", "OutOfStock": "out of stock", "PreOrder": "available to pre-order", "BackOrder": "on back order", "SoldOut": "sold out", "Discontinued": "discontinued" }, "ai": false },
-      { "key": "brand_name", "label": "Brand", "kind": "text" },
+      { "key": "brand_name", "label": "Brand", "kind": "text", "compose": true },
       { "key": "sku", "label": "SKU", "kind": "text", "pattern": "^\\S+$", "ai": false }
     ],
     "slots": {
@@ -221,8 +221,8 @@
     "refs": { "provider": "identity" },
     "nested": { "offers": "Offer" },
     "props": [
-      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "name", "label": "Name", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
+      { "key": "description", "label": "Summary", "kind": "text", "compose": true, "default": { "fact": "description" } },
       { "key": "offers_price", "label": "Price", "kind": "number", "ai": false },
       { "key": "offers_priceCurrency", "label": "Currency", "kind": "currency", "ai": false },
       { "key": "billing", "label": "Billed", "kind": "enum", "options": ["once", "P1M", "P1Y"], "option_labels": { "once": "once", "P1M": "every month", "P1Y": "every year" }, "emit": false, "ai": false }
@@ -247,8 +247,8 @@
     "kind": { "label": "A person's profile", "name": "a profile", "earn": "Can show the person's name and photo with results from the page.", "icon": "person", "order": 5 },
     "main": ["image", "jobTitle"],
     "props": [
-      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
-      { "key": "description", "label": "About", "kind": "text", "default": { "fact": "description" } },
+      { "key": "name", "label": "Name", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
+      { "key": "description", "label": "About", "kind": "text", "compose": true, "default": { "fact": "description" } },
       { "key": "image", "label": "Photo", "kind": "image", "default": { "fact": "image" } },
       { "key": "jobTitle", "label": "Role", "kind": "text" },
       { "group": "worksFor", "use": "who", "label": "Works for", "type": "Organization", "ref": { "label": "Works for", "accept": ["Organization"], "site": true } },
@@ -270,7 +270,7 @@
     "scopes": { "page": "component" },
     "main": ["description", "hiringOrganization", "work", "jobLocation"],
     "props": [
-      { "key": "title", "label": "Job title", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "title", "label": "Job title", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
       { "key": "description", "label": "Description", "kind": "text", "html": true, "link_only": true, "level": "required", "ai": false },
       { "key": "datePosted", "label": "Posted", "kind": "date", "default": { "fact": "published" }, "level": "required" },
       { "key": "validThrough", "label": "Closing date", "kind": "date", "per_item": true },
@@ -299,9 +299,9 @@
     "kind": { "label": "A place people visit", "name": "a place people visit", "earn": "Can show its address, opening hours and phone number in local results.", "not_for": "Not for a business with no address customers visit.", "icon": "home", "order": 7 },
     "main": ["address", "openingHoursSpecification", "telephone"],
     "props": [
-      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "name", "label": "Name", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
       { "key": "placeKind", "label": "Kind of place", "kind": "enum", "default": { "text": "LocalBusiness" }, "emit": "type", "options": ["Store", "Restaurant", "CafeOrCoffeeShop", "BarOrPub", "Bakery", "Hotel", "Dentist", "MedicalClinic", "HealthAndBeautyBusiness", "LegalService", "FinancialService", "RealEstateAgent", "HomeAndConstructionBusiness", "AutomotiveBusiness", "SportsActivityLocation", "Library", "ChildCare", "TravelAgency", "LocalBusiness", "EventVenue"], "option_labels": { "Store": "store", "Restaurant": "restaurant", "CafeOrCoffeeShop": "café or coffee shop", "BarOrPub": "bar or pub", "Bakery": "bakery", "Hotel": "hotel", "Dentist": "dentist", "MedicalClinic": "medical clinic", "HealthAndBeautyBusiness": "health and beauty", "LegalService": "legal service", "FinancialService": "financial service", "RealEstateAgent": "real estate agent", "HomeAndConstructionBusiness": "home and construction", "AutomotiveBusiness": "automotive", "SportsActivityLocation": "sports and fitness", "Library": "library", "ChildCare": "child care", "TravelAgency": "travel agency", "LocalBusiness": "other local business", "EventVenue": "a venue (not a business)" }, "ai": false },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "description", "label": "Summary", "kind": "text", "compose": true, "default": { "fact": "description" } },
       { "key": "image", "label": "Image", "kind": "image", "default": { "fact": "image" } },
       { "key": "url", "label": "Web address", "kind": "url", "default": { "fact": "url" } },
       { "group": "address", "use": "address", "label": "Address", "level": "required" },
@@ -327,9 +327,9 @@
     "kind": { "label": "A recipe", "name": "a recipe", "earn": "Can show in recipe results with its photo and times.", "icon": "recipe", "order": 8 },
     "main": ["recipeIngredient", "recipeInstructions", "prepTime", "cookTime", "totalTime", "image"],
     "props": [
-      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
+      { "key": "name", "label": "Name", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
       { "key": "image", "label": "Image", "kind": "image", "list": true, "max": 10, "default": { "fact": "image" } },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" } },
+      { "key": "description", "label": "Summary", "kind": "text", "compose": true, "default": { "fact": "description" } },
       { "group": "author", "use": "who", "label": "Author", "type": "Person", "ref": { "label": "Author", "accept": ["Person", "Organization"], "site": true, "page_default": true } },
       { "key": "datePublished", "label": "Published", "kind": "date", "default": { "fact": "published" } },
       { "key": "prepTime", "label": "Prep time", "kind": "number", "unit": "minute", "units": ["minute", "hour"], "pair": "cookTime", "ai": false },
@@ -362,8 +362,8 @@
     "main": ["description"],
     "refs": { "provider": "identity" },
     "props": [
-      { "key": "name", "label": "Name", "kind": "text", "default": { "fact": "title" }, "level": "required" },
-      { "key": "description", "label": "Summary", "kind": "text", "default": { "fact": "description" }, "meter": 60 }
+      { "key": "name", "label": "Name", "kind": "text", "compose": true, "default": { "fact": "title" }, "level": "required" },
+      { "key": "description", "label": "Summary", "kind": "text", "compose": true, "default": { "fact": "description" }, "meter": 60 }
     ],
     "slots": {
       "name": { "path": "name", "prop": "name" },

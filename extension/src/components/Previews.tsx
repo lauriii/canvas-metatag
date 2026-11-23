@@ -38,7 +38,7 @@ function focusPath(path: string) {
   field
     ?.querySelector<HTMLElement>(
       // A value that is linked or follows its default is its box.
-      ending ? '.seo-ending-btn' : 'textarea, input, .seo-linked-box, [data-focus]',
+      ending ? '.seo-ending-btn' : '.seo-composer[contenteditable="true"], textarea, input, .seo-linked-box, [data-focus]',
     )
     ?.focus();
 }
