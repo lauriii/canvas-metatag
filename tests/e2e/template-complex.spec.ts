@@ -181,15 +181,40 @@ test('the Event template opens on its draft and offers the type fields with thei
   await page.mouse.move(0, 0);
 
   // The Event's fields come first, each with the previewed event's value: a
-  // list gives its label, a reference is a level of its own. The Event's
-  // Description and the page's are both offered; an image is not text.
+  // list gives its label, a reference is a level of its own. The worked-out
+  // values follow as "Automatic", without the Description the field already
+  // follows; an image is not text.
   const menu = await linkMenu(frame);
-  await expect(menu.locator('.seo-menu-group')).toHaveText(['Event', 'Page']);
-  await expect(menu.getByRole('option', { name: /^Status, / })).toContainText(event.status);
-  // In a place that composes, the field labelled like the fact is told
-  // apart by its machine name.
-  await expect(menu.getByRole('option', { name: /^Description, / })).toHaveCount(1);
-  await expect(menu.getByRole('option', { name: /^Description \(body\), / })).toHaveCount(1);
+  const groups = menu.getByRole('group');
+  await expect(groups).toHaveCount(2);
+  await expect(groups.nth(0)).toHaveAccessibleName('Event');
+  await expect(groups.nth(1)).toHaveAccessibleName('Automatic');
+  await expect(menu.getByRole('group', { name: 'Event' }).getByRole('option', { name: /^Status, / })).toContainText(event.status);
+  // The fact the field follows is left out, so the field labelled like it
+  // goes by its label alone: nothing else reads the same.
+  await expect(menu.getByRole('group', { name: 'Event' }).getByRole('option', { name: /^Description, / })).toHaveCount(1);
+  await expect(menu.getByRole('group', { name: 'Automatic' }).getByRole('option', { name: /^Description, / })).toHaveCount(0);
+  // The field the default reads leads the Event group, current: the Default
+  // box it names may be out of sight.
+  const reads = menu.getByRole('group', { name: 'Event' }).getByRole('option').first();
+  await expect(reads).toHaveAccessibleName(/^Description › Summary, Default, /);
+  await expect(reads).toHaveAttribute('aria-selected', 'true');
+  await expect(reads).toHaveAttribute('data-active');
+  // Up and Down move across the groups: from the last Event option to the
+  // first Automatic one, and back.
+  const active = () => menu.locator('[role="option"][data-active]');
+  const lastEvent = menu.getByRole('group', { name: 'Event' }).getByRole('option').last();
+  const firstAutomatic = menu.getByRole('group', { name: 'Automatic' }).getByRole('option').first();
+  await lastEvent.hover();
+  await expect(active()).toHaveAccessibleName((await lastEvent.getAttribute('aria-label'))!);
+  await page.keyboard.press('ArrowDown');
+  await expect(active()).toHaveAccessibleName((await firstAutomatic.getAttribute('aria-label'))!);
+  await expect(menu.getByRole('textbox', { name: 'Find a field' })).toHaveAttribute('aria-activedescendant', (await firstAutomatic.getAttribute('id'))!);
+  await page.keyboard.press('ArrowUp');
+  await expect(active()).toHaveAccessibleName((await lastEvent.getAttribute('aria-label'))!);
+  // The open menu, its groups named, has no accessibility violation.
+  const scan = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
+  expect(scan.violations.map(({ id, nodes }) => `${id}: ${nodes.map(({ target }) => target.join(' ')).join(', ')}`)).toEqual([]);
   await menu.getByRole('textbox', { name: 'Find a field' }).fill('Poster › Image');
   await expect(menu.getByRole('option', { name: /^Poster › Image, / })).toHaveAttribute('aria-disabled', 'true');
   await menu.getByRole('textbox', { name: 'Find a field' }).fill('');
@@ -198,7 +223,16 @@ test('the Event template opens on its draft and offers the type fields with thei
   await expect(menu.getByRole('option', { name: /^Title, / })).toContainText(event.venue);
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
-  await expect(box(frame, UI.field.description)).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
+  await expect(box(frame, UI.field.description)).toHaveAccessibleDescription(/^Follows the default: each event's description, from Description › Summary\./);
+  // Another text's menu lists the Description under "Automatic", saying
+  // where it comes from.
+  await button(frame, UI.action.changeLink(UI.field.title)).click();
+  const ofTitle = frame.getByRole('dialog', { name: `Link ${UI.field.title}` });
+  await expect(ofTitle.getByRole('group', { name: 'Automatic' }).getByRole('option', { name: /^Description, / })).toContainText(
+    '· from Description › Summary',
+  );
+  await page.keyboard.press('Escape');
+  await expect(ofTitle).toBeHidden();
 
   // Opened by keyboard, it takes the side with room for three entries.
   await box(frame, UI.field.description).focus();
@@ -526,23 +560,29 @@ test('on a long event the link menu works by keyboard in a short window, long va
   await expect(filter).toBeFocused();
   await page.keyboard.type('Desc');
   // The arrows move through the matches, the type's fields first; the active
-  // one stays in sight.
+  // one stays in sight. The field the default reads says so, and is current.
   const active = () =>
     filter.evaluate((element) => {
       const id = element.getAttribute('aria-activedescendant');
-      return id ? (element.ownerDocument.getElementById(id)?.firstElementChild?.textContent ?? '') : '';
+      return id ? (element.ownerDocument.getElementById(id)?.querySelector(':scope > span > span[dir]')?.textContent ?? '') : '';
     });
-  // The body is labelled like the Description fact: its machine name tells
-  // them apart where the description composes.
-  await expect.poll(active).toBe('Description (body)');
+  // The body is labelled like the Description fact, which this menu does
+  // not list: it goes by its label, with no machine name. It is what the
+  // default reads, and says so, its check at the row's end.
+  await expect.poll(active).toBe('Description');
+  const reads = menu.getByRole('option', { name: /^Description, Default, / });
+  await expect(reads).toHaveAttribute('aria-selected', 'true');
+  const check = (await reads.locator('svg[data-check]').boundingBox())!;
+  const row = (await reads.boundingBox())!;
+  expect(row.x + row.width - (check.x + check.width)).toBeLessThanOrEqual(12);
   await page.keyboard.press('ArrowDown');
   await expect.poll(active).toBe('Description › Summary');
   await expect(menu.getByRole('option', { name: /^Description › Summary/ })).toBeInViewport();
 
   // The 6 KB body is read as a short excerpt; its name carries the label and
   // at most 150 characters.
-  const entry = menu.getByRole('option', { name: /^Description \(body\), / }).first();
-  await expect(entry).toHaveAccessibleName(/^Description \(body\), .{0,150}…?$/su);
+  const entry = reads;
+  await expect(entry).toHaveAccessibleName(/^Description, Default, .{0,150}…?$/su);
   const body = entry.locator('span').last();
   await expect(body).toHaveAttribute('title', /^Each work is introduced by the musicians who play it/);
   expect(((await body.getAttribute('title')) ?? '').length).toBeLessThanOrEqual(160);
@@ -568,8 +608,20 @@ test('on a long event the link menu works by keyboard in a short window, long va
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
   await expect(description).toBeFocused();
-  await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
+  // The body, labelled Description too, is named by its label: "from"
+  // always names a field.
+  await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description, from Description\./);
   await expect(status(frame)).toContainText(UI.footer.draftTemplate);
+
+  // In the title's menu, the Description worked out from the long body says
+  // the field it reads beside its label, never cut with its value.
+  await box(frame, UI.field.title).focus();
+  await page.keyboard.press('Alt+ArrowDown');
+  const titleMenu = frame.getByRole('dialog', { name: `Link ${UI.field.title}` });
+  const worked = titleMenu.getByRole('group', { name: 'Automatic' }).getByRole('option', { name: /^Description, from Description \(body\), Each work/ });
+  await expect(worked).toContainText('· from Description (body)');
+  expect(await worked.locator('.seo-menu-via').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.keyboard.press('Escape');
 });
 
 test('in a short window the link menu shows its values', async ({ drupal, page }) => {
@@ -621,7 +673,7 @@ test('in a short window the link menu shows its values', async ({ drupal, page }
     await expect(textbox(frame, UI.field.description)).toHaveText('x');
     await page.keyboard.press('Backspace');
     await textbox(frame, UI.field.description).blur();
-    await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
+    await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description, from Description › Summary\./);
 
     // The link button of a field in the right-hand column. A double-click
     // opens the menu and links nothing: an entry under a still pointer
@@ -731,7 +783,7 @@ test('in a short window the link menu shows its values', async ({ drupal, page }
     await expect.poll(async () => (await frameHeight()) <= 420).toBe(to <= 420);
     await expect(menu).toBeHidden({ timeout: 1000 });
     await expect(description).toBeFocused();
-    await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description\./);
+    await expect(description).toHaveAccessibleDescription(/^Follows the default: each event's description, from Description › Summary\./);
   }
 
   // From the link button of a field never focused, Escape hands focus back
@@ -795,10 +847,12 @@ test('a job posting: its group is named in the menu, its square logo makes a sma
   // A group whose label has a space is named by it, on screen and to
   // assistive technology: its options are told apart from the page's.
   const menu = await linkMenu(frame);
-  await expect(menu.locator('.seo-menu-group', { hasText: 'Job posting' })).toBeVisible();
   await expect(menu.getByRole('group', { name: 'Job posting' })).toBeVisible();
-  await expect(menu.getByRole('group', { name: 'Page' }).getByRole('option', { name: /^Description, / })).toHaveCount(1);
-  await expect(menu.getByRole('group', { name: 'Job posting' }).getByRole('option', { name: /^Description \(\w+\), / })).toHaveCount(1);
+  await expect(menu.getByRole('group', { name: 'Automatic' })).toBeVisible();
+  // Its field labelled Description goes by its label: this menu lists no
+  // Description fact to tell it apart from.
+  await expect(menu.getByRole('group', { name: 'Job posting' }).getByRole('option', { name: /^Description, / })).toHaveCount(1);
+  await expect(menu.getByRole('group', { name: 'Job posting' }).getByRole('option', { name: /^Description \(\w+\), / })).toHaveCount(0);
   const { violations } = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
   expect(
     violations
@@ -905,6 +959,8 @@ test('a template that was never published previews its values; visitors keep cor
   const frame = await openSeo(page);
   const preview = frame.getByTestId(TEST_ID.search);
   await expect(frame.getByText(/^Previewing/)).toContainText('Template not in use yet');
+  // In sight at the dialog's width: the item's name gives way first.
+  await expect(frame.getByText('· Template not in use yet', { exact: true }).first()).toBeVisible();
   await expect(preview).toContainText(`${recipe.title} | Recipes`);
   await expect(preview).toContainText(recipe.firstIngredient);
 
@@ -982,7 +1038,7 @@ test('a node that is not published is named as such in the caption', async ({ dr
   let moves = 0;
   await expect(async () => {
     await linkButton.hover({ position: { x: 2 + (moves++ % 8), y: 6 } });
-    await expect(frame.getByRole('tooltip', { name: /^(Link|Change the link for) / })).toBeVisible({
+    await expect(frame.locator('.rt-TooltipContent', { hasText: /^(Link|Change the link for) / })).toBeVisible({
       timeout: 1000,
     });
   }).toPass();
@@ -1074,13 +1130,13 @@ test('a type with no content shows its values read-only, until there is one to p
   await expect(button(frame, UI.action.output)).toHaveCount(0);
   await expect(frame.getByText(UI.site.hint)).toHaveCount(0);
   await expect(frame.getByText(UI.site.otherTemplate)).toHaveCount(0);
-  // A value that follows its default says which, and that there is no
-  // announcement to fill it from.
+  // A value that follows its default says which, the field it reads with no
+  // announcement yet, and that there is no announcement to fill it from.
   const atRest = (label: string) => frame.getByRole('group', { name: label, exact: true });
   await expect(atRest(UI.field.description)).toHaveAccessibleDescription(
-    /^Follows the default: each announcement's description\. No announcement to preview\./,
+    /^Follows the default: each announcement's description, from Text\. No announcement to preview\./,
   );
-  await expect(atRest(UI.field.description)).toContainText('Default');
+  await expect(atRest(UI.field.description)).toContainText('Default · from Text');
   // Settings are values at rest: no switch or menu that does not open.
   await expect(frame.getByRole('switch')).toHaveCount(0);
   await expect(frame.locator('.seo-row[data-path="robots.noindex"]')).toContainText('On');
@@ -1091,7 +1147,9 @@ test('a type with no content shows its values read-only, until there is one to p
   // The social texts follow their defaults, with nothing to fill them from.
   await tab(frame, UI.tab.social).click();
   await expect(atRest(UI.field.socialTitle)).toHaveAccessibleDescription(/^Follows the default: each announcement's title\. No announcement to preview\./);
-  await expect(atRest(UI.field.socialDescription)).toHaveAccessibleDescription(/^Follows the default: the description\. No announcement to preview\./);
+  // The description it follows reads Text, and says so.
+  await expect(atRest(UI.field.socialDescription)).toHaveAccessibleDescription(/^Follows the default: the description, from Text\. No announcement to preview\./);
+  await expect(atRest(UI.field.socialDescription)).toContainText('Default · from Text');
   await expect(atRest(UI.field.socialDescription)).toContainText('No announcement to preview');
   // No kind of its own: what is output, a web page, with no sheet to open.
   await tab(frame, UI.tab.schema).click();
@@ -1201,7 +1259,7 @@ test('a link to a field that no longer exists says so in its box, under it and i
   await expect(frame.getByRole('status').filter({ hasText: 'Description linked to Summary.' })).toHaveCount(1);
   await expect(description.locator('.seo-linked-tag')).toHaveText('Summary');
   await expect(description.locator('.seo-linked-value')).toHaveText('Empty for this article');
-  await expect(field.locator('.seo-guide')).toHaveText('This article has no Summary, so its Body summary, else the start of its Body is used.');
+  await expect(field.locator('.seo-guide')).toHaveText('This article has no Summary, so its description, from Body, is used.');
   await expect(status(frame)).toContainText(new RegExp(`${UI.footer.draftTemplate}|^Linked to Summary`), { timeout: 30_000 });
 
   // Undo goes back to the stored link: the server takes it, and the box

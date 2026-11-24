@@ -109,7 +109,8 @@ final class VocabularyRouteTest extends CanvasKernelTestBase {
     self::assertSame('The module is tested with release ' . Vocabulary::RELEASE . '. Run drush canvas-metatag:vocabulary to update.', (string) $requirements['canvas_metatag_vocabulary']['description']);
     // Not a release: refused, and said so.
     self::assertSame(VocabularyCommands::EXIT_FAILURE, $command->download(['release' => 'latest']));
-    self::assertStringContainsString('A release is a version number', $output->fetch());
+    // The error block wraps at the terminal's width, 80 columns without one.
+    self::assertStringContainsString('A release is a version number, like ' . Vocabulary::RELEASE . '.', preg_replace('/\s+/', ' ', $output->fetch()));
 
     // Too large: refused, and nothing is written over.
     try {

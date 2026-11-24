@@ -32,9 +32,11 @@ use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Render\Markup;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Site\Settings;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Utility\Error;
 use Symfony\Component\DependencyInjection\Attribute\AutowireServiceClosure;
+use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
  * Hook implementations for Canvas Metatag.
@@ -57,6 +59,7 @@ final class CanvasMetatagHooks {
     private readonly ModuleHandlerInterface $moduleHandler,
     private readonly ClassResolverInterface $classResolver,
     private readonly AutoSaveManager $autoSaveManager,
+    private readonly RequestStack $requestStack,
     // Only the status report reads it: built when it does, never for a page.
     #[AutowireServiceClosure(Vocabulary::class)]
     private readonly \Closure $vocabulary,
@@ -328,7 +331,8 @@ final class CanvasMetatagHooks {
    * Which schema.org release the hand-added JSON-LD form reads. The headless
    * head is ours only while the controller canvas_headless
    * resolves is our decorator, and nothing else would tell that it stopped
-   * being: the controller resolver makes this same call.
+   * being: the controller resolver makes this same call. And whether
+   * visitors can use the public base (publicAddresses()).
    */
   #[Hook('runtime_requirements')]
   public function runtimeRequirements(): array {
@@ -346,22 +350,85 @@ final class CanvasMetatagHooks {
         'severity' => RequirementSeverity::Info,
       ],
     ];
-    if (!$this->moduleHandler->moduleExists('canvas_headless')) {
-      return $requirements;
+    if ($this->moduleHandler->moduleExists('canvas_headless')) {
+      try {
+        $ours = $this->classResolver->getInstanceFromDefinition(CanvasContentController::class) instanceof HeadlessContentController;
+      }
+      catch (\Throwable) {
+        $ours = FALSE;
+      }
+      if (!$ours) {
+        $requirements['canvas_metatag_headless'] = [
+          'title' => new TranslatableMarkup('SEO for headless content'),
+          'value' => new TranslatableMarkup('Not in use'),
+          'description' => new TranslatableMarkup('The content API no longer runs through the SEO module, so headless responses carry neither its head tags nor those of the Metatag module. Update the SEO module for this Canvas version.'),
+          'severity' => RequirementSeverity::Error,
+        ];
+      }
     }
-    try {
-      $ours = $this->classResolver->getInstanceFromDefinition(CanvasContentController::class) instanceof HeadlessContentController;
+    $addresses = $this->publicAddresses();
+    if ($addresses !== NULL) {
+      $requirements['canvas_metatag_public_base'] = ['title' => new TranslatableMarkup('SEO public addresses')] + $addresses;
     }
-    catch (\Throwable) {
-      $ours = FALSE;
+    return $requirements;
+  }
+
+  /**
+   * The status of the public base, when visitors cannot use it.
+   *
+   * A setting that is not an absolute address, or a base from the setting or
+   * a frontend that is plain http or on a host no visitor reaches, is an
+   * error, a warning while Drupal's own host is a
+   * development host, and fine when the base is a development host too: a
+   * local frontend is the normal local setup. A base from the request that
+   * is plain http on a public host is a warning on a production-like host.
+   *
+   * @return array{value: string, description: \Drupal\Core\StringTranslation\TranslatableMarkup, severity: \Drupal\Core\Extension\Requirement\RequirementSeverity}|null
+   *   The row without its title, or NULL for none.
+   */
+  private function publicAddresses(): ?array {
+    $base = $this->resolver->origin(new CacheableMetadata());
+    $host = (string) parse_url($base['url'], PHP_URL_HOST);
+    $plain = strtolower((string) parse_url($base['url'], PHP_URL_SCHEME)) === 'http';
+    $public = Values::isPublicHost($host);
+    $development = Values::isDevelopmentHost((string) $this->requestStack->getCurrentRequest()?->getHost());
+    $args = ['@address' => $base['url']];
+    // A setting that is not an absolute address is ignored: said first, as
+    // it is the fix the other rows would name. An empty string is how an
+    // environment leaves it unset.
+    $setting = Settings::get('canvas_metatag_public_base');
+    if ($setting !== NULL && $setting !== '' && $base['source'] !== 'settings') {
+      return [
+        'value' => $base['url'],
+        'description' => new TranslatableMarkup('canvas_metatag_public_base in settings.php is "@setting", which is not an absolute http or https address without a query or fragment, so pages use @address. Set it to the public https address for this environment, such as https://www.example.com.', $args + ['@setting' => is_scalar($setting) ? (string) $setting : get_debug_type($setting)]),
+        'severity' => $development ? RequirementSeverity::Warning : RequirementSeverity::Error,
+      ];
     }
-    return $ours ? $requirements : $requirements + [
-      'canvas_metatag_headless' => [
-        'title' => new TranslatableMarkup('SEO for headless content'),
-        'value' => new TranslatableMarkup('Not in use'),
-        'description' => new TranslatableMarkup('The content API no longer runs through the SEO module, so headless responses carry neither its head tags nor those of the Metatag module. Update the SEO module for this Canvas version.'),
-        'severity' => RequirementSeverity::Error,
-      ],
+    if ($base['source'] === 'request') {
+      if (!$plain || !$public || $development) {
+        return NULL;
+      }
+      $description = new TranslatableMarkup("Pages say their address is @address. If visitors use https, set Drupal's reverse proxy settings.", $args);
+      return ['value' => $base['url'], 'description' => $description, 'severity' => RequirementSeverity::Warning];
+    }
+    if ($development && Values::isDevelopmentHost($host)) {
+      return NULL;
+    }
+    if (!$public) {
+      $description = $development
+        ? new TranslatableMarkup('Pages tell visitors and search engines to use @address, which is not public. Set canvas_metatag_public_base in settings.php to the public address for this environment.', $args)
+        : new TranslatableMarkup('Pages carry no address, because @address is not public. Set canvas_metatag_public_base in settings.php to the public address for this environment.', $args);
+    }
+    elseif ($plain) {
+      $description = new TranslatableMarkup('Pages tell visitors and search engines to use @address, which is not https. Set canvas_metatag_public_base in settings.php to the public address for this environment.', $args);
+    }
+    else {
+      return NULL;
+    }
+    return [
+      'value' => $base['url'],
+      'description' => $description,
+      'severity' => $development ? RequirementSeverity::Warning : RequirementSeverity::Error,
     ];
   }
 

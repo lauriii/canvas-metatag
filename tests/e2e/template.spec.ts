@@ -4,6 +4,7 @@ import { NODES, SITE_NAME, TEMPLATE_ID, TEST_ID, UI, USERS } from './constants';
 import {
   button,
   closeReview,
+  closeSeo,
   expect,
   graphNode,
   link,
@@ -63,7 +64,9 @@ test('type-level values are linked to fields, follow the previewed article and p
   await expect(preview).toContainText(`${article.title} | ${SITE_NAME}`);
   // A value that follows its default is a box that names its source.
   const description = frame.getByRole('combobox', { name: UI.field.description, exact: true });
-  await expect(description).toHaveAccessibleDescription(/^Follows the default: each article's description\./);
+  // The Description reads the Article's plain Summary, and says so.
+  await expect(description).toHaveAccessibleDescription(/^Follows the default: each article's description, from Summary\./);
+  await expect(description).toContainText('Default · from Summary');
 
   // The link button says the same as its tooltip, first.
   const linkButton = frame.getByRole('button', { name: UI.action.changeLink(UI.field.description) });
@@ -133,9 +136,22 @@ test('type-level values are linked to fields, follow the previewed article and p
   // where the field shows this article's image.
   await tab(frame, UI.tab.social).click();
   await expect(frame.getByTestId(TEST_ID.social)).toContainText(article.summary);
+  // Until then it follows each article's Image, named by the field it reads;
+  // its menu offers that field, never the Image it already follows.
+  await expect(frame.getByText('Default · from Hero image', { exact: true })).toBeVisible();
+  await frame.getByRole('button', { name: UI.action.link('Image') }).click();
+  const followed = frame.getByRole('dialog', { name: 'Link Image' });
+  await expect(followed.getByRole('option', { name: /^Hero image/ })).not.toHaveCount(0);
+  await expect(followed.getByRole('group', { name: 'Automatic' }).getByRole('option', { name: /^Image, / })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(followed).toBeHidden();
   await button(frame, UI.action.chooseImage).click();
   const hero = sheet(frame, 'Choose image').getByRole('button', { name: UI.action.useHeroField });
   await expect(hero.locator('img')).toHaveCount(1);
+  // "From each Article" lists the type's image fields, never the worked-out
+  // Image, which is the default already.
+  await expect(sheet(frame, 'Choose image').getByRole('button', { name: /^Use / })).toHaveCount(1);
+  await expect(sheet(frame, 'Choose image').getByRole('button', { name: 'Use Image', exact: true })).toHaveCount(0);
   await hero.click();
   await expect(sheet(frame, 'Choose image')).toHaveCount(0);
   // The image row names the link, path and all.
@@ -186,6 +202,19 @@ test('type-level values are linked to fields, follow the previewed article and p
     });
   // Saved: the status says so, unless the last link's Undo is still on offer.
   await expect(status(frame)).toContainText(new RegExp(`${UI.footer.draftTemplate}|^Linked to Byline`), { timeout: 30_000 });
+  // The scope menu names the draft as "Review changes" lists it at once,
+  // also while the bar still offers the link's Undo.
+  const label = UI.footer.canvasLabel('Article');
+  await frame.getByRole('button', { name: 'Every Article', exact: true }).click();
+  await expect(frame.getByRole('menu')).toContainText(`${UI.footer.draftTemplate} “${label}”`, { timeout: 30_000 });
+  await page.keyboard.press('Escape');
+  await expect(frame.getByRole('menu')).toBeHidden();
+  // Opened again, the status says the same.
+  await closeSeo(page);
+  await openSeo(page);
+  await expect(status(frame)).toContainText(`${UI.footer.draftTemplate} “${label}”`, { timeout: 30_000 });
+  await expect(await reviewRows(page, label)).toHaveCount(1);
+  await closeReview(page);
 
   // The editor's own preview picker decides which article the dialog shows,
   // in the previews and in the linked boxes.

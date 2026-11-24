@@ -28,7 +28,7 @@ use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-// cspell:ignore خواهم
+// cspell:ignore خواهم Affichage complet Contenus
 /**
  * Pins how type-level settings ride the content template's Canvas draft.
  */
@@ -151,6 +151,21 @@ final class TemplateDraftTest extends CanvasKernelTestBase {
     self::assertSame(self::EDITOR, $this->autoSave()->getAutoSaveEntity($this->template(), TRUE)->clientId);
     // The stored template is never saved by us.
     self::assertSame([], $this->template()->getThirdPartySettings('canvas_metatag'));
+
+    // The state names the draft as "Review changes" lists it: by the label
+    // Canvas stored with its auto-save entry.
+    $state = self::decodeResponse($this->request(Request::create('/canvas-metatag/api/state?entity_type=content_template&id=' . self::ID . '&preview=' . $this->node->id())));
+    $entry = $this->autoSave()->getAllAutoSaveList(FALSE, FALSE)[self::KEY] ?? NULL;
+    self::assertSame($entry['label'] ?? NULL, $state['target']['canvas_label']);
+    self::assertSame('Article content items — Full content view', $state['target']['canvas_label']);
+    // A draft written in another interface language keeps the label it was
+    // stored with, whatever the language of this request.
+    $store = $this->container->get('keyvalue')->get(AutoSaveManager::AUTO_SAVE_STORE);
+    $stored = $store->get(self::KEY);
+    $store->set(self::KEY, ['label' => 'Contenus Article — Affichage complet'] + $stored);
+    $state = self::decodeResponse($this->request(Request::create('/canvas-metatag/api/state?entity_type=content_template&id=' . self::ID . '&preview=' . $this->node->id())));
+    self::assertSame('Contenus Article — Affichage complet', $state['target']['canvas_label']);
+    $store->set(self::KEY, $stored);
 
     // The editor's whole-tree save, with the hash it had before our write.
     self::assertSame(Response::HTTP_OK, $this->request($this->layoutRequest('POST', [

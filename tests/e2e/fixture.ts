@@ -5,7 +5,7 @@ import { promisify } from 'node:util';
 import { Drupal } from '@drupal/playwright';
 import type { DrupalSite } from '@drupal/playwright';
 import { test as base, expect } from '@playwright/test';
-import type { FrameLocator, Locator, Page, Response } from '@playwright/test';
+import type { APIRequestContext, FrameLocator, Locator, Page, Response } from '@playwright/test';
 
 import { TEST_ID } from './constants';
 
@@ -35,6 +35,8 @@ import { TEST_ID } from './constants';
  *   its docroot, for when Playwright runs outside the web container, for
  *   example `docker exec -w /var/www/html/web <container>`.
  * - CANVAS_METATAG_SETUP_FILE: the setup file, relative to the docroot.
+ * - CANVAS_METATAG_CANVAS_DIR: Canvas, relative to the docroot, when it is not
+ *   modules/contrib/canvas (the headless-frontend project reads its adapter).
  * - DRUPAL_TEST_PLAYWRIGHT_SKIP_TEARDOWN=true keeps the sandboxes.
  *
  * @see \Drupal\Tests\canvas_metatag\TestSite\CanvasMetatagTestSetup
@@ -58,6 +60,7 @@ const CLI = process.env.CANVAS_METATAG_E2E_CLI ?? '';
 /** The environment flag CanvasMetatagTestSetup reads, by Playwright project. */
 const FLAGS: Record<string, string> = {
   headless: 'CANVAS_METATAG_E2E_HEADLESS=1',
+  'headless-frontend': 'CANVAS_METATAG_E2E_HEADLESS=1',
   ai: 'CANVAS_METATAG_E2E_AI=1',
   complex: 'CANVAS_METATAG_E2E_COMPLEX=1',
   'compose-firefox': 'CANVAS_METATAG_E2E_COMPLEX=1',
@@ -93,6 +96,9 @@ async function exec(command: string): Promise<string> {
   });
   return stdout;
 }
+
+/** Reads a file of the codebase under test, by its path from the docroot. */
+export const drupalFile = (path: string): Promise<string> => exec(`cat '${path.replaceAll("'", "'\\''")}'`);
 
 /** Installs a sandbox seeded by CanvasMetatagTestSetup for one project. */
 async function installSeededSite(project: string): Promise<DrupalSite> {
@@ -367,6 +373,15 @@ export interface SeoState {
   target: { values: { title?: { text: string } | Record<string, unknown> } & Record<string, unknown>; has_draft: boolean } | null;
   facts: Record<string, { label: string; kind: string; value: string }>;
   resolved: { head: ApiHead; schema?: { nodes: { origin: string }[] } } | null;
+}
+
+/** Reads the content API `head` of a request URI, as a visitor or with a preview token. */
+export async function contentHead(request: APIRequestContext, requestUri: string, token?: string): Promise<ApiHead> {
+  const response = await request.get(`./canvas/content-api?requestUri=${encodeURIComponent(requestUri)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  expect(response.status(), await response.text()).toBe(200);
+  return ((await response.json()) as { head: ApiHead }).head;
 }
 
 export const pageQuery = (id: number) => `entity_type=canvas_page&id=${id}`;

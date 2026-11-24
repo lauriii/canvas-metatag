@@ -162,7 +162,7 @@ The fix is in three places:
   inheriting.
 - **The recipe** does it until the adapter does.
 - **The dialog** says only what the module knows, in the same words
-  everywhere: "No description sent. The frontend decides what shows." That
+  everywhere: "No description sent. The frontend decides what to show." That
   is the search preview's and the link preview's muted line, the focused
   empty field's text, and the "Add a description" check's sentence, in
   every variant of that check, the front page's too.
@@ -201,19 +201,27 @@ An explicit excerpt beats a cut of the body, the common CMS convention.
 The fact's `via` names the field that gave the value, else the first that
 could. A field `field_post_summary` labelled "Summary" matches by its label.
 Exact words, not parts of words: "Lead time" on a product is not a
-description.
+description. The label is the one stored with the field
+(`Sources::namedFor()`), never the one translated for the interface, so a
+"Summary" shown as "Résumé" is the description in every language, and the
+editor's menu agrees with every visitor's head. `via` is said in the
+editor's language.
 
 The words, with title's (headline, title), live in
-`data/value-words.json`, read by the resolver and imported by `values.ts`
-as `data/schema-types.json` already is. The default and the menu's order
-then always agree. `strengthen-zero-config-defaults` builds its "first
+`data/value-words.json`, read by `Values::isNamedFor()`. The resolver uses it
+for the default, and the field rows the dialog gets carry the values each
+whole text field is named for (`named`), so one function decides: the default
+and the menu's order always agree. `strengthen-zero-config-defaults` builds its "first
 formatted or long text" fallback after step 2 (amendment).
 
 **The menu** changes in four ways:
 
 1. **The group is "Automatic".** These values are worked out for each item,
-   whatever its type. A fact entry's value line adds what it reads, from
-   `via`: "How teams turn … · from Summary". A box that follows a default
+   whatever its type. A fact entry says what it reads beside its label, from
+   `via`: "Description · from Summary", also where a field listed above
+   gives the same text. It is its own part of the row (`MenuItem.hint`),
+   never cut with a long value, and part of its accessible name. A summary is named as the menu names it:
+   "from Body › Summary". A box that follows a default
    which reads a field says the same in its description. Facts that read no
    field (Title, Site name, Address, Author, the dates) show their value
    alone. A box, a chip and the announcements name a fact by its label
@@ -222,20 +230,33 @@ formatted or long text" fallback after step 2 (amendment).
    the chip's tooltip and the composer's description, not onto the chip.
 2. **A fact no item can have is disabled.** The resolver reports, per fact
    and per type, whether anything of the type can give it. That is `via`
-   being set for Description and Image, and always for the rest. A fact
-   without it moves to the quiet last row, disabled, with the reason "No
-   ‹type› has one" ("No post has one"). "Empty for this ‹type›" keeps its
-   meaning: this item lacks a value others may have.
+   being set for Description and Image, and always for the rest, also for
+   a type with no item yet (the resolver walks the type's form). A fact
+   without it is listed last in its group, disabled, with the reason "No
+   ‹type› has one" ("No post has one"), so that the reason is seen without
+   opening the fold; a Default box that follows it says the same. "Empty for
+   this ‹type›" keeps its meaning: this item lacks a value others may have.
 3. **A field's own default is not in its menu when the pick links the whole
    value.** Linking a field to the value it already follows changes nothing.
    The field's Default box shows the default and its source, and "Reset"
    returns to it. In add mode, and when replacing a chip of a composition,
    the menu offers it, since "Tickets: ‹Title›" needs Title. On a Default box
    and in an empty composer, the row "Add words or fields · Start from
-   ‹Title›" adopts it as the first chip.
+   ‹Title›" adopts it as the first chip. While a field follows its default,
+   the entry of the field that default reads is marked current and says
+   "Default" beside its label: at 350 px the menu covers the Default box,
+   and nothing else would say what is in use. It is the field's own row,
+   not a "Default" entry.
 4. **With an empty filter, fields named for the value come first**, by the
-   same words. The filter's own "best match first" ranking does this already
-   for typed text. Without a filter, form order decides within each band.
+   same words, and so does the field a description's or image's default
+   reads ("Description › Summary" before "Description" and "Status"). The
+   filter's own "best match first" ranking does this already for typed
+   text. Without a filter, form order decides within each band. A typed
+   filter ranks across groups on purpose, so a group's heading can move
+   while typing (round 2 UX review): the best match must be first and
+   active, so that Enter picks it ("{title}" adds Title, not Venue › Title;
+   value-links "The best match first"). Groups in a fixed order would put a
+   weaker match of the type's group above an exact Automatic one.
 
 Points 2 and 4 hold in every mode of the menu: link, add and replace.
 
@@ -278,7 +299,7 @@ would be worse than the warning below.
 
 | Public base | On a non-public host | Plain http, public host |
 |---|---|---|
-| From the setting or a frontend, Drupal production-like | error: "Pages carry no address, because ‹address› is not public. Set `$settings['canvas_metatag_public_base']` to the public address for this environment." | error: "Pages tell visitors and search engines to use ‹address›. Set …" (same fix) |
+| From the setting or a frontend, Drupal production-like | error: "Pages carry no address, because ‹address› is not public. Set `$settings['canvas_metatag_public_base']` to the public address for this environment." | error: "Pages tell visitors and search engines to use ‹address›, which is not https. Set …" (same fix) |
 | From the setting or a frontend, Drupal on a development host | warning; nothing when the base is a development host too | warning |
 | From the request (no frontend, no setting) | none | warning on a production-like host: "Pages say their address is http://…. If visitors use https, set Drupal's reverse proxy settings." |
 
@@ -288,7 +309,10 @@ correct local setup, so it gets no row.
 - "Non-public host" and "development host" are exactly
   `serve-each-frontend-its-own-addresses`' definitions: images on a host no
   crawler reaches; and D14's loopback, `localhost`, `test`, `invalid` and the
-  known local suffixes. They are one static helper each,
+  known local suffixes. A known local suffix is both development and
+  non-public: its names resolve to 127.0.0.1, so a production Drupal whose
+  frontend came over as `https://front.ddev.site` gets the error too. They
+  are one static helper each,
   `Values::isPublicHost()` and `Values::isDevelopmentHost()`, so that change
   reuses them.
 - The row is computed at runtime, never cached, and costs one parse.
@@ -302,9 +326,11 @@ developer could not connect to SEO.
 
 The template's draft status says that label, from the state's
 `target.canvas_label` (Canvas's own `label()` of the target, read by the
-server). It reads: "Draft · in Review changes as “Article content items —
-Full content view”". A page keeps "Draft · goes live when you publish the
-page", because Canvas lists it under its own title.
+server). It reads: "Draft · listed under Unpublished changes as “Article
+content items — Full content view”" ("Unpublished changes" heads the panel
+Canvas's "Review changes" button opens), with a non-breaking space before the dash so
+that no line starts with it. A page keeps "Draft · goes live when you
+publish the page", because Canvas lists it under its own title.
 
 What the draft changes is not listed (see "Review decisions"). It belongs in
 `add-structured-data-diff-and-overview`'s visible "When you publish", and in
@@ -360,6 +386,16 @@ Every gap found was semantic, and test IDs would have hidden it.
   becomes the default description. The words are exact, the field must be
   text, and the editor sees "from ‹field›" on the Default box and can link
   another.
+- **A long field named for a description is sent whole.** A long "Intro"
+  becomes a long meta description, as a long summary already does; only the
+  body is cut, because it was never written as a description. The search
+  preview and the length meter show the length, and the editor can link
+  another field or type one.
+- **A template's Default box names the previewed item's source.** "from
+  Biography › Summary" for a person with a summary, "from Biography" for one
+  without: `via` is the field that gave the value, else the first that
+  could. The box is about every item, but its value is the previewed one's,
+  and the source goes with the value.
 - **Leaving out addresses while misconfigured.** A production site with a
   development frontend loses its canonical and JSON-LD until the public base
   is set. That is the safe failure, and the status report error says how to

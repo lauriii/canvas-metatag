@@ -17,6 +17,7 @@ use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Cache\CacheBackendInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
+use Drupal\Core\Config\Entity\ConfigEntityInterface;
 use Drupal\Core\Access\AccessResultInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
@@ -28,6 +29,7 @@ use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\language\ConfigurableLanguageManagerInterface;
 use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\Core\Session\AnonymousUserSession;
+use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Theme\Component\ComponentMetadata;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -134,7 +136,9 @@ final class Sources {
    *   `names`: it is the referenced item's own name. `many`: a field of
    *   several values. `lines`: one long plain text, which gives its lines
    *   to a list. `timestamp`: a number that is a point in time. `scale`: a
-   *   decimal's digits after the point.
+   *   decimal's digits after the point. `named`: the values a whole plain
+   *   or formatted text field is named for (Values::isNamedFor()):
+   *   `description`, `title`.
    *
    * @throws \Throwable
    *   With $strict, when Canvas could not suggest: an update that converts
@@ -178,6 +182,27 @@ final class Sources {
     $this->cache->set($cid, $rows, $expire, $tags);
     $this->memory->set($cid, $rows, $expire, $tags);
     return $this->rows($rows, $expire, $cacheability);
+  }
+
+  /**
+   * The values a whole plain or formatted text field is named for.
+   *
+   * Values::isNamedFor() on its label as stored, never as translated for the
+   * interface: one field is named for a value in every language, so that the
+   * head of each language and the menu of every editor agree.
+   *
+   * @return list<string>
+   *   Of `description` and `title`.
+   */
+  public function namedFor(FieldDefinitionInterface $definition): array {
+    if (!in_array($definition->getType(), Values::NAMED_TYPES, TRUE)) {
+      return [];
+    }
+    $label = $definition instanceof ConfigEntityInterface
+      ? (string) $this->configFactory->get($definition->getConfigDependencyName())->getOriginal('label', FALSE)
+      : $definition->getLabel();
+    $label = $label instanceof TranslatableMarkup ? $label->getUntranslatedString() : (string) $label;
+    return array_values(array_filter(['description', 'title'], static fn (string $value): bool => Values::isNamedFor($value, $definition->getName(), $label)));
   }
 
   /**
@@ -604,6 +629,12 @@ final class Sources {
       }
       elseif (!$row['hop'] && ($definitions[$row['field']] ?? NULL)?->getType() === 'string_long') {
         $row['lines'] = TRUE;
+      }
+      // The values a whole text field is named for: the link menu lists it
+      // first for them, by the rule the Description fact reads it by.
+      $named = !$row['hop'] && count($row['path']) === 1 && isset($definitions[$row['field']]) ? $this->namedFor($definitions[$row['field']]) : [];
+      if ($named !== []) {
+        $row['named'] = $named;
       }
     }
     unset($row);

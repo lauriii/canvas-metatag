@@ -51,7 +51,7 @@ use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 use Symfony\Component\HttpKernel\KernelEvents;
 use Symfony\Component\Routing\Route;
 
-// cspell:ignore Tarifs tarifs
+// cspell:ignore ddev Tarifs tarifs
 /**
  * Tests the head in the content API of canvas_headless.
  */
@@ -192,6 +192,97 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     self::assertNotContains('Rating', array_column($head['script'][0]['textContent']['@graph'], '@type'));
     // Only the refused item is left out.
     self::assertContains('Kept', array_column($head['script'][0]['textContent']['@graph'], 'name'));
+  }
+
+  /**
+   * A frontend no visitor reaches: no addresses in production, per host.
+   */
+  public function testAddressesOnUnreachableHost(): void {
+    $hero = $this->createImage('Pricing hero', ['alt' => 'Pricing table']);
+    $page = $this->createPage([
+      'image' => $hero->id(),
+      'components' => [
+        ['uuid' => '2c6e91ae-23ac-433d-9bb8-687144464b34', 'component_id' => 'js.canvas_headless_test', 'inputs' => []],
+      ],
+    ]);
+    $page->addTranslation('fr', ['title' => 'Tarifs', 'status' => TRUE, 'path' => ['alias' => '/tarifs']]);
+    $page->save();
+    $this->config('canvas_headless.settings')->set('frontends', [['url' => 'http://localhost:3000', 'components' => []]])->save();
+
+    // A development frontend in production: no canonical, og:url, hreflang
+    // or script; the title, description and image stay.
+    $response = $this->content('/pricing', drupal: 'https://cms.example.com');
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    $production = self::decodeResponse($response)['head'];
+    self::assertSame([], $production['link']);
+    self::assertSame([], $production['script']);
+    self::assertArrayNotHasKey('og:url', self::meta($production));
+    self::assertSame('Pricing | Example', $production['title']);
+    self::assertSame('Plans and prices for Example.', self::meta($production)['description']);
+    self::assertStringStartsWith('https://cms.example.com/', self::meta($production)['og:image']);
+    self::assertContains('url.site', $response->getCacheableMetadata()->getCacheContexts());
+
+    // A development site: the local frontend is its address.
+    $development = self::decodeResponse($this->content('/pricing', drupal: 'https://cms.example.test'))['head'];
+    self::assertSame(['rel' => 'canonical', 'href' => 'http://localhost:3000/pricing'], $development['link'][0]);
+    self::assertCount(4, $development['link']);
+    self::assertSame('http://localhost:3000/pricing', self::meta($development)['og:url']);
+    self::assertCount(1, $development['script']);
+
+    // Each Drupal host keeps its own head in the page cache.
+    $cached = $this->content('/pricing', drupal: 'https://cms.example.com');
+    self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
+    self::assertSame($production, self::decodeResponse($cached)['head']);
+    $cached = $this->content('/pricing', drupal: 'https://cms.example.test');
+    self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
+    self::assertSame($development, self::decodeResponse($cached)['head']);
+
+    // Drupal on an internal name is production-like, as a private address
+    // would be: only a development host keeps a local frontend's addresses.
+    $internal = self::decodeResponse($this->content('/pricing', drupal: 'https://cms.internal'))['head'];
+    self::assertSame([], $internal['link']);
+    self::assertSame([], $internal['script']);
+
+    // Plain http on a public host is reported, never left out.
+    $frontend = ['url' => 'http://www.example.com', 'components' => []];
+    $this->config('canvas_headless.settings')->set('frontends', [$frontend])->save();
+    $plain = self::decodeResponse($this->content('/pricing', drupal: 'https://cms.example.com'))['head'];
+    self::assertSame(['rel' => 'canonical', 'href' => 'http://www.example.com/pricing'], $plain['link'][0]);
+    self::assertCount(1, $plain['script']);
+
+    // A name under .local, or under a known local development suffix,
+    // reaches no visitor.
+    foreach (['https://mysite.local', 'https://front.ddev.site'] as $url) {
+      $this->config('canvas_headless.settings')->set('frontends', [['url' => $url, 'components' => []]])->save();
+      self::assertSame([], self::decodeResponse($this->content('/pricing', drupal: 'https://cms.example.com'))['head']['link'], $url);
+    }
+
+    // Canvas refuses a frontend in another spelling of an address (its form
+    // and config schema too; stored past them here), so pages use the
+    // request's.
+    foreach (['http://127.1:3000', 'http://[::ffff:127.0.0.1]:3000'] as $url) {
+      $settings = ['frontends' => [['url' => $url, 'components' => []]]] + $this->config('canvas_headless.settings')->get();
+      $this->container->get('config.storage')->write('canvas_headless.settings', $settings);
+      $this->container->get('config.factory')->reset('canvas_headless.settings');
+      Cache::invalidateTags(['config:canvas_headless.settings']);
+      $head = self::decodeResponse($this->content('/pricing', drupal: 'https://cms.example.com'))['head'];
+      self::assertSame(['rel' => 'canonical', 'href' => 'https://cms.example.com/pricing'], $head['link'][0], $url);
+    }
+
+    // The setting takes any spelling of a loopback address, and leaves out
+    // the addresses as for localhost. A setting changes with a cache
+    // rebuild.
+    foreach (['http://127.1:3000', 'http://[::ffff:127.0.0.1]:3000', 'http://0177.0.0.1:3000'] as $base) {
+      $this->setSetting('canvas_metatag_public_base', $base);
+      foreach (Cache::getBins() as $bin) {
+        $bin->deleteAll();
+      }
+      $head = self::decodeResponse($this->content('/pricing', drupal: 'https://cms.example.com'))['head'];
+      self::assertSame([], $head['link'], $base);
+      self::assertSame([], $head['script'], $base);
+      $head = self::decodeResponse($this->content('/pricing', drupal: 'https://cms.example.test'))['head'];
+      self::assertSame(['rel' => 'canonical', 'href' => "$base/pricing"], $head['link'][0], $base);
+    }
   }
 
   /**
@@ -529,10 +620,12 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
    *   Further query parameters of the content API.
    * @param int $status
    *   The expected status.
+   * @param string $drupal
+   *   The scheme and host Drupal is reached at, if not the test's own.
    */
-  private function content(string $path, array $query = [], int $status = 200): Response {
+  private function content(string $path, array $query = [], int $status = 200, string $drupal = ''): Response {
     try {
-      $response = $this->request(Request::create('/canvas/content-api?' . http_build_query(['requestUri' => $path] + $query)));
+      $response = $this->request(Request::create($drupal . '/canvas/content-api?' . http_build_query(['requestUri' => $path] + $query)));
       // A preview on a multilingual site is first sent to its language.
       if ($response instanceof PreviewLanguageRedirectResponse) {
         $response = $this->request(Request::create($response->getTargetUrl()));

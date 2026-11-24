@@ -89,6 +89,40 @@ final class ApiTest extends CanvasKernelTestBase {
   }
 
   /**
+   * The state says whether a headless frontend decides what to show.
+   */
+  public function testHeadless(): void {
+    $this->setUpCurrentUser([], ['edit canvas metatag', ...self::VISITOR]);
+    $headless = fn (): bool => self::decodeResponse($this->request(Request::create(self::STATE)))['headless'];
+    // Without the module.
+    self::assertFalse($headless());
+
+    $modules = ['serialization', 'consumers', 'simple_oauth', 'custom_elements', 'canvas_headless'];
+    if (array_diff($modules, array_keys($this->container->get('extension.list.module')->getList()))) {
+      self::markTestSkipped('canvas_headless or one of its dependencies is not in the codebase.');
+    }
+    $this->enableModules($modules);
+    $this->installEntitySchema('consumer');
+    $this->installEntitySchema('oauth2_token');
+    $this->installConfig(['canvas_headless']);
+    // Without a frontend, then with one.
+    $this->config('canvas_headless.settings')->set('frontends', [])->save();
+    self::assertFalse($headless());
+    $frontend = ['url' => 'https://www.example.com', 'components' => []];
+    $this->config('canvas_headless.settings')->set('frontends', [$frontend])->save();
+    self::assertTrue($headless());
+    // A public base set for the environment does not hide it.
+    $this->setSetting('canvas_metatag_public_base', 'https://www.example.com');
+    self::assertTrue($headless());
+    // A frontend the head can't be built for is none, as for the head. Its
+    // schema refuses it, so it is stored as an older release might have.
+    $storage = $this->container->get('config.storage');
+    $storage->write('canvas_headless.settings', ['frontends' => [['url' => 'not a url'] + $frontend]] + $storage->read('canvas_headless.settings'));
+    $this->container->get('config.factory')->reset('canvas_headless.settings');
+    self::assertFalse($headless());
+  }
+
+  /**
    * The requirements of the five routes, and that they are enforced.
    */
   public function testRoutes(): void {
@@ -238,6 +272,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'langcode',
       'languages',
       'origin',
+      'headless',
       'can',
       'capabilities',
       'site',
@@ -264,6 +299,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'langcode' => 'en',
       'languages' => ['en' => 'English', 'fr' => 'French'],
       'origin' => ['url' => 'http://localhost', 'source' => 'request'],
+      'headless' => FALSE,
       'can' => ['target' => TRUE, 'site' => FALSE],
       'capabilities' => ['ai' => NULL],
       'site' => [
@@ -524,6 +560,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'langcode',
       'languages',
       'origin',
+      'headless',
       'can',
       'capabilities',
       'site',
@@ -549,6 +586,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'entity_type' => 'content_template',
       'id' => 'node.article.full',
       'label' => 'Article',
+      'canvas_label' => 'Article content items — Full content view',
       'auto_save_key' => 'content_template:node.article.full',
       'translatable' => FALSE,
       'default_langcode' => NULL,
@@ -738,6 +776,8 @@ final class ApiTest extends CanvasKernelTestBase {
    */
   public function testTemplateWithoutNodes(): void {
     $this->createField('field_byline', 'string', 'Byline');
+    $this->createField('field_body', 'text_with_summary', 'Body');
+    $this->createField('field_hero', 'image', 'Hero image');
     $stored = ['title_end' => ['text' => 'News']];
     $this->createTemplate(TRUE, $stored);
     ContentTemplate::create([
@@ -759,12 +799,15 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertNull($state['preview']);
     self::assertNull($state['resolved']);
     // The type's fields and the facts, without values but the site name.
-    self::assertSame([
-      'Byline',
-      'none',
-      '',
-    ], [$state['sources'][0]['label'], $state['sources'][0]['status'], $state['sources'][0]['value']]);
+    $byline = array_values(array_filter($state['sources'], static fn (array $row): bool => $row['label'] === 'Byline'))[0];
+    self::assertSame(['none', ''], [$byline['status'], $byline['value']]);
     self::assertSame(['', 'Example'], array_values(array_unique(array_column($state['facts'], 'value'))));
+    // Description and Image still name the fields they come from: the link
+    // menu offers them, and the Default box says "from Body".
+    self::assertSame(['Body', 'Hero image'], [
+      $state['facts']['description']['via'] ?? NULL,
+      $state['facts']['image']['via'] ?? NULL,
+    ]);
 
     // The draft, for who may update the template.
     $template = ContentTemplate::load('node.article.full');
@@ -804,6 +847,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'langcode',
       'languages',
       'origin',
+      'headless',
       'can',
       'capabilities',
       'site',
@@ -1319,6 +1363,31 @@ final class ApiTest extends CanvasKernelTestBase {
     self::assertSame(['schema.extend.#webpage' => '34 KB. Keep under 32 KB, including added details.'], self::decodeResponse($response)['error']['fields']);
     $state = self::decodeResponse($this->request(Request::create(self::STATE . '?entity_type=canvas_page&id=' . $page->id())));
     self::assertSame(['schema' => ['custom' => $big]], $state['target']['values']);
+  }
+
+  /**
+   * A page with hand-added items opens on a host no visitor reaches.
+   *
+   * Its head ships no graph, so the rules have nothing to judge, and the
+   * report says why the addresses are left out.
+   */
+  public function testUnaddressedPageWithHandAddedItems(): void {
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, Page::EDIT_PERMISSION, 'edit canvas metatag']);
+    $custom = '{"@type": "Recipe", "@id": "#x-recipe", "name": "Rye bread", "url": "rye"}';
+    $values = ['schema' => ['custom' => $custom, 'extend' => ['#webpage' => '{"keywords": "bread"}']]];
+    $page = $this->createPage(['canvas_metatag' => Values::encode($values)]);
+    $query = self::STATE . '?entity_type=canvas_page&id=' . $page->id();
+    $schema = fn (string $drupal): array => self::decodeResponse($this->request(Request::create($drupal . $query)))['resolved']['schema'];
+
+    // Addressed, the hand-added item's relative address is a rule.
+    self::assertSame('relative', $schema('https://cms.example.test')['rules'][0]['rule'] ?? NULL);
+
+    $this->setSetting('canvas_metatag_public_base', 'http://localhost:3000');
+    $response = $this->request(Request::create('https://cms.example.com' . $query));
+    self::assertSame(200, $response->getStatusCode(), (string) $response->getContent());
+    $report = self::decodeResponse($response)['resolved']['schema'];
+    self::assertTrue($report['unaddressed']);
+    self::assertSame([], $report['rules']);
   }
 
   /**

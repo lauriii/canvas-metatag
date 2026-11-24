@@ -43,10 +43,18 @@ const OFFSET = 4;
  */
 const ROOM_FOR_THREE = 320;
 
+/** How high a menu above its field may reach: the header's bottom edge, never through the header. */
+const ceiling = () => document.querySelector('.seo-header')?.getBoundingClientRect().bottom ?? 0;
+
 /** One row of a link menu. */
 export interface MenuItem {
   key: string;
   label: string;
+  /**
+   * Beside the label, never cut with the value: "from Summary" for a
+   * worked-out value, "Default" for the field the default reads.
+   */
+  hint?: string;
   /** The second line: the previewed item's value, or what the row does. */
   sub?: string;
   /** The second line says that there is no value. */
@@ -179,10 +187,13 @@ export function LinkMenu(props: {
     // The current entry has focus, in its level (after "Back"); a key that
     // opened the menu, the best match.
     const rows = props.items(seed, start);
-    // Without a current entry, the first one after the pinned steps: Enter
-    // at once picks a field, never a step on the whole value.
+    // Without a current entry, the first row that can be picked after the
+    // pinned steps: Enter at once picks a field, never a step on the whole
+    // value, nor a row that only says why it can't be picked.
     const current = rows.findIndex((row) => row.current);
-    setActive(seed ? first(rows) : current >= 0 ? current + (start === null ? 0 : 1) : Math.max(0, rows.findIndex((row) => !row.pin)) + (start === null ? 0 : 1));
+    const pick = rows.findIndex((row) => !row.pin && (pickable(row) || !!row.level));
+    const after = pick >= 0 ? pick : Math.max(0, rows.findIndex((row) => !row.pin));
+    setActive(seed ? first(rows) : (current >= 0 ? current : after) + (start === null ? 0 : 1));
     const rect = props.box.current?.getBoundingClientRect();
     const fits = window.innerHeight > SHORT_FRAME;
     // The action bar's top edge is the frame's bottom while it shows, in a
@@ -190,7 +201,7 @@ export function LinkMenu(props: {
     const bar = document.querySelector('.seo-bar')?.getBoundingClientRect();
     const bottom = bar ? Math.max(8, window.innerHeight - bar.top + 8) : 8;
     const below = rect ? window.innerHeight - bottom - rect.bottom : Infinity;
-    const above = rect?.top ?? 0;
+    const above = (rect?.top ?? 0) - ceiling();
     let width = Math.min(MENU_WIDTH, window.innerWidth - 16);
     shortFrame.current = !fits;
     frameTop.current = null;
@@ -254,7 +265,7 @@ export function LinkMenu(props: {
    * Fixes the height of a menu that hangs above its field: what it lists,
    * up to 360 px and the room above the field (`room`; null: below it).
    */
-  function fit(room = placed.side === 'top' && placed.short === null && !placed.seeded ? (props.box.current?.getBoundingClientRect().top ?? 0) - OFFSET - 8 : null) {
+  function fit(room = placed.side === 'top' && placed.short === null && !placed.seeded ? (props.box.current?.getBoundingClientRect().top ?? 0) - ceiling() - OFFSET - 8 : null) {
     setHeight(null);
     if (room === null) {
       return;
@@ -407,6 +418,7 @@ export function LinkMenu(props: {
   showActive.current = () => {
     const item = document.getElementById(`${menuId}-${index}`);
     const group = item?.parentElement?.closest('[role="group"]');
+    const lead = group?.querySelector('[role="option"]') === item ? group : item;
     // On opening, an active entry in sight from the top keeps the rows above
     // it, such as "Add words or fields", in sight too.
     const fromTop = item && list.current ? item.getBoundingClientRect().bottom - list.current.getBoundingClientRect().top + list.current.scrollTop : Infinity;
@@ -418,7 +430,7 @@ export function LinkMenu(props: {
         return;
       }
     } else {
-      reveal(group?.querySelector('[role="option"]') === item ? group : item);
+      reveal(lead);
     }
     // The entry below the last whole one shows a sliver: a cue that the
     // list goes on, never a clean edge that looks like its end.
@@ -429,7 +441,8 @@ export function LinkMenu(props: {
       const next = rows.find((one) => one.bottom > view.bottom + 0.5);
       const shown = next ? view.bottom - next.top : 12;
       const active = item.getBoundingClientRect();
-      if (shown < 12 && active.top - view.top >= 12 - shown) {
+      // Never so far that a group's first row loses its heading.
+      if (shown < 12 && (lead ?? item).getBoundingClientRect().top - view.top >= 12 - shown) {
         // Up a little: the next entry comes into sight.
         element.scrollTop += 12 - shown;
       } else if (shown < 12) {
@@ -594,8 +607,9 @@ export function LinkMenu(props: {
                   tabIndex={-1}
                   aria-selected={row.current || false}
                   aria-disabled={!pickable(row) && !row.level ? true : undefined}
-                  // What it shows: its label, and its value as cut there.
-                  aria-label={`${row.label}${sub ? `, ${clip(sub, ENTRY_CHARS)}` : ''}`}
+                  // What it shows: its label and hint, and its value as cut
+                  // there.
+                  aria-label={`${row.label}${row.hint ? `, ${row.hint}` : ''}${sub ? `, ${clip(sub, ENTRY_CHARS)}` : ''}`}
                   className="seo-menu-item"
                   data-kind={row.key === '#back' ? 'back' : row.level ? 'level' : undefined}
                   data-quiet={row.quiet || undefined}
@@ -625,7 +639,8 @@ export function LinkMenu(props: {
                   <span>
                     {row.key === '#back' && <ChevronLeftIcon aria-hidden />}
                     <span dir="auto">{row.label}</span>
-                    {row.current && <CheckIcon aria-hidden />}
+                    {row.hint && <span className="seo-menu-via">· {row.hint}</span>}
+                    {row.current && <CheckIcon aria-hidden data-check="" />}
                     {row.level && <ChevronRightIcon aria-hidden />}
                   </span>
                   {/* A space between label and value: its name holds what it shows. */}{' '}
@@ -642,30 +657,28 @@ export function LinkMenu(props: {
               );
             });
             const id = `${menuId}-g-${group.index}`;
-            // Each group is named by its heading, also to assistive
-            // technology; rows that are not values come after a line.
-            // The first rows, when they are steps on the whole value, stay
-            // under the filter.
+            // Each group's options are a group named by its heading, as
+            // assistive technology reads them; rows that are not values
+            // come after a line. The first rows, when they are steps on the
+            // whole value, stay under the filter.
             const pinned = group.index === 0 && group.name === '' && group.rows.every(({ row }) => row.pin);
             return pinned ? (
               <div key={id} role="presentation" className="seo-menu-pinned" ref={pinRef}>
                 {options}
               </div>
-            ) : group.name === undefined ? (
-              <Fragment key={id}>{options}</Fragment>
             ) : group.name ? (
               <div key={id} role="group" aria-labelledby={id}>
-                <div className="seo-menu-group" id={id} aria-hidden>
+                <div className="seo-menu-group" id={id}>
                   {group.name}
                 </div>
                 {options}
               </div>
             ) : (
-              <div key={id} role="presentation">
+              <Fragment key={id}>
                 {/* A line only between rows: never under the filter. */}
-                {group.index > 0 && <div className="seo-menu-sep" aria-hidden />}
+                {group.name === '' && group.index > 0 && <div className="seo-menu-sep" aria-hidden />}
                 {options}
-              </div>
+              </Fragment>
             );
           })}
         </div>
@@ -680,8 +693,8 @@ export function LinkMenu(props: {
             <kbd className="seo-kbd">↑</kbd>
             <kbd className="seo-kbd">↓</kbd>move
           </span>
-          {/* Read-only, Enter only opens a level. */}
-          {(!props.readOnly || at?.level) && (
+          {/* A row that only says why it can't be picked takes no Enter. */}
+          {(at ? pickable(at) || !!at.level : !props.readOnly) && (
             <span>
               <kbd className="seo-kbd">↵</kbd>
               {at?.level ? 'open' : at && !at.key.startsWith('#') ? (props.verb ?? 'link') : 'choose'}

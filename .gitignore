@@ -2,3 +2,4 @@
 *.cache
 extension/node_modules/
 extension/dist/*.map
+examples/headless-next/node_modules/

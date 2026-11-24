@@ -351,7 +351,8 @@ linked or broken.
 - **Surface**: `--seo-stage-bg`, `inset 0 0 0 1px gray-a3`, radius 12, padding
   12 16 16. Caption row 20 tall, 12/16 `--seo-ink-2`, 12 below; caption
   suffixes after a middle dot ("Not published yet", "Hidden from search",
-  "Small card"); caption buttons 24 ghost on the right (`</>` "View output",
+  "Small card"), kept whole: the previewed item's name gives way first, to a
+  few letters, before a suffix goes; caption buttons 24 ghost on the right (`</>` "View output",
   ⓘ "About this preview").
 - **Search result**: site logo or first letter (28 circle), site name 14/20,
   breadcrumb 12/16, title 18/24 `--seo-preview-link`, snippet 14/22
@@ -438,14 +439,15 @@ instead of a paragraph of explanation.
 A popover anchored to the field that always opens **fully inside the
 dialog**, whatever column the field is in. Filter row 40 tall, no box, labelled
 "Find a field", autofocused. Its name says what a pick does: "Link ‹Field›"
-(the whole value; a box's menu adds the row "Add words or fields"), "Add a
+(the whole value; a box's menu, and an empty composer's that follows its
+default, adds the row "Add words or fields"), "Add a
 field to ‹Field›" (at the caret of a composer; a line above the list says
 where, "After “Summer Gala in”", also in short frames, and a footer line says
 once that the words joining a missing field are left out too), or "Replace
 ‹Source›" (a chip's menu, with "Remove ‹Source›"). With eight fields the
 add menu says "At most 8 fields in one value." and its entries can't be
 picked.
-Groups (the type's fields at template scope, then Page, then Site), group
+Groups (the type's fields at template scope, then Automatic, then Site), group
 labels 12/500 `--seo-ink-2`, sentence case, each group named by its label.
 Each entry shows its **value under its label**, across the menu's width, up to
 two lines, with the whole value on hover; an empty value reads "Empty for this

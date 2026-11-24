@@ -2,11 +2,11 @@ import { useId, useState } from 'react';
 
 import { useApp } from '../App';
 import { socialImage, texts } from '../model';
-import { entriesFor } from '../values';
+import { entriesFor, inSentence, noItemHas, sameValue } from '../values';
 import { ImageRow } from './MediaPicker';
 import { SocialPreview } from './Previews';
 import { SuggestButton, TextSuggest } from './Suggest';
-import { ValueField } from './Value';
+import { ValueField, stateWords } from './Value';
 
 export function SocialTab() {
   const { state, dispatch, openSheet, ...app } = useApp();
@@ -28,14 +28,26 @@ export function SocialTab() {
     server.separator,
     server.site.values.title_end,
   );
-  // The type's image fields, for "From each Article".
+  // The type's image fields, for "From each Article": fields only, never a
+  // worked-out value.
   const fields = page
     ? undefined
     : entriesFor('social.image', 'image', 'template', view.lookup, target.label)
-        .filter((entry) => entry.group !== 'Page' && !entry.disabled)
+        .filter((entry) => 'source' in entry.value && !entry.disabled)
         .map((entry) => ({ value: entry.value, label: entry.full, image: entry.image }));
   const value = social.image;
   const linked = !!value && 'source' in value;
+  // The Image value it follows, named by the field it reads ("Photo"); with
+  // no item to preview, by the field it would read.
+  const via = view.facts.image?.via;
+  const fromImage = from === 'Image' || (!page && !value && !view.lookup.resolvable && !!via);
+  // No item of the type has an image, and no site default stands in: said
+  // as its menu and Checks say it.
+  const noneHave = !page && !value && from === 'No image' && noItemHas('image', view.lookup);
+  // The description follows its default, unset or stored as that default:
+  // so does the social description, as Checks reads it.
+  const description = view.effective.description;
+  const followsDescription = !description || sameValue(description, { fact: 'description' });
   const library = () =>
     openSheet({
       kind: 'image',
@@ -93,6 +105,8 @@ export function SocialTab() {
         label="Image"
         kind="image"
         linkable={!page}
+        // Its menu leaves out the Image it follows by default.
+        byDefault={{ fact: 'image' }}
         group
         library={library}
         source={
@@ -103,15 +117,18 @@ export function SocialTab() {
               : `Set for every ${target.label}`
             : linked && !link
               ? `From each ${target.label}`
-              : from === 'Image'
-                ? 'From the Image field'
+              : fromImage
+                ? // The Default box says "Default · from ‹via›": said once.
+                  !page && !value && via
+                  ? null
+                  : `From the ${via ?? 'Image'} field`
                 : from
         }
         resetTip="the default image"
         instead={
           link &&
-          (from === 'Image'
-            ? 'its Image field is used'
+          (fromImage
+            ? `its ${via ?? 'Image'} field is used`
             : from === 'Site default image'
               ? 'the site default image is used'
               : 'no image is shared')
@@ -123,12 +140,14 @@ export function SocialTab() {
             // The link, and what it gives for the previewed item; at template
             // scope the default it follows, as a box's tag.
             tag={
-              row.imageTag ??
-              (!page && !value && (from === 'Image' || from === 'Site default image')
-                ? { text: `Default · ${from}`, look: 'default' }
-                : undefined)
+              value || fromImage || noneHave
+                ? row.imageTag
+                : !page && from === 'Site default image'
+                  ? { text: `Default · ${from}`, look: 'default' }
+                  : undefined
             }
-            state={row.imageState}
+            // With no item to preview, the field it would read and no image.
+            state={(value || noneHave ? row.imageState : undefined) ?? (!page && !value && row.shown.status === 'none' ? stateWords('none', inSentence(target.label)) : undefined)}
             onUnlink={row.linked && !row.disabled ? () => row.unlink() : undefined}
             disabled={field.disabled}
             minWidth={600}
@@ -156,7 +175,9 @@ export function SocialTab() {
         label="Description"
         kind="text"
         linkable={!page}
-        defaultWords={{ tag: 'Description', text: unset.social_description }}
+        // While the description follows its default, so does this: unset,
+        // or set to that same default.
+        defaultWords={{ tag: 'Description', text: unset.social_description, ...(followsDescription ? { fact: 'description' as const } : {}) }}
         instead="the description is used"
         fallback="Same as description"
         resetTip="the description"

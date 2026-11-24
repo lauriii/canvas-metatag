@@ -125,6 +125,13 @@ final class SourcesTest extends CanvasKernelTestBase {
     // One long plain text gives its lines to a list; a short one does not.
     self::assertTrue($row('Summary')['lines']);
     self::assertArrayNotHasKey('lines', $row('Byline'));
+    // A whole text field named for a value says so; a formatted text with a
+    // summary, a part or a field through a reference never is.
+    self::assertSame(['description'], $row('Summary')['named']);
+    self::assertArrayNotHasKey('named', $row('Byline'));
+    self::assertArrayNotHasKey('named', $row('Body'));
+    self::assertArrayNotHasKey('named', $rows[self::ARTICLE . 'field_body␞␟summary']);
+    self::assertArrayNotHasKey('named', $row('Writer › Title'));
     // Dates, addresses, numbers; a decimal keeps its digits.
     self::assertSame(['date'], $row('When')['kinds']);
     self::assertSame(['address'], $row('More')['kinds']);

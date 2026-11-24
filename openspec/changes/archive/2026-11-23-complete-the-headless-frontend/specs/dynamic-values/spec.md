@@ -2,13 +2,13 @@
 
 ### Requirement: A page's and a node's own description and image
 
-The Description fact MUST be, for a Canvas page, its Canvas description field;
-for a node, the summary of its first formatted text field with a summary, else
-its first plain or formatted text field named for a description (value-links),
-else that formatted field's text cut at a word boundary within 160 characters.
-The Image fact MUST be, for a Canvas page, the image of its image media; for a
-node, the first image field that resolves. "First" MUST follow the order of the
-type's form.
+The Description fact MUST be a Canvas page's description field; for a node,
+the summary of its first formatted text with one, else its first plain or
+formatted text field named for a description (value-links) with text the
+visitor may view, else that formatted text cut at a word boundary within 160
+characters. The Image fact MUST be a Canvas page's image media, or a node's
+first image field that resolves. "First" MUST follow the order of the type's
+form.
 
 #### Scenario: A node's description
 
@@ -34,3 +34,16 @@ type's form.
 
 - **WHEN** the Person type's form shows a Photo field above an Avatar field, both with a public image, and Avatar's machine name sorts first
 - **THEN** its Image fact MUST be the Photo field's image
+
+## ADDED Requirements
+
+### Requirement: A node's description and image name their field
+
+A node's Description and Image facts MUST name the field they come from as the
+link menu names it ("Body › Summary" for a summary), else the first field that
+could give them, also for a type with no item yet.
+
+#### Scenario: A type with no item yet
+
+- **WHEN** the template of a type with a Body and a Hero image field is opened and the type has no item
+- **THEN** its Description fact MUST name Body and its Image fact Hero image as their sources, with no value

@@ -64,10 +64,14 @@ export const IconBtn = forwardRef<HTMLButtonElement, IconBtnProps>(
         {children}
       </button>
     );
+    // A tip that starts with the name ("Change the link for Title · Follows
+    // the default: …") describes the button by the rest: the name is said
+    // once.
+    const rest = tip?.startsWith(`${label} · `) ? tip.slice(label.length + 3) : undefined;
     // tip="": a name that says it all ("Back") needs no tooltip.
     return tip === '' ? button : (
       // A long tip wraps inside the frame, at 200 % zoom too.
-      <Tooltip content={tip ?? label} side={side} maxWidth="min(360px, var(--radix-tooltip-content-available-width, calc(100vw - 16px)))" collisionPadding={8}>
+      <Tooltip content={tip ?? label} aria-label={rest} side={side} maxWidth="min(360px, var(--radix-tooltip-content-available-width, calc(100vw - 16px)))" collisionPadding={8}>
         {button}
       </Tooltip>
     );

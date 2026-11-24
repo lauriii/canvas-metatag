@@ -228,6 +228,68 @@ export function sentences(text: string, room: number): string {
   return cut.join('').replace(/[ ,;:]+$/, '') + '…';
 }
 
+/**
+ * A type's label inside a sentence: "Event" reads "event", while a label
+ * that starts with an abbreviation ("FAQ page") stays as written.
+ */
+export const inSentence = (label: string) =>
+  /^\p{Lu}\p{Lu}/u.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1);
+
+/**
+ * Whether a field is named for the value a place takes, as the server says
+ * (Values::isNamedFor(), the rule the Description fact reads it by). The
+ * place's value is its last key: a description, a title or a headline.
+ */
+export function namedFor(path: string, row: Pick<SourceRow, 'named'>): boolean {
+  const key = path.split('.').at(-1);
+  return !!row.named?.includes(key === 'headline' ? 'title' : (key as 'description' | 'title'));
+}
+
+/**
+ * At template scope, whether no item of the type can have a fact: a node's
+ * Description and Image read a field of the type, and it has none.
+ */
+export const noItemHas = (fact: Fact, lookup: Lookup): boolean =>
+  (fact === 'description' || fact === 'image') && lookup.facts[fact]?.via === undefined;
+
+/** What an unset detail says of the worked-out value it follows, by default. */
+const DETAIL_FROM: Partial<Record<Fact, string>> = {
+  title: 'From the page title',
+  description: 'Same as description',
+  image: 'From the Image field',
+};
+
+/**
+ * Beside an unset detail that follows a fact (SchemaTab): where its value
+ * comes from. An image names the field the Image reads ("From the Hero image
+ * field"); at template scope, on a type none of whose items has an image, it
+ * says so instead.
+ */
+export function detailFrom(fact: Fact, lookup: Lookup, template: boolean, type: string): string {
+  const via = fact === 'image' ? lookup.facts.image?.via : undefined;
+  return via
+    ? `From the ${via} field`
+    : fact === 'image' && template && noItemHas('image', lookup)
+      ? `No ${type} has one`
+      : (DETAIL_FROM[fact] ?? 'From the page');
+}
+
+/**
+ * The facts structured data reads (SchemaGraph::build()): its Description is
+ * the description as the head gives it. That reads the field its default
+ * reads ("from Body › Summary") only while the description follows the
+ * default; one set for the place reads what is set, so `via` is '' (no one
+ * field, though every item has it).
+ */
+export function detailLookup(lookup: Lookup, description: string, own: Value | undefined): Lookup {
+  const fact = lookup.facts.description;
+  if (!fact) {
+    return lookup;
+  }
+  const follows = !own || sameValue(own, { fact: 'description' });
+  return { ...lookup, facts: { ...lookup.facts, description: { ...fact, value: description, ...(follows ? {} : { via: '' }) } } };
+}
+
 /** The kind of value each fact gives. As Values::FACTS. */
 export const FACT_KINDS: Record<Fact, Kind> = {
   title: 'text',
@@ -294,6 +356,15 @@ export interface Shown {
 }
 
 const NONE: Shown = { status: 'none', value: '', text: '', image: null };
+
+/**
+ * What a box that follows a default given as words shows (the social
+ * description, "Same as description"): those words, "Empty for this
+ * ‹type›" when the previewed item gives none, and nothing to preview
+ * without an item.
+ */
+export const wordsShown = (text: string, resolvable: boolean): Shown =>
+  !resolvable ? NONE : { status: text ? 'ok' : 'empty', value: text, text, image: null };
 
 /** The kind of the value in one place of the values. */
 export function kindOf(path: string, props: SchemaProp[] = []): Kind {
@@ -420,6 +491,19 @@ export function composed(value: { parts: Part[] }, form: 'words' | 'line', looku
 }
 
 /**
+ * What a composer's parts give the item, as one text; with `without`, as
+ * they would for an item that lacks that field, wherever it is used.
+ */
+export function partsText(parts: Part[], form: 'words' | 'line', lookup: Lookup, without?: Part): string {
+  const gone = without && !('text' in without) ? keyOf(without) : null;
+  const folded = fold(parts.map((part) => ('text' in part || keyOf(part) !== gone ? part : { source: { sourceType: 'entity-field' as const, expression: '#without' } })));
+  if (!folded) {
+    return '';
+  }
+  return 'parts' in folded ? composed(folded, form, lookup).join('').replace(/\s+/g, ' ').trim() : resolve(folded, form, lookup).text;
+}
+
+/**
  * The text a value gives for the item in a form, '' for none; a
  * composition's segments: what texts() takes.
  */
@@ -502,7 +586,7 @@ export interface Entry {
   label: string;
   /** The whole path: "Venue › Street address". */
   full: string;
-  /** "Page" for facts, the type's name for its fields. */
+  /** "Automatic" for facts, the type's name for its fields. */
   group: string;
   /** The reference it goes through, a level of the menu; null at the top. */
   level: string | null;
@@ -515,13 +599,31 @@ export interface Entry {
   disabled?: string;
   /**
    * What a fact is, said instead of its value when a field listed above
-   * gives the same: "The first image it has".
+   * gives the same: "Its title". A fact that reads a field says which beside
+   * its value instead.
    */
   note?: string;
   /** The referenced item's own name: what a filter for the reference finds first. */
   names?: true;
   /** Long text, linked whole: never added to a title-like composition. */
   long?: true;
+  /** A fact: the field it reads ("Summary"), said as "from Summary". */
+  from?: string;
+  /**
+   * A field named for the value, or the field the place's worked-out
+   * default reads (readsVia()): first while nothing is typed.
+   */
+  named?: true;
+  /**
+   * A fact no item of the type has: listed last in its group, disabled, so
+   * that the reason shows without opening the fold.
+   */
+  unavailable?: true;
+  /**
+   * A field told apart from a fact by its machine name ("Description
+   * (body)"): its own names, for a menu that does not list that fact.
+   */
+  untold?: { label: string; full: string };
 }
 
 /** Why long text is never a part of a title-like composition. */
@@ -551,21 +653,20 @@ export function fitsPart(part: unknown, form: 'words' | 'line', lookup: Lookup):
   return !!row && givesWords(row) && !(form === 'line' && row.long);
 }
 
-/** What each fact is, in words. */
-function factNote(fact: Fact, lookup: Lookup): string {
-  const via = lookup.facts[fact]?.via;
-  return {
-    title: 'Its title',
-    description: via ? `The ${via} summary, else the start of the ${via}` : 'Its description',
-    site: 'The site name',
-    url: 'Its address',
-    author: "Its author's name",
-    published: 'When it was first published',
-    modified: 'When it was last changed',
-    identity: 'Your site',
-    image: 'The first image it has',
-  }[fact];
-}
+/**
+ * What each fact that reads no field is, in words. At template scope a
+ * Description or Image either reads a field, and says "from ‹via›" instead,
+ * or no item of the type has it: neither needs a note.
+ */
+const FACT_NOTES: Partial<Record<Fact, string>> = {
+  title: 'Its title',
+  site: 'The site name',
+  url: 'Its address',
+  author: "Its author's name",
+  published: 'When it was first published',
+  modified: 'When it was last changed',
+  identity: 'Your site',
+};
 
 /**
  * The facts a place may link to, by the rules of its scope (Values::value()):
@@ -593,7 +694,11 @@ export function factsFor(
 }
 
 /**
- * The entries of a place's link menu: the type's fields, then the facts.
+ * The entries of a place's link menu: the type's fields, then the facts
+ * ("Automatic"). In every mode of the menu: a fact that no item of the type
+ * can have is listed last in its group, disabled ("No ‹type› has one"), and
+ * fields named for the value, and the field its default reads, are marked to
+ * come first (tree()).
  *
  * `choices`: the options of a choice detail; only a list field whose value
  * is one of them fits it.
@@ -619,22 +724,32 @@ export function entriesFor(
   const factNames = form && scope === 'template' ? TEXT_FACTS : factsFor(path, kind, scope);
   const facts: Entry[] = factNames.map((fact) => {
     const shown = resolve({ fact }, form ?? kind, lookup);
+    const from = lookup.facts[fact]?.via;
+    const none = !choices && !(items === 'list' && kind === 'text') && scope === 'template' && noItemHas(fact, lookup);
     return {
       key: `fact:${fact}`,
       value: { fact },
       label: lookup.facts[fact]?.label ?? fact,
       full: lookup.facts[fact]?.label ?? fact,
       // A reference's publisher is its own group, first.
-      group: kind === 'ref' ? 'This site' : 'Page',
+      group: kind === 'ref' ? 'This site' : 'Automatic',
       level: null,
       kind,
       shown: shown.text,
       image: shown.image,
       status: shown.status === 'none' ? 'none' : shown.status === 'ok' ? 'ok' : 'empty',
       // A fact is one value: never a list of text.
-      disabled: choices ? NOT_AN_OPTION : items === 'list' && kind === 'text' ? ONE_VALUE : undefined,
+      disabled: choices
+        ? NOT_AN_OPTION
+        : items === 'list' && kind === 'text'
+          ? ONE_VALUE
+          : none
+            ? `No ${inSentence(typeLabel)} has one`
+            : undefined,
       // The description is long text: linked whole, never a part of a title.
       ...(form === 'line' && fact === 'description' ? { long: true as const } : {}),
+      ...(from ? { from } : {}),
+      ...(none ? { unavailable: true as const } : {}),
     };
   });
   if (scope !== 'template') {
@@ -671,6 +786,7 @@ export function entriesFor(
               ? 'Hidden from visitors'
               : undefined,
       names: row.names,
+      ...(namedFor(path, row) ? { named: true as const } : {}),
       note: page ? (shown ? `Its page: ${shown}` : 'Its page') : own === kind && !choices && !form ? itemsNote(row, items) : undefined,
     };
   });
@@ -709,17 +825,38 @@ export function entriesFor(
   for (const entry of fields) {
     if (counts[entry.full] > 1) {
       const row = lookup.sources.find((one) => one.source.expression === entry.key)!;
+      const alone = fields.filter((one) => one.full === entry.full).length === 1;
+      // A fact that reads this field names it as the menu does: "from
+      // Description (body)", never "Description · from Description".
+      for (const fact of facts) {
+        if (fact.from === entry.full && alone) {
+          fact.from = `${entry.full} (${row.field})`;
+        }
+      }
+      if (alone) {
+        entry.untold = { label: entry.label, full: entry.full };
+      }
       entry.label = `${entry.label} (${row.field})`;
       entry.full = `${entry.full} (${row.field})`;
     }
   }
+  // The field the place's default reads ("Body › Summary") leads, as a field
+  // named for it does: it is what the Default box names.
+  const key = path.split('.').at(-1);
+  const via = key === 'description' || key === 'image' ? lookup.facts[key]?.via : undefined;
+  for (const entry of fields) {
+    if (readsVia(entry, via)) {
+      entry.named = true;
+    }
+  }
   // A fact that gives what a field above gives says what it is instead: two
-  // rows that read alike would leave the editor to guess.
+  // rows that read alike would leave the editor to guess. One that reads a
+  // field already tells itself apart: "· from Summary" beside its value.
   const same = (entry: Entry) => `${entry.image?.thumb ?? ''}\u0000${entry.shown}`;
   const given = new Set(fields.filter((entry) => !entry.disabled && (entry.shown || entry.image)).map(same));
   for (const entry of facts) {
-    if ((entry.shown || entry.image) && given.has(same(entry))) {
-      entry.note = factNote((entry.value as { fact: Fact }).fact, lookup);
+    if (!entry.from && (entry.shown || entry.image) && given.has(same(entry))) {
+      entry.note = FACT_NOTES[(entry.value as { fact: Fact }).fact];
     }
   }
   // At template scope the type's own fields come first: they are what a link
@@ -734,6 +871,129 @@ export function entriesFor(
  */
 export const entriesIn = (entries: Entry[], mode: 'link' | 'add' | 'replace'): Entry[] =>
   mode === 'link' ? entries : entries.map((entry) => (entry.long && !entry.disabled ? { ...entry, disabled: TOO_LONG } : entry));
+
+/**
+ * Whether an entry is the field a worked-out value reads (FactInfo.via):
+ * "Body › Summary"; for an image, the image of the field it names ("Photo ›
+ * Image" for "Photo"). A field told apart from a fact by its machine name
+ * ("Description (body)") is still the field its label names.
+ */
+export function readsVia(entry: Entry, via: string | undefined): boolean {
+  if (!via || !('source' in entry.value)) {
+    return false;
+  }
+  const told = `${via} (${machineName(entry.key) ?? ''})`;
+  return entry.full === via || entry.full === told || (entry.kind === 'image' && entry.full.startsWith(`${via} › `));
+}
+
+/**
+ * What a value's box says before its value (Value.tsx): its tag, the field
+ * a worked-out value reads, and, where no item of the type can have the
+ * default, the value line in place of "Empty for this ‹type›".
+ *
+ * A default is named as one, with its source only where it is not the place
+ * ("Default · First published"); a default typed in the registry is the
+ * default, not text anybody typed. A worked-out value says which field it
+ * reads: "Default · from Summary".
+ */
+export function boxTag(box: {
+  linked: boolean;
+  /** The link, or the default the place follows. */
+  value: Value | undefined;
+  /** tagOf() the value. */
+  source: string;
+  /** The place's own label: "Description". */
+  label: string;
+  lookup: Lookup;
+  template: boolean;
+  /** The type in a sentence: "bookmark". */
+  type: string;
+}): { tag: string; from?: string; none?: string } {
+  const fact = box.value && 'fact' in box.value ? box.value.fact : undefined;
+  // By its label alone: "from Description" always names a field, so the
+  // box never needs a machine name to tell it apart.
+  const from = fact ? box.lookup.facts[fact]?.via : undefined;
+  const none = box.template && fact && noItemHas(fact, box.lookup) ? `No ${box.type} has one` : undefined;
+  const tag = box.linked
+    ? box.source
+    : box.source === box.label || (!!box.value && 'text' in box.value)
+      ? from ? `Default · from ${from}` : 'Default'
+      : `Default · ${box.source}${from ? `, from ${from}` : ''}`;
+  return { tag, ...(from ? { from } : {}), ...(none ? { none } : {}) };
+}
+
+/**
+ * The detail of "Add words or fields", which turns a box into a composer
+ * holding its value as the first chip: "Keep Summary and add to it" for a
+ * link, "Start from Title" for a default, "Keep the default and add to it"
+ * for a default named like its place ("Start from Description" on
+ * Description goes in a circle). A value a composition can't hold starts
+ * empty.
+ */
+export const startWords = (kept: boolean, linked: boolean, source: string, label: string): string =>
+  !kept ? 'Type words and add fields' : linked ? `Keep ${source} and add to it` : source === label ? 'Keep the default and add to it' : `Start from ${source}`;
+
+/**
+ * Whether composing keeps a box's value as its first chip: one a
+ * composition can hold, and not a default no item of the type has, which
+ * would be a chip that is always empty.
+ */
+export const keptAsChip = (value: Value | undefined, form: 'words' | 'line', lookup: Lookup, template: boolean): value is Value =>
+  !!value && partsOf(value).every((part) => fitsPart(part, form, lookup)) && !(template && 'fact' in value && noItemHas(value.fact, lookup));
+
+/**
+ * A menu that links the whole value leaves out the default the place
+ * follows: picking it would change nothing, and the Default box and Reset
+ * already return to it. A menu that adds to a composition keeps it. A
+ * default no item of the type has stays, disabled, last in its group: its
+ * "No ‹type› has one" is why nothing fits.
+ */
+export function withoutDefault(entries: Entry[], byDefault: Value | null | undefined): Entry[] {
+  if (!byDefault) {
+    return entries;
+  }
+  const left = entries.filter((entry) => entry.unavailable || !sameValue(entry.value, byDefault));
+  // A field told apart from the fact left out goes by its label again:
+  // nothing else in the menu reads the same.
+  return left.map((entry) =>
+    entry.untold && !left.some((one) => 'fact' in one.value && one.full === entry.untold!.full) ? { ...entry, ...entry.untold } : entry,
+  );
+}
+
+/**
+ * What a value's box says to assistive technology: where the value comes
+ * from, then what it gives ("Linked to Site name. This article: Example.").
+ * A worked-out value is named by its label, and says the field it reads.
+ */
+export function boxSaid(box: {
+  linked: boolean;
+  broken: boolean;
+  /** tagOf() the value. */
+  source: string;
+  /** "Article › " before a field of the type. */
+  group: string;
+  /** The field a worked-out value reads. */
+  from?: string;
+  /** brokenWhy() of a broken link. */
+  why: string;
+  /** The type in a sentence: "article", "page". */
+  type: string;
+  /** What the default is: "each article's description". */
+  defaultName: string;
+  /** What it gives for the item, as a sentence. */
+  said: string;
+}): string {
+  const from = box.from ? `, from ${box.from}` : '';
+  if (!box.linked) {
+    return `${followsDefault(box.defaultName, box.from)}. ${box.said}`;
+  }
+  return box.broken
+    ? `Linked to ${box.source}, which ${box.why}. Each ${box.type} uses its default.`
+    : `Linked to ${box.group}${box.source}${from}. ${box.said}`;
+}
+
+/** A default and the field it reads: the box's description and the link button's tooltip. */
+export const followsDefault = (defaultName: string, from?: string) => `Follows the default: ${defaultName}${from ? `, from ${from}` : ''}`;
 
 const NOT_AN_OPTION = 'Not one of the options';
 const ONE_VALUE = 'One value, not a list';
@@ -765,16 +1025,17 @@ const folded = (text: string) =>
 /** The rows of a menu: entries, and levels to open. */
 export type MenuRow =
   | { type: 'entry'; entry: Entry; deep: boolean }
-  | { type: 'level'; level: string; group: string; count: number };
+  | { type: 'level'; level: string; group: string; count: number; marked?: true };
 
 /** The level that holds the entries that do not fit: they come last, folded. */
 export const FOLD = '#fold';
 
 /**
  * Where a menu lists an entry when nothing is typed: the fold for one that
- * does not fit (in a level too), else its level or the top.
+ * does not fit (in a level too), else its level or the top. A fact no item
+ * has stays at the top, last in its group: its reason is the answer.
  */
-export const levelOf = (entry: Entry): string | null => (entry.disabled ? FOLD : entry.level);
+export const levelOf = (entry: Entry): string | null => (entry.disabled && !entry.unavailable ? FOLD : entry.level);
 
 /** "4 fields that aren't text": the fold's row. */
 export function foldLabel(entries: Entry[], kind: Kind): string {
@@ -816,11 +1077,17 @@ function rank(entry: Entry, query: string): number | null {
  * a level: its entries. A filter matches labels, paths and values in every
  * level: what fits first, then the best matches; a match inside a level is
  * listed at the top with its path.
+ *
+ * `marked`: an entry the menu marks ("Default"); the level that holds it is
+ * marked too, so it is found without opening every level.
  */
-export function tree(entries: Entry[], level: string | null, filter: string): MenuRow[] {
+export function tree(entries: Entry[], level: string | null, filter: string, marked?: (entry: Entry) => boolean): MenuRow[] {
   // An old token typed from memory: "{title}" finds Title.
   const query = folded(filter.trim()).replace(/^\{|\}$/g, '');
   if (query) {
+    // Ranked across groups, on purpose: the best match is first and active,
+    // so Enter picks it ("{title}" adds Title, not Venue › Title), and a
+    // group's heading follows its best match.
     return entries
       .map((entry, index) => ({ entry, index, rank: rank(entry, query) }))
       .filter((one) => one.rank !== null)
@@ -845,23 +1112,27 @@ export function tree(entries: Entry[], level: string | null, filter: string): Me
     if (at === null) {
       rows.push({ type: 'entry', entry, deep: false });
     } else if (at !== FOLD) {
-      const known = levels.get(at);
+      let known = levels.get(at);
       if (known) {
         known.count++;
       } else {
-        const row = { type: 'level' as const, level: at, group: entry.group, count: 1 };
-        levels.set(at, row);
-        rows.push(row);
+        known = { type: 'level' as const, level: at, group: entry.group, count: 1 };
+        levels.set(at, known);
+        rows.push(known);
+      }
+      if (marked?.(entry)) {
+        known.marked = true;
       }
     }
   }
-  // Within a group, what fits first: the type's own fields, then a part of
-  // one ("Image › Alternative text"), then the references to open; each in
-  // the order of the form.
+  // Within a group, what fits first: the fields named for the value, the
+  // type's other fields, then a part of one ("Image › Alternative text"),
+  // then the references to open, each in the order of the form; last, a
+  // fact no item has.
   const groups = [...new Set(rows.map((row) => (row.type === 'entry' ? row.entry.group : row.group)))];
   const place = (row: MenuRow) => [
     groups.indexOf(row.type === 'entry' ? row.entry.group : row.group),
-    row.type === 'level' ? 2 : row.entry.label.includes(' › ') ? 1 : 0,
+    row.type === 'level' ? 3 : row.entry.unavailable ? 4 : row.entry.named ? 0 : row.entry.label.includes(' › ') ? 2 : 1,
   ];
   rows.sort((a, b) => {
     const [x, y] = [place(a), place(b)];
@@ -931,18 +1202,28 @@ export const partSentence = (label: string, status: Shown['status'], type: strin
 
 /**
  * A composer's description: the item's result (else what its default gives),
+ * the field each worked-out value reads ("Description comes from Summary"),
  * then each part that gives nothing and why, one full stop at the end.
  */
 export function compositionSaid(
   type: string,
   result: string,
   fallback: string,
-  parts: { label: string; status: Shown['status']; why?: string }[],
+  parts: { label: string; status: Shown['status']; why?: string; from?: string }[],
 ): string {
   // Each sentence ends once: a result may end with its own mark.
   const ended = (text: string) => (/[.!?…。！？]["'”’)\]]*$/u.test(text) ? text : `${text}.`);
   return [
     `This ${type}: ${result || fallback || 'nothing'}`,
+    // Once per value, however often it is a part.
+    ...new Set(parts.filter((one) => one.from).map((one) => `${one.label} comes from ${one.from}`)),
     ...parts.filter((one) => one.status !== 'ok' && one.status !== 'none').map((one) => partSentence(one.label, one.status, type, one.why)),
   ].map(ended).join(' ');
 }
+
+/**
+ * A chip's tooltip: its value or its state in words; for a worked-out value,
+ * the field it reads ("· from Summary"); then what the item gets without it.
+ */
+export const chipTitle = (own: string, from?: string, without?: string): string =>
+  `${own}${from ? ` · from ${from}` : ''}${without ? `\n${without}` : ''}`;

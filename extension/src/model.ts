@@ -9,6 +9,7 @@ import { dateWords } from './readback';
 import { set as setJson, value as readJson } from './custom/doc';
 import {
   type Form,
+  inSentence,
   type Lookup,
   type ShownImage,
   rowOf,
@@ -25,6 +26,7 @@ import type {
   Pending,
   Registry,
   Resolved,
+  Robots,
   SchemaProp,
   Scope,
   SchemaType,
@@ -521,12 +523,7 @@ export const dirOf = (text: string): 'rtl' | 'ltr' =>
     ? 'rtl'
     : 'ltr';
 
-/**
- * A type's label inside a sentence: "Event" reads "event", while a label
- * that starts with an abbreviation ("FAQ page") stays as written.
- */
-export const inSentence = (label: string) =>
-  /^\p{Lu}\p{Lu}/u.test(label) ? label : label.charAt(0).toLowerCase() + label.slice(1);
+export { inSentence };
 
 /**
  * Output normalization: control and bidi characters removed, whitespace
@@ -637,6 +634,19 @@ export function texts(
   };
 }
 
+/** What an empty description means on a headless site, everywhere the dialog says it. */
+export const NO_DESCRIPTION_SENT = 'No description sent. The frontend decides what to show.';
+
+/**
+ * What the search preview, the link preview's card and the focused field
+ * say for an empty description. On a headless site the frontend decides
+ * what to show, so no place claims what search engines pick.
+ */
+export const emptyDescription = (place: 'search' | 'card' | 'field', headless: boolean): string =>
+  headless
+    ? NO_DESCRIPTION_SENT
+    : { search: 'Search engines will pick text from the page.', card: '', field: 'Empty. Search engines will pick text from the page.' }[place];
+
 // Meters and truncation.
 
 /** Where search results cut text. Every number is an estimate. */
@@ -743,8 +753,6 @@ export interface Meter {
   after: string;
   /** How much of the text is shown, in UTF-16 code units; all of it unless `long`. */
   shown: number;
-  /** The visible sentence, also the meter's aria-valuetext. */
-  sentence: string;
 }
 
 export function meter(
@@ -754,21 +762,13 @@ export function meter(
 ): Meter {
   const { font, desktop, phone } = LIMITS[kind];
   const chars = Array.from(text).length;
-  const count = `${chars} ${chars === 1 ? 'character' : 'characters'}`;
   const base = { chars, ratio: 0, where: null, after: '', shown: text.length };
   if (text === '') {
-    return {
-      ...base,
-      state: 'empty',
-      sentence:
-        kind === 'description'
-          ? 'Empty · search engines will choose text from the page'
-          : '',
-    };
+    return { ...base, state: 'empty' };
   }
   const width = measure(text, font, measurer);
   if (width === null) {
-    return { ...base, state: 'unmeasured', sentence: count };
+    return { ...base, state: 'unmeasured' };
   }
   const ratio = Math.min(
     1,
@@ -785,7 +785,7 @@ export function meter(
     (name) => cuts[name] !== text,
   );
   if (long.length === 0) {
-    return { ...base, ratio, state: 'fits', sentence: `${count} · fits` };
+    return { ...base, ratio, state: 'fits' };
   }
   const where = long.length === 2 ? 'both' : long[0];
   const cut =
@@ -800,9 +800,6 @@ export function meter(
     where,
     after,
     shown: cut.replace(/…$/, '').trimEnd().length,
-    sentence: `${count} · may be cut off${
-      where === 'both' ? '' : where === 'desktop' ? ' on desktop' : ' on phones'
-    } after "…${after}"`,
   };
 }
 
@@ -1858,7 +1855,10 @@ export function footer(state: State): Footer {
       text:
         target.default_langcode && target.default_langcode !== server.langcode
           ? `Draft of the ${name(server.langcode)} version · goes live with the ${name(target.default_langcode)} version`
-          : `Draft · goes live when you publish the ${what}`,
+          : target.scope === 'template' && target.canvas_label
+            ? // The dash of Canvas's label never starts a line.
+              `Draft · listed under Unpublished changes as “${target.canvas_label.replace(/ (?=[—–])/gu, '\u00a0')}”`
+            : `Draft · goes live when you publish the ${what}`,
       actions: ['output'],
     };
   }
@@ -2080,6 +2080,110 @@ export function breadcrumb(url: string): string {
     return url;
   }
 }
+
+/**
+ * The addresses the previews show: the page's public address (Canvas's live
+ * path while it differs from the saved one), the canonical search engines
+ * are asked to show instead, and the link card's host. None at all while the
+ * head carries no address (on a host visitors can't reach): Checks says why.
+ */
+export function shownAddresses(
+  server: StatePayload,
+  shown: Pick<View, 'facts' | 'effective'>,
+  /** Canvas's live alias of a page. */
+  alias: string | undefined,
+): { address: string; elsewhere: string; host: string } {
+  if (server.resolved?.schema.unaddressed) {
+    return { address: '', elsewhere: '', host: '' };
+  }
+  const base = server.origin.url;
+  const saved = shown.facts.url?.value || server.preview?.url || '';
+  let path = '';
+  try {
+    path = new URL(saved).pathname;
+  } catch {
+    // No saved address: the live path is all there is.
+  }
+  let address: string;
+  // The front page is the base itself, whatever its alias; an unchanged
+  // alias keeps the saved address with its language prefix.
+  if (!alias?.startsWith('/') || path === '/' || path.endsWith(alias)) {
+    address = saved || (alias?.startsWith('/') ? base + alias : '');
+  } else {
+    const target = server.target;
+    const prefix =
+      target?.default_langcode &&
+      server.langcode !== target.default_langcode &&
+      path.startsWith(`/${server.langcode}/`)
+        ? `/${server.langcode}`
+        : '';
+    address = base + prefix + alias;
+  }
+  // A canonical set here shows at once; a path is put on the public address.
+  const canonical = shown.effective.canonical?.trim() ?? '';
+  const elsewhere = canonical.startsWith('/') ? base + canonical : canonical;
+  let host = '';
+  try {
+    host = new URL(base).host;
+  } catch {
+    // No public address: the card shows none.
+  }
+  return { address, elsewhere: elsewhere === address ? '' : elsewhere, host };
+}
+
+/** The search result's description, and whether it is a note rather than the text. */
+export function resultDescription(
+  description: string,
+  robots: Robots | undefined,
+  headless: boolean,
+  measurer: Measurer,
+): { text: string; muted: boolean } {
+  if (robots?.nosnippet === true || robots?.max_snippet === 0) {
+    return { text: 'No description: text previews are off', muted: true };
+  }
+  return description
+    ? { text: previewText('description', description, measurer), muted: false }
+    : { text: emptyDescription('search', headless), muted: true };
+}
+
+/**
+ * What the Structured data view says in place of its read-back, '' for
+ * nothing: while the head carries no address, no structured data is sent,
+ * so there is nothing to read back and no search feature to earn.
+ */
+export const unsentSchema = (report: { unaddressed?: boolean } | undefined): string =>
+  report?.unaddressed ? 'No structured data is sent: page addresses are left out.' : '';
+
+/**
+ * The search result preview's accessible name: what it shows, its
+ * description or the sentence in its place ("Search engines will pick text
+ * from the page."), as the link preview's name does.
+ */
+export function resultName(shown: {
+  hidden: boolean;
+  site: string;
+  /** breadcrumb() of the address; '' for none. */
+  crumbs: string;
+  title: string;
+  description: { text: string; muted: boolean };
+}): string {
+  const where = [shown.site, shown.crumbs.replaceAll(' › ', ', ')].filter(Boolean).join(', ');
+  const { text, muted } = shown.description;
+  const said = muted ? text.replace(/([^.!?])$/u, '$1.') : `Description: ${text}`;
+  return `${shown.hidden ? 'Not shown in search results. ' : ''}Search result preview, estimate. ${where ? `${where}. ` : ''}Title: ${shown.title}. ${said}`;
+}
+
+/**
+ * Beside the site's title example: the example is the site's pattern, and
+ * the previewed item may end its title its own way ("Every Article sets its
+ * own ending."); '' when it follows the site.
+ */
+export const ownEndingNote = (target: StatePayload['target'], source: Source): string =>
+  !target || (source !== 'target' && source !== 'default')
+    ? ''
+    : target.scope === 'template'
+      ? `Every ${target.label} sets its own ending.`
+      : 'This page sets its own ending.';
 
 /** An ISO date or date-time in words, as written: the time is the site's own. */
 export const dateText = (value: string): string => dateWords(value, 'en') ?? value;

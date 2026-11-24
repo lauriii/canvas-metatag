@@ -85,6 +85,15 @@ async function listen(frame: FrameLocator) {
 }
 const said = (frame: FrameLocator) => frame.locator('body').evaluate(() => (window as unknown as { said: string[] }).said);
 
+/**
+ * Tab, or Shift+Tab with `back`, as a keyboard user presses it. WebKit's
+ * desktop default moves Tab only between text fields, past buttons and
+ * links; Alt+Tab is its key for every control, as Tab is once the user has
+ * turned on Tab to every item.
+ */
+const tab = (page: Page, back = false) =>
+  page.keyboard.press(`${back ? 'Shift+' : ''}${page.context().browser()?.browserType().name() === 'webkit' ? 'Alt+' : ''}Tab`);
+
 /** The text of each range a composer has marked with a CSS highlight. */
 const highlighted = (frame: FrameLocator, name: string) =>
   frame.locator('body').evaluate((_, key) => {
@@ -173,7 +182,9 @@ test('a title composed by keyboard: chips, the result, the head', async ({ drupa
   // says what the title is made of.
   await expect(button(frame, 'Add a field to Title')).not.toHaveAttribute('tabindex', '-1');
   await button(frame, 'Add a field to Title').hover();
-  await expect(frame.getByRole('tooltip')).toContainText('Add a field to Title · Made of Title, “in”, Venue › City, “·”, Starts');
+  await expect(frame.locator('.rt-TooltipContent')).toContainText('Add a field to Title · Made of Title, “in”, Venue › City, “·”, Starts');
+  // Its name is said once: the tip after the name describes it.
+  await expect(button(frame, 'Add a field to Title')).toHaveAccessibleDescription('Made of Title, “in”, Venue › City, “·”, Starts');
   expect(await said(frame)).toEqual(expect.arrayContaining(['Venue › City added to Title.', 'Starts added to Title.']));
 
   // Stored as parts, in the template's draft.
@@ -652,11 +663,11 @@ test('arrows, Backspace, paste, the preview and Reset beside chips', async ({ dr
   await expect(link.getByRole('option').first()).toBeInViewport();
   await expect(link.getByRole('option', { name: /^Type a title for every/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
-  // The description's menu opens on its current entry, far below: composing
-  // stays in sight, under the filter.
+  // The description's menu opens on its current entry, the field its
+  // default reads: composing stays in sight, under the filter.
   await box(frame, 'Description').click();
   const describe = frame.getByRole('dialog', { name: 'Link Description' });
-  await expect(describe.getByRole('option', { name: /✓|^Description,/ }).first()).toBeVisible();
+  await expect(describe.getByRole('option', { name: /^Description › Summary, Default, / })).toHaveAttribute('data-active');
   await expect(describe.getByRole('option').first()).toHaveAccessibleName('Add words or fields, Keep the default and add to it');
   await expect(describe.getByRole('option').first()).toBeInViewport({ ratio: 1 });
   await page.keyboard.press('Escape');
@@ -668,6 +679,8 @@ test('arrows, Backspace, paste, the preview and Reset beside chips', async ({ dr
   await expect(title).toBeFocused();
   await page.keyboard.type('{');
   await expect(link).toBeVisible();
+  // Still following its default, it may start from it again.
+  await expect(link.getByRole('option').first()).toHaveAccessibleName('Add words or fields, Keep the default and add to it');
   await page.keyboard.type('starts');
   await page.keyboard.press('Enter');
   await expect(box(frame, 'Title')).toBeFocused();
@@ -720,7 +733,7 @@ test('a brace by layout, a box stepped out of, Tab order, announcements and a pa
   await settled(frame);
   await title.focus();
   // Nothing added: Tab shows the box again and goes on to the ending.
-  await page.keyboard.press('Tab');
+  await tab(page);
   await expect(titleBox).toBeVisible();
   await expect(ending).toBeFocused();
   await expect.poll(async () => (await seoState(page, templateQuery)).target?.values?.title, { timeout: 30_000 }).toBeUndefined();
@@ -730,7 +743,7 @@ test('a brace by layout, a box stepped out of, Tab order, announcements and a pa
   await page.keyboard.press('ArrowRight');
   await expect(title).toBeFocused();
   expect((await caret(title)).before).toBe('Title');
-  await page.keyboard.press('Shift+Tab');
+  await tab(page, true);
   await expect(titleBox).toBeVisible();
   await expect(button(frame, 'Change the link for Title')).toBeFocused();
 
@@ -752,14 +765,14 @@ test('a brace by layout, a box stepped out of, Tab order, announcements and a pa
 
   // Tabbing through a composed title: its button, the composer, the ending.
   await button(frame, 'Add a field to Title').focus();
-  await page.keyboard.press('Tab');
+  await tab(page);
   await expect(composed).toBeFocused();
   // Tabbed in, the caret is at the end: `{` adds after the last part.
   await page.keyboard.type('{');
   await expect(add.locator('.seo-menu-where')).toHaveText(/^After “…?.*Helsinki · .+”$/);
   await page.keyboard.press('Escape');
   await expect(composed).toBeFocused();
-  await page.keyboard.press('Tab');
+  await tab(page);
   await expect(ending).toBeFocused();
 
   // A field selected whole shows a ring; its tooltip says what the event
@@ -808,7 +821,7 @@ test('a brace by layout, a box stepped out of, Tab order, announcements and a pa
   await expect(chips(composer(frame, 'Description'))).toHaveText(['Status']);
   expect((await caret(composer(frame, 'Description'))).before).toBe('Status');
   // Nothing added: the box again.
-  await page.keyboard.press('Shift+Tab');
+  await tab(page, true);
   await expect(description).toBeVisible();
   await description.focus();
   // Arrow right: the field as a chip, the caret after it.
@@ -821,7 +834,7 @@ test('a brace by layout, a box stepped out of, Tab order, announcements and a pa
   await page.keyboard.type(' x');
   await page.keyboard.press('Backspace');
   await page.keyboard.press('Backspace');
-  await page.keyboard.press('Tab');
+  await tab(page);
   await expect(description).toBeVisible();
   await expect(description).not.toBeFocused();
   expect(await frame.locator('body').evaluate(() => document.activeElement !== document.body && !document.activeElement?.closest('.seo-field[data-path="description"]'))).toBe(true);
@@ -839,7 +852,7 @@ test('a brace by layout, a box stepped out of, Tab order, announcements and a pa
   await descriptionComposer.focus();
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.press('Backspace');
-  await page.keyboard.press('Tab');
+  await tab(page);
   await expect(description).toBeVisible();
 
   // An emptied composer shows what the event gets instead, and the brace.
@@ -889,7 +902,15 @@ test('another event, a conflict, and a type with nothing to preview', async ({ d
   await expect(result).toHaveCount(0);
   // Another event, with the dialog open: its venue is unpublished, so Venue
   // › City is hidden for it. Every composed result follows.
+  const layoutLoaded = page.waitForResponse((response) => response.url().endsWith(`/layout-content-template/node.event.full/${eventHidden.id}`));
   await previewNode(page, 'event', eventHidden);
+  // The editor's load of its layout sets off the dialog's read-back of the
+  // state, 300 ms on. The other session below writes after that read-back:
+  // before it, the read-back would bring that write in and leave nothing to
+  // refuse.
+  const loaded = await layoutLoaded;
+  const loadedAt = loaded.request().timing().startTime + loaded.request().timing().responseStart;
+  const readBack = page.waitForResponse((response) => response.url().includes('/canvas-metatag/api/state?') && response.request().timing().startTime >= loadedAt);
   // At rest, beside the preview that shows the result: only what is left out.
   await expect(result).toHaveText('Venue › City left out for this event');
   await expect(frame.getByTestId(TEST_ID.search)).toContainText(`${eventHidden.title} · `);
@@ -912,6 +933,7 @@ test('another event, a conflict, and a type with nothing to preview', async ({ d
 
   // Another session writes the template's draft: the next write here is
   // refused, and the dialog turns read-only.
+  await readBack;
   await writeDraft(page, 'content_template/node.event.full', `layout-content-template/node.event.full/${eventHidden.id}`, { robots: { nofollow: true } });
   await page.keyboard.press('End');
   await page.keyboard.type('!');
@@ -1031,6 +1053,103 @@ test('the words that go with a field, an empty field, and a field named like a f
   // The default again.
   await field.getByRole('button', { name: 'Reset Description', exact: true }).click();
   await expect(box(frame, 'Description')).toBeVisible();
+});
+
+test('a worked-out value in a composer: started from, added, replaced, and where it comes from', async ({ drupal, page, browserName }) => {
+  await drupal.login(USERS.editor);
+  // The event's description follows its default, the Description worked out
+  // from its Description › Summary.
+  await openTemplate(page, event.id, 'event');
+  const frame = await openSeo(page);
+  const field = frame.locator('.seo-field[data-path="description"]');
+  const description = composer(frame, 'Description');
+  const reset = field.getByRole('button', { name: 'Reset Description', exact: true });
+  if (await reset.count()) {
+    await reset.click();
+  }
+  const from = 'from Description › Summary';
+
+  // Linking the whole value leaves out the default it follows; composing
+  // starts from it.
+  await box(frame, 'Description').click();
+  const link = frame.getByRole('dialog', { name: 'Link Description' });
+  await expect(link.getByRole('group', { name: 'Automatic' }).getByRole('option', { name: /^Description, / })).toHaveCount(0);
+  // The row the default reads is marked current; choosing it keeps the
+  // default, which is more than a link to that one field.
+  await link.getByRole('option', { name: /, Default, / }).click();
+  await expect(link).toBeHidden();
+  await expect(box(frame, 'Description')).toContainText(`Default · ${from}`);
+  await expect(reset).toHaveCount(0);
+  await box(frame, 'Description').click();
+  await expect(link).toBeVisible();
+  await link.getByRole('option', { name: 'Add words or fields, Keep the default and add to it' }).click();
+  await expect(description).toBeFocused();
+  // The chip is named by the value's label alone; its tooltip and the
+  // composer's description say the field it reads.
+  await expect(chips(description)).toHaveText(['Description']);
+  await expect(chips(description).first()).toHaveAttribute('title', new RegExp(` · ${from}$`));
+  await expect(description).toHaveAccessibleDescription(new RegExp(`^This event: .*Description comes ${from}\\.`, 's'));
+  // With the mouse, its "+" opens the add menu, and the composition that
+  // holds only the default stays.
+  await field.getByRole('button', { name: 'Add a field to Description' }).click();
+  const adding = frame.getByRole('dialog', { name: 'Add a field to Description' });
+  await expect(adding).toBeVisible();
+  await expect(chips(description)).toHaveText(['Description']);
+  await page.keyboard.press('Escape');
+  await expect(adding).toBeHidden();
+  await expect(description).toBeFocused();
+
+  // Adding to the composition offers the default, saying where it comes
+  // from; the groups are named in add mode too.
+  await page.keyboard.type(' Free delivery.');
+  await page.keyboard.type('{');
+  const add = frame.getByRole('dialog', { name: 'Add a field to Description' });
+  await expect(add).toBeVisible();
+  await expect(add.getByRole('group')).toHaveCount(2);
+  await expect(add.getByRole('group').nth(0)).toHaveAccessibleName('Event');
+  await expect(add.getByRole('group').nth(1)).toHaveAccessibleName('Automatic');
+  const offered = add.getByRole('group', { name: 'Automatic' }).getByRole('option', { name: new RegExp(`^Description, ${from}, `) });
+  await expect(offered).toBeVisible();
+  await expect(offered.locator('.seo-menu-via')).toHaveText(`· ${from}`);
+  // The "Default" mark is the link menu's only.
+  await expect(add.getByRole('option', { name: /, Default, / })).toHaveCount(0);
+  if (browserName === 'firefox') {
+    await hideAriaElementReflection(page);
+  }
+  const scan = await new AxeBuilder({ page }).include({ fromFrames: [SEO_IFRAME, 'body'] }).analyze();
+  expect(scan.violations.map(({ id, nodes }) => `${id}: ${nodes.map(({ target }) => target.join(' ')).join(', ')}`)).toEqual([]);
+  await offered.click();
+  await expect(add).toBeHidden();
+  await expect(chips(description)).toHaveText(['Description', 'Description']);
+
+  // Replacing a chip offers it too.
+  await chips(description).first().click();
+  const replace = frame.getByRole('dialog', { name: 'Replace Description' });
+  await expect(replace).toBeVisible();
+  await expect(replace.getByRole('group', { name: 'Automatic' }).getByRole('option', { name: new RegExp(`^Description, ${from}, `) })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(replace).toBeHidden();
+
+  // In an empty composer, "Link Description" starts from the default too:
+  // its first chip, which leaving gives back as the Default box.
+  await reset.click();
+  await expect(box(frame, 'Description')).toBeVisible();
+  await box(frame, 'Description').focus();
+  await page.keyboard.press('Backspace');
+  await expect(description).toBeFocused();
+  await expect(chips(description)).toHaveCount(0);
+  await page.keyboard.type('{');
+  await expect(link).toBeVisible();
+  const start = link.getByRole('option').first();
+  await expect(start).toHaveAccessibleName('Add words or fields, Keep the default and add to it');
+  // Enter picks a field, never the step on the whole value.
+  await expect(start).not.toHaveAttribute('data-active');
+  await start.click();
+  await expect(description).toBeFocused();
+  await expect(chips(description)).toHaveText(['Description']);
+  await tab(page);
+  await expect(box(frame, 'Description')).toBeVisible();
+  await expect(box(frame, 'Description')).toHaveAccessibleDescription(new RegExp(`^Follows the default: each event's description, ${from}\\.`));
 });
 
 test('the composer that cannot load leaves the dialog working', async ({ drupal, page }) => {

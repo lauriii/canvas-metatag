@@ -3,7 +3,7 @@ import { Fragment } from 'react';
 
 import { useApp } from '../App';
 import { identityGaps } from '../checks';
-import { aiOffText, andList, currencyChoices, placesText, siteTexts } from '../model';
+import { aiOffText, andList, currencyChoices, ownEndingNote, placesText, siteTexts } from '../model';
 import { detailLabel } from '../custom/project';
 import type { SearchFeatures } from '../types';
 import { Field, useHeld } from './Field';
@@ -89,6 +89,7 @@ export function SiteView() {
     ? SEPARATORS
     : [...SEPARATORS, identity.separator].filter(Boolean);
   const example = view ? siteTexts(state, view).title : '';
+  const ownEnding = view ? ownEndingNote(server.target, view.source('title_end')) : '';
 
   return (
     <>
@@ -206,8 +207,11 @@ export function SiteView() {
         note={
           view && (
             <>
-              For {view.facts.title?.value || 'About us'}:{' '}
+              {/* An item that sets its own ending shows another: the
+                  example is what the site's ending would give. */}
+              {ownEnding ? "With the site's ending" : `For ${view.facts.title?.value || 'About us'}`}:{' '}
               <span className="seo-guide-example">{example}</span>
+              {ownEnding && ` · ${ownEnding}`}
             </>
           )
         }

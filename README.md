@@ -368,15 +368,152 @@ controller. If a Canvas update changes that, the status report shows an error
 for "SEO for headless content".
 
 What reaches visitors is the frontend's decision. This is what the Canvas SDK
-packages do with `head`, read in the Canvas 1.x-dev source, not tested against
-running frontends:
+packages do with `head`:
 
 | Package | What it renders from `head` |
 |---|---|
-| `@drupal-canvas/headless-tanstack-start` (`toTanStackHead()`) | Everything, including JSON-LD |
-| `@drupal-canvas/headless-angular` (`CanvasDocumentHead`) | Everything, including JSON-LD |
-| `@drupal-canvas/headless-next` (`toNextMetadata()`) | Title, description, robots, canonical, hreflang, the card hint, and Open Graph title, description, URL, type, site name and image. Not `article:*`, not the `og:image:*` details, not JSON-LD |
-| `@drupal-canvas/headless-nuxt`, `@drupal-canvas/headless-astro`, `@drupal-canvas/headless-react` | Nothing by themselves: the app passes `head` to its own head manager |
+| `@drupal-canvas/headless-next` (`toNextMetadata()`) | Title, description, robots, canonical, hreflang, the card hint, and Open Graph title, description, URL, type, site name and image. It loses `og:image:width`, `og:image:height`, `og:image:alt`, `article:published_time`, `article:modified_time` and the JSON-LD, and a page without a description or a canonical keeps its layout's. A test checks that list against the Canvas release it runs on; the recipe below fills the gaps |
+| `@drupal-canvas/headless-tanstack-start` (`toTanStackHead()`) | Everything, including JSON-LD. Read in the Canvas 1.x-dev source, not tested |
+| `@drupal-canvas/headless-angular` (`CanvasDocumentHead`) | Everything, including JSON-LD. Read in the source, not tested |
+| `@drupal-canvas/headless-nuxt`, `@drupal-canvas/headless-astro`, `@drupal-canvas/headless-react` | Nothing by themselves: the app passes `head` to its own head manager. Read in the source, not tested |
+
+### With `@drupal-canvas/headless-next`
+
+Set the app up as the adapter's own README says first (its `withCanvas()`
+in the framework's config, and its proxy): the recipe adds to that app. On
+the framework's 16.x, a proxy file that only re-exports `canvasMiddleware`
+fails the build ("must export a function"); declare the function:
+
+```ts
+// proxy.ts
+import { canvasMiddleware } from '@drupal-canvas/headless-next/middleware';
+import type { NextRequest } from 'next/server';
+
+export default function proxy(request: NextRequest) {
+  return canvasMiddleware(request);
+}
+```
+
+The page's metadata function returns `canvasMetadata(page.head)`, and the
+page renders `<CanvasJsonLd head={page.head} />` beside its content:
+
+```tsx
+// app/[[...slug]]/page.tsx
+import { fetchPage, isPageRedirect } from '@drupal-canvas/headless-next';
+import { CanvasComponentTree } from '@drupal-canvas/headless-next/CanvasComponentTree';
+import type { Metadata } from 'next';
+import { notFound, permanentRedirect, redirect } from 'next/navigation';
+
+import { CanvasJsonLd, canvasMetadata } from '../../canvas-head';
+
+type Props = { params: Promise<{ slug?: string[] }> };
+
+async function load({ params }: Props) {
+  const { slug = [] } = await params;
+  const page = await fetchPage(`/${slug.join('/')}`);
+  if (!page) notFound();
+  // Drupal's redirects, as the adapter's README says: 301 and 308 are
+  // permanent.
+  if (isPageRedirect(page)) {
+    const { url, statusCode } = page.redirect;
+    if (statusCode === 301 || statusCode === 308) permanentRedirect(url);
+    redirect(url);
+  }
+  return page;
+}
+
+export async function generateMetadata(props: Props): Promise<Metadata> {
+  return canvasMetadata((await load(props)).head);
+}
+
+export default async function Page(props: Props) {
+  const page = await load(props);
+  return (
+    <>
+      <CanvasJsonLd head={page.head} />
+      <CanvasComponentTree tree={page.content} context={page.context} />
+    </>
+  );
+}
+```
+
+The helper is
+[`examples/headless-next/canvas-head.tsx`](examples/headless-next/canvas-head.tsx).
+It is tested with the exact versions in that folder's `package.json`:
+`@drupal-canvas/headless-next` 0.8.0, `@drupal-canvas/headless` 0.11.0, the
+framework 16.4.6 and React 19.3.0.
+
+<!-- canvas-head.tsx -->
+```tsx
+import { serializeJsonForHtml, type PageHead } from '@drupal-canvas/headless';
+import { toNextMetadata } from '@drupal-canvas/headless-next';
+import type { Metadata } from 'next';
+
+// The CMS head is the page's whole head. A member it leaves out means none,
+// never "inherit the layout's": a page without a description or a canonical
+// gets an empty description and no alternates, not the layout's.
+
+/** The page's metadata: toNextMetadata() plus the rows it drops. */
+export function canvasMetadata(head: PageHead): Metadata {
+  const metadata = toNextMetadata(head);
+  const images: Record<string, string>[] = [];
+  const locales: string[] = [];
+  const times: Record<string, string> = {};
+  for (const { property = '', content = '' } of head.meta ?? []) {
+    if (property === 'og:image' || property === 'og:image:url') {
+      images.push({ url: content });
+    } else if (property.startsWith('og:image:') && images.length > 0) {
+      // og:image:width, height, alt, type and secure_url describe the
+      // og:image before them.
+      const key = property.slice('og:image:'.length);
+      images[images.length - 1][key === 'secure_url' ? 'secureUrl' : key] = content;
+    } else if (property === 'og:locale:alternate') {
+      locales.push(content);
+    } else if (property === 'article:published_time') {
+      times.publishedTime = content;
+    } else if (property === 'article:modified_time') {
+      times.modifiedTime = content;
+    }
+  }
+  return {
+    ...metadata,
+    description: metadata.description ?? '',
+    alternates: metadata.alternates ?? null,
+    openGraph: {
+      ...metadata.openGraph,
+      ...(images.length > 0 ? { images } : {}),
+      ...(locales.length > 0 ? { alternateLocale: locales } : {}),
+      ...times,
+    } as Metadata['openGraph'],
+  };
+}
+
+/** The page's structured data, serialized so that no value ends the script. */
+export function CanvasJsonLd({ head }: { head: PageHead }) {
+  return head.script?.map((script, index) => (
+    <script
+      key={index}
+      type={script.type}
+      dangerouslySetInnerHTML={{ __html: serializeJsonForHtml(script.textContent) }}
+    />
+  ));
+}
+```
+<!-- /canvas-head.tsx -->
+
+The empty description and the null alternates are there on purpose. The
+framework merges metadata page over layout, one member at a time. Without
+them, a page whose head has no description keeps the layout's, and the
+framework copies it into the share card's description too; a page whose head
+has no canonical keeps the layout's, so a layout's
+`alternates: { canonical: '/' }` would point it at the home page.
+
+Structured data needs no library. The module's graph already holds the site's
+organization or person (`#identity`) and its website (`#website`), so a layout
+must not add its own; a frontend that adds other nodes references the module's
+`@id`s.
+
+### With the other packages
 
 Where JSON-LD is not rendered for you, render `head.script` yourself, with the
 SDK's serializer, never with plain `JSON.stringify()`:
@@ -408,8 +545,32 @@ marked `UPSTREAM(canvas)`; ARCHITECTURE.md lists every ask:
 
 - A head alter hook in the `canvas_headless` head builder would replace this
   module's decorator of the content controller.
-- `@drupal-canvas/headless-next` should map `article:*` and `og:image:*`, and
-  render `head.script`.
+- `@drupal-canvas/headless-next` should map `og:image:*` and `article:*`,
+  treat an absent description and canonical as none, and export a JSON-LD
+  component. Then the recipe above shrinks to `toNextMetadata()` and that
+  component, and its example file goes.
+
+## Scripting the dialog
+
+The SEO dialog is a Canvas extension in its own frame, titled "SEO", so a
+script that queries Canvas's page finds none of its controls: reach the frame
+by its title first. Inside it, roles and accessible names are the supported
+hooks, the same ones the module's own tests use. The few `data-testid` and
+`data-path` attributes are the module's own and may change without notice.
+For example, the description's link menu on a content type's template, from
+a browser test:
+
+```ts
+const seo = page.frameLocator('iframe[title="SEO"]');
+await seo.getByRole('button', { name: 'Change the link for Description' }).click();
+const menu = seo.getByRole('dialog', { name: 'Link Description' });
+await menu.getByRole('textbox', { name: 'Find a field' }).fill('summary');
+await menu.getByRole('group', { name: 'Article' }).getByRole('option', { name: /^Summary, / }).click();
+await expect(seo.getByRole('combobox', { name: 'Description', exact: true })).toContainText('Summary');
+```
+
+Each group of a link menu is named by its heading: the type's fields under
+the type's name, the values the module works out under "Automatic".
 
 ## Deployment
 
@@ -441,6 +602,23 @@ marked `UPSTREAM(canvas)`; ARCHITECTURE.md lists every ask:
 - Going back to a release before composed values needs the configuration
   restored from before the update: the earlier schema refuses `parts`, and the
   earlier dialog's first save deletes every composition.
+- The status report's "SEO public addresses" row is an error when the public
+  address from the setting or the first frontend is plain http or on a host
+  visitors cannot reach, such as `http://localhost:3000` (a warning on a
+  development copy, and nothing when both are local). Until
+  `canvas_metatag_public_base` is set for the environment, pages served on a
+  production host leave out what would point there: the canonical,
+  `og:url`, hreflang and JSON-LD. A later release replaces both rules with
+  addresses per frontend. Drupal's host is a development host when it is
+  `localhost`, a loopback address, a name under `.localhost`, `.test` or
+  `.invalid`, or under a known local development suffix (listed in
+  `Values::isDevelopmentHost()`). Any other name counts as production, a
+  name under `.local` (`mysite.local`) included: a local frontend that
+  fetches pages from Drupal at an internal name (`http://web`,
+  `host.docker.internal`) gets them without those tags, and Drush reports
+  the error unless given `--uri`. A value of `canvas_metatag_public_base`
+  that is not an absolute http or https address is ignored, and the row
+  says so.
 - To keep a staging site out of search engines, override the site setting in
   its `settings.php`. The dialog shows such pages as hidden and says the
   setting comes from outside:
@@ -480,6 +658,9 @@ locked while someone edits them: the last save wins.
   dialog's fields show the stored setting while its previews and the output
   use the override.
 - Changing `canvas_metatag_public_base` takes a cache rebuild.
+- The dialog shows field labels in the editor's language only when that
+  language is the user's preferred one: Canvas drops a language prefix from
+  its editor's address, so a language chosen by the address is not used.
 - A content type with no content yet shows its SEO settings read-only: Canvas
   keeps no draft for its template until there is an item to preview.
 - Tested in Chromium on a single-language site. Translations are covered by
@@ -511,9 +692,9 @@ vendor/bin/phpunit --configuration web/modules/contrib/canvas/phpunit.xml.dist \
 Playwright end-to-end tests live in `tests/e2e/`. Every spec file installs a
 seeded site of its own (`tests/src/TestSite/CanvasMetatagTestSetup.php`), so run
 them where the Drupal command line and the web server share a file system, for
-example inside the web container of a local development site. The `headless`
-and `ai` projects need `canvas_headless` with its dependencies and the `ai`
-module in the codebase.
+example inside the web container of a local development site. The `headless`,
+`headless-frontend` and `ai` projects need `canvas_headless` with its
+dependencies and the `ai` module in the codebase.
 
 ```bash
 cd tests/e2e
@@ -523,7 +704,11 @@ DRUPAL_TEST_BASE_URL=https://drupal.example.com npx playwright test
 npx playwright test --project=coupled --no-deps page.spec.ts   # One spec.
 ```
 
-The suite has four Playwright projects. `host-contract` runs first and the
-other three (`coupled`, `headless`, `ai`) depend on it; `--no-deps` skips it.
+`host-contract` runs first and every other project depends on it;
+`--no-deps` skips it. The `headless-frontend` project runs the recipe of
+"Headless delivery" on the module's heads, with the packages pinned in
+`examples/headless-next`: run `npm ci` there first. Running the recipe needs
+Node 22.15 or later (the Canvas SDK asks for 22.19); on an older Node those
+tests are skipped locally and fail in CI.
 The environment variables, including the one for running Playwright outside the
 web container, are listed at the top of `tests/e2e/fixture.ts`.

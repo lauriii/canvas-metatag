@@ -49,12 +49,14 @@ const TONES: Record<Footer['dot'], string> = {
 };
 
 /** The scope is the view's title; its menu says what each scope means. */
-function ScopeMenu(props: { footer: Footer; bar: boolean }) {
+function ScopeMenu(props: { status: Footer | null }) {
   const { state, dispatch, closeSheet } = useApp();
   const server = state.server!;
   const target = server.target;
   const trigger = useRef<HTMLElement>(null);
   const id = useId();
+  /** The menu is used with keys, not a pointer. */
+  const keyed = useRef(false);
   // Once, when the dialog opens. Focus never moves again without a user action.
   useEffect(() => {
     const element = trigger.current;
@@ -140,6 +142,17 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
           event.preventDefault();
           trigger.current?.focus();
         }}
+        onKeyDown={() => (keyed.current = true)}
+        onPointerMove={() => (keyed.current = false)}
+        onFocus={(event) => {
+          // What follows the last item is text: reached by keys, that item
+          // brings it into sight as well, in a short frame.
+          const items = event.currentTarget.querySelectorAll('[role^="menuitem"]');
+          if (keyed.current && event.target === items[items.length - 1]) {
+            const viewport = event.currentTarget.querySelector('[data-radix-scroll-area-viewport]');
+            viewport?.scrollTo({ top: viewport.scrollHeight });
+          }
+        }}
       >
         <DropdownMenu.RadioGroup
           value={state.scope}
@@ -215,16 +228,16 @@ function ScopeMenu(props: { footer: Footer; bar: boolean }) {
             </div>
           </>
         )}
-        {!props.bar && props.footer.text && (
+        {props.status?.text && (
           <>
             <DropdownMenu.Separator />
             <div className="seo-mi-status">
               <span
                 className="seo-dot"
                 data-size="6"
-                data-tone={TONES[props.footer.dot]}
+                data-tone={TONES[props.status.dot]}
               />
-              {props.footer.text}
+              {props.status.text}
             </div>
           </>
         )}
@@ -407,6 +420,8 @@ function ChecksButton(props: { short: boolean }) {
 export function Header(props: {
   footer: Footer;
   bar: boolean;
+  /** The scope menu's status line: none while the bar says it. */
+  status: Footer | null;
   loading: boolean;
   scrolled: boolean;
   tab: string;
@@ -440,7 +455,7 @@ export function Header(props: {
       className="seo-header"
       data-scrolled={props.scrolled || undefined}
     >
-      <ScopeMenu footer={props.footer} bar={props.bar} />
+      <ScopeMenu status={props.status} />
       <SaveStatus footer={props.footer} bar={props.bar} />
       {target && <TabList value={props.tab} />}
       {target && !props.loading && state.server?.preview && (

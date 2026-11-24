@@ -1,0 +1,4 @@
+{
+  "description": ["summary", "description", "excerpt", "teaser", "intro", "lead", "abstract"],
+  "title": ["headline", "title"]
+}

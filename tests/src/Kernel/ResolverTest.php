@@ -8,6 +8,7 @@ use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Resolver;
+use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\Core\Cache\CacheableMetadata;
@@ -23,7 +24,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
-// cspell:ignore Tarifs tarifs ville amet Canvasville Preise Accueil
+// cspell:ignore Tarifs tarifs ville amet Canvasville Preise Accueil Résumé
 // cspell:ignore مرحبا عنوان शीर्षक
 /**
  * Tests ownership, layers, facts, links, URLs, the head and its cacheability.
@@ -262,6 +263,10 @@ final class ResolverTest extends CanvasKernelTestBase {
     // Without a form, the first image by name.
     self::assertSame($this->imageOf($article_hero), $facts['image']['image']);
     self::assertSame('Hero image', $facts['image']['via']);
+    // A template of the type with no item to preview names the same fields.
+    $none = $resolver->facts(NULL, new CacheableMetadata(), bundle: 'article');
+    self::assertSame(['Body', 'Hero image'], [$none['description']['via'], $none['image']['via']]);
+    self::assertNull($none['image']['image']);
     self::assertSame('http://localhost/node/' . $node->id(), $facts['url']['value']);
     foreach ([
       'media:' . $article_hero->id(),
@@ -308,6 +313,80 @@ final class ResolverTest extends CanvasKernelTestBase {
       $node->set('field_body', ['value' => "<p>$body</p>", 'summary' => ''])->save();
       self::assertSame($description, $resolver->facts(Node::load($node->id()), new CacheableMetadata())['description']['value']);
     }
+  }
+
+  /**
+   * A text field named for a description gives it when there is no summary.
+   */
+  public function testNamedDescription(): void {
+    $resolver = $this->resolver();
+    // The Description fact's value and the field it names, as a visitor's.
+    $facts = function (Node $node) use ($resolver): array {
+      $description = $resolver->facts($this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id()), new CacheableMetadata())['description'];
+      return [$description['value'], $description['via'] ?? NULL];
+    };
+    // A word inside a label is not the word: no description, from nowhere.
+    $this->createField('field_lead_time', 'string', 'Lead time');
+    $product = Node::create(['type' => 'article', 'title' => 'Oak desk', 'field_lead_time' => 'Two weeks']);
+    $product->save();
+    self::assertSame(['', NULL], $facts($product));
+
+    // A Body without a summary and a plain long text labelled Summary. A
+    // field the visitor may not view comes first by name and is skipped.
+    $this->createField('field_body', 'text_with_summary', 'Body');
+    $this->createField('field_post_summary', 'string_long', 'Summary');
+    $this->createField('field_no_view_access', 'string', 'Summary');
+    $post = Node::create([
+      'type' => 'article',
+      'title' => 'A year of shipping',
+      'field_body' => ['value' => '<p>The long story.</p>', 'summary' => ''],
+      'field_post_summary' => 'Ten lessons from a year of shipping.',
+      'field_no_view_access' => 'Hidden from visitors.',
+    ]);
+    $post->save();
+    self::assertSame(['Ten lessons from a year of shipping.', 'Summary'], $facts($post));
+
+    // Its label translated for the interface still names it: the stored
+    // label decides, so the head and the menu agree in every language. Its
+    // source is named in the editor's language.
+    $languages = $this->container->get('language_manager');
+    $languages->getLanguageConfigOverride('fr', 'field.field.node.article.field_post_summary')->set('label', 'Résumé')->save();
+    $languages->setConfigOverrideLanguage($languages->getLanguage('fr'));
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+    self::assertSame('Résumé', (string) FieldConfig::loadByName('node', 'article', 'field_post_summary')?->getLabel());
+    self::assertSame(['Ten lessons from a year of shipping.', 'Résumé'], $facts($post));
+    self::assertSame(['description'], $this->container->get(Sources::class)->namedFor(FieldConfig::loadByName('node', 'article', 'field_post_summary')));
+    $languages->setConfigOverrideLanguage($languages->getDefaultLanguage());
+    $this->container->get('entity_field.manager')->clearCachedFieldDefinitions();
+
+    // The Body's own summary still wins, named as the link menu names it.
+    $post->set('field_body', ['value' => '<p>The long story.</p>', 'summary' => 'In short.'])->save();
+    self::assertSame(['In short.', 'Body › Summary'], $facts($post));
+
+    // An empty Summary: the Body, cut. Nothing at all: the first that could.
+    $post->set('field_body', ['value' => '<p>The long story.</p>', 'summary' => ''])->set('field_post_summary', '')->save();
+    self::assertSame(['The long story.', 'Body'], $facts($post));
+    $post->set('field_body', [])->save();
+    self::assertSame(['', 'Body'], $facts($post));
+
+    // A formatted text named by its machine name, read as text.
+    $this->createField('field_teaser', 'text_long', 'Short text');
+    $post = $this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($post->id());
+    \assert($post instanceof Node);
+    $post->set('field_teaser', ['value' => '<p>Ten <em>lessons</em>.</p>', 'format' => 'plain_text'])->save();
+    self::assertSame(['Ten lessons.', 'Short text'], $facts($post));
+    // A type with no item yet: where each would come from, with no value.
+    $none = $resolver->facts(NULL, new CacheableMetadata(), bundle: 'article');
+    self::assertSame(['', 'Body'], [$none['description']['value'], $none['description']['via']]);
+    self::assertSame('', $none['title']['value']);
+    // Without a Body, the first field named for it is where it would come
+    // from, whether or not the visitor may view it.
+    $post->set('field_teaser', [])->save();
+    FieldConfig::loadByName('node', 'article', 'field_body')?->delete();
+    self::assertSame(['', 'Summary'], $facts($post));
+    self::assertSame('Summary', $resolver->facts(NULL, new CacheableMetadata(), bundle: 'article')['description']['via']);
+    FieldConfig::loadByName('node', 'article', 'field_post_summary')?->delete();
+    self::assertSame(['', 'Summary'], $facts($post));
   }
 
   /**

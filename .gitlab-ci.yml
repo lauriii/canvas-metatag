@@ -168,8 +168,8 @@ search-features-review:
 # Drupal core's @drupal/playwright (like Canvas); see tests/e2e/fixture.ts.
 # (A composer-required Canvas release already ships its built UI, so no build.)
 #
-# All projects run, one worker: host-contract first, then coupled, headless
-# and ai, each spec file on a seeded site of its own. The headless and ai
+# All projects run, one worker: host-contract first, then the others, each
+# spec file on a seeded site of its own. The headless and ai
 # projects need the modules named in composer.json's require-dev.
 #
 # This job is required to pass. If a pipeline trips an environment assumption
@@ -206,6 +206,16 @@ playwright:
     - service apache2 start
   script:
     # The checkout at $CI_PROJECT_DIR is the module root, so tests/e2e lives here.
+    # The headless-frontend project imports the README's recipe with the
+    # packages that folder pins. No install scripts or platform binaries are
+    # needed for that. Playwright strips types: the recipe is type-checked
+    # against the pinned framework here. The recipe test loads the adapter
+    # with module.registerHooks() (Node 22.15 or later; the SDK's engines ask
+    # for 22.19): on an image whose Node has none, the file fails in CI rather
+    # than passing by being skipped.
+    - node --version
+    - cd $CI_PROJECT_DIR/examples/headless-next && npm ci --ignore-scripts --omit=optional --no-audit --no-fund
+    - npx tsc --noEmit
     - cd $CI_PROJECT_DIR/tests/e2e
     - npm ci
     # CEILING: apt-installs browser deps into the image; needs root plus network.

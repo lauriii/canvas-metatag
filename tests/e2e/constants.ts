@@ -28,7 +28,7 @@ export const PAGES = {
   // No main heading, a small image, and a stored title that is too long and
   // names the site twice.
   checks: { id: 4, title: 'Checks', path: './checks' },
-  // Its published SEO title's main part is "Published title".
+  // Its published SEO title's main part is "Published title". No description.
   stored: { id: 5, title: 'Stored', path: './stored', seoTitle: 'Published title' },
   /** Described as a Movie, which the registry does not have. */
   unknownKind: { id: 6, title: 'Night at the cinema', path: './night-at-the-cinema' },
@@ -61,6 +61,8 @@ export const NODES = {
     image: IMAGES.article,
   },
   plain: { id: 3, title: 'Plain page', path: './plain-page' },
+  /** The headless projects only: an article without a summary. */
+  noSummary: { id: 4, title: 'A note without a summary' },
 } as const;
 
 export const TEMPLATE_ID = 'node.article.full';
@@ -193,7 +195,10 @@ export const UI = {
     matchesPage: 'Matches the published page',
     saved: 'Saved to draft',
     draftPage: 'Draft · goes live when you publish the page',
-    draftTemplate: 'Draft · goes live when you publish the template',
+    // A template's draft is named as Canvas's "Review changes" lists it.
+    draftTemplate: 'Draft · listed under Unpublished changes as',
+    /** The label Canvas lists a type's Full template under. */
+    canvasLabel: (type: string) => `${type} content items — Full content view`,
     restored: "Restored a change that hadn't been saved",
     readOnly: 'Read-only',
     unstored: 'This change could not be stored in the draft',
@@ -221,6 +226,8 @@ export const UI = {
     heading: 'SEO is not available',
     text: "You don't have permission to edit SEO settings.",
   },
+  /** What an empty description means on a headless site, in every place. */
+  noDescriptionSent: 'No description sent. The frontend decides what to show.',
   output: {
     // By the sheet's heading while a change is saved or read back.
     updating: 'Updating…',
