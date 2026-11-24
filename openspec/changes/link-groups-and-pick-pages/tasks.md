@@ -25,6 +25,7 @@ Playwright one spec at a time, one worker.
 - [ ] 4.2 A reference's link menu leaves out reference fields whose targets are described as a kind it does not accept. Verify with kernel `ApiTest` (rows carry their targets' kinds) and `values.test.ts`.
 
 - [ ] 4.3 A link menu that hangs above its field and opened with a typed filter (its height measured then) grows again when the filter is cleared, and its "No field matches" line follows the current filter (round 1 UX review, Pay › Per and Closing date). Verify with Playwright `template-complex.spec.ts` (a menu opened by typing, its filter cleared: every row in sight).
+- [ ] 4.4 Text menus at template scope offer noise beside the named-first order of `complete-the-headless-frontend` (its round 2 UX review, Every Article): an image's numbers ("Image › Height 1600", "Image › Width 2400") are offered as sources of a title or description, and Body (long text) is the first entry of the Title's link menu. Fold an image's dimensions under "fields that aren't text" in text places, and in a title-like place's link menu list long text after short text; add the value-links scenarios. Verify with `values.test.ts` cases on the article fixture (Height and Width in the fold of the description's menu; Body after the short text fields in the Title's).
 
 ## 5. Docs and the site
 

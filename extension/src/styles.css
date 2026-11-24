@@ -578,12 +578,18 @@ h2.seo-scope {
 }
 .seo-mi-status {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
-  padding: 8px 8px 6px;
+  /* The menu's own padding is under it: a two-line status fits a short
+     frame without a scrollbar. */
+  padding: 8px 8px 2px;
   color: var(--seo-ink-2);
   font-size: 12px;
   line-height: 16px;
+}
+/* On the first line's middle, however many lines the status takes. */
+.seo-mi-status .seo-dot {
+  margin-top: 5px;
 }
 
 /* ── Body ── */
@@ -702,14 +708,12 @@ h2.seo-scope {
   font-style: normal;
   text-overflow: ellipsis;
 }
-/* In a narrow frame the suffixes give way first, the name only once they
-   are gone: a suffix shows whole or not at all (Stage leaves out a cut one),
-   the previewed node's name is the caption's point. */
+/* In a narrow frame the previewed node's name gives way first, so that its
+   status stays in sight; a suffix shows whole or not at all (Stage leaves
+   one out once the name is down to a few letters). */
 .seo-stage-cap-l > em ~ span,
 .seo-stage-cap-l > span + span {
-  flex-shrink: 1000;
-  min-width: 0;
-  overflow: hidden;
+  flex-shrink: 0;
 }
 .seo-stage-cap-l > [data-cut] {
   display: none;
@@ -1389,6 +1393,14 @@ button.seo-feature-line:hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.seo-social-description[data-muted] {
+  /* A sentence of the dialog's, not the page's: shown whole, in two lines. */
+  display: -webkit-box;
+  font-style: italic;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
 .seo-social[data-layout="compact"] {
   display: flex;
 }
@@ -1456,6 +1468,9 @@ button.seo-feature-line:hover {
   top: 0;
   right: 0;
   height: 20px;
+  /* Half the row: a long type's "Set for every …" is cut, never drawn over
+     the label. */
+  max-width: 50%;
   padding-left: 8px;
 }
 /* A trailing ghost button's padding hangs past the edge, so its text aligns. */
@@ -2445,16 +2460,27 @@ textarea.seo-textarea:not([data-multiline]) {
   flex: none;
   color: var(--seo-icon);
 }
+/* "from Summary", "Default": on the label's line, never cut with the value. */
+.seo-menu-item > :first-child > .seo-menu-via {
+  color: var(--seo-ink-2);
+  font-size: 12px;
+}
 /* The fold of entries that do not fit: last, and quiet. */
 .seo-menu-item[data-quiet] > :first-child {
   color: var(--seo-ink-2);
   font-size: 12px;
 }
-.seo-menu-item[data-kind="level"] > :first-child > svg:last-child {
+.seo-menu-item[data-kind="level"] > :first-child > svg:last-child,
+/* The current row's check at the row's end, as in every menu of the dialog. */
+.seo-menu-item > :first-child > svg[data-check] {
   margin-left: auto;
 }
 .seo-menu-item[data-disabled] > :first-child {
   color: var(--seo-ink-2);
+}
+/* Reached by the arrows, a row that can't be picked is not shown as chosen. */
+.seo-menu-item[data-active][data-disabled] {
+  background: var(--gray-a3);
 }
 .seo-menu-item[data-kind="back"] {
   min-height: 28px;

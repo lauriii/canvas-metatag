@@ -451,6 +451,15 @@ final class ComposeTest extends CanvasKernelTestBase {
     $reordered = ['sourceType' => 'entity-field', 'expression' => self::NOTES];
     $response = $this->put(['title' => ['parts' => [['fact' => 'title'], ['text' => ' at '], ['source' => $reordered]]]]);
     self::assertSame(Response::HTTP_OK, $response->getStatusCode(), (string) $response->getContent());
+    // Text added to a title already at its limit is refused, not cut back to
+    // the stored title and carried as if nothing changed.
+    $full = self::parts(['fact' => 'title'], str_repeat('a', 255));
+    $this->values(['title' => $full]);
+    $response = $this->put(['title' => self::parts(['fact' => 'title'], str_repeat('a', 256))]);
+    self::assertSame(Response::HTTP_UNPROCESSABLE_ENTITY, $response->getStatusCode());
+    self::assertSame('Use at most 255 characters.', self::decodeResponse($response)['error']['fields']['title']);
+    // Sent back unchanged, it saves.
+    self::assertSame(Response::HTTP_OK, $this->put(['title' => $full])->getStatusCode());
   }
 
   /**
@@ -471,6 +480,15 @@ final class ComposeTest extends CanvasKernelTestBase {
     $response = $this->put(['title' => self::parts(['fact' => 'title'], ' – ', ['source' => $body])]);
     self::assertSame(Response::HTTP_UNPROCESSABLE_ENTITY, $response->getStatusCode());
     self::assertSame('Choose a field from the list.', self::decodeResponse($response)['error']['fields']['title']);
+    // Imported that way all the same: the dialog lists the part as broken,
+    // as saving reads it, so it can be replaced.
+    $this->values(['title' => self::parts(['fact' => 'title'], ' – ', ['source' => $body])]);
+    $this->container->get('cache.static')->deleteAll();
+    self::assertSame(['path' => 'title', 'part' => 2, 'field' => 'body', 'reason' => 'kind'], $this->state('event_full')['broken']['title.parts.2'] ?? NULL);
+    // Linked whole, the same long text still fits.
+    $this->values(['title' => ['source' => $body]]);
+    $this->container->get('cache.static')->deleteAll();
+    self::assertArrayNotHasKey('title', $this->state('event_full')['broken']);
   }
 
   /**

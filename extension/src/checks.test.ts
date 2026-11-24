@@ -86,6 +86,8 @@ interface Setup {
   site?: SeoValues;
   /** Fact name => value. */
   facts?: Partial<Record<Fact, string>>;
+  /** The field Description and Image read (Body, Hero image); null for none. */
+  via?: Partial<Record<'description' | 'image', string | null>>;
   sources?: SourceRow[];
   broken?: Record<string, BrokenLink>;
   media?: Lookup['media'];
@@ -106,6 +108,7 @@ function input(setup: Setup = {}): ChecksInput {
           kind: FACT_KINDS[name],
           value: facts[name],
           ...(name === 'image' ? { image: IMAGE } : {}),
+          ...((via) => (via ? { via } : {}))(name === 'description' || name === 'image' ? ({ description: 'Body', image: 'Hero image', ...setup.via }[name]) : null),
         },
       ]),
     ),
@@ -844,6 +847,23 @@ describe('rules that need the page preview', () => {
     ).toEqual([]);
   });
 
+  it("schema-not-on-page reads a detail's Description as the head gives it", () => {
+    // The description is set: the summary and words of its own. A detail
+    // linked to Description gives that, and is looked for as that.
+    const set = (text: string): Setup => ({
+      target: {
+        description: { parts: [{ fact: 'description' }, { text: ' Launch at the Mill.' }] },
+        schema: { type: 'Article', props: { headline: { fact: 'description' } } },
+      },
+      facts: { description: 'Plans for every team.' },
+      input: { scope: 'template', facts: { h1: ['Pricing'], imagesWithoutAlt: [], text } },
+    });
+    expect(find(set('Plans for every team. Launch at the Mill.'), 'schema-not-on-page:headline')).toBeUndefined();
+    expect(find(set('Plans for every team.'), 'schema-not-on-page:headline')?.message).toBe(
+      "Couldn't find “Plans for every team. Launch at the Mill.” on this page",
+    );
+  });
+
   it('finds dates four ways, and images by their file', () => {
     const on = (text: string, images: string[] = []): Setup['input'] => ({ facts: { h1: ['Pricing'], imagesWithoutAlt: [], text, images } });
     const starts = { target: { schema: { type: 'Event', props: { startDate: t('2027-03-04') } } } };
@@ -1018,6 +1038,16 @@ describe('rules that need the page preview', () => {
     // Too much: to fix, with the other tags still output.
     expect(report({ over: true }).find((issue) => issue.id === 'hand-over')).toMatchObject({ severity: 'fix', message: 'Your own JSON-LD was left out: the structured data would be over 256 KB.', detail: expect.stringContaining('The other tags are still output.') });
     expect(report({ unencodable: true }, { schema: { custom: '{"@type": "Thing"}' } }).find((issue) => issue.id === 'schema-unencodable')).toMatchObject({ severity: 'fix', detail: 'The other tags are still output. Check your own JSON-LD and added details.' });
+    // No address on a host no visitor reaches: one issue to fix, in an
+    // editor's words, pointing at the status report; no setting named.
+    expect(report({ unaddressed: true }).filter((issue) => issue.id === 'unaddressed')).toEqual([
+      expect.objectContaining({
+        severity: 'fix',
+        message: 'Page addresses are left out',
+        detail: "Visitors can't reach the site's public address, so links to this page, share links, language links and structured data are left out. An administrator can fix this; the status report says how.",
+      }),
+    ]);
+    expect(ids(report({}))).not.toContain('unaddressed');
     // A main thing not used.
     expect(report({ main: { id: `${PAGE}#x`, ignored: 'kind' } }).find((issue) => issue.id === 'hand-main-kind')?.severity).toBe('info');
     expect(report({ main: { id: `${PAGE}#x`, ignored: 'absent' } }).find((issue) => issue.id === 'hand-main-absent')?.severity).toBe('improve');
@@ -1072,6 +1102,11 @@ describe('rules that need the page preview', () => {
     expect(countIssues(none)).toBe(0);
     // A web page says nothing about it.
     expect(ids(schema({ features: [{ feature: null, node: null, verdict: 'none' }] }, {}))).not.toContain('feature-none');
+    // While the head carries no address, no structured data is sent: the
+    // address issue says so, and nothing claims it still tells anything.
+    const unaddressed = ids(schema({ type: 'Service', unaddressed: true, features: [{ feature: null, node: null, verdict: 'none' }] }, { schema: { type: 'Service' } }));
+    expect(unaddressed).toContain('unaddressed');
+    expect(unaddressed).not.toContain('feature-none');
   });
 
   it('asks once for what withholds a node or a group, with an article', () => {
@@ -1325,6 +1360,44 @@ describe('rules that need the page preview', () => {
     expect(checks(input({ facts: { description: '' }, input: { scope: 'template', typeLabel: 'Product' } })).find((issue) => issue.id === 'value-empty:description')?.message).toBe('The description is empty for this product');
     // On a page the empty description is the page's own problem.
     expect(checks(input({ target: { description: { source: sku.source } }, sources: [sku], facts: { description: '' } })).map((issue) => issue.id)).toContain('description-missing');
+  });
+
+  it('on a headless site, an empty description says the frontend decides', () => {
+    const sent = 'No description sent. The frontend decides what to show.';
+    // A page: the same level and fix, only the sentence differs.
+    const coupled = find({ facts: { description: '' } }, 'description-missing');
+    const headless = find({ facts: { description: '' }, input: { headless: true } }, 'description-missing');
+    expect(coupled?.detail).toBe('Without one, search engines pick text from the page.');
+    expect(headless).toEqual({ ...coupled, detail: sent, fix: headless?.fix });
+    expect(headless?.fix).toEqual(coupled?.fix);
+    // A template previewing an item without one.
+    const template = { scope: 'template' as const, typeLabel: 'Post' };
+    expect(find({ facts: { description: '' }, input: template }, 'value-empty:description')?.detail).toBe(
+      'Search engines pick text from the page for this post; each post that has one shows its own.',
+    );
+    expect(find({ facts: { description: '' }, input: { ...template, headless: true } }, 'value-empty:description')).toMatchObject({
+      severity: 'info',
+      message: 'The description is empty for this post',
+      detail: `${sent} Each post that has one shows its own.`,
+    });
+  });
+
+  it('says no item has a description on a type that reads no field for one', () => {
+    // "Every Bookmark": a title and a link; its default can never give one.
+    const bookmark = { facts: { description: '' }, via: { description: null }, input: { scope: 'template' as const, typeLabel: 'Bookmark' } };
+    expect(find(bookmark, 'value-empty:description')).toMatchObject({
+      severity: 'info',
+      message: 'No bookmark has a description',
+      detail: 'Search engines pick text from the page.',
+    });
+    expect(find({ ...bookmark, input: { ...bookmark.input, headless: true } }, 'value-empty:description')?.detail).toBe(
+      'No description sent. The frontend decides what to show.',
+    );
+    // Linked to a field, it is that field's item that has none.
+    const summary = field('field_summary', 'Summary', { status: 'empty', value: '' });
+    expect(find({ ...bookmark, target: { description: { source: summary.source } }, sources: [summary] }, 'value-empty:description')?.message).toBe(
+      'Summary is empty for this bookmark',
+    );
   });
 
   it('lists a detail linked to a field the previewed item has empty once', () => {

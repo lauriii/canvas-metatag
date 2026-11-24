@@ -238,6 +238,9 @@ describe('context', () => {
     expect(host.basePath()).toBe('/');
     fake.parent.drupalSettings.path.baseUrl = '/sub/';
     expect(host.basePath()).toBe('/sub/');
+    // A language taken from the editor's address: the API is asked under it.
+    (fake.parent.drupalSettings.path as Json).pathPrefix = 'fr/';
+    expect(host.basePath()).toBe('/sub/fr/');
     (fake.parent.drupalSettings as Json).user = undefined;
     expect(host.uid()).toBeNull();
   });

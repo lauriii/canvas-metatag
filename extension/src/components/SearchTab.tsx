@@ -407,7 +407,7 @@ export function SearchTab() {
           byDefault={{ fact: 'description' }}
           instead={
             view.facts.description?.via
-              ? `its ${view.facts.description.via} summary, else the start of its ${view.facts.description.via} is used`
+              ? `its description, from ${view.facts.description.via}, is used`
               : 'its own description is used'
           }
           meter={descriptionMeter}

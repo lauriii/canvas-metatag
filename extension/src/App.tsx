@@ -885,6 +885,7 @@ export default function App() {
       ui: server.ui,
       facts: state.facts,
       scope: server.target.scope,
+      headless: server.headless,
       can: server.can,
       langcode: server.langcode,
       ai: server.capabilities.ai?.available === true,
@@ -1302,6 +1303,10 @@ function Ready(props: {
   // that it can be reached with a keyboard or a screen reader.
   const shown = footer(state);
   const bar = barOf(state, shown);
+  // The scope menu says what the target is now, the bar's Undo aside: a
+  // template's draft names its entry as soon as it is stored.
+  const resting = state.undo ? footer({ ...state, undo: null }) : shown;
+  const status = (state.undo ? barOf(state, resting) : bar) ? null : resting;
   const notes = useNotes();
   const frame = useRef<HTMLDivElement>(null);
   const [scrolled, setScrolled] = useState(false);
@@ -1392,6 +1397,7 @@ function Ready(props: {
         <Header
           footer={shown}
           bar={bar}
+          status={status}
           loading={!!props.loading}
           scrolled={scrolled}
           tab={tab}

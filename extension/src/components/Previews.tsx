@@ -10,8 +10,12 @@ import {
 import { useApp } from '../App';
 import {
   breadcrumb,
+  emptyDescription,
   previewNote,
   previewText,
+  resultDescription,
+  resultName,
+  shownAddresses,
   smallCard,
   socialImage,
 } from '../model';
@@ -43,6 +47,9 @@ function focusPath(path: string) {
     ?.focus();
 }
 
+/** The caption keeps this much of the previewed node's name before a suffix goes, in pixels. */
+const NAME_ROOM = 80;
+
 /**
  * The tinted surface a view opens with. It tells the fields whether it is in
  * sight: chip fields say what they become only when it is not.
@@ -71,28 +78,26 @@ export function Stage(props: {
     observer.observe(element);
     return () => observer.disconnect();
   }, [setStageVisible]);
-  // A suffix shows whole or not at all, so that only the subject (the
-  // previewed node's name) can end in an ellipsis; the last one goes first.
-  // What a left-out suffix said is said elsewhere too: the About this
-  // preview tip, or Checks for Site's identity gap. Measured when the
-  // caption's text or width changes, not on every keystroke.
+  // The previewed node's name gives way first, to an ellipsis, so that the
+  // status beside it stays in sight; below a few letters of the name, a
+  // suffix goes, whole, the last first. What a left-out suffix said is said
+  // elsewhere too: the About this preview tip, or Checks for Site's identity
+  // gap. Measured when the caption's text or width changes, not on every
+  // keystroke.
   const cap = useRef<HTMLDivElement>(null);
   const fitted = useRef<string | null>(null);
   const fit = () => {
-    const parts = [
-      ...(cap.current?.querySelectorAll<HTMLElement>(
-        ':scope > em ~ span, :scope > span + span',
-      ) ?? []),
-    ];
+    const box = cap.current;
+    if (!box) {
+      return;
+    }
+    const parts = [...box.querySelectorAll<HTMLElement>(':scope > em ~ span, :scope > span + span')];
+    const name = box.querySelector<HTMLElement>(':scope > em');
     parts.forEach((part) => part.removeAttribute('data-cut'));
-    const cut = () =>
-      parts.some(
-        (part) =>
-          !part.hasAttribute('data-cut') &&
-          // Widths are rounded: a pixel over is subpixel rounding, not a cut.
-          part.scrollWidth - part.clientWidth > 1,
-      );
-    for (let index = parts.length - 1; index >= 0 && cut(); index--) {
+    // Widths are rounded: a pixel over is subpixel rounding, not a cut.
+    const tight = () =>
+      box.scrollWidth - box.clientWidth > 1 || (!!name && name.clientWidth < Math.min(name.scrollWidth - 1, NAME_ROOM));
+    for (let index = parts.length - 1; index >= 0 && tight(); index--) {
       parts[index].setAttribute('data-cut', '');
     }
   };
@@ -138,31 +143,10 @@ export function OutputButton() {
   );
 }
 
-/** The page's public address: Canvas's live path while it differs from the saved one. */
-function useAddress(): string {
+/** What the previews show of the page's addresses (shownAddresses()). */
+function useAddresses() {
   const { state, view } = useApp();
-  const server = state.server!;
-  const saved = view?.facts.url?.value || server.preview?.url || '';
-  const alias = state.ctx.kind === 'page' ? state.live.alias : undefined;
-  let path = '';
-  try {
-    path = new URL(saved).pathname;
-  } catch {
-    // No saved address: the live path is all there is.
-  }
-  // The front page is the base itself, whatever its alias; an unchanged
-  // alias keeps the saved address with its language prefix.
-  if (!alias?.startsWith('/') || path === '/' || path.endsWith(alias)) {
-    return saved || (alias?.startsWith('/') ? server.origin.url + alias : '');
-  }
-  const target = server.target;
-  const prefix =
-    target?.default_langcode &&
-    server.langcode !== target.default_langcode &&
-    path.startsWith(`/${server.langcode}/`)
-      ? `/${server.langcode}`
-      : '';
-  return server.origin.url + prefix + alias;
+  return shownAddresses(state.server!, view!, state.ctx.kind === 'page' ? state.live.alias : undefined);
 }
 
 /** The site's mark in a result: its logo, else its first letter. */
@@ -194,10 +178,8 @@ export function SearchPreview() {
   const view = app.view!;
   const server = state.server!;
   const target = server.target!;
-  const address = useAddress();
+  const { address, elsewhere } = useAddresses();
   const texts = { ...view.texts, ...trial };
-  const robots = view.effective.robots ?? {};
-  const snippets = robots.nosnippet !== true && robots.max_snippet !== 0;
   const site = view.facts.site?.value ?? '';
   const title = previewText('title', texts.title, measurer);
   // Each part of the title lights up with its own control.
@@ -207,27 +189,10 @@ export function SearchPreview() {
       : title.length;
   const titleMain = title.slice(0, mainLength);
   const titleEnd = title.slice(titleMain.length);
-  const description = !snippets
-    ? 'No description: text previews are off'
-    : texts.description
-      ? previewText('description', texts.description, measurer)
-      : 'Search engines will pick text from the page.';
-  const muted = !snippets || !texts.description;
+  const shownDescription = resultDescription(texts.description, view.effective.robots, server.headless, measurer);
+  const { text: description, muted } = shownDescription;
   const crumbs = breadcrumb(address);
-  // A canonical set here shows at once; a path is put on the public address.
-  const canonical = view.effective.canonical?.trim();
-  const elsewhere = canonical
-    ? canonical.startsWith('/')
-      ? server.origin.url + canonical
-      : canonical
-    : '';
-  const name = useSettled(
-    `${view.hidden ? 'Not shown in search results. ' : ''}Search result preview, estimate. ${site}, ${crumbs.replaceAll(
-      ' › ',
-      ', ',
-    )}. Title: ${title}.${snippets && texts.description ? ` Description: ${description}` : ''}`,
-    1000,
-  );
+  const name = useSettled(resultName({ hidden: !!view.hidden, site, crumbs, title, description: shownDescription }), 1000);
   const template = target.scope === 'template';
   const note = previewNote({
     template,
@@ -318,7 +283,7 @@ export function SearchPreview() {
             {description}
           </span>
         </div>
-        {elsewhere && elsewhere !== address && (
+        {elsewhere && (
           <div className="seo-result-note">
             Search engines are asked to show {elsewhere} instead.
           </div>
@@ -397,20 +362,16 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
       ? (image.url ?? (front ? front.src : image.thumb))
       : image.thumb
     : '';
-  let host = '';
-  try {
-    // Upper case in CSS only: assistive technology reads the name as a word.
-    host = new URL(server.origin.url).host;
-  } catch {
-    // No public address: the card shows none.
-  }
+  // Upper case in CSS only: assistive technology reads the name as a word.
+  const { host } = useAddresses();
+  const emptyCard = emptyDescription('card', server.headless);
   const name = useSettled(
     `Social card preview. ${
       large ? 'Large image' : image ? 'Small image' : 'No image'
     }. ${host}. Title: ${texts.social_title}.${
       texts.social_description
         ? ` Description: ${texts.social_description}`
-        : ''
+        : emptyCard && ` ${emptyCard}`
     }`,
     1000,
   );
@@ -494,13 +455,17 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
               {texts.social_title}
             </span>
           </span>
-          <span className="seo-social-description" dir="auto">
+          <span
+            className="seo-social-description"
+            dir="auto"
+            data-muted={(!texts.social_description && !!emptyCard) || undefined}
+          >
             <span
               className="seo-part"
               data-on={on('social.description', 'social_description')}
               onClick={() => focusPath('social.description')}
             >
-              {texts.social_description}
+              {texts.social_description || emptyCard}
             </span>
           </span>
         </div>

@@ -11,7 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 
-// cspell:ignore cing Ünïcode ééééé hinnasto päivä
+// cspell:ignore cing Ünïcode ééééé hinnasto päivä ddev lndo
 /**
  * Tests the value shape: validation, encoding, layers and text output.
  */
@@ -910,6 +910,80 @@ final class ValuesTest extends UnitTestCase {
     [$clean, $errors] = Values::cleanIdentity(['same_as' => ['a' => 'https://example.org/a']]);
     self::assertSame([['identity.same_as'], []], [array_keys($errors), $clean['same_as']]);
     self::assertSame(['identity.same_as.0'], array_keys(Values::cleanIdentity(['same_as' => ['https://example.org/' . str_repeat('a', 2030)]])[1]));
+  }
+
+  /**
+   * Hosts no visitor reaches, and hosts of a development copy.
+   */
+  #[DataProvider('providerHosts')]
+  public function testHosts(string $host, bool $public, bool $development): void {
+    self::assertSame($public, Values::isPublicHost($host), "$host is public");
+    self::assertSame($development, Values::isDevelopmentHost($host), "$host is a development host");
+  }
+
+  /**
+   * Hosts: whether each is public, and whether it is a development host.
+   */
+  public static function providerHosts(): \Generator {
+    // Loopback addresses and localhost: neither public, and development.
+    yield '127.0.0.1' => ['127.0.0.1', FALSE, TRUE];
+    yield '[::1]' => ['[::1]', FALSE, TRUE];
+    yield 'localhost' => ['localhost', FALSE, TRUE];
+    yield 'under localhost' => ['app.localhost', FALSE, TRUE];
+    yield 'site.test' => ['site.test', FALSE, TRUE];
+    yield 'under invalid' => ['cms.invalid', FALSE, TRUE];
+    // Other spellings of a loopback address.
+    yield '127.1' => ['127.1', FALSE, TRUE];
+    yield 'one number' => ['2130706433', FALSE, TRUE];
+    yield 'uncompressed ::1' => ['[0:0:0:0:0:0:0:1]', FALSE, TRUE];
+    yield 'IPv4 in IPv6' => ['[::ffff:127.0.0.1]', FALSE, TRUE];
+    yield 'loopback in another IPv6 form' => ['[::ffff:7f00:1]', FALSE, TRUE];
+    // Octal and hex, as URL parsers in browsers read them.
+    yield 'octal' => ['0177.0.0.1', FALSE, TRUE];
+    yield 'hex' => ['0x7f.0.0.1', FALSE, TRUE];
+    yield 'one hex number' => ['0x7f000001', FALSE, TRUE];
+    // Where development servers listen.
+    yield 'unspecified IPv4' => ['0.0.0.0', FALSE, TRUE];
+    yield 'unspecified IPv6' => ['[::]', FALSE, TRUE];
+    // A known local suffix resolves to 127.0.0.1: not public, development.
+    yield 'a known local suffix' => ['cms.ddev.site', FALSE, TRUE];
+    yield 'another known local suffix' => ['front.lndo.site', FALSE, TRUE];
+    // Private, internal, single-label: not public, and production-like.
+    yield '10.0.0.5' => ['10.0.0.5', FALSE, FALSE];
+    yield '192.168.1.20' => ['192.168.1.20', FALSE, FALSE];
+    yield 'link-local' => ['169.254.10.1', FALSE, FALSE];
+    yield 'link-local IPv6' => ['[fe80::1]', FALSE, FALSE];
+    yield 'private IPv6' => ['[fd00::1]', FALSE, FALSE];
+    yield 'cms' => ['cms', FALSE, FALSE];
+    yield 'default, as Drush has it' => ['default', FALSE, FALSE];
+    yield 'cms.internal' => ['cms.internal', FALSE, FALSE];
+    yield 'shop.local' => ['shop.local', FALSE, FALSE];
+    yield 'home.arpa' => ['nas.home.arpa', FALSE, FALSE];
+    yield 'the example domain' => ['www.example', FALSE, FALSE];
+    yield 'shared by a carrier' => ['100.64.1.1', FALSE, FALSE];
+    yield 'private IPv4 in IPv6' => ['[::ffff:10.0.0.5]', FALSE, FALSE];
+    yield 'numbers that are no address' => ['999.1', FALSE, FALSE];
+    yield 'an octal digit out of range' => ['08.0.0.1', FALSE, FALSE];
+    yield 'a hex last label' => ['www.example.0x1', FALSE, FALSE];
+    // Public, and production-like.
+    yield 'www.example.com' => ['www.example.com', TRUE, FALSE];
+    yield 'with a final dot, in capitals' => ['WWW.Example.COM.', TRUE, FALSE];
+    yield '203.0.113.10' => ['203.0.113.10', TRUE, FALSE];
+    yield 'public IPv4 in IPv6' => ['[::ffff:203.0.113.10]', TRUE, FALSE];
+    yield 'a word inside a name is not a suffix' => ['test.example.com', TRUE, FALSE];
+  }
+
+  /**
+   * An absolute http(s) address, IPv6 literals included.
+   */
+  public function testHttpUrl(): void {
+    self::assertTrue(Values::isHttpUrl('https://www.example.com/a?b=1'));
+    self::assertTrue(Values::isHttpUrl('http://[::1]:3000'));
+    self::assertTrue(Values::isHttpUrl('http://[::ffff:127.0.0.1]:3000/a'));
+    self::assertFalse(Values::isHttpUrl('http://[::ffff:127.0.0.1/a'));
+    self::assertFalse(Values::isHttpUrl('http://[nope]/'));
+    self::assertFalse(Values::isHttpUrl('http://user@www.example.com'));
+    self::assertFalse(Values::isHttpUrl('ftp://www.example.com'));
   }
 
   /**

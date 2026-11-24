@@ -27,6 +27,7 @@ use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityRepositoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\KeyValueStore\KeyValueFactoryInterface;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Session\AccountInterface;
@@ -34,6 +35,7 @@ use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Url;
 use Drupal\locale\StringStorageInterface;
 use Drupal\media\Plugin\media\Source\Image;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -103,6 +105,8 @@ final class ApiController implements ContainerInjectionInterface {
     private readonly Sources $sources,
     private readonly Vocabulary $vocabulary,
     private readonly Words $words,
+    #[Autowire(service: 'keyvalue')]
+    private readonly KeyValueFactoryInterface $keyValue,
   ) {}
 
   /**
@@ -187,6 +191,9 @@ final class ApiController implements ContainerInjectionInterface {
         : $this->languageManager->getDefaultLanguage()->getId(),
       'languages' => array_map(static fn (LanguageInterface $language): string => $language->getName(), $this->languageManager->getLanguages()),
       'origin' => $this->resolver->origin($cacheability),
+      // A frontend decides what to show where the head has nothing: the
+      // dialog says so. The public base can't tell: the setting hides it.
+      'headless' => $this->resolver->frontend() !== NULL,
       'can' => [
         'target' => $context['can'],
         'site' => $this->currentUser->hasPermission('administer canvas metatag'),
@@ -226,7 +233,9 @@ final class ApiController implements ContainerInjectionInterface {
           ? $target['published']
           : !$entity instanceof EntityPublishedInterface || $entity->isPublished(),
       ],
-      'facts' => $this->resolver->facts($entity, $cacheability),
+      // A type with no item yet still names the fields its Description and
+      // Image would read.
+      'facts' => $this->resolver->facts($entity, $cacheability, bundle: $template ? $bundle : NULL),
       'separator' => $this->resolver->separator($cacheability),
       // Only a template links fields; read with its preview node.
       'sources' => $template ? $this->resolver->sourceRows($entity, $bundle, $cacheability) : [],
@@ -529,10 +538,14 @@ final class ApiController implements ContainerInjectionInterface {
     }
     $broken = [];
     foreach ($kinds as $path => $kind) {
-      // A place that composes reads its fields as words.
-      $kind = Values::composes($props[$path] ?? NULL, $path, 'template') ? 'words' : $kind;
       $value = NestedArray::getValue($values, explode('.', $path));
-      $links = is_array($value) && isset($value['parts']) ? $value['parts'] : [$value];
+      $composed = is_array($value) && isset($value['parts']);
+      // As saving reads them: a place that composes reads its fields as
+      // words, and the parts of a title-like composition as one line.
+      if (Values::composes($props[$path] ?? NULL, $path, 'template')) {
+        $kind = $composed && Values::titleLike($path) ? 'line' : 'words';
+      }
+      $links = $composed ? $value['parts'] : [$value];
       foreach ($links as $at => $link) {
         $source = is_array($link) ? $link['source'] ?? NULL : NULL;
         $reason = is_array($source) ? $this->sources->problem($bundle, $source, $kind) : NULL;
@@ -573,12 +586,14 @@ final class ApiController implements ContainerInjectionInterface {
   private static function carry(array $sent, array $clean, array $errors, array $current, string $scope, string $type = 'WebPage'): array {
     $carried = [];
     // Compared in canonical form: a value sent back with its keys in another
-    // order, or its composition written another way, is the same value.
-    $canonical = Values::clean($sent, $scope, NULL, $type)[0];
+    // order, or its composition written another way, is the same value. Not
+    // when cleaning it changed it: a title cut back to its stored length is
+    // new text lost, not the stored value.
+    [$canonical, $changed] = Values::clean($sent, $scope, NULL, $type);
     foreach (array_keys($errors) as $path) {
       $parents = explode('.', (string) $path);
       $kept = NestedArray::getValue($current, $parents, $exists);
-      if ($exists && ($kept === NestedArray::getValue($sent, $parents) || $kept === NestedArray::getValue($canonical, $parents))) {
+      if ($exists && ($kept === NestedArray::getValue($sent, $parents) || (!isset($changed[$path]) && $kept === NestedArray::getValue($canonical, $parents)))) {
         NestedArray::setValue($clean, $parents, $kept);
         $carried[$path] = $errors[$path];
         unset($errors[$path]);
@@ -770,6 +785,16 @@ final class ApiController implements ContainerInjectionInterface {
         'entity_type' => ContentTemplate::ENTITY_TYPE_ID,
         'id' => $template->id(),
         'label' => (string) $this->entityTypeManager->getStorage('node_type')->load($template->getTargetBundle())?->label(),
+        // What Canvas's "Review changes" names its draft: the label it
+        // stored with the auto-save entry, in the language of whoever wrote
+        // it.
+        'canvas_label' => $draft !== NULL
+          // UPSTREAM(canvas): AutoSaveManager has no per-entry getter for
+          // what getAllAutoSaveList() returns, which unserializes every draft
+          // on the site; its store, public as AUTO_SAVE_STORE, is read for this
+          // one entry (TemplateDraftTest pins it). ARCHITECTURE ask 8.
+          ? (string) ($this->keyValue->get(AutoSaveManager::AUTO_SAVE_STORE)->get(AutoSaveManager::getAutoSaveKey($template))['label'] ?? $draft->label())
+          : (string) $template->label(),
         'auto_save_key' => AutoSaveManager::getAutoSaveKey($template),
         'translatable' => FALSE,
         'default_langcode' => NULL,

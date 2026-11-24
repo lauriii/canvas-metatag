@@ -1,0 +1,21 @@
+{
+  "name": "canvas-metatag-example-headless-next",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "The README's recipe for @drupal-canvas/headless-next, with the exact versions it is tested with.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@drupal-canvas/headless": "0.11.0",
+    "@drupal-canvas/headless-next": "0.8.0",
+    "next": "16.4.6",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "typescript": "5.9.3"
+  }
+}

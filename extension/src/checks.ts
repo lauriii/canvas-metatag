@@ -10,6 +10,7 @@ import {
   largeCardNeeds,
   leaveOut,
   meter,
+  NO_DESCRIPTION_SENT,
   offered,
   typeOf,
 } from './model';
@@ -34,7 +35,7 @@ import type {
   Value,
   Verdict,
 } from './types';
-import { type Lookup, PROP_KINDS, brokenWhy, composed as composedText, composes, fieldsIn, formOf, kindOf, resolve, rowOf, sameValue, tagOf } from './values';
+import { type Lookup, PROP_KINDS, brokenWhy, composed as composedText, composes, detailLookup, fieldsIn, formOf, kindOf, noItemHas, resolve, rowOf, sameValue, tagOf } from './values';
 
 /**
  * What a group misses, said one way under its box, in its sheet and in
@@ -99,6 +100,8 @@ export interface ChecksInput {
   facts: PageFacts | null;
 
   scope: 'page' | 'template';
+  /** A headless frontend decides what to show where the head has nothing. */
+  headless?: boolean;
   can: { target: boolean; site: boolean };
   langcode: string;
   /** AI suggestions are available. */
@@ -219,7 +222,7 @@ export function checks(input: ChecksInput): Issue[] {
   // default, the previewed item has empty: a fact about the item, good to
   // know, not a problem of the template. (The title and the social texts
   // always fall back to one that is there.)
-  const emptyHere = (path: 'description', detail: string): boolean => {
+  const emptyHere = (path: 'description', detail: string, message?: string): boolean => {
     if (onPage) {
       return false;
     }
@@ -227,7 +230,7 @@ export function checks(input: ChecksInput): Issue[] {
     issues.push({
       id: `value-empty:${path}`,
       severity: 'info',
-      message: `${value && 'source' in value ? tagOf(value, lookup, path) : 'The description'} is empty for ${page}`,
+      message: message ?? `${value && 'source' in value ? tagOf(value, lookup, path) : 'The description'} is empty for ${page}`,
       detail,
       jump: jump('search', path),
     });
@@ -558,14 +561,29 @@ export function checks(input: ChecksInput): Issue[] {
   }
 
   // Description.
-  if (texts.description === '' && emptyHere('description', `Search engines pick text from the page for ${page}; each ${inSentence(input.typeLabel)} that has one shows its own.`)) {
+  const each = `${inSentence(input.typeLabel)} that has one shows its own.`;
+  // Its default, on a type whose items can't have one: no item shows one.
+  const description = effective.description;
+  const noneHave = (!description || ('fact' in description && description.fact === 'description')) && noItemHas('description', lookup);
+  if (
+    texts.description === '' &&
+    emptyHere(
+      'description',
+      noneHave
+        ? input.headless ? NO_DESCRIPTION_SENT : 'Search engines pick text from the page.'
+        : input.headless
+          ? `${NO_DESCRIPTION_SENT} Each ${each}`
+          : `Search engines pick text from the page for ${page}; each ${each}`,
+      noneHave ? `No ${inSentence(input.typeLabel)} has a description` : undefined,
+    )
+  ) {
     // Said for the item.
   } else if (texts.description === '') {
     issues.push({
       id: 'description-missing',
       severity: 'improve',
       message: 'Add a description',
-      detail: 'Without one, search engines pick text from the page.',
+      detail: input.headless ? NO_DESCRIPTION_SENT : 'Without one, search engines pick text from the page.',
       jump: jump('search', 'description'),
       fix: suggest('description'),
     });
@@ -1002,7 +1020,9 @@ function structured(
   input: ChecksInput,
   at: { page: string; onPage: boolean; jump(tab: Tab, field: string): Jump; hidden: string[]; broken: string[] },
 ): Issue[] {
-  const { effective, lookup, resolved, facts, registry, rules } = input;
+  const { effective, resolved, facts, registry, rules } = input;
+  // A detail's Description is the head's description, as the dialog shows it.
+  const lookup = detailLookup(input.lookup, input.texts.description, effective.description);
   const { page, onPage, hidden, broken } = at;
   const issues: Issue[] = [];
   const schema = effective.schema ?? {};
@@ -1283,7 +1303,9 @@ function structured(
         detail: 'Search engines no longer show it, whatever the page says.',
         jump: custom,
       });
-    } else if (verdict.verdict === 'none' && type.primary_type) {
+    } else if (verdict.verdict === 'none' && type.primary_type && !report?.unaddressed) {
+      // While the head carries no address, nothing tells search engines
+      // anything: "Page addresses are left out" says so.
       issues.push({ id: 'feature-none', severity: 'info', message: `No search feature for ${kind?.name ?? 'this page'}`, detail: 'It still tells search engines what the page is about.' });
     }
   }
@@ -1616,6 +1638,17 @@ function handReport(input: ChecksInput, report: Resolved['schema'] | null, label
       message: "The structured data was left out: it can't be written out.",
       detail: `The other tags are still output.${schema.custom || schema.extend ? ' Check your own JSON-LD and added details.' : ''}`,
       jump: custom,
+    });
+  }
+  if (report?.unaddressed) {
+    issues.push({
+      id: 'unaddressed',
+      severity: 'fix',
+      // Said to editors, who can't fix it: the setting is named only in the
+      // status report row.
+      message: 'Page addresses are left out',
+      detail:
+        "Visitors can't reach the site's public address, so links to this page, share links, language links and structured data are left out. An administrator can fix this; the status report says how.",
     });
   }
   if (report?.main?.ignored) {

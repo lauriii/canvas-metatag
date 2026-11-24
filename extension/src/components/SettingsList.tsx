@@ -57,7 +57,6 @@ export function Row(
           </label>
           <span
             className="seo-aside"
-            id={field.asideId}
             data-pinned={field.pinned || undefined}
           >
             {field.aside}

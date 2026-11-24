@@ -418,6 +418,53 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
   }
 
   /**
+   * A public base no visitor reaches: no addresses in production, per host.
+   */
+  public function testAddressesOnUnreachableHost(): void {
+    $hero = $this->createImage('Pricing hero', ['alt' => 'Pricing table']);
+    $page = $this->createPage(['image' => $hero->id()]);
+    $page->addTranslation('fr', ['title' => 'Tarifs', 'status' => TRUE, 'path' => ['alias' => '/tarifs']]);
+    $page->save();
+    $this->setSetting('canvas_metatag_public_base', 'http://localhost:3000');
+
+    // Drupal on a production-like host: the page has no address.
+    $response = $this->get('https://cms.example.com/pricing');
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    $production = self::readHead($response);
+    self::assertSame([], $production['links']);
+    self::assertSame([], $production['json_ld']);
+    self::assertArrayNotHasKey('og:url', self::meta($production));
+    self::assertSame(['Pricing | Example'], $production['titles']);
+    self::assertSame('Plans and prices for Example.', self::meta($production)['description']);
+    self::assertStringStartsWith('https://cms.example.com/', self::meta($production)['og:image']);
+
+    // On a development host the same base is the normal local setup.
+    $development = self::readHead($this->get('https://cms.example.test/pricing'));
+    self::assertSame('http://localhost:3000/pricing', $development['links'][0]['href']);
+    self::assertSame(['canonical', 'alternate', 'alternate', 'alternate'], array_column($development['links'], 'rel'));
+    self::assertSame('http://localhost:3000/pricing', self::meta($development)['og:url']);
+    self::assertCount(1, $development['json_ld']);
+
+    // Each host keeps its own head in the page cache.
+    $cached = $this->get('https://cms.example.com/pricing');
+    self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
+    self::assertSame([], self::readHead($cached)['links']);
+    $cached = $this->get('https://cms.example.test/pricing');
+    self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
+    self::assertSame($development['links'], self::readHead($cached)['links']);
+    self::assertContains('url.site', $this->resolver()->resolve(Page::load($page->id()))['cacheability']->getCacheContexts());
+
+    // The dialog's report says so where they are left out, so that Checks
+    // can say why.
+    $stack = $this->container->get('request_stack');
+    foreach (['https://cms.example.com' => TRUE, 'https://cms.example.test' => FALSE] as $drupal => $left_out) {
+      $stack->push(Request::create("$drupal/pricing"));
+      self::assertSame($left_out, $this->resolver()->resolve(Page::load($page->id()))['schema']['unaddressed'] ?? FALSE, $drupal);
+      $stack->pop();
+    }
+  }
+
+  /**
    * A hostile job description reaches the head as filtered HTML.
    *
    * One script element, which decodes to the graph: markup in the field

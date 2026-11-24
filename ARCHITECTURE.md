@@ -215,7 +215,7 @@ text is never scanned: `{site}` typed into a title is the six characters.
 | Fact | Value | Kind |
 |---|---|---|
 | `title` (Title) | the entity label | text |
-| `description` (Description) | page: Canvas's description field; node: the first `text_with_summary` field's summary, else its text cut at 160 | text |
+| `description` (Description) | page: Canvas's description field; node: the first `text_with_summary` field's summary, else the first plain or formatted text field named for a description (`Values::isNamedFor()`, `data/value-words.json`) that has text and the visitor may view, else that summary field's text cut at 160 | text |
 | `site` (Site name) | identity name, else `system.site:name` | text |
 | `url` (Page address) | the entity's own public URL | address |
 | `author` (Author) | owner's label (`view label` access) | text |
@@ -282,7 +282,19 @@ read as sentences, not as one run-on line.
 
 The dialog shows a link or a default as a box that names its source and the
 previewed value; the link button and the box open a menu of the type's fields
-(levels for references) and the page's facts (`LinkMenu.tsx`, `Value.tsx`).
+(levels for references) and the facts, grouped as "Automatic" (`LinkMenu.tsx`,
+`Value.tsx`, `entriesFor()` in `values.ts`). Each group is a `role="group"`
+named by its heading. A fact that reads a field says "from ‹via›" beside its
+label; at template scope Description and Image without a `via` (the resolver
+sets it from the type's form, with or without an item) are listed last in
+their group, disabled ("No post has one"), and a Default box that follows one
+says the same; with an empty filter the fields the server marks `named`
+(`Values::isNamedFor()`, the resolver's rule) come first; a menu that links
+the whole value leaves out the default the place follows (`withoutDefault()`),
+while adding or replacing a part of a composition offers it. A chip of a fact
+is named by its label and says "from ‹via›" in its tooltip and the composer's
+description (`chipTitle()`, `compositionSaid()`); the Default box's words come
+from `boxTag()` and `boxSaid()` alone.
 
 ### Compositions
 
@@ -806,7 +818,8 @@ loudly.
 | Dependency | Where used | If Canvas changes it | Caught by |
 |---|---|---|---|
 | `Controller\AutoSaveValidateTrait::validateAutoSaves()` (`@internal`), property name `autoSaveManager` | `ApiController::putDraft()` | both draft PUTs fail (500); the dialog reports a network error | `PageDraftTest::testConflictRule`, `testWriteUnderAnotherIdConflictsTheEditor` |
-| `AutoSaveManager::getAutoSaveEntity()`, `getAutoSaveEntityForPreview()`, `saveEntity($entity, $clientId)`, `getAllAutoSaveList()`, static `getAutoSaveKey()`; `AutoSaveEntity` props `entity`, `clientId`, `hash`, `isEmpty()` | `ApiController`, `Resolver::layers()`, `HeadlessContentController`, `canvas_metatag.install` | draft writes, draft previews, uninstall cleanup | `PageDraftTest`, `TemplateDraftTest`, `HeadlessHeadTest::testDrafts`, `InstallTest::testUninstallAndReinstall` |
+| `AutoSaveManager::getAutoSaveEntity()`, `getAutoSaveEntityForPreview()`, `saveEntity($entity, $clientId)`, static `getAutoSaveKey()`; `AutoSaveEntity` props `entity`, `clientId`, `hash`, `isEmpty()` | `ApiController`, `Resolver::layers()`, `HeadlessContentController`, `canvas_metatag.install` | draft writes, draft previews, uninstall cleanup | `PageDraftTest`, `TemplateDraftTest`, `HeadlessHeadTest::testDrafts`, `InstallTest::testUninstallAndReinstall` |
+| The key-value store `AUTO_SAVE_STORE` and its entry key `label`, read for one template's draft (`UPSTREAM(canvas)`: no per-entry getter) | `ApiController::templateContext()` (`canvas_label`) | a template draft's status names the type, not Canvas's label | `TemplateDraftTest::testWriteThenEditorSaves` |
 | Auto-save key format `canvas_page:{id}:{langcode}`, `content_template:{id}` | server via `getAutoSaveKey()`; client re-derives it in `host.ts` | the client finds no entry and goes read-only | `host-contract.spec.ts` (first test), `host.test.ts` |
 | Layout save starts from the auto-saved entity and converts only form fields (`ApiLayoutController::post()`, `ClientDataToEntityConverter`) | the whole draft transport | an editor save would erase the dialog's value | `PageDraftTest::testWriteThenEditorSave`, `testUnchangedLayoutRoundTripCreatesNoDraft`, `TemplateDraftTest::testWriteThenEditorSaves`, `page.spec.ts` |
 | Publish stores the field / third-party setting and enables the template (`ApiAutoSaveController`) | going live | values would not publish | `PageDraftTest::testPublish`, `TemplateDraftTest::testPublish`, `page.spec.ts`, `template.spec.ts` |
@@ -870,8 +883,13 @@ guessed write.
    closes the same-client lost-update window and replaces the read-back loop.
 4. `AutoSaveValidateTrait` as a public service, so the conflict rule is not
    `@internal` (Canvas's own `@todo` already points that way).
-5. `@drupal-canvas/headless-next` should map `article:*` and `og:image:*`, and
-   render `head.script` (README).
+5. `@drupal-canvas/headless-next`'s `toNextMetadata()` should map `og:image:*`
+   and `article:*`, set an empty description and no alternates when the head
+   has no description or canonical (else the framework keeps the layout's),
+   and the package should export a JSON-LD component for `head.script`. It
+   replaces the README's recipe for that adapter and its helper,
+   `examples/headless-next/canvas-head.tsx`; `headless-frontend.spec.ts` fails
+   on the first Canvas release whose adapter keeps those rows.
 6. A viewport-aware height and position for the extension dialog: Canvas
    leaves the frame 300 px less than the window and keeps the dialog where it
    opened, so a dialog opened at 900 px tall and then made 350 px tall has a
@@ -880,6 +898,21 @@ guessed write.
 7. Publishing a translation that exists only as a draft should compare its
    fields against nothing, not against the default translation. It replaces
    `CanvasMetatagHooks::pagePresave()`.
+8. An `AutoSaveManager` getter for one entry's list data (its `label`), as
+   `getAllAutoSaveList()` gives it for every draft on the site. It replaces
+   the read of `AUTO_SAVE_STORE` in `ApiController::templateContext()`
+   (`canvas_label`), marked there.
+9. A way for modules to add a short detail to a pending change in "Review
+   changes" ("SEO: Description"). It replaces the template's draft status
+   "Draft · listed under Unpublished changes as “‹label›”" with "Draft · goes
+   live when you publish the template". Drafted in
+   `openspec/changes/archive/2026-11-23-complete-the-headless-frontend/upstream/canvas-review-change-details.md`.
+10. The editor's routes keeping the language prefix. Canvas redirects
+    `/fr/canvas/…` to the same path without it, so the editor runs in the
+    default language and `drupalSettings.path.pathPrefix` is empty: the
+    dialog follows the editor's language only through the user's preferred
+    language. Nothing is replaced; `host.basePath()`, marked there, already
+    sends the prefix Canvas would keep.
 
 ## 12. Headless delivery
 
@@ -926,6 +959,16 @@ Image URLs always stay on Drupal, where the files are.
 `hook_runtime_requirements` reports an error when canvas_headless is enabled
 but the class resolver no longer returns this decorator.
 
+A base from the setting or a frontend on a host no visitor reaches
+(`Values::isPublicHost()`, headless-head "Hosts no visitor reaches")
+gives pages no address while Drupal's own host is not a development host
+(`Values::isDevelopmentHost()`): `Resolver::addressed()` leaves out
+the canonical, `og:url`, hreflang and the JSON-LD script, coupled and headless
+alike. The status report row "SEO public addresses"
+(`CanvasMetatagHooks::publicAddresses()`) says why and how to fix it, and
+warns of a plain http base; it is absent while both hosts are development
+hosts.
+
 ## 13. Cacheability
 
 Everything `resolve()` reads is added to the `CacheableMetadata` it returns;
@@ -946,7 +989,7 @@ account; both page caches stay effective.
 | media, files, referenced labels | their tags | `mediaImage()`, `usable()`, `label()` |
 | image URLs (built on the request host) | context `url.site` | `usable()` |
 | anonymous access results | their tags and max-age, `config:user.role.anonymous` | `allowed()` |
-| public base | `config:canvas_headless.settings` unless the setting is used; `url.site` when it is the request | `origin()` |
+| public base | `config:canvas_headless.settings` unless the setting is used; `url.site` when it is the request, or on a host no visitor reaches | `origin()`, `addressed()` |
 
 The `settings.php` public base carries no tag: changing it needs a cache
 rebuild (README). Install invalidates `rendered`, because core's canonical and
@@ -1176,11 +1219,21 @@ limitations of the implementation:
   the dialog: without a preview node Canvas keeps no draft entry to write
   under (section 9). It needs a Canvas write path for templates without a
   preview entity.
+- The dialog's words follow the editor's language only through the user's
+  preferred language: Canvas redirects a language-prefixed editor route to
+  the route without its prefix (`UPSTREAM(canvas)` ask 10), so a language
+  set by the address never reaches the dialog.
 - `host.fitFrame()` follows the editor's window, not a drag of the dialog: a
   dialog dragged down keeps the height it had, and a resize keeps the drag
   (the panel's place is measured once, at open). In a window 350 px tall the
   view below the dialog's header is 158 px: the dialog stays below the
   editor's top bar.
+- A link menu opened in a window 350 px tall, or at 200 % zoom, can run past
+  the visible part of Canvas's dialog: the frame is taller than the dialog's
+  scroll area, and the menu fits itself to the frame. Fitting it to what is
+  visible needs the host to tell the frame its visible area (`UPSTREAM(canvas)`
+  ask 6); scrolling the editor's page from the frame is ruled out.
+  `test-in-every-engine-and-language` task 4.5 tracks it.
 - `templateContext()` reads the template's values itself (override-free)
   while `Resolver::layers()` reads them with overrides, so under a config
   override of a template's setting the dialog's values and its preview can

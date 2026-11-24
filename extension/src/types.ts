@@ -367,7 +367,10 @@ export interface FactInfo {
   value: string;
   /** The Image fact's image. */
   image?: ImageInfo | null;
-  /** The field a node's Description or Image fact is taken from. */
+  /**
+   * The field a node's Description or Image fact is taken from; '' where it
+   * reads no one field (detailLookup()).
+   */
   via?: string;
   /** A date fact in words, as a place that composes reads it: the server's. */
   text?: string;
@@ -411,6 +414,8 @@ export interface SourceRow {
   long?: true;
   /** Long text: enough of its start for a description to cut it. */
   part?: string;
+  /** A whole text field named for these values (Values::isNamedFor()). */
+  named?: ('description' | 'title')[];
 }
 
 /** A stored link that cannot be read, and why. */
@@ -489,6 +494,11 @@ export interface Resolved {
     over?: boolean;
     /** The structured data could not be written out: the head has no script. */
     unencodable?: boolean;
+    /**
+     * The public address is on a host no visitor reaches: the head has no
+     * canonical, og:url, hreflang or script (Resolver::addressed()).
+     */
+    unaddressed?: boolean;
   };
 }
 
@@ -498,6 +508,8 @@ export interface Target {
   id: string;
   /** The page's label, or the bundle label for a template. */
   label: string;
+  /** A template: the label Canvas's "Review changes" lists its draft under. */
+  canvas_label?: string;
   auto_save_key: string;
   translatable: boolean;
   default_langcode: string | null;
@@ -525,6 +537,8 @@ export interface StatePayload {
   langcode: string;
   languages: Record<string, string>;
   origin: { url: string; source: 'settings' | 'frontend' | 'request' };
+  /** A headless frontend is configured: it decides what to show where the head has nothing. */
+  headless: boolean;
   can: { target: boolean; site: boolean };
   capabilities: {
     ai: {

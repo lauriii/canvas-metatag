@@ -96,7 +96,8 @@ interface EditorStore {
 
 interface EditorWindow {
   drupalSettings: {
-    path: { baseUrl: string };
+    /** `pathPrefix`: the language prefix of the editor's address ("fr/"), or ''. */
+    path: { baseUrl: string; pathPrefix?: string };
     user: { uid: string | number };
     canvas: { store: EditorStore; canvasLayoutRequestInProgress?: unknown[] };
   };
@@ -181,7 +182,13 @@ export function createHost(win: Window = window): Host {
 
     basePath() {
       try {
-        return editor().drupalSettings.path.baseUrl || '/';
+        // With the editor's language prefix, as Canvas builds its own
+        // requests: the dialog's words follow a language the address sets.
+        // UPSTREAM(canvas): the editor's routes redirect to the path without
+        // their prefix, so it is empty today; the dialog follows the user's
+        // preferred language (ARCHITECTURE ask 10).
+        const { baseUrl, pathPrefix } = editor().drupalSettings.path;
+        return (baseUrl || '/') + (pathPrefix ?? '');
       } catch {
         return '/';
       }

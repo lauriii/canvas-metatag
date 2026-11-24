@@ -5,6 +5,7 @@ import { ApiError } from './api';
 import { EMPTY_SCHEMA, REGISTRY, RULES } from './data.test-helper';
 import type { EditorToken } from './host';
 import {
+  emptyDescription,
   type DraftIO,
   LIMITS,
   MESSAGES,
@@ -56,6 +57,10 @@ import {
   previewNote,
   previewText,
   prune,
+  resultDescription,
+  resultName,
+  shownAddresses,
+  ownEndingNote,
   readPending,
   robotsUnsent,
   reducer,
@@ -71,6 +76,7 @@ import {
   texts,
   truncate,
   unsent,
+  unsentSchema,
   view,
 } from './model';
 import type {
@@ -79,6 +85,7 @@ import type {
   Measurer,
   Part,
   Resolved,
+  Robots,
   SeoValues,
   SourceRow,
   State,
@@ -131,6 +138,7 @@ const payload = (over: Partial<StatePayload> = {}): StatePayload => ({
   langcode: 'en',
   languages: { en: 'English' },
   origin: { url: 'https://www.example.com', source: 'request' },
+  headless: false,
   can: { target: true, site: true },
   capabilities: { ai: null },
   site: SITE,
@@ -415,6 +423,95 @@ describe('values in the reducer', () => {
 
 // Meters.
 
+describe('an empty description', () => {
+  it('says the frontend decides on a headless site, in every place', () => {
+    const sent = 'No description sent. The frontend decides what to show.';
+    expect(emptyDescription('search', true)).toBe(sent);
+    expect(emptyDescription('card', true)).toBe(sent);
+    expect(emptyDescription('field', true)).toBe(sent);
+  });
+
+  it('keeps the coupled sentences, and an empty card stays empty', () => {
+    expect(emptyDescription('search', false)).toBe('Search engines will pick text from the page.');
+    expect(emptyDescription('card', false)).toBe('');
+    expect(emptyDescription('field', false)).toBe('Empty. Search engines will pick text from the page.');
+  });
+});
+
+describe('what the previews show of addresses', () => {
+  const addressed = payload();
+  const shown = { facts: addressed.facts, effective: { canonical: '/plans' } };
+  const unaddressed = payload({
+    resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, unaddressed: true } },
+  });
+
+  it('shows the page address, the canonical elsewhere and the card host', () => {
+    expect(shownAddresses(addressed, shown, undefined)).toEqual({
+      address: 'https://www.example.com/pricing',
+      elsewhere: 'https://www.example.com/plans',
+      host: 'www.example.com',
+    });
+    // Canvas's live alias, before it is saved.
+    expect(shownAddresses(addressed, shown, '/plans-2026').address).toBe('https://www.example.com/plans-2026');
+    // A canonical equal to the address is not "elsewhere".
+    expect(shownAddresses(addressed, { ...shown, effective: { canonical: '/pricing' } }, undefined).elsewhere).toBe('');
+  });
+
+  it('shows none while the head carries no address', () => {
+    expect(shownAddresses(unaddressed, shown, '/plans-2026')).toEqual({ address: '', elsewhere: '', host: '' });
+  });
+});
+
+describe("the site's title example", () => {
+  it('says when the previewed item ends its title its own way', () => {
+    expect(ownEndingNote(target({ scope: 'template', label: 'Article' }), 'target')).toBe('Every Article sets its own ending.');
+    expect(ownEndingNote(target(), 'default')).toBe('This page sets its own ending.');
+    expect(ownEndingNote(target(), 'site')).toBe('');
+    expect(ownEndingNote(null, 'target')).toBe('');
+  });
+});
+
+describe("the search result's description", () => {
+  const fake: Measurer = (text) => Array.from(text).length * 10;
+
+  it('says text previews are off before anything else, headless too', () => {
+    const off = { text: 'No description: text previews are off', muted: true };
+    expect(resultDescription('', { nosnippet: true }, true, fake)).toEqual(off);
+    expect(resultDescription('Plans.', { max_snippet: 0 }, false, fake)).toEqual(off);
+  });
+
+  it('shows the description, else what an empty one means', () => {
+    expect(resultDescription('Plans.', {}, true, fake)).toEqual({ text: 'Plans.', muted: false });
+    expect(resultDescription('', undefined, true, fake)).toEqual({ text: 'No description sent. The frontend decides what to show.', muted: true });
+    expect(resultDescription('', undefined, false, fake)).toEqual({ text: 'Search engines will pick text from the page.', muted: true });
+  });
+});
+
+describe("the search result preview's name", () => {
+  const fake: Measurer = (text) => Array.from(text).length * 10;
+  const name = (description: string, robots: Robots | undefined, headless: boolean, crumbs = 'example.com › careers') =>
+    resultName({ hidden: false, site: 'Example', crumbs, title: 'Careers | Example', description: resultDescription(description, robots, headless, fake) });
+
+  it('ends with the description, or the sentence shown in its place', () => {
+    expect(name('Join us.', undefined, false)).toBe('Search result preview, estimate. Example, example.com, careers. Title: Careers | Example. Description: Join us.');
+    expect(name('', undefined, false)).toBe('Search result preview, estimate. Example, example.com, careers. Title: Careers | Example. Search engines will pick text from the page.');
+    expect(name('', undefined, true)).toMatch(/Title: Careers \| Example\. No description sent\. The frontend decides what to show\.$/);
+    expect(name('Join us.', { nosnippet: true }, false)).toMatch(/Title: Careers \| Example\. No description: text previews are off\.$/);
+  });
+
+  it('leaves out an address the head does not carry', () => {
+    expect(name('Join us.', undefined, false, '')).toBe('Search result preview, estimate. Example. Title: Careers | Example. Description: Join us.');
+  });
+});
+
+describe("the Structured data view's read-back", () => {
+  it('says no structured data is sent while the head carries no address', () => {
+    expect(unsentSchema({ ...EMPTY_SCHEMA, unaddressed: true })).toBe('No structured data is sent: page addresses are left out.');
+    expect(unsentSchema(EMPTY_SCHEMA)).toBe('');
+    expect(unsentSchema(undefined)).toBe('');
+  });
+});
+
 describe('measure, truncate and the meter', () => {
   // Every character is 10 px wide.
   const fake: Measurer = (text) => Array.from(text).length * 10;
@@ -511,24 +608,17 @@ describe('measure, truncate and the meter', () => {
   });
 
   it('meter states', () => {
-    expect(meter('title', '', fake)).toMatchObject({
-      state: 'empty',
-      sentence: '',
-    });
-    expect(meter('description', '', fake)).toMatchObject({
-      state: 'empty',
-      sentence: 'Empty · search engines will choose text from the page',
-    });
+    expect(meter('title', '', fake)).toMatchObject({ state: 'empty', chars: 0 });
+    expect(meter('description', '', fake)).toMatchObject({ state: 'empty', chars: 0 });
     expect(meter('title', 'Pricing | Example', fake)).toMatchObject({
       state: 'fits',
       chars: 17,
-      sentence: '17 characters · fits',
       where: null,
     });
-    expect(meter('title', 'a', fake).sentence).toBe('1 character · fits');
+    expect(meter('title', 'a', fake)).toMatchObject({ state: 'fits', chars: 1 });
     expect(meter('title', 'Pricing | Example', null)).toMatchObject({
       state: 'unmeasured',
-      sentence: '17 characters',
+      chars: 17,
     });
 
     // 60 characters: over one desktop line of 580 px, inside two phone lines of 340.
@@ -538,19 +628,16 @@ describe('measure, truncate and the meter', () => {
       where: 'desktop',
       ratio: 1,
     });
-    expect(desktop.sentence).toBe(
-      '60 characters · may be cut off on desktop after "…word word word"',
-    );
+    expect(desktop.after).toBe('word word word');
 
     // 80 characters: over both title limits.
     const both = meter('title', `${'word '.repeat(15)}words`, fake);
     expect(both).toMatchObject({ state: 'long', where: 'both' });
-    expect(both.sentence).toMatch(/^80 characters · may be cut off after "…/);
+    expect(both.chars).toBe(80);
 
     // 70 characters: over the phone limit of 680 px, inside the desktop one of 920.
     const phones = meter('description', `${'word '.repeat(13)}words`, fake);
     expect(phones).toMatchObject({ state: 'long', where: 'phones' });
-    expect(phones.sentence).toContain('may be cut off on phones after');
   });
 
   it('the preview truncates at the phone limits, or by characters', () => {
@@ -1480,6 +1567,22 @@ describe('footer and strips', () => {
           target: target({ has_draft: true }),
         }),
       ).text,
+    ).toBe('Draft of the Finnish version · goes live with the English version');
+  });
+
+  it("a template's draft names its entry in Review changes; a page's does not", () => {
+    const canvas_label = 'Article content items — Full content view';
+    expect(at(ready({ target: target({ scope: 'template', has_draft: true, canvas_label }) }))).toEqual({
+      dot: 'blue',
+      // Its dash stays on the line before it.
+      text: 'Draft · listed under Unpublished changes as “Article content items\u00a0— Full content view”',
+      actions: ['output'],
+    });
+    // A page is listed under its own title, and a translation goes live
+    // with its default version: both unchanged.
+    expect(at(ready({ target: target({ has_draft: true }) })).text).toBe('Draft · goes live when you publish the page');
+    expect(
+      at(ready({ langcode: 'fi', languages: { en: 'English', fi: 'Finnish' }, target: target({ has_draft: true }) })).text,
     ).toBe('Draft of the Finnish version · goes live with the English version');
   });
 

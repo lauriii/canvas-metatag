@@ -644,7 +644,13 @@ final class Values {
    * Whether the string is an absolute http(s) URL with a host and no login.
    */
   public static function isHttpUrl(string $url): bool {
-    if (!UrlHelper::isValid($url, TRUE)) {
+    // Drupal's pattern reads no IPv6 literal with an IPv4 tail
+    // ([::ffff:127.0.0.1]): such a host is checked as [::].
+    $host = (string) parse_url($url, PHP_URL_HOST);
+    $checked = str_starts_with($host, '[') && filter_var(trim($host, '[]'), FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== FALSE
+      ? (string) preg_replace('~^([a-z][a-z0-9+.\-]*://)\[[0-9a-f:.]+\]~i', '$1[::]', $url, 1)
+      : $url;
+    if (!UrlHelper::isValid($checked, TRUE)) {
       return FALSE;
     }
     $parts = parse_url($url);
@@ -653,6 +659,139 @@ final class Values {
       && ($parts['host'] ?? '') !== ''
       && !isset($parts['user'])
       && !isset($parts['pass']);
+  }
+
+  /**
+   * The field types a value can be named for: plain and formatted text.
+   *
+   * A formatted text with a summary gives a description by its summary
+   * (Resolver::facts()), never by its name.
+   */
+  public const NAMED_TYPES = ['string', 'string_long', 'text', 'text_long'];
+
+  /**
+   * Whether a field is named for a value.
+   *
+   * Its whole label, or its machine name without `field_`, is one of the
+   * value's words (data/value-words.json), compared without case. The link
+   * menu orders by the same words.
+   *
+   * @param string $value
+   *   The value: `description` or `title`.
+   * @param string $name
+   *   The field's machine name.
+   * @param string $label
+   *   The field's label.
+   */
+  public static function isNamedFor(string $value, string $name, string $label): bool {
+    static $words;
+    $words ??= json_decode((string) file_get_contents(dirname(__DIR__) . '/data/value-words.json'), TRUE, 4, JSON_THROW_ON_ERROR);
+    $candidates = [mb_strtolower(trim($label)), strtolower((string) preg_replace('/^field_/', '', $name))];
+    return array_intersect($candidates, $words[$value] ?? []) !== [];
+  }
+
+  /**
+   * Known local development suffixes: their names resolve to 127.0.0.1.
+   */
+  // cspell:ignore ddev lndo docksal localtest
+  private const DEVELOPMENT_SUFFIXES = ['ddev.site', 'lndo.site', 'docksal.site', 'localtest.me', 'lvh.me'];
+
+  /**
+   * A number in a host, as URL parsers read one: decimal, 0x hex, 0 octal.
+   */
+  private const NUMBER = '(?:0x[0-9a-f]*|[0-9]+)';
+
+  /**
+   * Whether visitors and crawlers can reach a host, judged by its name.
+   *
+   * Not a loopback, private, shared or link-local IP in any spelling, a
+   * single label, a name whose last label is a number, or a name under
+   * `localhost`, `local`, `test`, `example`, `internal`, `invalid`,
+   * `home.arpa` or a known local development suffix (those resolve to
+   * 127.0.0.1). Nothing is looked up.
+   *
+   * @param string $host
+   *   A host, as parse_url() gives it (an IPv6 address in brackets).
+   */
+  public static function isPublicHost(string $host): bool {
+    $host = self::host($host);
+    if (filter_var($host, FILTER_VALIDATE_IP) !== FALSE) {
+      // 100.64.0.0/10 is shared by carriers, as private as 10.0.0.0/8.
+      return filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_NO_PRIV_RANGE | FILTER_FLAG_NO_RES_RANGE) !== FALSE
+        && (ip2long($host) & 0xFFC00000) !== 0x64400000;
+    }
+    $suffixes = ['localhost', 'local', 'test', 'example', 'internal', 'invalid', 'home.arpa'];
+    foreach ([...$suffixes, ...self::DEVELOPMENT_SUFFIXES] as $suffix) {
+      if ($host === $suffix || str_ends_with($host, '.' . $suffix)) {
+        return FALSE;
+      }
+    }
+    // No top-level domain is a number.
+    return str_contains($host, '.') && !preg_match('/\.' . self::NUMBER . '$/D', $host);
+  }
+
+  /**
+   * Whether a host is plainly a development copy's.
+   *
+   * A loopback address in any spelling, an unspecified one (`0.0.0.0`, `::`,
+   * where development servers listen), `localhost`, a name under
+   * `localhost`, `test` or `invalid`, or under a known local development
+   * suffix. Anything else, a private address or an internal name included,
+   * is production-like.
+   *
+   * @param string $host
+   *   A host, as parse_url() gives it (an IPv6 address in brackets).
+   */
+  public static function isDevelopmentHost(string $host): bool {
+    $host = self::host($host);
+    if (filter_var($host, FILTER_VALIDATE_IP) !== FALSE) {
+      return in_array($host, ['::1', '::', '0.0.0.0'], TRUE) || str_starts_with($host, '127.');
+    }
+    foreach (['localhost', 'test', 'invalid', ...self::DEVELOPMENT_SUFFIXES] as $suffix) {
+      if ($host === $suffix || str_ends_with($host, '.' . $suffix)) {
+        return TRUE;
+      }
+    }
+    return FALSE;
+  }
+
+  /**
+   * One spelling of a host, so that each address is judged once.
+   *
+   * Lower case, without brackets or a final dot. An IPv6 address as
+   * inet_ntop() writes it (`::1` for `0:0:0:0:0:0:0:1`), an IPv4 address in
+   * IPv6 (`::ffff:127.0.0.1`), in short (`127.1`, one number), in hex
+   * (`0x7f.1`) or octal (`0177.0.0.1`) as four decimal numbers, read as URL
+   * parsers in browsers read them. A spelling they refuse stays as it is,
+   * and ends in a number, so it is not public.
+   */
+  private static function host(string $host): string {
+    $host = rtrim(strtolower(trim($host, '[]')), '.');
+    if (filter_var($host, FILTER_VALIDATE_IP, FILTER_FLAG_IPV6) !== FALSE) {
+      $packed = (string) inet_pton($host);
+      return (string) inet_ntop(str_starts_with($packed, str_repeat("\0", 10) . "\xff\xff") ? substr($packed, 12) : $packed);
+    }
+    if (preg_match('/^' . self::NUMBER . '(?:\.' . self::NUMBER . '){0,3}$/D', $host)) {
+      $parts = [];
+      foreach (explode('.', $host) as $part) {
+        $parts[] = match (TRUE) {
+          str_starts_with($part, '0x') => hexdec(substr($part, 2) ?: '0'),
+          $part[0] === '0' && $part !== '0' => preg_match('/^[0-7]+$/D', $part) ? octdec($part) : -1,
+          default => (float) $part,
+        };
+      }
+      // The last number fills the bytes the others leave.
+      $long = array_pop($parts);
+      if (min([0, $long, ...$parts]) < 0 || max([0, ...$parts]) > 255 || $long >= 1 << (32 - 8 * count($parts))) {
+        return $host;
+      }
+      $long = (int) $long;
+      foreach ($parts as $index => $part) {
+        $long |= (int) $part << (24 - 8 * $index);
+      }
+      return long2ip($long);
+    }
+    return $host;
   }
 
   /**

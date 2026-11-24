@@ -198,6 +198,12 @@ The SEO dialog's visual rules (tokens, components, review checklist) are in
     - The frontend recipe is proved by a contract test plus a manual check.
     - Runs first after the JSON-LD form pause. Superseded by item 17:
       it now lands right after compose-values-from-fields.
+    - Built in parallel with compose-values-from-fields and put on top of
+      it: the composer's parts of the link menu are finished on that merge
+      (the change's proposal, "Built on merge onto
+      compose-values-from-fields"). Its amendments are still in
+      strengthen-zero-config-defaults, serve-each-frontend-its-own-addresses
+      and test-in-every-engine-and-language.
 17. compose-values-from-fields (owner: "connect multiple fields or add hard
     coded text"; accepted 2026-11-17, recommended option of every open
     decision taken)

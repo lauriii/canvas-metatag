@@ -39,12 +39,13 @@ import {
   setPath,
   stageVerdicts,
   typeOf,
+  unsentSchema,
   withKind,
 } from '../model';
 import { type ReadFact, dateWords, judged, readback, valueAt } from '../readback';
 import { choicesOf, controlFor, durationText, groupLine, hoursLine, missingParts, parseHours, partNoun, plainText } from '../controls';
 import type { Registry, SchemaProp, SchemaType, Value, Verdict } from '../types';
-import { factsFor, propKind, resolve, sameValue, tagOf } from '../values';
+import { detailFrom, detailLookup, factsFor, propKind, resolve, sameValue, tagOf } from '../values';
 import { CheckRows, DurationInput, Picker, WeekEditor } from './Controls';
 import { Field, Guide, useField, useHeld } from './Field';
 import { Sheet } from './Header';
@@ -61,13 +62,6 @@ const ICONS: Record<string, typeof CubeIcon> = {
   calendar: CalendarIcon,
   person: PersonIcon,
   file: FileIcon,
-};
-
-/** What an unset detail says about its default. */
-const DEFAULTS: Record<string, string> = {
-  title: 'From the page title',
-  description: 'Same as description',
-  image: 'From the Image field',
 };
 
 /** The stage's lines as last said, by target: drawn again, they are not said again. */
@@ -230,15 +224,7 @@ function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean; who
   const edit = (value: unknown) => dispatch({ type: 'edit', scope: 'target', path, value });
   // The Description fact of a detail is the description as search shows it,
   // as the head gives it (SchemaGraph::build()).
-  const lookup = {
-    ...view.lookup,
-    facts: {
-      ...view.lookup.facts,
-      ...(view.lookup.facts.description && {
-        description: { ...view.lookup.facts.description, value: view.texts.description },
-      }),
-    },
-  };
+  const lookup = detailLookup(view.lookup, view.texts.description, view.effective.description);
   // What a feature needs it for, said at rest while it is empty.
   const report = server.resolved?.schema;
   // A choice of who is asked for by any of its parts: an employer's name.
@@ -330,7 +316,7 @@ function Detail(props: { prop: SchemaProp; type: string; revealed?: boolean; who
       fallback={
         // "Now the page title" says it once, when it is shown.
         stored === undefined && fact && !(props.revealed && follows && !nameIsTitle)
-          ? (DEFAULTS[fact] ?? 'From the page')
+          ? detailFrom(fact, view.lookup, template, inSentence(server.target!.label))
           : site
             ? `Site currency: ${site}`
             : bySite
@@ -1272,6 +1258,8 @@ function Stage(props: { onReveal(key: string): void }) {
     ? 'Show in your own JSON-LD'
     : `Show ${type.props?.find((one) => `schema.props.${one.key}` === shownField)?.label ?? type.groups?.[shownField.slice('schema.props.'.length)]?.label ?? 'the field'}`;
 
+  // Nothing is sent to read back, nor to earn a search feature.
+  const unsent = unsentSchema(report);
   return (
     <section className="seo-stage seo-schema-stage" aria-labelledby="seo-understood" aria-busy={catchingUp(state) || undefined}>
       <div className="seo-stage-caption">
@@ -1287,7 +1275,14 @@ function Stage(props: { onReveal(key: string): void }) {
           />
         </span>
       </div>
-      {!read ? (
+      {unsent ? (
+        <p className="seo-readback">
+          {unsent}{' '}
+          <Btn variant="ghost" size={24} onClick={() => openSheet({ kind: 'checks' })}>
+            Show in Checks
+          </Btn>
+        </p>
+      ) : !read ? (
         <p className="seo-readback">There is no page to read back.</p>
       ) : (
         <div className="seo-readback" ref={group} role="group" aria-label="What search engines read">
@@ -1345,8 +1340,9 @@ function Stage(props: { onReveal(key: string): void }) {
           )}
         </div>
       )}
-      <h4 className="seo-stage-sub">In search results</h4>
+      {!unsent && <h4 className="seo-stage-sub">In search results</h4>}
       <ul
+        hidden={!!unsent}
         className="seo-features"
         ref={lines}
         onFocus={(event) => (focusedLine.current = (event.target as HTMLElement).closest<HTMLElement>('[data-line]')?.dataset.line ?? null)}

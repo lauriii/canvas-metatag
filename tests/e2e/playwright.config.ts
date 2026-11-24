@@ -10,7 +10,7 @@ import { defineConfig, devices } from '@playwright/test';
  * certificate.
  *
  * The four seeds of CanvasMetatagTestSetup are the projects `coupled`,
- * `headless`, `ai` and `complex` (the coupled site plus the complex content
+ * `headless` (also `headless-frontend`), `ai` and `complex` (the coupled site plus the complex content
  * fixture). `host-contract` is the coupled seed too: it is a project
  * of its own only so that it runs first, and so that a Canvas change which
  * breaks the editor integration fails once, loudly, instead of in every spec.
@@ -50,6 +50,9 @@ export default defineConfig({
       use,
     },
     { name: 'headless', testMatch: 'headless.spec.ts', dependencies: ['host-contract'], use },
+    // The headless seed: the README's recipe for the metadata adapter, run
+    // on its heads (needs `npm ci` in examples/headless-next).
+    { name: 'headless-frontend', testMatch: 'headless-frontend.spec.ts', dependencies: ['host-contract'], use },
     { name: 'ai', testMatch: 'ai.spec.ts', dependencies: ['host-contract'], use },
     { name: 'complex', testMatch: ['template-complex.spec.ts', 'compose.spec.ts'], dependencies: ['host-contract'], use },
     // The composer's keys, caret and selection in the other engines (design

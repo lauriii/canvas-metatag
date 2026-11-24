@@ -19,7 +19,7 @@ import {
 
 import { useApp } from '../App';
 import { stageMatch } from '../checks';
-import { AI_SENDS, type Meter, source as sourceOf } from '../model';
+import { AI_SENDS, type Meter, emptyDescription, source as sourceOf } from '../model';
 import type { Issue, Scope } from '../types';
 import { Btn, SparkleIcon, reveal } from './ui';
 
@@ -68,6 +68,7 @@ export interface FieldParts {
   /** Give it to the control. */
   id: string;
   labelId: string;
+  /** The source word's id, for the control's description; '' without one. */
   asideId: string;
   invalid: boolean;
   disabled: boolean;
@@ -160,17 +161,26 @@ export function useField(options: FieldOptions): FieldParts {
   const language =
     server.languages[target?.default_langcode ?? ''] ?? 'default-language';
   const disabled = locked[scope];
-  // Reset and its Undo remove the button that was pressed: focus stays in the field.
-  const stayOnField = () =>
-    requestAnimationFrame(() =>
+  // Reset and its Undo remove the button that was pressed: focus stays in the
+  // field. A control that is swapped once more as the value settles (a box
+  // giving way to a composer) would drop it: for a few frames, focus that
+  // fell out of the dialog comes back.
+  const stayOnField = (frames = 8) =>
+    requestAnimationFrame(() => {
+      if (frames < 8 && document.activeElement && document.activeElement !== document.body) {
+        return;
+      }
       (
         document.getElementById(id) ??
         ref.current?.querySelector<HTMLElement>('[data-focus]') ??
         // The control that replaced it (a box, a select), else the label.
         ref.current?.querySelector<HTMLElement>('input, textarea, button:not([data-link])') ??
         document.getElementById(`${id}-label`)
-      )?.focus({ preventScroll: true }),
-    );
+      )?.focus({ preventScroll: true });
+      if (frames > 0) {
+        stayOnField(frames - 1);
+      }
+    });
   const justReset =
     state.undo?.text === 'Reset' &&
     state.undo.path !== undefined &&
@@ -204,8 +214,9 @@ export function useField(options: FieldOptions): FieldParts {
 
   let action: ReactNode = null;
   if (justReset) {
-    // Where the value now comes from, beside its Undo.
-    word = word ? <>Reset · {word} ·</> : 'Reset ·';
+    // Where the value now comes from, beside its Undo: "Reset · Set for
+    // every Article · Undo". The field's description keeps the source
+    // alone; the live region says Reset.
     action = (
       <Btn
         variant="ghost"
@@ -276,14 +287,20 @@ export function useField(options: FieldOptions): FieldParts {
   return {
     id,
     labelId: `${id}-label`,
-    asideId: `${id}-aside`,
+    asideId: word ? `${id}-aside` : '',
     invalid: message !== undefined,
     disabled,
     set,
     aside:
       word || action ? (
         <>
-          {word && <span>{word}</span>}
+          {(word || justReset) && (
+            <span>
+              {justReset && (word ? 'Reset · ' : 'Reset ·')}
+              {word && <span id={`${id}-aside`}>{word}</span>}
+              {justReset && (word ? ' ·' : '')}
+            </span>
+          )}
           {action}
         </>
       ) : null,
@@ -456,12 +473,14 @@ export function Field(
   // Length is guidance, as Checks files it: shown while editing, never as a
   // warning at rest. The count stays on the line whatever the line says.
   const long = meter?.state === 'long';
+  // A bare number on screen; read as its own phrase, "247 characters".
+  const characters = meter?.chars === 1 ? ' character' : ' characters';
   const count =
     field.focused && meter && meter.state !== 'empty' ? (
       <span data-long={long || undefined}>
-        {meter.state === 'unmeasured'
-          ? `${meter.chars} characters`
-          : meter.chars}
+        <span className="seo-visually-hidden">. </span>
+        {meter.chars}
+        {meter.state === 'unmeasured' ? characters : <span className="seo-visually-hidden">{characters}</span>}
       </span>
     ) : undefined;
   let guide: ReactNode = null;
@@ -524,9 +543,9 @@ export function Field(
   } else if (field.focused && meter) {
     guide =
       meter.state === 'empty' ? (
-        meter.sentence && (
+        props.path === 'description' && (
           <Guide id={guideId}>
-            Empty. Search engines will pick text from the page.
+            {emptyDescription('field', state.server?.headless === true)}
           </Guide>
         )
       ) : (
@@ -589,7 +608,6 @@ export function Field(
   const aside = (
     <div
       className="seo-aside"
-      id={field.asideId}
       data-pinned={field.pinned || undefined}
     >
       {field.aside}

@@ -133,7 +133,7 @@ export function dateWords(value: string, ui: string): string | null {
   }
   let day: string;
   try {
-    day = new Intl.DateTimeFormat(dateLocale(ui), { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])));
+    day = new Intl.DateTimeFormat(dateLocale(ui), { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC', calendar: 'gregory' }).format(new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])));
   } catch {
     return `${m[1]}-${m[2]}-${m[3]}${m[4] ? ` ${m[4]}:${m[5]}` : ''}`;
   }

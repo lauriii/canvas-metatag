@@ -25,7 +25,7 @@ import {
   typeOf,
   wellFormed,
 } from '../model';
-import type { Kind, Part, Scope, SeoValues, Value } from '../types';
+import type { Fact, Kind, Part, Scope, SeoValues, Value } from '../types';
 import {
   type Entry,
   FOLD,
@@ -34,7 +34,10 @@ import {
   type Shown,
   allEmptySaid,
   andWords,
+  boxSaid,
+  boxTag,
   braceKey,
+  chipTitle,
   brokenWhy,
   composed,
   compositionSaid,
@@ -45,15 +48,22 @@ import {
   fitsPart,
   fold,
   foldLabel,
+  followsDefault,
   formOf,
   kindReason,
+  keptAsChip,
   levelOf,
   partsOf,
+  partsText,
+  readsVia,
   resolve,
   sameValue,
   rowOf,
+  startWords,
   tagOf,
   tree,
+  withoutDefault,
+  wordsShown,
 } from '../values';
 import type { ChipView, ComposerHandle } from './Composer';
 import { Field, type FieldOptions, type FieldParts } from './Field';
@@ -179,13 +189,15 @@ export function menuRows(
   filter: string,
   level: string | null,
   toItem: (entry: Entry, deep: boolean) => MenuItem,
+  /** The entry marked "Default": its level says so too. */
+  marked?: (entry: Entry) => boolean,
 ): MenuItem[] {
-  return tree(entries, level, filter).map((row) =>
+  return tree(entries, level, filter, marked).map((row) =>
     row.type === 'entry'
       ? toItem(row.entry, row.deep)
       : row.level === FOLD
         ? { key: FOLD, label: foldLabel(entries.filter((entry) => levelOf(entry) === FOLD), kind), group: '', level: FOLD, quiet: true }
-        : { key: `level:${row.level}`, label: row.level, sub: `${row.count} ${row.count === 1 ? 'field' : 'fields'}`, group: row.group, level: row.level },
+        : { key: `level:${row.level}`, label: row.level, ...(row.marked ? { hint: 'Default' } : {}), sub: `${row.count} ${row.count === 1 ? 'field' : 'fields'}`, group: row.group, level: row.level },
   );
 }
 
@@ -204,8 +216,11 @@ export interface LinkOptions {
   linkable: boolean;
   /** Template scope: the default a value that is not set follows, shown as a box. */
   byDefault?: Value | null;
-  /** What the default gives, when it is not a value of its own ("Same as description"). */
-  defaultWords?: { tag: string; text: string };
+  /**
+   * What the default gives, when it is not a value of its own ("Same as
+   * description"), and the worked-out value it ends at, if any.
+   */
+  defaultWords?: { tag: string; text: string; fact?: Fact };
   /** What happens without the link, in a clause: "its Title is used". */
   instead?: string;
   /** The image sheet, for "Choose from the media library…". */
@@ -263,6 +278,9 @@ function useLink(options: LinkOptions) {
     : null;
   const composing = options.linkable && kind === 'text' && !options.choices && !options.who && composes(prop, path, template ? 'template' : 'page');
   const form = formOf(path);
+  const allEntries = options.linkable
+    ? entriesFor(path, kind, template ? 'template' : 'page', lookup, target.label, options.choices, options.items, label, composing ? form : undefined).filter((entry) => !(options.noSite && entry.key === 'fact:identity'))
+    : [];
   // The composer's chunk: loaded where a value composes. Until it is there
   // the composer shows its parts at rest; if it can't load, it says so and
   // the dialog goes on.
@@ -316,14 +334,11 @@ function useLink(options: LinkOptions) {
   const shown: Shown = shownValue
     // Where text composes, a field reads as words: a date, every item.
     ? resolve(shownValue, composing ? form : kind, lookup)
-    : lookup.resolvable
-      ? { status: 'ok', value: options.defaultWords?.text ?? '', text: options.defaultWords?.text ?? '', image: null }
-      : { status: 'none', value: '', text: '', image: null };
+    : wordsShown(options.defaultWords?.text ?? '', lookup.resolvable);
   const source = shownValue ? tagOf(shownValue, lookup, path, kind) : (options.defaultWords?.tag ?? '');
-  // A default is named as one; its source only where it is not the field.
-  // A default typed in the registry ("Other local business") is the default,
-  // not text anybody typed.
-  const tag = linked ? source : source === label || (!!shownValue && 'text' in shownValue) ? 'Default' : `Default · ${source}`;
+  // "Default · from Summary", "Site name"; "No bookmark has one".
+  const follows = shownValue ?? (options.defaultWords?.fact ? { fact: options.defaultWords.fact } : undefined);
+  const { tag, from, none } = boxTag({ linked, value: follows, source, label, lookup, template, type });
   const group = shownValue && 'source' in shownValue ? `${target.label} › ` : '';
   // What a default is, in words: "each event's title", "the site name".
   const defaultName =
@@ -349,10 +364,13 @@ function useLink(options: LinkOptions) {
   // A list linked to several values says how many: every one is used.
   const more = options.items === 'list' && row?.many && (row.count ?? 0) > 1 ? ` and ${row.count! - 1} more` : '';
   const first = options.format?.(shownText(shown, kind)) ?? shownText(shown, kind);
+  // A default no item can give says so, also where the text it stands for
+  // is merely empty.
+  const status = shown.status === 'ok' && !first && none ? 'none' : shown.status;
   // "Leave overnight and 2 more": the first item's full stop goes.
-  const valueText = shown.status === 'ok'
+  const valueText = status === 'ok'
     ? (more ? first.replace(/[.。]$/u, '') : first) + more
-    : stateWords(shown.status, type, why, item);
+    : none ?? stateWords(shown.status, type, why, item);
   const unlinked = UNLINKED[options.choices ? 'choice' : kind];
   // The row that types a value instead of the default: "Type a title for
   // every Article", "Enter a date".
@@ -429,6 +447,11 @@ function useLink(options: LinkOptions) {
     setMenu(false);
     say(`${label} linked to ${entry.full}.`);
   }
+  /** The menu closes on the current row: nothing is written. */
+  function keep() {
+    (kind === 'image' ? linkButton.current : boxButton.current)?.focus();
+    setMenu(false);
+  }
   /**
    * Composing, a step out of the box: its field, or the default's fact, as a
    * chip with the caret after it. With `add`, the menu at the caret.
@@ -454,7 +477,7 @@ function useLink(options: LinkOptions) {
     // title) is not carried over: composing starts empty. A paste replaces
     // the box, as a typed key does.
     const value_ = linked ? value : (byDefault ?? undefined);
-    const first = !pasted && value_ && partsOf(value_).every((part) => fitsPart(part, form, lookup)) ? value_ : undefined;
+    const first = !pasted && keptAsChip(value_, form, lookup, template) ? value_ : undefined;
     focusOnMount.current = true;
     flushSync(() => {
       setStarted(first ? partsOf(first) : []);
@@ -522,16 +545,20 @@ function useLink(options: LinkOptions) {
   const composerParts = started ?? partsOf(value);
   const chipParts = fieldsIn(composerParts);
   const full = chipParts.length >= MAX_PARTS;
-  const allEntries = options.linkable
-    ? entriesFor(path, kind, template ? 'template' : 'page', lookup, target.label, options.choices, options.items, label, composing ? form : undefined).filter((entry) => !(options.noSite && entry.key === 'fact:identity'))
-    : [];
-  // What the menu lists in its mode: long text waits in the last row while
-  // a part is added or replaced.
-  const entries = entriesIn(allEntries, mode);
+  // What the menu lists in its mode. A pick that links the whole value
+  // leaves out the default it follows, while it follows it: the Default box
+  // and Reset return to it. A value linked to that same fact keeps its row,
+  // the current one. Adding or replacing a part offers it, and long text
+  // waits in the last row there.
+  const entries = mode === 'link' ? withoutDefault(allEntries, byDefault) : entriesIn(allEntries, mode);
   const current = mode === 'replace' ? chipParts[replacing] as Value | undefined : mode === 'add' ? undefined : linked ? value : byDefault ?? undefined;
+  // Beside its label, a fact says the field it reads; linking, the field the
+  // default reads says so too: the Default box may be out of sight.
+  const reads = (entry: Entry) => mode === 'link' && !linked && readsVia(entry, from);
   const toItem = (entry: Entry, deep: boolean): MenuItem => ({
     key: entry.key,
     label: deep ? entry.full : entry.label,
+    hint: entry.from ? `from ${entry.from}` : reads(entry) ? 'Default' : undefined,
     sub:
       entry.disabled ??
       entry.note ??
@@ -539,7 +566,8 @@ function useLink(options: LinkOptions) {
         ? // Through a reference: other items give it.
           `Hidden from visitors for this ${type}`
         : entry.kind === 'image'
-          ? entry.image?.name ?? stateWords(entry.status === 'ok' ? 'empty' : entry.status, type)
+          ? // An image reads the same from a field or a value.
+            entry.image ? entry.image.alt || entry.image.name : stateWords(entry.status === 'ok' ? 'empty' : entry.status, type)
           : entry.shown
             ? entry.kind === 'date'
               ? dateText(entry.shown)
@@ -549,11 +577,15 @@ function useLink(options: LinkOptions) {
     group: entry.group,
     // With eight fields, nothing more is added; a field is still replaced.
     disabled: entry.disabled ?? (mode === 'add' && full ? `At most ${MAX_PARTS} fields in one value` : undefined),
-    current: !!current && sameValue(entry.value, current),
-    run: () => pick(entry),
+    // A default no item has is only its reason: the menu opens on what can be picked.
+    current: !entry.unavailable && ((!!current && sameValue(entry.value, current)) || reads(entry)),
+    // From its box, the current row changes nothing: the default it reads
+    // is more than a link to that one field. An editor who left the box to
+    // make a value of their own links the field they pick.
+    run: () => (mode === 'link' && showBox && ((!!current && sameValue(entry.value, current)) || reads(entry)) ? keep() : pick(entry)),
   });
   const items = (filter: string, level: string | null): MenuItem[] => {
-    const rows = menuRows(entries, kind, filter, level, toItem);
+    const rows = menuRows(entries, kind, filter, level, toItem, reads);
     // A chip's menu opens where its field is: Remove is there too.
     if (level !== null && level !== FOLD && filter.trim() === '' && mode === 'replace' && chipParts[replacing]) {
       rows.unshift({ key: '#remove', label: `Remove ${tagOf(chipParts[replacing], lookup)}`, group: '', run: () => removeChip(replacing) });
@@ -568,16 +600,16 @@ function useLink(options: LinkOptions) {
         // Text only: the field can take its place. A step on the whole
         // value, first.
         rows.unshift({ key: '#replace-text', label: 'Replace the text with a field', sub: 'Then pick the field', group: '', pin: true, run: () => setMode('link') });
-      } else if (composing && mode === 'link' && showBox) {
-        // The headline step, first: under the filter.
+      } else if (composing && mode === 'link' && (showBox || (showComposer && !composerParts.length && !!byDefault))) {
+        // The headline step, first: under the filter. In an empty composer
+        // too, which still follows its default: that default becomes the
+        // first chip.
         const first = linked ? value : byDefault;
-        const kept = !!first && partsOf(first).every((part) => fitsPart(part, form, lookup));
-        // "Start from Description" on Description goes in a circle.
-        const from = name(first ?? undefined);
+        const kept = keptAsChip(first ?? undefined, form, lookup, template);
         rows.unshift({
           key: '#compose',
           label: 'Add words or fields',
-          sub: !kept ? 'Type words and add fields' : linked ? `Keep ${from} and add to it` : from === label ? 'Keep the default and add to it' : `Start from ${from}`,
+          sub: startWords(kept, linked, name(first ?? undefined), label),
           group: '',
           // In sight when the menu opens on the current entry, far below.
           pin: true,
@@ -632,7 +664,9 @@ function useLink(options: LinkOptions) {
   // "Title, “in”, Venue › City": what a composition is made of.
   const madeOf = (parts: Part[]) =>
     parts.map((part) => ('text' in part ? `“${part.text.trim()}”` : tagOf(part, lookup))).filter((one) => one !== '“”').join(', ');
-  const openFromButton = (from: HTMLElement) => openMenu(from, '', adding ? 'add' : 'link');
+  // Adding, focus comes back to the composer, at its caret: never to the
+  // button, which would end a composition that only holds its default.
+  const openFromButton = (from: HTMLElement) => (adding ? openMenu(composer.current?.root() ?? from, '', 'add') : openMenu(from, '', 'link'));
 
   // One name, and the tooltip says it first.
   const button = options.linkable && !atRest && (
@@ -644,7 +678,7 @@ function useLink(options: LinkOptions) {
           ? adding && chipParts.length ? `${buttonName} · Made of ${madeOf(composerParts)}` : buttonName
           : `${buttonName} · ${
               !linked
-                ? `Follows the default: ${defaultName}`
+                ? followsDefault(defaultName, from)
                 : shown.status === 'broken'
                   ? `${tag} ${why}`
                   : `Linked to ${tag}`
@@ -652,6 +686,9 @@ function useLink(options: LinkOptions) {
       }
       data-link=""
       data-look={linked ? (shown.status === 'broken' ? 'broken' : 'linked') : 'unlinked'}
+      // Adding: a click leaves focus, and the caret, in the composer. Focus
+      // leaving it would end a composition that only holds its default.
+      onMouseDown={adding ? (event) => event.preventDefault() : undefined}
       // The box opens the same menu: one Tab stop per field.
       tabIndex={showBox ? -1 : undefined}
       aria-haspopup="dialog"
@@ -674,7 +711,7 @@ function useLink(options: LinkOptions) {
   // by name.
   const beforeParts = menu && mode === 'add' ? (composer.current?.before() ?? []) : [];
   const before = beforeParts.length
-    ? (lookup.resolvable && resultOf(beforeParts, -1, false)) || beforeParts.map((part) => ('text' in part ? part.text : tagOf(part, lookup))).join('').replace(/\s+/g, ' ').trim()
+    ? (lookup.resolvable && resultOf(beforeParts, undefined, false)) || beforeParts.map((part) => ('text' in part ? part.text : tagOf(part, lookup))).join('').replace(/\s+/g, ' ').trim()
     : '';
   const menuNode = options.linkable && (
     <LinkMenu
@@ -711,12 +748,8 @@ function useLink(options: LinkOptions) {
     />
   );
 
-  const said_ = shown.status === 'ok' ? sentence(`This ${type}: ${valueText}`) : sentence(valueText);
-  const description = linked
-    ? shown.status === 'broken'
-      ? `Linked to ${source}, which ${why}. Each ${type} uses its default.`
-      : `Linked to ${group}${source}. ${said_}`
-    : `Follows the default: ${defaultName}. ${said_}`;
+  const said_ = status === 'ok' ? sentence(`This ${type}: ${valueText}`) : sentence(valueText);
+  const description = boxSaid({ linked, broken: shown.status === 'broken', source, group, from, why, type, defaultName, said: said_ });
 
   /** What the box says: where the value comes from, and what it gives. */
   const boxWords = (
@@ -733,7 +766,7 @@ function useLink(options: LinkOptions) {
           <span className="seo-linked-leaf" dir="auto">{tag}</span>
         )}
       </span>
-      <span className="seo-linked-value" data-state={shown.status} dir={shown.status === 'ok' ? 'auto' : undefined} title={shown.status === 'ok' ? valueText : undefined}>
+      <span className="seo-linked-value" data-state={status} dir={status === 'ok' ? 'auto' : undefined} title={status === 'ok' ? valueText : undefined}>
         {valueText}
       </span>
     </>
@@ -884,10 +917,13 @@ function useLink(options: LinkOptions) {
     const at = stored.findIndex((part) => !('text' in part) && ++seen === field);
     return at >= 0 ? `${path}.parts.${at}` : undefined;
   };
-  const chipView = (part: Part, field: number): ChipView & { why: string } => {
+  const chipView = (part: Part, field: number): ChipView & { why: string; from?: string } => {
     // A field labelled like a fact, or like another field, as the menu says
     // it: "Description (body)".
-    const entry = 'source' in part ? entries.find((one) => one.key === part.source.expression) : undefined;
+    const entry = 'source' in part ? allEntries.find((one) => one.key === part.source.expression) : undefined;
+    // A worked-out value is named by its label alone, and says the field it
+    // reads in its tooltip and the composer's description.
+    const from = 'fact' in part ? (allEntries.find((one) => sameValue(one.value, part))?.from ?? lookup.facts[part.fact]?.via) : undefined;
     const tag = tagOf(part, lookup, brokenPath(field));
     const name = entry && tag === rowOf(lookup, part)?.label ? entry.full : tag;
     const one = resolve(part, form, lookup);
@@ -898,28 +934,28 @@ function useLink(options: LinkOptions) {
       label: name,
       state,
       why,
+      ...(from ? { from } : {}),
       // Its value, and what the item gets without it; a field that gives
       // nothing for the item, its state only: the result already goes
       // without it.
-      title: lookup.resolvable && chipParts.length > 1 && state === 'ok' ? `${own}\nWithout ${name}: ${withoutOf(field)}` : own,
+      title: chipTitle(own, from, lookup.resolvable && chipParts.length > 1 && state === 'ok' ? `Without ${name}: ${withoutOf(field)}` : undefined),
     };
   };
-  /** What the item gives without the field at an index: its default when nothing is left. */
+  /**
+   * What an item without the field at an index gets: that field empty
+   * wherever it is, then its default, unless the default is that field.
+   */
   function withoutOf(field: number): string {
-    return resultOf(composerParts, field) || byDefaultFor(options.byDefault, options.defaultWords, lookup, form) || 'nothing';
+    const chip = chipParts[field];
+    const fallback = options.byDefault && sameValue(options.byDefault, chip) ? '' : byDefaultFor(options.byDefault, options.defaultWords, lookup, form);
+    return resultOf(composerParts, chip) || fallback || 'nothing';
   }
-  function resultOf(parts: Part[], without = -1, ends = true): string {
-    let seen = -1;
-    const kept = parts.map((part) => ('text' in part || ++seen !== without ? part : { source: { sourceType: 'entity-field' as const, expression: '#without' } }));
+  function resultOf(parts: Part[], without?: Part, ends = true): string {
     if (!ends) {
       // Up to the caret: the words typed after the last field still show.
-      return composed({ parts: [...kept, { text: '\u0000' }] }, form, lookup).join('').replace('\u0000', '').replace(/\s+/g, ' ').trim();
+      return composed({ parts: [...parts, { text: '\u0000' }] }, form, lookup).join('').replace('\u0000', '').replace(/\s+/g, ' ').trim();
     }
-    const folded = fold(kept);
-    if (!folded) {
-      return '';
-    }
-    return 'parts' in folded ? composed(folded, form, lookup).join('').replace(/\s+/g, ' ').trim() : resolve(folded, form, lookup).text;
+    return partsText(parts, form, lookup, without);
   }
   const result = lookup.resolvable ? resultOf(composerParts) : '';
   const views = chipParts.map((part, at) => chipView(part, at));
@@ -934,7 +970,7 @@ function useLink(options: LinkOptions) {
   const allEmptyGuided = showComposer && lookup.resolvable && chipParts.length > 0 && brokenAt < 0 && !pasteNote && !result;
   const composerSaid = !lookup.resolvable
     ? `No ${type} to preview.`
-    : compositionSaid(type, result, fallbackText, allEmptyGuided ? [] : views.filter((_, at) => at !== guided).map((one) => ({ label: one.label, status: one.state, why: one.why })));
+    : compositionSaid(type, result, fallbackText, allEmptyGuided ? [] : views.filter((_, at) => at !== guided).map((one) => ({ label: one.label, status: one.state, why: one.why, from: one.from })));
   // What the item gives without a chip: while it is hovered, selected whole
   // or being replaced. Never for the only field, whose "without" is the
   // default.
@@ -1169,7 +1205,7 @@ function useLink(options: LinkOptions) {
           ? { text: tag, look: 'default' as const }
           : undefined;
   /** An image row's value line when the link gives nothing. */
-  const imageState = linked && shown.status !== 'ok' ? stateWords(shown.status, type, why, item) : undefined;
+  const imageState = linked && shown.status !== 'ok' ? stateWords(shown.status, type, why, item) : byDefault ? none : undefined;
 
   // The length of a composition with a field is this item's.
   const varies = showComposer && chipParts.some((part) => !('fact' in part) || part.fact !== 'site') ? type : undefined;
@@ -1357,7 +1393,7 @@ function Ending(props: { scope: Scope; disabled: boolean; wide?: boolean }) {
   // At template scope the type's text fields, in the link menu's levels;
   // nothing that does not fit is offered.
   const entries = template
-    ? entriesFor('title_end', 'text', 'template', lookup, target!.label).filter((one) => one.group !== 'Page' && !one.disabled)
+    ? entriesFor('title_end', 'text', 'template', lookup, target!.label).filter((one) => 'source' in one.value && !one.disabled)
     : [];
   const folded = (one: string) => one.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase();
   const items = (filter: string, level: string | null): MenuItem[] => {

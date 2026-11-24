@@ -49,7 +49,8 @@ if (!\class_exists(TestSetupInterface::class)) {
  * Run by `core/scripts/test-site.php install --setup-file …`, once per spec
  * file. Two environment flags choose what is added to the base (coupled) site:
  *
- * - CANVAS_METATAG_E2E_HEADLESS=1 installs canvas_headless with one frontend.
+ * - CANVAS_METATAG_E2E_HEADLESS=1 installs canvas_headless with one frontend,
+ *   and adds node 4, an article without a summary.
  * - CANVAS_METATAG_E2E_AI=1 installs the AI submodule and its test provider,
  *   edits the search result prompt and adds a site guardrail (configureAi()).
  * - CANVAS_METATAG_E2E_COMPLEX=1 adds the complex content fixture after the
@@ -105,6 +106,8 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
   public const string SECOND_ARTICLE_SUMMARY = 'Twelve releases, three lessons and one thing we would do differently.';
   public const string SECOND_ARTICLE_BYLINE = 'Grace Editor';
   public const string PLAIN_NODE_TITLE = 'Plain page';
+  // The headless projects' node 4: an article with no description.
+  public const string NO_SUMMARY_TITLE = 'A note without a summary';
 
   // Users. Each one's password is its name.
   // Edits Canvas pages and templates, with neither SEO permission.
@@ -647,6 +650,9 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
 
   /**
    * Connects one frontend and gives the token endpoint its signing keys.
+   *
+   * Articles are described as articles, so that their heads carry the
+   * article times a frontend must keep.
    */
   private function configureHeadless(): void {
     $directory = \Drupal::root() . '/' . \Drupal::getContainer()->getParameter('site.path') . '/keys';
@@ -668,6 +674,11 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     \Drupal::configFactory()->getEditable('canvas_headless.settings')
       ->set('frontends', [['url' => self::FRONTEND_URL, 'components' => []]])
       ->save();
+    $template = ContentTemplate::load('node.article.full');
+    \assert($template instanceof ContentTemplate);
+    $template->setThirdPartySetting('canvas_metatag', 'values', ['schema' => ['type' => 'Article']])->save();
+    // Previewed at template scope, it has no description to send.
+    Node::create(['type' => 'article', 'title' => self::NO_SUMMARY_TITLE, 'status' => 1])->save();
   }
 
 }

@@ -185,14 +185,19 @@ final class Resolver {
    * @param string|null $langcode
    *   The language its words are read in: a referencing page's, for a page
    *   it names (target()); NULL for the entity's own.
+   * @param string|null $bundle
+   *   Without an entity: the node type whose form names `via`, so that a
+   *   template of a type with no item yet says where its values come from.
    *
    * @return array<string, array{label: string, kind: string, value: string, text?: string, image?: ?array, via?: string}>
    *   Name => fact. The Image fact has an empty `value` and an `image`: the
-   *   image array without `source`, or NULL. `via`: the label of the field
-   *   a node's Description or Image fact is taken from. `text`: a date fact
-   *   in words, as a place that composes reads it (Words).
+   *   image array without `source`, or NULL. `via`: the field a node's
+   *   Description or Image fact is taken from, as the link menu names it
+   *   ("Body › Summary" for a summary), else the first that could give it.
+   *   `text`: a date fact in words, as a place that composes reads it
+   *   (Words).
    */
-  public function facts(?ContentEntityInterface $entity, CacheableMetadata $cacheability, ?string $langcode = NULL): array {
+  public function facts(?ContentEntityInterface $entity, CacheableMetadata $cacheability, ?string $langcode = NULL, ?string $bundle = NULL): array {
     $facts = [];
     foreach (Values::FACTS as $name => $kind) {
       $facts[$name] = ['label' => self::LABELS[$name], 'kind' => $kind, 'value' => ''] + ($kind === 'image' ? ['image' => NULL] : []);
@@ -203,37 +208,47 @@ final class Resolver {
     $facts['site']['value'] = $identity['name'] !== '' ? $identity['name'] : (string) $this->configFactory->get('system.site')->get('name');
     // The publisher: a reference to the site's own identity, by its name.
     $facts['identity']['value'] = $facts['site']['value'];
-    if ($entity === NULL) {
+    if ($entity === NULL && $bundle === NULL) {
       return $facts;
     }
 
-    $langcode ??= $entity->language()->getId();
-    $cacheability->addCacheableDependency($this->configFactory->get('system.date'));
-    $facts['title']['value'] = (string) $entity->label();
-    $facts['url']['value'] = $this->url($entity, $cacheability);
-    $facts['author']['value'] = $this->label($entity instanceof EntityOwnerInterface ? $entity->getOwner() : NULL, $langcode, $cacheability);
-    foreach (['published' => 'created', 'modified' => 'changed'] as $name => $field) {
-      $facts[$name]['value'] = $entity->hasField($field) ? $this->date($entity->get($field)->value) : '';
-      $facts[$name]['text'] = $facts[$name]['value'] === '' ? '' : $this->words->date($facts[$name]['value'], $langcode, $cacheability);
+    $langcode ??= $entity?->language()->getId();
+    if ($entity !== NULL) {
+      $cacheability->addCacheableDependency($this->configFactory->get('system.date'));
+      $facts['title']['value'] = (string) $entity->label();
+      $facts['url']['value'] = $this->url($entity, $cacheability);
+      $facts['author']['value'] = $this->label($entity instanceof EntityOwnerInterface ? $entity->getOwner() : NULL, $langcode, $cacheability);
+      foreach (['published' => 'created', 'modified' => 'changed'] as $name => $field) {
+        $facts[$name]['value'] = $entity->hasField($field) ? $this->date($entity->get($field)->value) : '';
+        $facts[$name]['text'] = $facts[$name]['value'] === '' ? '' : $this->words->date($facts[$name]['value'], $langcode, $cacheability);
+      }
     }
 
-    if ($entity->getEntityTypeId() === 'canvas_page') {
+    if ($entity?->getEntityTypeId() === 'canvas_page') {
       $facts['description']['value'] = (string) $entity->get('description')->value;
       $facts['image']['image'] = $this->mediaImage($entity->get('image')->entity, $langcode, $cacheability);
       return $facts;
     }
 
-    // The first formatted text with a summary, and the first image that
-    // resolves, in the order of the form.
-    foreach ($this->formFields($entity->getEntityTypeId(), $entity->bundle(), $cacheability) as $name => $definition) {
+    // The first formatted text with a summary, the text fields named for a
+    // description, and the first image that resolves, in the order of the
+    // form. Without an entity, only the fields they would come from.
+    $formatted = NULL;
+    $named = [];
+    foreach ($this->formFields($entity?->getEntityTypeId() ?? 'node', $entity?->bundle() ?? $bundle, $cacheability) as $name => $definition) {
       $type = $definition->getType();
       $image = $type === 'image' || $this->referencesImageMedia($definition);
-      if (($type !== 'text_with_summary' || isset($facts['description']['via'])) && (!$image || $facts['image']['image'] !== NULL)) {
+      // Named by its label as stored, so that every language takes it.
+      if (in_array('description', $this->sources->namedFor($definition), TRUE)) {
+        $named[$name] = (string) $definition->getLabel();
         continue;
       }
-      $items = $entity->get($name);
+      if (($type !== 'text_with_summary' || $formatted !== NULL) && (!$image || $facts['image']['image'] !== NULL)) {
+        continue;
+      }
+      $items = $entity?->get($name);
       // A field the visitor may not view gives nothing. Only delta 0.
-      $item = $this->allowed($items, 'view', $cacheability) ? $items->first() : NULL;
+      $item = $items !== NULL && $this->allowed($items, 'view', $cacheability) ? $items->first() : NULL;
       if ($image) {
         $facts['image']['via'] ??= (string) $definition->getLabel();
         $found = match (TRUE) {
@@ -246,11 +261,33 @@ final class Resolver {
         }
         continue;
       }
-      $facts['description']['via'] = (string) $definition->getLabel();
-      // The summary, else the text cut at a word boundary.
-      $summary = Values::fromHtml((string) $item?->get('summary')->getValue());
-      $text = Values::fromHtml((string) $item?->get('value')->getValue());
-      $facts['description']['value'] = $summary !== '' ? $summary : Values::excerpt($text);
+      $formatted = [(string) $definition->getLabel(), $item];
+    }
+
+    // Its summary; else the first field named for a description that has
+    // text and the visitor may view; else its text cut at a word boundary.
+    // `via` names the field that gave the value, else the first that could,
+    // whatever the visitor may view, as for the image.
+    $summary = Values::fromHtml((string) ($formatted[1] ?? NULL)?->get('summary')->getValue());
+    if ($summary !== '') {
+      $facts['description'] = ['value' => $summary, 'via' => $formatted[0] . ' › Summary'] + $facts['description'];
+      return $facts;
+    }
+    foreach ($entity === NULL ? [] : $named as $name => $label) {
+      $items = $entity->get($name);
+      $value = $this->allowed($items, 'view', $cacheability) ? (string) $items->first()?->get('value')->getValue() : '';
+      $text = in_array($items->getFieldDefinition()->getType(), ['text', 'text_long'], TRUE) ? Values::fromHtml($value) : trim($value);
+      if ($text !== '') {
+        $facts['description'] = ['value' => $text, 'via' => $label] + $facts['description'];
+        return $facts;
+      }
+    }
+    if ($formatted !== NULL) {
+      $facts['description']['value'] = Values::excerpt(Values::fromHtml((string) $formatted[1]?->get('value')->getValue()));
+    }
+    $via = $formatted[0] ?? reset($named);
+    if ($via !== FALSE) {
+      $facts['description']['via'] = $via;
     }
     return $facts;
   }
@@ -650,17 +687,50 @@ final class Resolver {
     // Always: installing canvas_headless or configuring a frontend later must
     // invalidate what was built on the request host.
     $cacheability->addCacheTags(['config:canvas_headless.settings']);
-    if ($this->moduleHandler->moduleExists('canvas_headless')) {
-      // The first frontend is the one the editor previews against.
-      $url = $this->configFactory->get('canvas_headless.settings')->get('frontends.0.url');
-      $frontend = is_string($url) ? FrontendUrl::fromConfig($url) : NULL;
-      if ($frontend !== NULL) {
-        return ['url' => $frontend->baseUrl, 'source' => 'frontend'];
-      }
+    $frontend = $this->frontend();
+    if ($frontend !== NULL) {
+      return ['url' => $frontend->baseUrl, 'source' => 'frontend'];
     }
     $cacheability->addCacheContexts(['url.site']);
     $request = $this->requestStack->getCurrentRequest();
     return ['url' => $request->getSchemeAndHttpHost() . $request->getBasePath(), 'source' => 'request'];
+  }
+
+  /**
+   * The first headless frontend: the one the editor previews against.
+   *
+   * NULL without canvas_headless, or when its first frontend can't be read.
+   * Its configuration is a dependency of whatever is built on it
+   * (`config:canvas_headless.settings`, see origin()).
+   */
+  public function frontend(): ?FrontendUrl {
+    if (!$this->moduleHandler->moduleExists('canvas_headless')) {
+      return NULL;
+    }
+    $url = $this->configFactory->get('canvas_headless.settings')->get('frontends.0.url');
+    return is_string($url) ? FrontendUrl::fromConfig($url) : NULL;
+  }
+
+  /**
+   * Whether pages carry their addresses: canonical, og:url, hreflang, JSON-LD.
+   *
+   * Not while the public base from the setting or a frontend is on a host no
+   * visitor reaches and Drupal's own host is not a development host: a
+   * missing canonical is safe, a localhost one breaks every share card. The
+   * status report says how to fix it
+   * (CanvasMetatagHooks::runtimeRequirements()).
+   *
+   * @param array{url: string, source: string} $origin
+   *   The public base (origin()).
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Gets `url.site` when Drupal's own host decides.
+   */
+  private function addressed(array $origin, CacheableMetadata $cacheability): bool {
+    if ($origin['source'] === 'request' || Values::isPublicHost((string) parse_url($origin['url'], PHP_URL_HOST))) {
+      return TRUE;
+    }
+    $cacheability->addCacheContexts(['url.site']);
+    return Values::isDevelopmentHost((string) $this->requestStack->getCurrentRequest()?->getHost());
   }
 
   /**
@@ -734,9 +804,11 @@ final class Resolver {
     // The canonical may point elsewhere. The entity's own URL stays the
     // identity of its structured data.
     $origin = $this->origin($cacheability);
+    $addressed = $this->addressed($origin, $cacheability);
     $own = $facts['url']['value'];
     $canonical = $effective['canonical'] ?? '';
     $canonical = match (TRUE) {
+      !$addressed => '',
       $canonical === '' => $own,
       str_starts_with($canonical, '/') => $origin['url'] . $canonical,
       default => $canonical,
@@ -839,7 +911,7 @@ final class Resolver {
 
     $link = [['rel' => 'canonical', 'href' => $canonical]];
     $alternates = [];
-    foreach (array_keys($entity->getTranslationLanguages()) as $langcode) {
+    foreach ($addressed ? array_keys($entity->getTranslationLanguages()) : [] as $langcode) {
       $translation = $entity->getTranslation($langcode);
       if (!$translation instanceof EntityPublishedInterface || $translation->isPublished()) {
         $alternates[$langcode] = $this->url($translation, $cacheability);
@@ -852,7 +924,14 @@ final class Resolver {
       }
     }
 
-    $script = self::script($report['graph'], $error);
+    // A page without an address carries no structured data: every @id is
+    // one. script() sets $error; without it, there is none.
+    $error = NULL;
+    $script = $addressed ? self::script($report['graph'], $error) : [];
+    if (!$addressed) {
+      // The dialog says why, and where it is fixed.
+      $report['unaddressed'] = TRUE;
+    }
     if ($error !== NULL) {
       $report['unencodable'] = TRUE;
       $this->loggers->get('canvas_metatag')->error('The structured data of @type @id was left out: @message', [
@@ -1021,7 +1100,9 @@ final class Resolver {
       'today' => $schema['today'],
       'hand' => array_column(array_filter($schema['nodes'], static fn (array $node): bool => $node['origin'] === 'hand' && isset($node['at'])), 'at'),
     ]);
-    $result['schema']['rules'] = SchemaGraph::rules($graph, ['home' => $home], $schema['nodes']);
+    // A page without an address ships no graph, so there is nothing for the
+    // rules to judge: its nodes point into a graph that is not there.
+    $result['schema']['rules'] = empty($schema['unaddressed']) ? SchemaGraph::rules($graph, ['home' => $home], $schema['nodes']) : [];
     return $result;
   }
 
