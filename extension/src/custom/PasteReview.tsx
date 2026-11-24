@@ -11,7 +11,7 @@ import type { SearchFeatures, StatePayload } from '../types';
 import { Btn } from '../components/ui';
 import type { Cleaned } from './clean';
 import { featuresOf, sentence, typesOf, type Item } from './project';
-import { CUSTOM_MAX } from './validate';
+import { CUSTOM_MAX, MODULE_IDS } from './validate';
 
 export interface ReviewRow {
   item: Item;
@@ -109,7 +109,7 @@ export function chosen(rows: ReviewRow[], ticks: boolean[]): { items: Item[]; da
   });
   let dangling = 0;
   let pointed = 0;
-  const ours = /^#(identity|logo|website|return-policy|webpage|primaryimage|primary|group)$/;
+  const ours = new RegExp(`^#(${MODULE_IDS.join('|')})$`);
   const walk = (value: unknown, top: boolean): unknown => {
     if (Array.isArray(value)) return value.map((one) => walk(one, false));
     if (!isObject(value)) return value;

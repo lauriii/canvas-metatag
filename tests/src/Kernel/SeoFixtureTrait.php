@@ -7,10 +7,13 @@ namespace Drupal\Tests\canvas_metatag\Kernel;
 use Drupal\canvas\Entity\Component;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
+use Drupal\canvas\Entity\PageVariant;
+use Drupal\canvas\Plugin\Canvas\ComponentSource\Marker;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
+use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\PageCache\ChainRequestPolicy;
 use Drupal\Core\PageCache\RequestPolicy\NoSessionOpen;
 use Drupal\field\Entity\FieldConfig;
@@ -51,6 +54,11 @@ trait SeoFixtureTrait {
    * A valid one-pixel PNG; the dimensions a test needs are set on the field.
    */
   private const PIXEL = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
+  /**
+   * The template's component whose slot each article fills.
+   */
+  protected const SLOTTED = '22222222-2222-4222-8222-222222222222';
 
   /**
    * The author of every fixture entity.
@@ -121,7 +129,7 @@ trait SeoFixtureTrait {
    * after the entity or the role it came from was saved.
    */
   protected function forgetAccess(): void {
-    foreach (['node', 'media', 'file', 'taxonomy_term'] as $entity_type_id) {
+    foreach (['node', 'canvas_page', 'media', 'file', 'taxonomy_term'] as $entity_type_id) {
       if ($this->container->get('entity_type.manager')->hasDefinition($entity_type_id)) {
         $this->container->get('entity_type.manager')->getAccessControlHandler($entity_type_id)->resetCache();
       }
@@ -317,7 +325,151 @@ trait SeoFixtureTrait {
   }
 
   /**
-   * The `content` of the named rows of a head, by name or property.
+   * One placed component, as Canvas stores it in a tree.
+   *
+   * @param string $uuid
+   *   The instance's UUID.
+   * @param string $id
+   *   The component.
+   * @param array|string $inputs
+   *   Its inputs; a string is stored as it is.
+   * @param string|null $parent
+   *   The UUID of the instance whose slot it is in, and the slot.
+   * @param string|null $slot
+   *   The slot.
+   * @param string|null $version
+   *   The version it was placed with; NULL for the active one.
+   */
+  protected static function placed(string $uuid, string $id, array|string $inputs = [], ?string $parent = NULL, ?string $slot = NULL, ?string $version = NULL): array {
+    $component = Component::load($id);
+    \assert($component instanceof Component);
+    return array_filter([
+      'uuid' => $uuid,
+      'component_id' => $id,
+      'component_version' => $version ?? $component->getActiveVersion(),
+      'inputs' => $inputs,
+      'parent_uuid' => $parent,
+      'slot' => $slot,
+    ], static fn (mixed $value): bool => $value !== NULL);
+  }
+
+  /**
+   * Makes the Article template expose one slot that each article fills.
+   *
+   * The template's component shows the article's title, and exposes its
+   * `the_body` slot; each article holds its own components in
+   * `field_canvas`. Call generateComponentConfig() first.
+   */
+  protected function createSlotTemplate(): ContentTemplate {
+    FieldStorageConfig::create(['field_name' => 'field_canvas', 'entity_type' => 'node', 'type' => 'component_tree'])->save();
+    FieldConfig::create([
+      'field_name' => 'field_canvas',
+      'entity_type' => 'node',
+      'bundle' => 'article',
+      'label' => 'Canvas',
+    ])->save();
+    $template = ContentTemplate::create([
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'article',
+      'content_entity_type_view_mode' => 'full',
+      'component_tree' => [
+        self::placed(self::SLOTTED, 'sdc.canvas_test_sdc.props-slots', [
+          'heading' => ['sourceType' => 'entity-field', 'expression' => 'ℹ︎␜entity:node:article␝title␞␟value'],
+        ]),
+      ],
+      'exposed_slots' => [
+        'content' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
+      ],
+      'status' => TRUE,
+    ]);
+    $template->save();
+    return $template;
+  }
+
+  /**
+   * Gives a component an older version, in which one prop had another name.
+   *
+   * As a code component whose prop was renamed: instances placed before the
+   * rename keep the old name.
+   *
+   * @param string $id
+   *   The component.
+   * @param string $version
+   *   The older version's hash.
+   * @param string $prop
+   *   The prop as the active version names it.
+   * @param string $old
+   *   Its name in the older version.
+   */
+  protected function addOlderVersion(string $id, string $version, string $prop, string $old): void {
+    $config = $this->container->get('config.factory')->getEditable("canvas.component.$id");
+    $active = $config->get('versioned_properties.active');
+    $definitions = $active['settings']['prop_field_definitions'];
+    $active['settings']['prop_field_definitions'] = [$old => $definitions[$prop]] + array_diff_key($definitions, [$prop => TRUE]);
+    $config->set("versioned_properties.$version", $active)->save();
+    $this->container->get('entity_type.manager')->getStorage('component')->resetCache([$id]);
+  }
+
+  /**
+   * Changes a stored instance of a page, as Canvas never writes one now.
+   *
+   * As if it was placed before its component changed: Canvas validates each
+   * instance it saves against the component as it is now.
+   *
+   * @param \Drupal\canvas\Entity\Page $page
+   *   The saved page.
+   * @param string $uuid
+   *   The instance.
+   * @param array<string, string> $values
+   *   Its stored properties: `component_version`, `inputs` (JSON).
+   */
+  protected function storeInstance(Page $page, string $uuid, array $values): void {
+    $storage = $this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID);
+    \assert($storage instanceof SqlContentEntityStorage);
+    $mapping = $storage->getTableMapping();
+    $definition = $this->container->get('entity_field.manager')->getFieldStorageDefinitions(Page::ENTITY_TYPE_ID)['components'];
+    $fields = [];
+    foreach ($values as $property => $value) {
+      $fields[$mapping->getFieldColumnName($definition, $property)] = $value;
+    }
+    foreach ([$mapping->getDedicatedDataTableName($definition), $mapping->getDedicatedRevisionTableName($definition)] as $table) {
+      $this->container->get('database')->update($table)
+        ->fields($fields)
+        ->condition($mapping->getFieldColumnName($definition, 'uuid'), $uuid)
+        ->execute();
+    }
+    $storage->resetCache([$page->id()]);
+  }
+
+  /**
+   * Drupal's breadcrumb block, placed.
+   */
+  protected static function breadcrumb(string $uuid = 'bbbbbbbb-0000-4000-8000-000000000001'): array {
+    return self::placed($uuid, 'block.system_breadcrumb_block', ['label' => '', 'label_display' => '0']);
+  }
+
+  /**
+   * Makes a page variant the site's chrome, with what is placed before it.
+   *
+   * @param list<array> $before
+   *   Instances placed before the page's content (placed()).
+   */
+  protected function createChrome(array $before = []): PageVariant {
+    $variant = PageVariant::create([
+      'id' => 'chrome',
+      'label' => 'Chrome',
+      'component_tree' => [
+        ...$before,
+        self::placed('cccccccc-0000-4000-8000-000000000001', Marker::PAGE_CONTENT_COMPONENT_ID),
+      ],
+    ]);
+    $variant->save();
+    $this->config('canvas.settings')->set('default_page_variant', 'chrome')->save();
+    return $variant;
+  }
+
+  /**
+   * The content of the named rows of a head, by name or property.
    *
    * @return array<string, string>
    *   Meta name or property => content, in emission order.

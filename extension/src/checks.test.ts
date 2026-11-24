@@ -13,6 +13,7 @@ import type {
   Resolved,
   SeoValues,
   Part,
+  SkippedPart,
   SourceRow,
   StatePayload,
 } from './types';
@@ -1004,6 +1005,107 @@ describe('rules that need the page preview', () => {
     expect(ids(hand([{ '@type': 'AggregateRating', name: 'Pricing', ratingValue: '(4.5' }], [], 'Pricing Rated (4,5) by many.')).filter((id) => id.startsWith('hand-rating'))).toEqual([]);
   });
 
+  it('compares values from components with the page, and lists skipped components to builders', () => {
+    const report = (schema: Partial<Resolved['schema']>, extra: Partial<ChecksInput> = {}) =>
+      checks(input({ resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, ...schema } }, input: extra }));
+    // A plan the pricing table holds with its display switched off.
+    const plans = { sources: { offers_price: 'component' as const }, from_components: { name: { label: 'Pricing table', value: 'Starter' } } };
+    const product = checks(
+      input({ target: { schema: { type: 'Product' } }, resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, ...plans, type: 'Product' } } }),
+    );
+    expect(product.find((issue) => issue.id === 'schema-component-not-on-page:name')).toMatchObject({
+      severity: 'improve',
+      message: "Couldn't find “Starter” on this page",
+      detail: 'It comes from the Pricing table component. Put it on the page, or change the text in the component. Structured data should describe what visitors see.',
+      // Show lands on the detail it fills.
+      jump: { field: 'schema.props.name' },
+    });
+    // A web page has no field for it: no Show that leads nowhere.
+    const elsewhere = report(plans).find((issue) => issue.id === 'schema-component-not-on-page:name');
+    expect(elsewhere).toMatchObject({ severity: 'improve' });
+    expect(elsewhere?.jump).toBeUndefined();
+    expect(report(plans, { facts: { h1: ['Pricing'], imagesWithoutAlt: [], text: 'Pricing Starter €10 a month' } }).map((issue) => issue.id)).not.toContain('schema-component-not-on-page:name');
+    // Without the page's text, nothing is compared.
+    expect(report(plans, { facts: null }).map((issue) => issue.id)).not.toContain('schema-component-not-on-page:name');
+
+    const skipped_parts: SkippedPart[] = [
+      { uuid: 'a', component: 'js.pricing', label: 'Pricing table', owner: 'page', reason: 'prop-missing', prop: 'monthlyPrice', version: '3e9baf3c7cc35f84' },
+      { uuid: 'b', component: 'js.hero', label: 'Hero', owner: 'region', reason: 'error' },
+      { uuid: 'c', component: 'p13n.case', label: 'Personalization Case', owner: 'page', reason: 'personalized' },
+      { uuid: 'd', component: 'js.card', label: 'Card', owner: 'page', reason: 'cacheability' },
+      { uuid: 'e', component: 'js.card', label: 'Card', owner: 'page', reason: 'access', prop: 'title' },
+      { uuid: '', component: '', label: '', reason: 'error' },
+    ];
+    const rows = report({ skipped_parts }).filter((issue) => issue.id.startsWith('component-skipped:'));
+    // Something to know, never counted: nothing in this dialog changes them.
+    // A renamed prop names the component, where it is and the prop in words;
+    // never the version.
+    // One statement each: what is left out, and where; the reason and the
+    // remedy in the detail, the component named once.
+    expect(rows.map((issue) => [issue.severity, issue.message, issue.detail])).toEqual([
+      ['info', "The Pricing table's monthly price on this page is left out", 'The component is an older version without “Monthly price”. Replace it with the current version.'],
+      ['info', "The Hero around the page couldn't be read", 'Details are in the site log. The rest of the page is described as usual.'],
+      ['info', 'The Card on this page is left out', 'What it shows changes for each visitor, or over time.'],
+      // What visitors can't see: the outcome, never "publish the prop".
+      ['info', "The Card's title on this page is left out", "Visitors can't see it."],
+      ['info', "This page's components couldn't be read", 'Details are in the site log. The rest of the page is described as usual.'],
+    ]);
+    expect(rows[0].id).toBe('component-skipped:js.pricing:prop-missing:monthlyPrice:page');
+    // Copies of one component skipped for one reason: one row with the count.
+    const cards: SkippedPart[] = ['f', 'g', 'h'].map((uuid) => ({ uuid, component: 'js.card', label: 'Card', owner: 'page', reason: 'access', prop: 'image' }));
+    const broken: SkippedPart[] = ['i', 'j'].map((uuid) => ({ uuid, component: 'js.card', label: 'Card', owner: 'page', reason: 'error' }));
+    const older: SkippedPart[] = ['k', 'l', 'm', 'n'].map((uuid) => ({ uuid, component: 'js.card', label: 'Card', owner: 'page', reason: 'prop-missing', prop: 'title', version: uuid }));
+    expect(
+      report({ skipped_parts: [...cards, ...broken, ...older] })
+        .filter((issue) => issue.id.startsWith('component-skipped:'))
+        .map((issue) => [issue.message, issue.detail]),
+    ).toEqual([
+      ["The Card's image on this page is left out in 3 places", "Visitors can't see it."],
+      ["The Card on this page couldn't be read in 2 places", 'Details are in the site log. The rest of the page is described as usual.'],
+      ["The Card's title on this page is left out in 4 places", 'The components are older versions without “Title”. Replace them with the current version.'],
+    ]);
+    // One component skipped in two places: a row for each place, each saying
+    // where.
+    expect(
+      report(
+        {
+          skipped_parts: [
+            { uuid: 'p', component: 'js.card', label: 'Card', owner: 'page', reason: 'cacheability' },
+            { uuid: 'q', component: 'js.card', label: 'Card', owner: 'region', reason: 'cacheability' },
+            { uuid: 'r', component: 'js.card', label: 'Card', owner: 'region', reason: 'access', prop: 'image' },
+          ],
+        },
+      )
+        .filter((issue) => issue.id.startsWith('component-skipped:'))
+        .map((issue) => issue.message),
+    ).toEqual(['The Card on this page is left out', 'The Card around the page is left out', "The Card's image around the page is left out"]);
+    // Where it is placed, in words.
+    const placed = (owner: SkippedPart['owner']) =>
+      report({ skipped_parts: [{ uuid: 'o', component: 'js.card', label: 'Card', owner, reason: 'prop-missing', prop: 'title' }] }, { scope: 'template', typeLabel: 'Article' }).find((issue) =>
+        issue.id.startsWith('component-skipped:'),
+      )?.message;
+    expect(placed('template')).toBe("The Card's title in the Article template is left out");
+    expect(placed('item')).toBe("The Card's title on this article is left out");
+    expect(placed('region')).toBe("The Card's title around the page is left out");
+    // Only for those who can change the site's settings.
+    expect(report({ skipped_parts }, { can: { target: true, site: false } }).filter((issue) => issue.id.startsWith('component-skipped:'))).toEqual([]);
+    // A trail added by hand with one item: what it needs, and where.
+    const handTrail = { '@type': 'BreadcrumbList', '@id': `${PAGE}#trail`, itemListElement: [{ '@type': 'ListItem', position: 1, name: 'Team' }] };
+    const needsRow = checks(
+      input({
+        resolved: {
+          head: { title: '', meta: [], link: [], script: [{ type: 'application/ld+json', textContent: { '@graph': [handTrail] } }] },
+          image: null,
+          schema: { ...EMPTY_SCHEMA, features: [{ feature: 'breadcrumb', node: `${PAGE}#trail`, verdict: 'needs', missing: [{ path: 'itemListElement.name', rule: 0 }] }] },
+        },
+      }),
+    ).find((issue) => issue.id.startsWith('feature-needs:'));
+    expect(needsRow).toMatchObject({ message: 'Add a second named item to your breadcrumb trail', detail: 'You added this breadcrumb trail by hand. It can show in results once it has one.' });
+    // The page's own trail has two crumbs or more: it can show, and is no row.
+    const trail = report({ features: [{ feature: 'breadcrumb', node: `${PAGE}#breadcrumb`, verdict: 'ready' }] });
+    expect(trail.filter((issue) => /breadcrumb/.test(issue.id) || /Breadcrumb/.test(issue.message))).toEqual([]);
+  });
+
   it('words what became of hand-added JSON-LD and added details', () => {
     const report = (schema: Partial<Resolved['schema']>, target: SeoValues = {}, extra: Partial<ChecksInput> = {}) =>
       checks(input({ target, resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, ...schema } }, input: extra }));
@@ -1210,6 +1312,10 @@ describe('rules that need the page preview', () => {
     const node = `${PAGE}#primary`;
     expect(verdictText(server('JobPosting'), { feature: 'job-posting', node, verdict: 'closed', date: '2026-10-31' })).toBe('Not shown: this job closed 31 October 2026');
     expect(verdictText(server('Course'), { feature: 'course-list', node, verdict: 'elsewhere' })).toBe('Needs a list page with at least 3 courses');
+    // A breadcrumb trail added by hand with one item.
+    const trail = `${PAGE}#trail`;
+    expect(verdictText(server('WebPage'), { feature: 'breadcrumb', node: trail, verdict: 'needs', missing: [{ path: 'itemListElement.name', rule: 0 }] })).toBe('Needs a second named item');
+    expect(verdictText(server('WebPage'), { feature: 'breadcrumb', node: trail, verdict: 'ready' })).toBe('Can show');
     expect(verdictText(server('CollectionPage'), { feature: 'course-list', node, verdict: 'ready', count: 4, of: 4 })).toBe('Can show: 4 courses');
     expect(verdictText(server('CollectionPage'), { feature: 'course-list', node, verdict: 'needs', count: 2, of: 5, missing: [{ path: 'itemListElement' }] })).toBe(
       'Needs at least 3 courses: 2 of the 5 linked pages are complete courses',

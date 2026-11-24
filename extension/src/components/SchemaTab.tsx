@@ -42,6 +42,7 @@ import {
   unsentSchema,
   withKind,
 } from '../model';
+import { at as valuesAt } from '../features';
 import { type ReadFact, dateWords, judged, readback, valueAt } from '../readback';
 import { choicesOf, controlFor, durationText, groupLine, hoursLine, missingParts, parseHours, partNoun, plainText } from '../controls';
 import type { Registry, SchemaProp, SchemaType, Value, Verdict } from '../types';
@@ -52,7 +53,7 @@ import { Sheet } from './Header';
 import { ImageRow } from './MediaPicker';
 import { Disclosure, List } from './SettingsList';
 import { SchemaSuggest, SuggestButton } from './Suggest';
-import { Btn, InfoTip, Notice } from './ui';
+import { Btn, Crumbs, InfoTip, Notice } from './ui';
 import { type InputProps, TextInput, ValueField } from './Value';
 
 const ICONS: Record<string, typeof CubeIcon> = {
@@ -1354,7 +1355,10 @@ function Stage(props: { onReveal(key: string): void }) {
         }}
       >
         {verdicts.map((verdict) => {
-          const label = featureLabel(rules, verdict.feature);
+          // A feature said twice: the line of a hand-added item says so.
+          const twice = verdicts.filter((one) => one.feature === verdict.feature).length > 1;
+          const hand = twice && !server.module_ids?.[(verdict.node ?? '').split('#').pop()!];
+          const label = `${featureLabel(rules, verdict.feature)}${hand ? ' (added by hand)' : ''}`;
           const words = verdictText(server, verdict, emptyFor);
           const action = fix(verdict);
           const quiet = QUIET.includes(verdict.verdict);
@@ -1484,6 +1488,10 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
     if (found === undefined) {
       return null;
     }
+    // A breadcrumb trail: every item's name, in order.
+    if (path === 'itemListElement.name' && node) {
+      return valuesAt(node, path, index).filter((one): one is string => typeof one === 'string').join(' › ');
+    }
     if (path.endsWith('price') && node) {
       const currency = valueAt(node, 'offers.priceCurrency', index);
       try {
@@ -1533,6 +1541,18 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
     const paths = (Array.isArray(entry) ? entry : [entry]).map((one) => one.split('|')[0]);
     return paths.find((path) => missing.has(path)) ?? paths.find((path) => value(path) !== null || held(path) !== null) ?? paths[0];
   });
+  // A rule's need no field fills, on an item as a whole: "a second item with
+  // a name". Its row shows the value as it is; the need is said below it.
+  const missingFacts = verdict.missing ?? [];
+  const ruleOnly = (fact: (typeof missingFacts)[number]) => fact.rule !== undefined && !fact.prop && !fact.site;
+  const ruled = missingFacts
+    .filter((fact) => fact.rule !== undefined && (ruleOnly(fact) || !asked.includes(fact.path)))
+    .map((fact) => feature.rules?.[fact.rule!]?.need ?? rules.facts[fact.path]?.need ?? fact.path);
+  // The module's own items and the hand-added ones.
+  const fragment = (verdict.node ?? '').split('#').pop() ?? '';
+  const ownNode = !!server.module_ids?.[fragment];
+  const ownTrail = ownNode && verdict.feature === 'breadcrumb';
+  const kindLabel = typeof node?.['@type'] === 'string' ? rules.labels?.[node['@type']]?.toLowerCase() : undefined;
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger>
@@ -1587,13 +1607,13 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
               {asked.length > 0 && (
                 <dl className="seo-proof-facts">
                   {asked.map((path) => {
-                    const fact = (verdict.missing ?? []).find((one) => one.path === path);
-                    const shown = missing.has(path) ? null : (value(path) ?? held(path));
+                    const fact = missingFacts.find((one) => one.path === path && !ruleOnly(one));
+                    const shown = fact ? null : (value(path) ?? held(path));
                     return (
                       <div key={path}>
                         <dt>{label(path, fact?.prop)}</dt>
                         <dd>
-                          {shown ?? 'Not set'}
+                          {path === 'itemListElement.name' && shown && node ? <Crumbs parts={valuesAt(node, path, index).filter((one): one is string => typeof one === 'string')} /> : (shown ?? 'Not set')}
                           {fact && (
                             <Btn variant="soft" size={24} aria-label={`${fact.prop && type.props?.find((one) => one.key === fact.prop)?.kind === 'image' ? 'Choose' : 'Add'} ${label(path, fact.prop)}`} onClick={() => go(fact.prop, fact.site)}>
                               {fact.prop && type.props?.find((one) => one.key === fact.prop)?.kind === 'image' ? 'Choose' : 'Add'}
@@ -1647,9 +1667,26 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
               )}
             </>
           )}
-          <p className="seo-proof-foot">Meeting these makes a result possible. Search engines decide whether to show it.</p>
+          <p className="seo-proof-foot">
+            {ownTrail
+              ? "It is the site's own breadcrumb, as visitors see it on the published page, and changes when the page moves in the site."
+              : ruled.length
+                ? `With ${ruled.join(' and ')}, it can show in results.`
+                : verdict.verdict === 'ready' || verdict.verdict === 'complete'
+                  ? 'It has what a result needs.'
+                  : 'Meeting these makes a result possible.'}{' '}
+            Search engines decide whether to show it.
+          </p>
           <p className="seo-proof-foot">
             Rules checked {dateWords(rules.reviewed, server.ui)}.{' '}
+            {/* A rule no field fills, on an item added by hand: its fix is there. */}
+            {ruled.length > 0 && !ownNode && (
+              <>
+                <Btn variant="ghost" size={24} aria-label={`Edit the ${kindLabel ?? 'item'} you added by hand`} onClick={() => go()}>
+                  Edit
+                </Btn>{' '}
+              </>
+            )}
             <Btn variant="ghost" size={24} onClick={() => host.openExternal((feature.doc ?? feature.changelog)!)}>
               {feature.status === 'retired' ? 'Changelog' : 'Documentation'}
             </Btn>

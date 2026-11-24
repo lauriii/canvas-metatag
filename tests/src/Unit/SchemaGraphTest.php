@@ -394,6 +394,57 @@ final class SchemaGraphTest extends UnitTestCase {
   }
 
   /**
+   * A breadcrumb trail where one shows; none where none does.
+   */
+  public function testBreadcrumb(): void {
+    $trail = [
+      ['name' => 'Home', 'url' => self::HOME],
+      ['name' => 'Shop', 'url' => self::HOME . 'shop'],
+      ['name' => 'Lamps', 'url' => self::HOME . 'shop/lamps'],
+      ['name' => 'Oak desk lamp', 'url' => ''],
+    ];
+    $result = self::build([], [], [], ['breadcrumb' => $trail]);
+    $graph = $result['graph']['@graph'];
+    $list = $graph[array_search('BreadcrumbList', array_column($graph, '@type'), TRUE)];
+    self::assertSame([
+      '@type' => 'BreadcrumbList',
+      '@id' => self::URL . '#breadcrumb',
+      'itemListElement' => [
+        ['@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => self::HOME],
+        ['@type' => 'ListItem', 'position' => 2, 'name' => 'Shop', 'item' => self::HOME . 'shop'],
+        ['@type' => 'ListItem', 'position' => 3, 'name' => 'Lamps', 'item' => self::HOME . 'shop/lamps'],
+        ['@type' => 'ListItem', 'position' => 4, 'name' => 'Oak desk lamp'],
+      ],
+    ], $list);
+    $page = $graph[array_search('WebPage', array_column($graph, '@type'), TRUE)];
+    self::assertSame(['@id' => self::URL . '#breadcrumb'], $page['breadcrumb']);
+    // The page's own node, listed as the page's.
+    self::assertContains(['id' => self::URL . '#breadcrumb', 'type' => 'BreadcrumbList', 'origin' => 'page', 'at' => 3], $result['nodes']);
+    self::assertGraphRules($result['graph'], self::HOME, self::URL);
+
+    // No breadcrumb on the page: no list, and the page names none.
+    foreach ([[], ['breadcrumb' => NULL], ['breadcrumb' => []]] as $ctx) {
+      $graph = self::build([], [], [], $ctx)['graph']['@graph'];
+      self::assertNotContains('BreadcrumbList', array_column($graph, '@type'));
+      self::assertArrayNotHasKey('breadcrumb', $graph[array_search('WebPage', array_column($graph, '@type'), TRUE)]);
+    }
+
+    // A hand-added item never takes its id, with or without the trail.
+    $custom = (string) json_encode(['@type' => 'BreadcrumbList', '@id' => '#breadcrumb', 'name' => 'Mine']);
+    foreach ([[], ['breadcrumb' => $trail]] as $ctx) {
+      $result = self::build(['custom' => $custom], [], [], $ctx);
+      self::assertNotContains('Mine', array_column($result['graph']['@graph'], 'name'));
+      self::assertContains([
+        'id' => self::URL . '#breadcrumb',
+        'type' => 'BreadcrumbList',
+        'origin' => 'hand',
+        'item' => 0,
+        'left_out' => 'reserved',
+      ], $result['nodes']);
+    }
+  }
+
+  /**
    * The Description fact is the page's description as search shows it.
    */
   public function testSummaryDefault(): void {

@@ -31,7 +31,7 @@ export interface Mode {
 }
 
 /** The ids the module emits (served in /state as `module_ids`). */
-export const MODULE_IDS = ['identity', 'logo', 'website', 'return-policy', 'webpage', 'primaryimage', 'primary', 'group'];
+export const MODULE_IDS = ['identity', 'logo', 'website', 'return-policy', 'webpage', 'primaryimage', 'primary', 'group', 'breadcrumb'];
 
 export const CUSTOM_MAX = 32768;
 export const CUSTOM_RAW_MAX = 65536;
@@ -235,7 +235,13 @@ export function check(input: string, mode: Mode = {}, ids: string[] = MODULE_IDS
     const id = node['@id'];
     if (!mode.extend && typeof id === 'string') {
       if (reserved(id, mode.origin, ids)) {
-        return fail(`“${id}” is made by this page. Use Add details, or give the item another @id.`, index, '/@id');
+        // The breadcrumb trail's id is kept even where no breadcrumb shows,
+        // and has no details to add.
+        return fail(
+          id.endsWith('#breadcrumb') ? `“${id}” is kept for the breadcrumb trail of the page. Give the item another @id.` : `“${id}” is made by this page. Use Add details, or give the item another @id.`,
+          index,
+          '/@id',
+        );
       }
       if (seen.has(id)) {
         return fail(`“${id}” is used by two items. Give the second another @id.`, index, '/@id');

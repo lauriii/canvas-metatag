@@ -158,6 +158,19 @@ value whose link gives nothing, or text that could not be typed there (such as
 an address starting with `javascript:`), is left out. Inside other text these names stay
 as written.
 
+**Breadcrumbs.** Where Drupal's breadcrumb block is placed on a page, in the
+page itself, its content template or the page's chrome (page variant), the
+structured data carries the same trail as a `BreadcrumbList` (`#breadcrumb`
+on the page's address), built by Drupal's breadcrumb for that page as an
+anonymous visitor gets it, in the page's language, with every address on the
+public base. A page that shows no breadcrumb has none, the front page shows
+none, and neither does a top-level page whose trail is only "Home": a trail
+needs two items to say where a page sits. The Schema tab's **Breadcrumb**
+line and the search preview's address show the trail; it follows the site's
+structure, so there is nothing to set in the dialog.
+A hand-added item can no longer take `#breadcrumb`; one stored before keeps
+its output as `#breadcrumb-2` (`drush updatedb` stores the new name).
+
 The form knows the types and details search features document. To offer every
 schema.org type, a site administrator downloads schema.org's vocabulary:
 `drush canvas-metatag:vocabulary`. It is fetched over https from schema.org,
@@ -633,7 +646,8 @@ XML sitemaps, redirects, `robots.txt` or `llms.txt`; keyword or readability
 scoring, or any score; bulk editing; overrides for a single node (a node uses
 its content type's settings); import of Metatag data; search console
 integrations; head output on routes it does not own; breadcrumb structured
-data; repeating structured data typed line by line, such as FAQs (lists come
+data where no breadcrumb shows; repeating structured data typed line by line,
+such as FAQs (lists come
 only from multi-value fields and one text's list items; add your own JSON-LD
 for the rest); robots rules for single crawlers and AI-training opt-outs (those
 belong in `robots.txt`); `og:locale`; image upload or image styles; a site-wide
@@ -654,6 +668,12 @@ locked while someone edits them: the last save wins.
 - With a language per domain and a headless frontend, addresses stay on the
   Drupal domain.
 - Images count only when their file is in the public file system.
+- The breadcrumb trail is Drupal's own for the page. A theme that alters
+  the trail it prints (with a preprocess function) shows a trail the
+  structured data does not have, and a breadcrumb placed through the block
+  layout instead of Canvas is not seen. Like the visible breadcrumb, the
+  trail can leave out a parent page that was unpublished and published
+  again until the child page's caches are cleared.
 - Under a configuration override of a content template's SEO setting, the
   dialog's fields show the stored setting while its previews and the output
   use the override.

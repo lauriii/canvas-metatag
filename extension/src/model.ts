@@ -7,6 +7,7 @@ import type { EditorToken, HostContext } from './host';
 import { durationText, groupLine, hoursLine, parseHours } from './controls';
 import { dateWords } from './readback';
 import { set as setJson, value as readJson } from './custom/doc';
+import { MODULE_IDS } from './custom/validate';
 import {
   type Form,
   inSentence,
@@ -346,7 +347,7 @@ export function leaveOut(
     const base = `#${String(node['@type'] ?? 'item').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
     const taken = new Set(list.map((one) => (isObj(one) ? one['@id'] : null)));
     // Never one of the site's own ids, never one another item has.
-    const reserved = ['#identity', '#logo', '#website', '#webpage', '#primaryimage', '#primary'];
+    const reserved = MODULE_IDS.map((name) => `#${name}`);
     id = base;
     for (let n = 2; taken.has(id) || reserved.includes(id); n++) {
       id = `${base}-${n}`;
@@ -1862,6 +1863,16 @@ export function footer(state: State): Footer {
       actions: ['output'],
     };
   }
+  // What the dialog shows includes a draft around the page: a breadcrumb in
+  // a page variant not published yet is not live either.
+  const around = server.resolved?.schema.chrome_drafts ?? [];
+  if (target.published && around.length) {
+    return {
+      dot: 'blue',
+      text: `Includes unpublished changes to ${around.map((label) => `“${label}”`).join(' and ')} · live once ${around.length === 1 ? 'it is' : 'they are'} published`,
+      actions: ['output'],
+    };
+  }
   return {
     dot: 'gray',
     text: target.published
@@ -2061,10 +2072,17 @@ export function strips(
 
 // What the previews and rows say.
 
-/** A public address as a result shows it: host › segment › segment. */
-export function breadcrumb(url: string): string {
+/**
+ * A public address as a result shows it, part by part: host, segment,
+ * segment; with the page's breadcrumb trail, the host and its crumbs, less
+ * the first when it is the home page (the host says it).
+ */
+export function breadcrumb(url: string, trail: string[] = [], fromHome = false): string[] {
   try {
     const { host, pathname } = new URL(url);
+    if (trail.length > 1) {
+      return [host, ...trail.slice(fromHome ? 1 : 0)];
+    }
     const parts = pathname.split('/').filter(Boolean);
     return [
       host,
@@ -2075,9 +2093,9 @@ export function breadcrumb(url: string): string {
           return part;
         }
       }),
-    ].join(' › ');
+    ];
   } catch {
-    return url;
+    return url ? [url] : [];
   }
 }
 
@@ -2162,12 +2180,12 @@ export const unsentSchema = (report: { unaddressed?: boolean } | undefined): str
 export function resultName(shown: {
   hidden: boolean;
   site: string;
-  /** breadcrumb() of the address; '' for none. */
-  crumbs: string;
+  /** breadcrumb() of the address; none when the head has none. */
+  crumbs: string[];
   title: string;
   description: { text: string; muted: boolean };
 }): string {
-  const where = [shown.site, shown.crumbs.replaceAll(' › ', ', ')].filter(Boolean).join(', ');
+  const where = [shown.site, shown.crumbs.join(', ')].filter(Boolean).join(', ');
   const { text, muted } = shown.description;
   const said = muted ? text.replace(/([^.!?])$/u, '$1.') : `Description: ${text}`;
   return `${shown.hidden ? 'Not shown in search results. ' : ''}Search result preview, estimate. ${where ? `${where}. ` : ''}Title: ${shown.title}. ${said}`;

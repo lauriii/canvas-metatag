@@ -89,5 +89,29 @@
     ],
     "item": 0,
     "verdicts": [{"feature": "employer-rating", "node": "https://example.com/jobs#rating", "verdict": "ready"}]
+  },
+  {
+    "name": "a breadcrumb trail of one item, added by hand",
+    "graph": [
+      {"@type": "BreadcrumbList", "@id": "https://example.com/shop/lamp#trail", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": "https://example.com/"}]}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "breadcrumb", "node": "https://example.com/shop/lamp#trail", "verdict": "needs", "missing": [{"path": "itemListElement.name", "rule": 0}]}]
+  },
+  {
+    "name": "a breadcrumb trail of two items, one without a name, added by hand",
+    "graph": [
+      {"@type": "BreadcrumbList", "@id": "https://example.com/shop/lamp#trail", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": "https://example.com/"}, {"@type": "ListItem", "position": 2}]}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "breadcrumb", "node": "https://example.com/shop/lamp#trail", "verdict": "needs", "missing": [{"path": "itemListElement.name", "rule": 0}]}]
+  },
+  {
+    "name": "a breadcrumb trail of two items, added by hand",
+    "graph": [
+      {"@type": "BreadcrumbList", "@id": "https://example.com/shop/lamp#trail", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": "https://example.com/"}, {"@type": "ListItem", "position": 2, "name": "Oak desk lamp"}]}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "breadcrumb", "node": "https://example.com/shop/lamp#trail", "verdict": "ready"}]
   }
 ]

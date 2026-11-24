@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RULES } from '../data.test-helper';
 import { pageValue } from './CustomSheet';
+import type { Problem } from './doc';
 import { keepTab, readTab } from './drafts';
+import { notSaved, savable, withRefusal } from './problems';
 import { project } from './project';
 import { backLabel, detailsExample, mergeWords, restorePaste, typeChangeWords, unexpectedKeys } from './sheet';
 import type { Vocabulary } from './vocab';
@@ -145,5 +147,30 @@ describe('the added details example', () => {
     expect(detailsExample(['Product'])).toBe('{"sku": "…"}');
     expect(detailsExample(['Organization'])).toBe('{"telephone": "…"}');
     expect(detailsExample(['WebPage'])).toBe('{"keywords": "…"}');
+  });
+});
+
+describe('a refusal from the server', () => {
+  const stored = '{\n  "@type": "Thing",\n  "@id": "#breadcrumb"\n}';
+  const amber: Problem = { tone: 'amber', line: 1, offset: 0, path: [], message: 'Line 1: advice' };
+  const refusal = '“#breadcrumb” is kept for the breadcrumb trail of the page.';
+
+  it('holds for the text that was sent, placed where the server said', () => {
+    const found = withRefusal([amber], stored, stored, refusal, () => ['@id']);
+    expect(found[0]).toMatchObject({ tone: 'red', line: 3, path: ['@id'], message: `Line 3: ${refusal}`, words: refusal });
+    expect(found[1]).toBe(amber);
+    expect(savable(found)).toBe(false);
+  });
+
+  it('goes once the text changes: its own problems are what count', () => {
+    const changed = stored.replace('#breadcrumb', '#trail');
+    expect(withRefusal([amber], changed, stored, refusal, () => ['@id'])).toEqual([amber]);
+    expect(savable(withRefusal([], changed, stored, refusal, () => ['@id']))).toBe(true);
+    // No refusal: nothing added.
+    expect(withRefusal([amber], stored, stored, undefined, () => [])).toEqual([amber]);
+  });
+
+  it('says it was not saved when it arrives', () => {
+    expect(notSaved(refusal)).toBe(`Not saved. ${refusal}`);
   });
 });

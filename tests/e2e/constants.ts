@@ -32,6 +32,8 @@ export const PAGES = {
   stored: { id: 5, title: 'Stored', path: './stored', seoTitle: 'Published title' },
   /** Described as a Movie, which the registry does not have. */
   unknownKind: { id: 6, title: 'Night at the cinema', path: './night-at-the-cinema' },
+  /** Shows Drupal's breadcrumb: Home › About us. */
+  trail: { id: 7, title: 'Our team', path: './about/team' },
 } as const;
 
 /** Image media, by name. The file is the lower-cased, hyphenated name. */

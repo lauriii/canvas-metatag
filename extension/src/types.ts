@@ -306,7 +306,7 @@ export interface SearchFeatures {
       required?: (string | string[])[];
       complete?: string[];
       recommended?: string[];
-      rules?: { path: string; need?: string; gt?: number; is?: string; when?: string }[];
+      rules?: { path: string; need?: string; gt?: number; min?: number; is?: string; when?: string }[];
       /** Judged only on hand-added items, or only on the page node. */
       only?: 'hand' | 'page';
       expects?: Record<string, ExpectsSpec>;
@@ -442,6 +442,20 @@ export interface Head {
   script: { type: string; textContent: unknown }[];
 }
 
+/** A component instance whose values were left out. */
+export interface SkippedPart {
+  /** Empty when the page's components could not be read at all. */
+  uuid: string;
+  component: string;
+  /** The component's name, as the editor lists it. */
+  label: string;
+  /** Where it is placed: the page, the template, the item's own slot, or around the page (the page variant or regions). */
+  owner?: 'page' | 'template' | 'item' | 'region';
+  reason: 'personalized' | 'error' | 'prop-missing' | 'access' | 'cacheability';
+  prop?: string;
+  version?: string;
+}
+
 export interface Resolved {
   head: Head;
   image: ImageInfo | null;
@@ -451,7 +465,15 @@ export interface Resolved {
     /** Values that do not fit their kind, with what they gave. */
     dropped: { key: string; value: string; kind: string }[];
     /** Where each value of the main node came from. */
-    sources: Record<string, 'set' | 'default' | 'site'> | [];
+    sources: Record<string, 'set' | 'default' | 'site' | 'component'> | [];
+    /** The values that came from a component: its name and the text it gave. */
+    from_components?: Record<string, { label: string; value: string }>;
+    /** The components that were not read, and why (Sources::instances(), props()). */
+    skipped_parts?: SkippedPart[];
+    /** The labels of the parts around the page read from their unpublished drafts (an editor's preview). */
+    chrome_drafts?: string[];
+    /** The page's breadcrumb trail starts at the home page: a result's address says it with the host. */
+    trail_home?: boolean;
     /** The values of the details that decide, never emitted. */
     gates: Record<string, string> | [];
     /** The registry type the graph was built as. */

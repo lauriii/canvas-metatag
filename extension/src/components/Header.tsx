@@ -465,6 +465,14 @@ export function Header(props: {
   );
 }
 
+const STOPS = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]';
+
+/** Tab (or Shift+Tab) from this element would take focus out of the frame. */
+function leavesFrame(from: EventTarget, back: boolean): boolean {
+  const stops = [...document.querySelectorAll<HTMLElement>(STOPS)].filter((one) => one.tabIndex >= 0 && one.getClientRects().length > 0);
+  return stops.length > 0 && from === stops[back ? 0 : stops.length - 1];
+}
+
 /** A full-frame panel with Back: Checks, Output, Choose image, Custom JSON-LD. */
 export function Sheet(props: {
   title: string;
@@ -513,9 +521,19 @@ export function Sheet(props: {
       className="seo-sheet"
       aria-labelledby={id}
       onKeyDown={(event: KeyboardEvent) => {
-        if (event.key === 'Escape' && !event.defaultPrevented) {
+        if (event.key === 'Escape') {
+          // Never on to the editor, which would close the dialog: an Escape
+          // a tip or a menu inside used stays here too.
           event.stopPropagation();
-          (props.onBack ?? props.onClose)();
+          if (!event.defaultPrevented) {
+            (props.onBack ?? props.onClose)();
+          }
+        } else if (event.key === 'Tab' && !event.defaultPrevented && leavesFrame(event.target, event.shiftKey)) {
+          // Past the last stop, focus would leave the dialog's frame and the
+          // next Escape would reach the editor: the title takes it, as it
+          // does for a control that went.
+          event.preventDefault();
+          title.current?.focus();
         }
       }}
       onBlur={(event) => {

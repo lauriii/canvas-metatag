@@ -177,6 +177,11 @@ export function itemVerdicts(item: Item, graph: Item[], rules: SearchFeatures, h
     }
     feature.rules?.forEach((rule, at_) => {
       if (rule.when) return;
+      // So many values or more: a trail of two items.
+      if (rule.min !== undefined) {
+        if (at(item, rule.path, index).length < rule.min) missing.push({ path: rule.path, rule: at_ });
+        return;
+      }
       for (const found of at(item, rule.path, index)) {
         const passes = rule.gt !== undefined ? Number(found) > rule.gt : rule.is !== undefined ? found === rule.is : true;
         if (!passes) {

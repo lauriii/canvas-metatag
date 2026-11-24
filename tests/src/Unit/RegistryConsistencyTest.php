@@ -136,6 +136,11 @@ final class RegistryConsistencyTest extends UnitTestCase {
       if ($feature['status'] !== 'shown' || isset($feature['only'])) {
         continue;
       }
+      // The breadcrumb trail a page shows sets the breadcrumb, never a
+      // detail (Resolver::breadcrumb()).
+      if ($feature['on'] === ['BreadcrumbList']) {
+        continue;
+      }
       $types = array_keys(array_filter($by, static fn (array $features): bool => isset($features[$name])));
       $entries = [
         ...$feature['required'],

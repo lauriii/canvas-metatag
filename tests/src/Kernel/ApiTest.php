@@ -7,6 +7,8 @@ namespace Drupal\Tests\canvas_metatag\Kernel;
 use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
+use Drupal\canvas\Entity\PageVariant;
+use Drupal\canvas\Plugin\Canvas\ComponentSource\Marker;
 use Drupal\canvas_metatag\Controller\ApiController;
 use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
@@ -1335,6 +1337,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'primaryimage' => 'url',
       'primary' => 'url',
       'group' => 'url',
+      'breadcrumb' => 'url',
     ], $state['module_ids']);
 
     // Stored as written, details added, a main thing: all travel in the
@@ -1415,6 +1418,30 @@ final class ApiTest extends CanvasKernelTestBase {
     catch (NotFoundHttpException) {
       return 404;
     }
+  }
+
+  /**
+   * An editor's report reads the page's chrome as a draft, and says so.
+   */
+  public function testChromeDraft(): void {
+    $this->createChrome();
+    $this->createPage(['title' => 'Shop', 'path' => ['alias' => '/shop']]);
+    $page = $this->createPage(['title' => 'Lamps', 'path' => ['alias' => '/shop/lamps']]);
+    // A breadcrumb placed in the variant's draft only.
+    $variant = PageVariant::load('chrome');
+    $variant->setComponentTree([
+      self::breadcrumb(),
+      self::placed('cccccccc-0000-4000-8000-000000000001', Marker::PAGE_CONTENT_COMPONENT_ID),
+    ]);
+    $this->container->get(AutoSaveManager::class)->saveEntity($variant);
+    $this->setUpCurrentUser(permissions: [...self::VISITOR, Page::EDIT_PERMISSION, 'edit canvas metatag']);
+    $state = self::decodeResponse($this->request(Request::create(self::STATE . '?entity_type=canvas_page&id=' . $page->id())));
+    self::assertSame(['Home', 'Shop'], array_column(self::graph($state['resolved']['head'])['breadcrumb']['itemListElement'], 'name'));
+    self::assertSame(['Chrome'], $state['resolved']['schema']['chrome_drafts']);
+    // The published page has none.
+    $published = $this->resolver()->resolve(Page::load($page->id()));
+    self::assertArrayNotHasKey('breadcrumb', self::graph($published['head']));
+    self::assertSame([], $published['schema']['chrome_drafts']);
   }
 
   /**

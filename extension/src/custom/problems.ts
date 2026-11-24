@@ -254,5 +254,22 @@ export function problems(text: string, rules: SearchFeatures, vocabulary: Vocabu
 /** Whether text with these problems may be saved. */
 export const savable = (found: Problem[]) => !found.some((problem) => problem.tone === 'red');
 
+/**
+ * A text's own problems, with the server's refusal of it first. A refusal
+ * holds for the text that was sent (the stored one) only: once the text
+ * changes, its own problems are what count, and it is sent again. Placed
+ * where the server said (`place`, a path in the text), else at the start.
+ */
+export function withRefusal(own: Problem[], text: string, stored: string, refusal: string | undefined, place: () => Path): Problem[] {
+  if (!refusal || text !== stored || own.some((one) => one.tone === 'red')) return own;
+  const path = place();
+  const offset = offsetOf(text, path);
+  const line = text.slice(0, offset).split('\n').length;
+  return [{ tone: 'red', line, offset, path, message: `Line ${line}: ${refusal}`, words: refusal }, ...own];
+}
+
+/** What the sheet says when a refusal arrives: never left saying it saved. */
+export const notSaved = (refusal: string) => `Not saved. ${refusal}`;
+
 /** Whether the text reads as one tree (Form can show it). */
 export const readable = (text: string) => text.trim() === '' || tree(text) !== null;

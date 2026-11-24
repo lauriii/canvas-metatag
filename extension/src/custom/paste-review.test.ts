@@ -6,7 +6,7 @@ import { chosen, danglingWords, reasonOf, reportFor, reviewOf } from './PasteRev
 
 const server = {
   search_features: rules,
-  module_ids: { identity: 'home', logo: 'home', website: 'home', 'return-policy': 'home', webpage: 'url', primaryimage: 'url', primary: 'url', group: 'url' },
+  module_ids: { identity: 'home', logo: 'home', website: 'home', 'return-policy': 'home', webpage: 'url', primaryimage: 'url', primary: 'url', group: 'url', breadcrumb: 'url' },
 } as unknown as StatePayload;
 const modules = new Map<string, Record<string, unknown>>([
   ['#identity', { '@type': 'Organization', '@id': 'https://www.example.com/#identity', name: 'Humanify', url: 'https://www.example.com/' }],

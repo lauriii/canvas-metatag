@@ -744,7 +744,8 @@ final class ApiController implements ContainerInjectionInterface {
       ],
       'can' => $update && $this->currentUser->hasPermission('edit canvas metatag'),
       'entity' => $entity,
-      'draft' => FALSE,
+      // The editor previews the page's chrome as a draft too.
+      'draft' => $update,
       'vocabulary' => [Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID],
     ];
   }

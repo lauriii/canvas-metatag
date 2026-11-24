@@ -496,6 +496,36 @@ test('a missing comma is kept: closed, reopened, restored and fixed', async ({ p
   await writeDraft(page, `canvas_page/${ID}`, `layout/canvas_page/${ID}`, {});
 });
 
+test('Escape goes back to Output, also with text not saved and after Discard', async ({ page }) => {
+  await writeDraft(page, `canvas_page/${ID}`, `layout/canvas_page/${ID}`, {});
+  // Frames come late, as on a busy machine: nothing waits for one to keep
+  // focus in the dialog.
+  const frame = await openSheet(page, true);
+  const own = sheet(frame, UI.schema.ownJsonLd);
+  const backOnOutput = async () => {
+    await page.keyboard.press('Escape');
+    await expect(sheet(frame, 'Output')).toBeVisible();
+    await expect(own).toHaveCount(0);
+    await expect(page.locator(SEO_IFRAME)).toHaveCount(1);
+  };
+  // Text after the JSON, then Tab past the sheet's last stop: not saved,
+  // focus on the sheet's title, never on the editor behind, and Escape goes
+  // back.
+  await tab(frame, 'JSON').click();
+  await own.getByRole('textbox', { name: 'JSON-LD' }).fill('{"@type": "Thing", "name": "Lamp"} more');
+  await page.keyboard.press('Tab');
+  await expect(own.getByRole('heading', { name: UI.schema.ownJsonLd })).toBeFocused();
+  expect(await page.evaluate(() => document.activeElement?.tagName)).toBe('IFRAME');
+  await expect(own.getByText('Not saved.', { exact: true })).toBeVisible();
+  await backOnOutput();
+  await fastFrames(frame);
+  // Opened again, the text is offered back; Discard, then Escape.
+  await sheet(frame, 'Output').getByRole('button', { name: UI.schema.ownJsonLd, exact: true }).click();
+  await own.getByRole('button', { name: UI.action.discard, exact: true }).click();
+  await backOnOutput();
+  expect(await custom(page)).toBe('');
+});
+
 test('a broken script tag copied from a chat: what was inside is kept in JSON, and its fix saves it', async ({ page }) => {
   await writeDraft(page, `canvas_page/${ID}`, `layout/canvas_page/${ID}`, {});
   const frame = await openSheet(page);

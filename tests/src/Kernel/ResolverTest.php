@@ -5,13 +5,19 @@ declare(strict_types=1);
 namespace Drupal\Tests\canvas_metatag\Kernel;
 
 use Drupal\canvas\AutoSave\AutoSaveManager;
+use Drupal\canvas\Entity\Component;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\field\Entity\FieldConfig;
+use Drupal\Core\Breadcrumb\Breadcrumb;
+use Drupal\Core\Breadcrumb\ChainBreadcrumbBuilderInterface;
 use Drupal\Core\Cache\CacheableMetadata;
+use Drupal\Core\Language\LanguageInterface;
+use Drupal\Core\Link;
+use Drupal\Core\Url;
 use Drupal\file\Entity\File;
 use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\Entity\Node;
@@ -19,12 +25,14 @@ use Drupal\node\Entity\NodeType;
 use Drupal\Tests\canvas\Kernel\CanvasKernelTestBase;
 use Drupal\Tests\canvas\Traits\GenerateComponentConfigTrait;
 use Drupal\Tests\content_translation\Traits\ContentTranslationTestTrait;
+use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 
 // cspell:ignore Tarifs tarifs ville amet Canvasville Preise Accueil Résumé
+// cspell:ignore kauppa lämpö valo Valo
 // cspell:ignore مرحبا عنوان शीर्षक
 /**
  * Tests ownership, layers, facts, links, URLs, the head and its cacheability.
@@ -37,6 +45,7 @@ final class ResolverTest extends CanvasKernelTestBase {
   use ContentTranslationTestTrait;
   use GenerateComponentConfigTrait;
   use SeoFixtureTrait;
+  use UserCreationTrait;
 
   /**
    * {@inheritdoc}
@@ -898,10 +907,15 @@ final class ResolverTest extends CanvasKernelTestBase {
     $cacheability = $resolver->resolve($page)['cacheability'];
     $expected = [
       'canvas_page:' . $page->id(),
+      // The page's chrome, where a breadcrumb may show: the site's page
+      // variant setting, else the default theme's legacy regions.
+      'config:canvas.settings',
       'config:canvas_headless.settings',
       'config:canvas_metatag.site',
+      'config:page_region_list',
       'config:system.date',
       'config:system.site',
+      'config:system.theme',
       'config:user.role.anonymous',
       'file:' . $files[0],
       'file:' . $files[1],
@@ -1109,6 +1123,277 @@ final class ResolverTest extends CanvasKernelTestBase {
       'path' => ['alias' => '/lamp'],
     ]))['head'])['primary']['offers'];
     self::assertSame('EUR', $offer['priceCurrency']);
+  }
+
+  /**
+   * The breadcrumb trail, where a breadcrumb renders.
+   */
+  public function testBreadcrumb(): void {
+    $this->setSetting('canvas_metatag_public_base', 'https://www.example.org');
+    $shop = $this->createPage(['title' => 'Shop', 'path' => ['alias' => '/shop']]);
+    $lamps = $this->createPage(['title' => 'Lamps', 'path' => ['alias' => '/shop/lamps']]);
+    $oak = $this->createPage(['title' => 'Oak desk lamp', 'path' => ['alias' => '/shop/lamps/oak']]);
+    // A new page object each time: resolve() keeps its result per object.
+    $load = function () use ($oak): Page {
+      $this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID)->resetCache();
+      return Page::load($oak->id());
+    };
+    $graph = fn (): array => self::graph($this->resolver()->resolve($load())['head']);
+
+    // No breadcrumb on the page: none in its structured data.
+    self::assertArrayNotHasKey('breadcrumb', $graph());
+    self::assertArrayNotHasKey('breadcrumb', $graph()['webpage']);
+
+    $this->createChrome([self::breadcrumb()]);
+    $path = $this->container->get('router.request_context')->getPathInfo();
+    $result = $this->resolver()->resolve($load());
+    $nodes = self::graph($result['head']);
+    // The trail visitors see, built by Drupal's own breadcrumb, on the public
+    // base: it follows the aliases, and leaves out the page itself.
+    self::assertSame([
+      '@type' => 'BreadcrumbList',
+      '@id' => 'https://www.example.org/shop/lamps/oak#breadcrumb',
+      'itemListElement' => [
+        ['@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => 'https://www.example.org/'],
+        ['@type' => 'ListItem', 'position' => 2, 'name' => 'Shop', 'item' => 'https://www.example.org/shop'],
+        ['@type' => 'ListItem', 'position' => 3, 'name' => 'Lamps', 'item' => 'https://www.example.org/shop/lamps'],
+      ],
+    ], $nodes['breadcrumb']);
+    self::assertSame(['@id' => 'https://www.example.org/shop/lamps/oak#breadcrumb'], $nodes['webpage']['breadcrumb']);
+    // It starts at the home page, which a result's address says with its
+    // host.
+    self::assertTrue($result['schema']['trail_home']);
+    // The head is rebuilt when the chrome changes, and never varies by user.
+    $tags = $result['cacheability']->getCacheTags();
+    self::assertContains('config:canvas.page_variant.chrome', $tags);
+    self::assertContains('config:canvas.settings', $tags);
+    self::assertSame([], array_filter($result['cacheability']->getCacheContexts(), static fn (string $context): bool => str_starts_with($context, 'user') || str_starts_with($context, 'url.path')));
+    self::assertSame([], $result['schema']['skipped_parts']);
+    // The request's own path is left as it was.
+    self::assertSame($path, $this->container->get('router.request_context')->getPathInfo());
+
+    // A draft's trail follows the alias it will be published with, as the
+    // dialog's address line does.
+    $brass = $this->createPage(['title' => 'Brass lamp', 'path' => ['alias' => '']]);
+    $brass->set('path', ['alias' => '/shop/lamps/brass']);
+    self::assertSame(['Home', 'Shop', 'Lamps'], array_column(self::graph($this->resolver()->resolve($brass, TRUE)['head'])['breadcrumb']['itemListElement'], 'name'));
+    // Also when the stored alias is in other letters: aliases are stored
+    // decoded, addresses encoded.
+    $valo = $this->createPage(['title' => 'Valo', 'path' => ['alias' => '/kauppa/lämpö']]);
+    $valo->set('path', ['alias' => '/shop/lamps/valo']);
+    self::assertSame(['Home', 'Shop', 'Lamps'], array_column(self::graph($this->resolver()->resolve($valo, TRUE)['head'])['breadcrumb']['itemListElement'] ?? [], 'name'));
+
+    // A top-level page's trail is "Home" alone: it says nothing, so there is
+    // none.
+    $this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID)->resetCache();
+    self::assertArrayNotHasKey('breadcrumb', self::graph($this->resolver()->resolve(Page::load($shop->id()))['head']));
+
+    // The trail an anonymous visitor gets, whoever asks: an editor who may
+    // see the unpublished "Lamps" does not get it in the trail.
+    $lamps->setUnpublished()->save();
+    $this->forgetAccess();
+    $this->setUpCurrentUser([], [Page::EDIT_PERMISSION, 'access content']);
+    $result = $this->resolver()->resolve($load());
+    self::assertSame(['Home', 'Shop'], array_column(self::graph($result['head'])['breadcrumb']['itemListElement'], 'name'));
+    self::assertSame([], array_filter($result['cacheability']->getCacheContexts(), static fn (string $context): bool => str_starts_with($context, 'user')));
+    $lamps->setPublished()->save();
+    $this->forgetAccess();
+
+    // A translation's trail is in its language, from a request in another:
+    // its aliases, its titles, its "Home" and its addresses.
+    $this->setSetting('locale_custom_strings_fr', ['' => ['Home' => 'Accueil']]);
+    $translations = [
+      [$shop, 'Boutique', '/boutique'],
+      [$lamps, 'Lampes', '/boutique/lampes'],
+      [$oak, 'Lampe de bureau', '/boutique/lampes/chene'],
+    ];
+    foreach ($translations as [$page, $title, $alias]) {
+      $page->addTranslation('fr', ['title' => $title, 'status' => TRUE, 'path' => ['alias' => $alias]])->save();
+    }
+    $french = $load()->getTranslation('fr');
+    self::assertSame('en', $this->container->get('language_manager')->getCurrentLanguage()->getId());
+    // The session is asked before the address, which works only on a
+    // request that has one.
+    $this->config('language.types')
+      ->set('negotiation.language_interface.enabled', ['language-session' => -10, 'language-url' => -8])
+      ->save();
+    self::assertTrue($this->container->get('request_stack')->getCurrentRequest()->hasSession());
+    $crumbs = self::graph($this->resolver()->resolve($french)['head'])['breadcrumb']['itemListElement'];
+    self::assertSame([
+      ['Accueil', 'https://www.example.org/fr'],
+      ['Boutique', 'https://www.example.org/fr/boutique'],
+      ['Lampes', 'https://www.example.org/fr/boutique/lampes'],
+    ], array_map(static fn (array $crumb): array => [$crumb['name'], $crumb['item']], $crumbs));
+    // The request's languages are left as they were.
+    self::assertSame('en', $this->container->get('language_manager')->getCurrentLanguage()->getId());
+    self::assertSame('en', $this->container->get('language_manager')->getCurrentLanguage(LanguageInterface::TYPE_CONTENT)->getId());
+    self::assertSame('Home', (string) $this->container->get('string_translation')->translate('Home'));
+
+    // The language picked by the domain: the French address is on its own
+    // host, which is not the request's.
+    $this->config('language.types')
+      ->set('negotiation.language_interface.enabled', ['language-url' => -8])
+      ->save();
+    $this->config('language.negotiation')
+      ->set('url.source', 'domain')
+      ->set('url.domains', ['en' => 'localhost', 'fr' => 'fr.example.com', 'de' => 'de.example.com'])
+      ->save();
+    self::assertSame(['Accueil', 'Boutique', 'Lampes'], array_column(self::graph($this->resolver()->resolve($load()->getTranslation('fr'))['head'])['breadcrumb']['itemListElement'] ?? [], 'name'));
+    self::assertSame('en', $this->container->get('language_manager')->getCurrentLanguage()->getId());
+
+    // The front page shows no trail.
+    $this->config('system.site')->set('page.front', '/page/' . $oak->id())->save();
+    self::assertArrayNotHasKey('breadcrumb', $graph());
+  }
+
+  /**
+   * A breadcrumb in the page's own tree or in its template gives the trail.
+   */
+  public function testBreadcrumbPlacement(): void {
+    $this->createPage(['title' => 'Shop', 'path' => ['alias' => '/shop']]);
+    $this->createPage(['title' => 'Lamps', 'path' => ['alias' => '/shop/lamps']]);
+    $page = $this->createPage([
+      'title' => 'Oak desk lamp',
+      'path' => ['alias' => '/shop/lamps/oak'],
+      'components' => [self::breadcrumb()],
+    ]);
+    self::assertSame(['Home', 'Shop', 'Lamps'], array_column(self::graph($this->resolver()->resolve($page)['head'])['breadcrumb']['itemListElement'] ?? [], 'name'));
+    ContentTemplate::create([
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'article',
+      'content_entity_type_view_mode' => 'full',
+      'component_tree' => [self::breadcrumb()],
+      'status' => TRUE,
+    ])->save();
+    $node = Node::create([
+      'type' => 'article',
+      'title' => 'A review',
+      'status' => TRUE,
+      'path' => ['alias' => '/shop/lamps/review'],
+    ]);
+    $node->save();
+    self::assertSame(['Home', 'Shop', 'Lamps'], array_column(self::graph($this->resolver()->resolve($node)['head'])['breadcrumb']['itemListElement'] ?? [], 'name'));
+  }
+
+  /**
+   * How the crumbs a breadcrumb builder gives become the trail.
+   */
+  public function testCrumbs(): void {
+    $this->setSetting('canvas_metatag_public_base', 'https://www.example.org');
+    $this->createChrome([self::breadcrumb()]);
+    $page = $this->createPage(['title' => 'Oak desk lamp', 'path' => ['alias' => '/shop/oak']]);
+    // A contributed builder: a crumb without a link, a nameless one, one on
+    // another site, and the page itself without a link.
+    $built = (new Breadcrumb())->setLinks([
+      Link::createFromRoute('Home', '<front>'),
+      Link::createFromRoute('Catalog', '<nolink>'),
+      Link::createFromRoute('', '<front>'),
+      Link::fromTextAndUrl('Partner', Url::fromUri('https://partner.example.com/lamps')),
+      Link::createFromRoute('Oak desk lamp', '<none>'),
+    ]);
+    $builder = $this->createMock(ChainBreadcrumbBuilderInterface::class);
+    $builder->method('build')->willReturn($built);
+    $this->container->set('breadcrumb', $builder);
+    $this->container->set(Resolver::class, NULL);
+    $result = $this->container->get(Resolver::class)->resolve(Page::load($page->id()));
+    self::assertSame([
+      ['@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => 'https://www.example.org/'],
+      ['@type' => 'ListItem', 'position' => 2, 'name' => 'Partner', 'item' => 'https://partner.example.com/lamps'],
+      ['@type' => 'ListItem', 'position' => 3, 'name' => 'Oak desk lamp'],
+    ], self::graph($result['head'])['breadcrumb']['itemListElement']);
+    self::assertTrue($result['schema']['trail_home']);
+    // A trail that does not start at the home page says so.
+    $builder = $this->createMock(ChainBreadcrumbBuilderInterface::class);
+    $builder->method('build')->willReturn((new Breadcrumb())->setLinks([
+      Link::fromTextAndUrl('Partner', Url::fromUri('https://partner.example.com/lamps')),
+      Link::createFromRoute('Oak desk lamp', '<none>'),
+    ]));
+    $this->container->set('breadcrumb', $builder);
+    $this->container->set(Resolver::class, NULL);
+    $result = $this->container->get(Resolver::class)->resolve(Page::load($page->id()));
+    self::assertSame(['Partner', 'Oak desk lamp'], array_column(self::graph($result['head'])['breadcrumb']['itemListElement'], 'name'));
+    self::assertFalse($result['schema']['trail_home']);
+  }
+
+  /**
+   * Components that cannot be read cost the head nothing but their values.
+   */
+  public function testUnreadableComponents(): void {
+    // A template whose slot the type has no field for: Canvas cannot build
+    // the article's tree.
+    ContentTemplate::create([
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'article',
+      'content_entity_type_view_mode' => 'full',
+      'component_tree' => [self::placed(self::SLOTTED, 'sdc.canvas_test_sdc.props-slots', ['heading' => 'Article'])],
+      'exposed_slots' => [
+        'content' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
+      ],
+      'status' => TRUE,
+    ])->save();
+    $node = Node::create(['type' => 'article', 'title' => 'Hello', 'status' => TRUE]);
+    $node->save();
+    $result = $this->resolver()->resolve($node);
+    self::assertSame('Hello | Example', $result['head']['title']);
+    self::assertSame('Hello', self::graph($result['head'])['webpage']['name']);
+    self::assertSame([['uuid' => '', 'component' => '', 'label' => '', 'reason' => 'error']], $result['schema']['skipped_parts']);
+
+    // One instance on a version that is gone, next to the breadcrumb: it is
+    // reported, what is inside it is left out with it, and the rest of the
+    // head ships with its trail.
+    $broken = 'aaaaaaaa-0000-4000-8000-00000000000b';
+    $this->createChrome([self::breadcrumb()]);
+    $this->createPage(['title' => 'Shop', 'path' => ['alias' => '/shop']]);
+    $page = $this->createPage([
+      'title' => 'Lamps',
+      'path' => ['alias' => '/shop/lamps'],
+      'description' => 'Lamps for every desk.',
+      'components' => [
+        self::placed($broken, 'sdc.canvas_test_sdc.props-slots', ['heading' => 'Lamps']),
+        self::placed('aaaaaaaa-0000-4000-8000-00000000000c', 'sdc.canvas_test_sdc.props-no-slots', ['heading' => 'Inside'], $broken, 'the_body'),
+      ],
+    ]);
+    $this->storeInstance($page, $broken, ['component_version' => 'deadbeefdeadbeef']);
+    $result = $this->resolver()->resolve(Page::load($page->id()));
+    self::assertSame('Lamps | Example', $result['head']['title']);
+    self::assertSame('Lamps for every desk.', self::meta($result['head'])['description']);
+    self::assertSame(['Home', 'Shop'], array_column(self::graph($result['head'])['breadcrumb']['itemListElement'], 'name'));
+    self::assertSame([
+      [
+        'uuid' => $broken,
+        'component' => 'sdc.canvas_test_sdc.props-slots',
+        'label' => (string) Component::load('sdc.canvas_test_sdc.props-slots')->label(),
+        'owner' => 'page',
+        'reason' => 'error',
+      ],
+    ], $result['schema']['skipped_parts']);
+  }
+
+  /**
+   * A trail that cannot be built costs the trail only.
+   */
+  public function testBrokenTrail(): void {
+    $this->createChrome([self::breadcrumb()]);
+    $this->createPage(['title' => 'Shop', 'path' => ['alias' => '/shop']]);
+    $page = $this->createPage(['title' => 'Lamps', 'path' => ['alias' => '/shop/lamps']]);
+    // A builder that fails, as a contributed one may.
+    $builder = $this->createMock(ChainBreadcrumbBuilderInterface::class);
+    $builder->method('build')->willThrowException(new \RuntimeException('No trail.'));
+    $this->container->set('breadcrumb', $builder);
+    $this->container->set(Resolver::class, NULL);
+    $result = $this->container->get(Resolver::class)->resolve(Page::load($page->id()));
+    self::assertSame('Lamps | Example', $result['head']['title']);
+    self::assertArrayNotHasKey('breadcrumb', self::graph($result['head']));
+    // The components were read: only the breadcrumb is reported.
+    self::assertSame([
+      [
+        'uuid' => 'bbbbbbbb-0000-4000-8000-000000000001',
+        'component' => 'block.system_breadcrumb_block',
+        'label' => (string) Component::load('block.system_breadcrumb_block')->label(),
+        'owner' => 'region',
+        'reason' => 'error',
+      ],
+    ], $result['schema']['skipped_parts']);
   }
 
 }

@@ -30,7 +30,16 @@ final class SchemaGraph {
     'primaryimage' => 'url',
     'primary' => 'url',
     'group' => 'url',
+    'breadcrumb' => 'url',
   ];
+
+  /**
+   * Ids of MODULE_IDS that hand-added items could take before the module.
+   *
+   * A hand-added item stored with one was output then: read mode and its
+   * post-update rename it and keep its output (Values::renameReserved()).
+   */
+  public const LATER_IDS = ['breadcrumb'];
 
   /**
    * The prefix of the ids of the page's component parts.
@@ -645,6 +654,8 @@ final class SchemaGraph {
    *   The keys home, url, langcode, title, description, published, modified,
    *   timezone, currency (the site's, or ''), identity{kind, name, same_as[]},
    *   logo?{url, width, height}, image?{url, width, height, alt, source},
+   *   breadcrumb? (the trail a breadcrumb on the page shows: {name, url},
+   *   the last one's url possibly ''; none when no breadcrumb renders),
    *   facts (name => text, the fixed names custom JSON-LD strings may use),
    *   scope ('page', the default, or 'template') and today (Y-m-d, for the
    *   dates of opening hours that have passed; '' keeps them).
@@ -701,10 +712,12 @@ final class SchemaGraph {
       'webpage' => $ctx['url'] . '#webpage',
       'primaryimage' => $ctx['url'] . '#primaryimage',
       'primary' => $ctx['url'] . '#primary',
+      'breadcrumb' => $ctx['url'] . '#breadcrumb',
     ];
     $ref = static fn (string $name): array => ['@id' => $ids[$name]];
     $logo = $ctx['logo'] ?? NULL;
     $page_image = $ctx['image'] ?? NULL;
+    $trail = $ctx['breadcrumb'] ?? [];
     $report = [
       'withheld' => NULL,
       'dropped' => [],
@@ -1003,8 +1016,21 @@ final class SchemaGraph {
         'dateModified' => $ctx['modified'] ?? '',
         'primaryImageOfPage' => $page_image ? $ref('primaryimage') : NULL,
         'mainEntity' => $primary ? $ref('primary') : $page_main,
+        'breadcrumb' => $trail ? $ref('breadcrumb') : NULL,
       ]),
       'page:image' => $page_image ? self::imageNode($ids['primaryimage'], $page_image) + self::node(['caption' => $page_image['alt'] ?? '']) : NULL,
+      // The trail the page shows; the last crumb, the page itself, may have
+      // no address.
+      'page:breadcrumb' => $trail ? [
+        '@type' => 'BreadcrumbList',
+        '@id' => $ids['breadcrumb'],
+        'itemListElement' => array_map(static fn (array $crumb, int $at): array => self::node([
+          '@type' => 'ListItem',
+          'position' => $at + 1,
+          'name' => $crumb['name'],
+          'item' => $crumb['url'] ?? '',
+        ]), array_values($trail), array_keys(array_values($trail))),
+      ] : NULL,
       'main' => $primary,
     ];
     // Every id the module emits, on its address: what a short id points at,
@@ -1543,6 +1569,13 @@ final class SchemaGraph {
             // can apply from where.
             if (isset($rule['when'])) {
               if (self::has($object, $rule['when'], $index, $accepts) && !self::has($object, $rule['path'], $index, $accepts)) {
+                $missing[] = $fact($rule['path'], $at);
+              }
+              continue;
+            }
+            // So many values or more: a trail of two items.
+            if (isset($rule['min'])) {
+              if (count(self::at($object, $rule['path'], $index)) < $rule['min']) {
                 $missing[] = $fact($rule['path'], $at);
               }
               continue;

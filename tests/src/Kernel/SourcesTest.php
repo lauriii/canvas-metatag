@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\canvas_metatag\Kernel;
 
+use Drupal\canvas\AutoSave\AutoSaveManager;
+use Drupal\canvas\PageVariantResolver;
 use Drupal\canvas\ShapeMatcher\PropSourceSuggester;
+use Drupal\canvas\Storage\ComponentTreeLoader;
 use Drupal\canvas_metatag\Sources;
 use Drupal\Core\Entity\EntityDisplayRepositoryInterface;
 use Drupal\Core\Cache\CacheableMetadata;
@@ -201,6 +204,9 @@ final class SourcesTest extends CanvasKernelTestBase {
       $c->get('datetime.time'),
       $c->getParameter('app.root'),
       $c->get('logger.factory'),
+      $c->get(ComponentTreeLoader::class),
+      $c->get(PageVariantResolver::class),
+      $c->get(AutoSaveManager::class),
     );
     self::assertSame([], $sources->vocabulary('article'));
     self::assertSame([], $sources->vocabulary('article'));

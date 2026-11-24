@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 namespace Drupal\canvas_metatag;
 
+use Drupal\canvas\AutoSave\AutoSaveManager;
+use Drupal\canvas\ComponentSource\ComponentSourceWithSwitchCasesInterface;
+use Drupal\canvas\Entity\Component;
+use Drupal\canvas\Entity\ContentTemplate;
+use Drupal\canvas\Entity\PageRegion;
+use Drupal\canvas\PageVariantResolver;
+use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItem;
+use Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList;
 use Drupal\canvas\PropExpressions\StructuredData\FieldPropExpression;
 use Drupal\canvas\PropExpressions\StructuredData\Labeler;
 use Drupal\canvas\PropExpressions\StructuredData\ReferencePropExpressionInterface;
@@ -11,6 +19,7 @@ use Drupal\canvas\PropExpressions\StructuredData\StructuredDataPropExpressionInt
 use Drupal\canvas\PropSource\EntityFieldPropSource;
 use Drupal\canvas\PropSource\PropSource;
 use Drupal\canvas\ShapeMatcher\PropSourceSuggester;
+use Drupal\canvas\Storage\ComponentTreeLoader;
 use Drupal\canvas\TypedData\BetterEntityDataDefinition;
 use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Cache\Cache;
@@ -90,6 +99,14 @@ final class Sources {
   private const LEFT_OUT = ['title', 'created', 'changed', 'uid', 'revision_uid', 'revision_user', 'canvas_metatag'];
 
   /**
+   * The segment of visitors in no other segment (Segment::DEFAULT_ID).
+   *
+   * Canvas renders, for every visitor, the personalization case whose
+   * segments hold it (Personalization::isNegotiatedCase()).
+   */
+  private const DEFAULT_SEGMENT = 'default';
+
+  /**
    * Anonymous access to each host, while reading() runs.
    *
    * @var \WeakMap<\Drupal\Core\Entity\ContentEntityInterface, \Drupal\Core\Access\AccessResultInterface>|null
@@ -113,6 +130,9 @@ final class Sources {
     #[Autowire(param: 'app.root')]
     private readonly string $root,
     private readonly LoggerChannelFactoryInterface $loggers,
+    private readonly ComponentTreeLoader $treeLoader,
+    private readonly PageVariantResolver $pageVariants,
+    private readonly AutoSaveManager $autoSaveManager,
   ) {}
 
   /**
@@ -729,33 +749,43 @@ final class Sources {
   }
 
   /**
-   * Reads an expression for a host, by the account rule.
+   * Reads a source for a host, by the account rule.
+   *
+   * @param string|array $source
+   *   An entity-field expression, or a whole stored prop source.
+   * @param \Drupal\Core\Entity\ContentEntityInterface|null $host
+   *   What the source is evaluated on: NULL for a component of the page's
+   *   chrome, which has no host.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the value depends on.
+   * @param \Drupal\Core\Entity\ContentEntityInterface|null $page
+   *   The entity whose page shows the value, when it is not the host: whether
+   *   anonymous visitors may view it decides the account.
+   * @param \Drupal\Core\Cache\CacheableMetadata|null $dropped
+   *   Gets the cache contexts left out of $cacheability when a value given is
+   *   read as an anonymous visitor.
    *
    * @return array{0: 'ok'|'hidden'|'broken', 1: mixed}
    *   The status and Canvas's value.
    */
-  private function read(string $expression, ContentEntityInterface $host, CacheableMetadata $cacheability): array {
-    // Asked once per host while reading() runs; else each time: a host may
-    // be published or unpublished between two reads in a long-running
-    // process.
-    if ($this->held !== NULL) {
-      $anonymous = $this->held[$host] ?? NULL;
-      $anonymous ??= $this->held[$host] = $this->hostAccess($host);
-    }
-    else {
-      $anonymous = $this->hostAccess($host);
-    }
+  private function read(string|array $source, ?ContentEntityInterface $host, CacheableMetadata $cacheability, ?ContentEntityInterface $page = NULL, ?CacheableMetadata $dropped = NULL): array {
+    $page ??= $host;
+    \assert($page !== NULL);
+    $anonymous = $this->anonymousAccess($page);
     $public = $anonymous->isAllowed();
     $cacheability
       ->addCacheTags([...$anonymous->getCacheTags(), 'config:user.role.anonymous'])
       ->setCacheMaxAge(Cache::mergeMaxAges($cacheability->getCacheMaxAge(), $anonymous->getCacheMaxAge()));
-    $keep = static function (object $result) use ($public, $cacheability): void {
+    $keep = static function (object $result, bool $shown = TRUE) use ($public, $cacheability, $dropped): void {
       $result = CacheableMetadata::createFromObject($result);
       if ($public) {
         // Tags and max-age only: what an anonymous visitor may see does not
         // vary by the user who asks.
         $cacheability->addCacheTags($result->getCacheTags())
           ->setCacheMaxAge(Cache::mergeMaxAges($cacheability->getCacheMaxAge(), $result->getCacheMaxAge()));
+        if ($shown) {
+          $dropped?->addCacheContexts($result->getCacheContexts());
+        }
         return;
       }
       $cacheability->addCacheableDependency($result);
@@ -764,12 +794,12 @@ final class Sources {
       $this->accountSwitcher->switchTo(new AnonymousUserSession());
     }
     try {
-      $result = PropSource::parse(['sourceType' => 'entity-field', 'expression' => $expression])->evaluate($host, FALSE);
+      $result = PropSource::parse(is_string($source) ? ['sourceType' => 'entity-field', 'expression' => $source] : $source)->evaluate($host, FALSE);
       $keep($result);
       return ['ok', $result->value];
     }
     catch (CacheableAccessDeniedHttpException $denied) {
-      $keep($denied);
+      $keep($denied, FALSE);
       return ['hidden', NULL];
     }
     catch (\Throwable) {
@@ -812,12 +842,349 @@ final class Sources {
   }
 
   /**
+   * Whether anonymous visitors may view a page.
+   *
+   * Asked once per page while reading() runs; else each time: a page may be
+   * published or unpublished between two reads in a long-running process.
+   */
+  private function anonymousAccess(ContentEntityInterface $page): AccessResultInterface {
+    if ($this->held === NULL) {
+      return $this->hostAccess($page);
+    }
+    return $this->held[$page] ??= $this->hostAccess($page);
+  }
+
+  /**
    * Whether anonymous visitors may view the host.
    */
   private function hostAccess(ContentEntityInterface $host): AccessResultInterface {
     // A Canvas draft shares its entity's UUID, and so the access cache entry.
     $this->entityTypeManager->getAccessControlHandler($host->getEntityTypeId())->resetCache();
     return $host->access('view', new AnonymousUserSession(), TRUE);
+  }
+
+  /**
+   * The component trees that render on an entity's page, with their owners.
+   *
+   * What Canvas renders: a Canvas page's own tree, or a node's template tree
+   * with the node's own slot content injected as ContentTemplate::build()
+   * does it; then the page variant the entity resolves to, else the default
+   * theme's legacy page regions (CanvasPageVariant).
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   A Canvas page (or its draft), or a node shown through its template.
+   * @param bool $draft
+   *   Read the drafts of the template and the page's chrome, as previews do.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the trees depend on.
+   *
+   * @return list<array{list: \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList, owner: 'page'|'template'|'region', host: ?\Drupal\Core\Entity\ContentEntityInterface, item: list<string>, draft: string}>
+   *   Each tree with its owner, the entity its fields are read from (none
+   *   for the page's chrome), the instances the node placed in its own slot
+   *   (`item`) and, for a template or a part of the chrome read from its
+   *   draft, the label of what the draft is of (`draft`, else '').
+   *
+   * @throws \Throwable
+   *   When Canvas could not build a tree: its own rendering fails the same
+   *   way.
+   */
+  public function tree(ContentEntityInterface $entity, bool $draft, CacheableMetadata $cacheability): array {
+    $trees = [];
+    $template = NULL;
+    if ($entity->getEntityTypeId() === 'canvas_page') {
+      $trees[] = [
+        'list' => $this->treeLoader->load($entity),
+        'owner' => 'page',
+        'host' => $entity,
+        'item' => [],
+        'draft' => '',
+      ];
+    }
+    else {
+      $template = ContentTemplate::loadForEntity($entity, 'full');
+      $drafted = '';
+      if ($template !== NULL && $draft) {
+        $auto_save = $this->autoSaveManager->getAutoSaveEntity($template);
+        $cacheability->addCacheableDependency($auto_save);
+        if ($auto_save->entity instanceof ContentTemplate) {
+          $template = $auto_save->entity;
+          $drafted = (string) $template->label();
+        }
+        // A template is previewed as if it were published.
+        if (!$template->status()) {
+          $template = (clone $template)->setStatus(TRUE);
+        }
+      }
+      // Canvas renders no disabled template, nor the chrome it would pick.
+      if ($template !== NULL && !$template->status()) {
+        $cacheability->addCacheableDependency($template);
+        $template = NULL;
+      }
+      if ($template !== NULL) {
+        $cacheability->addCacheableDependency($template);
+        $list = $template->getComponentTree($entity);
+        $own = [];
+        if ($template->getExposedSlots() !== []) {
+          $slot = $this->treeLoader->load($entity);
+          $own = array_column($slot->getValue(), 'uuid');
+          $list->injectSubTreeItemList($template->getExposedSlots(), $slot);
+        }
+        $trees[] = ['list' => $list, 'owner' => 'template', 'host' => $entity, 'item' => $own, 'draft' => $drafted];
+      }
+    }
+    // The page's chrome: the variant that resolves, else the legacy regions.
+    $cacheability->addCacheableDependency($this->configFactory->get('canvas.settings'));
+    $variant = $this->pageVariants->resolve($entity, $template);
+    if ($variant !== NULL) {
+      $cacheability->addCacheableDependency($variant);
+      $drafted = '';
+      // A preview shows the variant's draft when it is valid
+      // (PageVariantResolver::resolve()): a change to it rebuilds the head.
+      if ($draft) {
+        $cacheability->addCacheableDependency($this->autoSaveManager->getAutoSaveEntity($variant));
+        $preview = $this->pageVariants->resolvePreviewVariant($variant);
+        $drafted = $preview !== $variant ? (string) $variant->label() : '';
+        $variant = $preview;
+      }
+      $trees[] = self::chrome($variant->getComponentTree(), $drafted);
+      return $trees;
+    }
+    $cacheability->addCacheTags($this->entityTypeManager->getDefinition('page_region')->getListCacheTags())
+      ->addCacheTags(['config:system.theme']);
+    foreach (PageRegion::loadForTheme((string) $this->configFactory->get('system.theme')->get('default')) as $region) {
+      $cacheability->addCacheableDependency($region);
+      // A preview shows a region's draft when it is valid, as
+      // CanvasPageVariant does.
+      $drafted = '';
+      if ($draft) {
+        $auto_save = $this->autoSaveManager->getAutoSaveEntity($region);
+        $cacheability->addCacheableDependency($auto_save);
+        if ($auto_save->entity instanceof PageRegion && count($auto_save->entity->getTypedData()->validate()) === 0) {
+          $region = $auto_save->entity;
+          $drafted = (string) $region->label();
+        }
+      }
+      $trees[] = self::chrome($region->getComponentTree(), $drafted);
+    }
+    return $trees;
+  }
+
+  /**
+   * A tree of the page's chrome, as tree() gives it.
+   */
+  private static function chrome(ComponentTreeItemList $list, string $draft): array {
+    return ['list' => $list, 'owner' => 'region', 'host' => NULL, 'item' => [], 'draft' => $draft];
+  }
+
+  /**
+   * The component instances that render, from tree().
+   *
+   * @param list<array{list: \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList, owner: string, host: ?\Drupal\Core\Entity\ContentEntityInterface, item: list<string>}> $tree
+   *   What tree() gave.
+   *
+   * @return array{0: list<array{uuid: string, component: string, label: string, owner: string, version: string, item: \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItem, host: ?\Drupal\Core\Entity\ContentEntityInterface}>, 1: list<array{uuid: string, component: string, label: string, owner: string, reason: string}>}
+   *   The instances in tree order, each with its component, its owner (page,
+   *   template, item or region) and the version it was placed with; and
+   *   those skipped, with their owner: a personalization case Canvas does
+   *   not render for visitors in no segment (`personalized`), an instance
+   *   whose component or version cannot be loaded (`error`). What is inside
+   *   a skipped instance, or under a parent that is not there, does not
+   *   render and is left out with it.
+   */
+  public function instances(array $tree): array {
+    $instances = $skipped = [];
+    foreach ($tree as $part) {
+      $rows = [];
+      foreach ($part['list'] as $item) {
+        \assert($item instanceof ComponentTreeItem);
+        $row = [
+          'uuid' => (string) $item->get('uuid')->getValue(),
+          'component' => (string) $item->get('component_id')->getValue(),
+          'label' => '',
+          'owner' => in_array($item->get('uuid')->getValue(), $part['item'], TRUE) ? 'item' : $part['owner'],
+        ];
+        // One instance that cannot be read costs only itself.
+        try {
+          $component = Component::load($row['component']);
+          if (!$component instanceof Component) {
+            throw new \UnexpectedValueException('No such component.');
+          }
+          $row['label'] = (string) $component->label();
+          $version = $item->getComponentVersion();
+          // Throws when the version it was placed with is gone.
+          $component->getSettings($version);
+          // Personalized content: only the case Canvas renders for visitors
+          // in no segment is what every visitor gets.
+          $source = $component->getComponentSource();
+          if ($source instanceof ComponentSourceWithSwitchCasesInterface && $source->isCase() && !in_array(self::DEFAULT_SEGMENT, (array) ($item->getInputs()['segments'] ?? []), TRUE)) {
+            $skipped[] = $row + ['reason' => 'personalized'];
+            continue;
+          }
+        }
+        catch (\Throwable $e) {
+          $this->loggers->get('canvas_metatag')->warning('The component instance @uuid (@component) could not be read: @message', [
+            '@uuid' => $row['uuid'],
+            '@component' => $row['component'],
+            '@message' => $e->getMessage(),
+          ]);
+          $skipped[] = $row + ['reason' => 'error'];
+          continue;
+        }
+        $rows[$row['uuid']] = $row + [
+          'version' => $version,
+          'item' => $item,
+          'host' => $part['host'],
+          'parent' => $item->getParentUuid(),
+        ];
+      }
+      // Until nothing is left whose parent is not there.
+      do {
+        $count = count($rows);
+        $rows = array_filter($rows, static fn (array $row): bool => $row['parent'] === NULL || isset($rows[$row['parent']]));
+      } while (count($rows) !== $count);
+      foreach ($rows as $row) {
+        unset($row['parent']);
+        $instances[] = $row;
+      }
+    }
+    return [$instances, $skipped];
+  }
+
+  /**
+   * The values of some props of one instance, read against its own version.
+   *
+   * Each value is read by the account rule (read()), as linked values are:
+   * as an anonymous visitor when anonymous visitors may view the page. An
+   * image is read through its file (the same rewrite as a linked image),
+   * never as the rendered address with its width; formatted text as stored.
+   *
+   * @param array $instance
+   *   One of instances().
+   * @param array<string, string> $kinds
+   *   Prop name => the kind of value wanted: text, html, number, date,
+   *   address or image.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $page
+   *   The entity whose page the instance renders on.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the values depend on.
+   *
+   * @return array{0: array<string, array{0: 'ok'|'empty'|'hidden'|'broken', 1: mixed}>, 1: list<array{uuid: string, component: string, label: string, owner: string, reason: string, prop?: string, version?: string}>}
+   *   By prop, the status and the value (see evaluate(); an address as
+   *   stored, an image {uri, alt, width, height}); and what was skipped,
+   *   with the instance's owner: a prop the instance's version lacks
+   *   (`prop-missing`, with the prop and the version), a value visitors may
+   *   not see (`access`, with the prop), the whole instance when it cannot
+   *   be read (`error`) or when a value would make the head vary by user or
+   *   session, or expire (`cacheability`). A skipped value gives nothing and
+   *   adds nothing to $cacheability.
+   */
+  public function props(array $instance, array $kinds, ContentEntityInterface $page, CacheableMetadata $cacheability): array {
+    $part = array_intersect_key($instance, array_flip(['uuid', 'component', 'label', 'owner']));
+    $own = new CacheableMetadata();
+    // What reading as an anonymous visitor left out of $own (read()).
+    $dropped = new CacheableMetadata();
+    $values = $skipped = [];
+    try {
+      $component = Component::load($instance['component']);
+      \assert($component instanceof Component);
+      $definitions = $component->getSettings($instance['version'])['prop_field_definitions'] ?? [];
+      $inputs = $instance['item']->getInputs() ?? [];
+      foreach ($kinds as $prop => $kind) {
+        if (!isset($definitions[$prop])) {
+          $skipped[] = $part + ['reason' => 'prop-missing', 'prop' => $prop, 'version' => $instance['version']];
+          continue;
+        }
+        $values[$prop] = $this->input($inputs[$prop] ?? NULL, $definitions[$prop], $kind, $instance['host'], $page, $own, $dropped);
+        if ($values[$prop][0] === 'hidden') {
+          $skipped[] = $part + ['reason' => 'access', 'prop' => $prop];
+        }
+      }
+    }
+    catch (\Throwable $e) {
+      $this->loggers->get('canvas_metatag')->warning('The component instance @uuid (@component) could not be read: @message', [
+        '@uuid' => $part['uuid'],
+        '@component' => $part['component'],
+        '@message' => $e->getMessage(),
+      ]);
+      return [[], [$part + ['reason' => 'error']]];
+    }
+    // A head anonymous visitors get never varies by user or session, and
+    // never expires, because of a component: read as an anonymous visitor,
+    // a value that would is left out. A page they may not view is read as
+    // the user who asks (read()), and its head is that user's.
+    $varies = array_filter($dropped->getCacheContexts(), static fn (string $context): bool => $context === 'user' || str_starts_with($context, 'session'));
+    if (($varies || $own->getCacheMaxAge() !== Cache::PERMANENT) && $this->anonymousAccess($page)->isAllowed()) {
+      return [[], [...$skipped, $part + ['reason' => 'cacheability']]];
+    }
+    $cacheability->addCacheableDependency($own);
+    return [$values, $skipped];
+  }
+
+  /**
+   * One stored input as a value of a kind.
+   *
+   * A static input is stored bare; its source is the version's definition
+   * of the prop, as Canvas builds it.
+   */
+  private function input(mixed $input, array $definition, string $kind, ?ContentEntityInterface $host, ContentEntityInterface $page, CacheableMetadata $cacheability, CacheableMetadata $dropped): array {
+    if ($input === NULL || $input === [] || $input === '') {
+      return ['empty', NULL];
+    }
+    $source = is_array($input) && isset($input['sourceType']) ? $input : [
+      'sourceType' => 'static:field_item:' . $definition['field_type'],
+      'value' => $input,
+      'expression' => $definition['expression'],
+      'sourceTypeSettings' => array_filter([
+        'storage' => $definition['field_storage_settings'] ?? NULL,
+        'instance' => $definition['field_instance_settings'] ?? NULL,
+        'cardinality' => $definition['cardinality'] ?? NULL,
+      ], static fn (mixed $setting): bool => $setting !== NULL),
+    ];
+    if (($source['sourceTypeSettings'] ?? NULL) === []) {
+      unset($source['sourceTypeSettings']);
+    }
+    $row = [];
+    if (is_string($source['expression'] ?? NULL)) {
+      if ($kind === 'image') {
+        $source['expression'] = str_replace(self::IMAGE_FROM, self::IMAGE_TO, $source['expression']);
+      }
+      // Formatted text as stored, never as its filters render it.
+      if (preg_match('/␟processed$/u', $source['expression'])) {
+        $source['expression'] = (string) preg_replace('/␟processed$/u', '␟value', $source['expression']);
+        $row['html'] = TRUE;
+      }
+    }
+    [$status, $value] = $this->read($source, $host, $cacheability, $page, $dropped);
+    if ($status !== 'ok') {
+      return [$status, NULL];
+    }
+    $value = $this->normalize($value, $kind, $row);
+    return [$value === NULL || $value === '' ? 'empty' : 'ok', $value];
+  }
+
+  /**
+   * Where a component is used, in what is live.
+   *
+   * @return array{content: int, templates: int}
+   *   How many Canvas pages and other content items, in their default
+   *   revisions, and how many content templates place it. An item with
+   *   several component tree fields counts once.
+   */
+  public function usage(string $componentId): array {
+    $content = 0;
+    foreach ($this->entityFieldManager->getFieldMapByFieldType('component_tree') as $entity_type_id => $fields) {
+      $storage = $this->entityTypeManager->getStorage($entity_type_id);
+      $ids = [];
+      foreach (array_keys($fields) as $field) {
+        $ids += $storage->getQuery()->accessCheck(FALSE)->condition("$field.component_id", $componentId)->execute();
+      }
+      $content += count($ids);
+    }
+    $templates = array_filter(
+      ContentTemplate::loadMultiple(),
+      static fn (ContentTemplate $template): bool => in_array($componentId, $template->getComponentTree()->getComponentIdList(), TRUE),
+    );
+    return ['content' => $content, 'templates' => count($templates)];
   }
 
   /**

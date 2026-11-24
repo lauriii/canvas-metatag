@@ -2,6 +2,7 @@ aeiou
 alesund
 arvio
 automators
+boutique
 caretline
 cband
 cbar
@@ -10,6 +11,7 @@ cefact
 cextend
 cheader
 chelps
+chene
 cing
 citem
 clist
@@ -28,6 +30,7 @@ danda
 datatypes
 datetimes
 ddev
+deadbeefdeadbeef
 dollari
 echoai
 faqpage
@@ -49,6 +52,8 @@ kala
 kallio
 keepalive
 kungsgatan
+lampe
+lampes
 licence
 linnankatu
 llms
