@@ -373,6 +373,10 @@
     "video": {
       "label": "Video",
       "need": "a video"
+    },
+    "itemListElement.name": {
+      "label": "Trail",
+      "need": "items with a name"
     }
   },
   "features": {
@@ -910,6 +914,32 @@
         "name",
         "url",
         "alternateName"
+      ]
+    },
+    "breadcrumb": {
+      "label": "Breadcrumb",
+      "for": "the breadcrumb trail in results",
+      "where": "Where the page sits in your site, as a trail above its result instead of its address.",
+      "status": "shown",
+      "doc": "https://developers.google.com/search/docs/appearance/structured-data/breadcrumb",
+      "on": [
+        "BreadcrumbList"
+      ],
+      "required": [
+        "itemListElement.name"
+      ],
+      "rules": [
+        {
+          "path": "itemListElement.name",
+          "min": 2,
+          "need": "a second named item"
+        }
+      ],
+      "names": [
+        "itemListElement",
+        "position",
+        "name",
+        "item"
       ]
     },
     "faq": {
@@ -1601,7 +1631,9 @@
       ]
     },
     "unitText": "text",
-    "value": "number|text|item:QuantitativeValue"
+    "value": "number|text|item:QuantitativeValue",
+    "item": "url|item:Thing",
+    "position": "number"
   },
   "subtypes": {
     "Thing": [
@@ -1747,7 +1779,8 @@
     "SearchAction": "Search box",
     "SpecialAnnouncement": "Announcement",
     "Quiz": "Practice problems",
-    "ProfilePage": "Profile page"
+    "ProfilePage": "Profile page",
+    "BreadcrumbList": "Breadcrumb trail"
   },
   "about": {
     "EmployerAggregateRating": "A company's rating by the people who work there.",
@@ -1805,6 +1838,7 @@
     "Restaurant": "A restaurant.",
     "SportsActivityLocation": "A gym, a pool or another place for sport.",
     "Store": "A shop.",
-    "TravelAgency": "A travel agency."
+    "TravelAgency": "A travel agency.",
+    "BreadcrumbList": "A trail of pages from the home page to this one."
   }
 }

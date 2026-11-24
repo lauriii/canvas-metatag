@@ -30,11 +30,23 @@ the breadcrumb actually shows.
   head still ships; a component that would make the page uncacheable for
   visitors is left out and reported.
 - **Breadcrumbs:** a `BreadcrumbList` at `{url}#breadcrumb`, referenced from
-  the page node, only when a breadcrumb component renders on that page; a
-  "Breadcrumb" verdict line in the Schema view.
+  the page node, only when a breadcrumb component renders on that page and
+  its trail has two crumbs or more; a "Breadcrumb" verdict line in the Schema
+  view, and the trail in the search preview's address line. A hand-added `#breadcrumb` is
+  refused from now on; one stored before keeps its output as
+  `#breadcrumb-2` (read mode and a post-update).
 - **Component values join the page match:** a fact that comes from a
   component is compared with the page like any other (used fully in
   `derive-structured-data-from-components`).
+- **Ships ahead of its consumers:** `Sources::props()`, `Sources::usage()`
+  and `Resolver::parts()` have no production caller until
+  `strengthen-zero-config-defaults` and
+  `derive-structured-data-from-components` (the Components list) use them.
+  They ship here because they read the Canvas internals this change pins in
+  the contract job (stored inputs per version, the `component_tree` column),
+  so a Canvas change breaks a test before it reaches a consumer. They are not
+  dead code; until then only `error` and `personalized` reach the report's
+  `skipped_parts`, and nothing marks a value as coming from a component.
 - **Gates:** a kernel test that the reader has no render side effects and
   never leaks unpublished content, and a performance budget at delivery and
   on the dialog's state route.
@@ -46,10 +58,46 @@ the breadcrumb actually shows.
   self-setup (`set-up-types-from-templates`): they consume this reader.
 - Any UI to configure breadcrumbs: the trail is Drupal's own for the route.
 
-## Non-goals reopened (product owner sign-off needed)
+## Non-goals reopened (product owner sign-off)
 
-- The README lists **breadcrumb structured data** as not provided. This
-  change provides it, only where the breadcrumb shows. Recommended: yes.
+- The README listed **breadcrumb structured data** as not provided. This
+  change provides it, only where the breadcrumb shows. Signed off: yes,
+  only where a breadcrumb block shows (decisions, item 3).
+
+## Product owner decisions this change relies on
+
+- **Item 3:** breadcrumb structured data, only where a breadcrumb block
+  shows. The README's non-goal now reads "breadcrumb structured data where
+  no breadcrumb shows".
+- **Item 7:** the budgets: +10 ms warm at page delivery and +300 ms cold on
+  the dialog's state route, for 20 mapped components. Measured on the farm
+  site (`/pricing`, 24 instances, every prop of the 21 that have props): 4 ms
+  warm, about 95 ms in a cold process (115 ms right after a cache rebuild);
+  `GET /state` for that page 122 ms cold and 27-31 ms warm in all. Within
+  both budgets; `ComponentBudgetTest` holds the warm one. Recorded in
+  ARCHITECTURE.md section 13.
+- **Item 2:** no search engine or platform named in UI copy; the breadcrumb
+  feature's documentation link stays in `data/search-features.json` only.
+- **Item 8:** no human usability gate here; the dialog gains one Schema view
+  line and Checks rows for site builders only (under Good to know, never
+  counted: nothing in the dialog changes them).
+- **"Experience needs to be clean"** (the product owner's brief): a top-level
+  page's trail is "Home" alone, which says nothing about where the page sits
+  and which no editor can change. Rather than a permanent "Needs 2 items"
+  line on every such page, the module describes trails of two crumbs or
+  more only (lead's call on review round 1).
+
+## Canvas version
+
+`composer.json` keeps `drupal/canvas: ^1.11`. Checked against the 1.11.0
+release archive: it ships `PageVariantResolver` (with
+`resolve($entity, $template, $is_preview)`, identical to 1.x-dev),
+`Entity\PageVariant::getComponentTree()`,
+`ComponentSourceWithSwitchCasesInterface::isCase()`,
+`ContentTemplate::getExposedSlots()`,
+`ComponentTreeItemList::injectSubTreeItemList()`,
+`Component::getSettings($version)` and
+`AutoSaveManager::getAutoSaveEntity()`. No constraint change is needed.
 
 ## Depends on / followed by
 
@@ -80,9 +128,15 @@ the breadcrumb actually shows.
 
 ## Impact
 
-- **Server:** `src/Sources.php` (`tree()`, `instances()`, image reading,
-  guards), `SchemaGraph` (breadcrumb), `Resolver` (breadcrumb builder call,
-  report member `skipped_parts`).
+- **Server:** `src/Sources.php` (`tree()`, `instances()`, `props()`,
+  `usage()`, image reading, guards), `SchemaGraph` (breadcrumb node, the
+  `breadcrumb` module id, the `min` rule), `Resolver` (`trail()`,
+  `breadcrumb()`, `parts()`, report member `skipped_parts`), `Values`
+  (`#breadcrumb` stored before is renamed and kept), a post-update.
+- **Dialog:** `checks.ts` (component values compared with the page; skipped
+  components for site builders; the module's own trail never a Checks row),
+  `features.ts` (the `min` rule), `Header.tsx` (a sheet keeps Escape and Tab
+  inside the dialog's frame).
 - **Data:** a `breadcrumb` entry in `data/search-features.json`.
 - **Canvas internals:** content template subtree injection, component
   versions, explicit input evaluation, the image prop shape, the

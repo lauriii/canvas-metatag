@@ -432,6 +432,7 @@ does not move when its canonical does.
 | WebPage (or the type's `page_type`) | `{url}#webpage` | always |
 | ImageObject (page image) | `{url}#primaryimage` | an image resolved |
 | primary node (Article, Event, Product, ...) | `{url}#primary` | the type has a `primary_type` and every required property resolved |
+| BreadcrumbList | `{url}#breadcrumb` | a breadcrumb renders on the page (below) |
 
 These ids never change after release: other pages and search engines refer to
 them. The page node points at the primary node through `mainEntity` only when
@@ -552,6 +553,83 @@ no price). An image a main node takes
 by default is the one chosen to share the page, else the page's own, never
 the site default.
 
+### The page's components and its breadcrumb trail
+
+`Sources::tree($entity, $draft)` gives the component trees that render on
+the entity's page, as Canvas builds them: a Canvas page's own tree (owner
+`page`); a node's template tree with the node's own slot content injected by
+Canvas's `injectSubTreeItemList()` (owners `template` and `item`); then the
+page's chrome, the page variant `PageVariantResolver` resolves, else the
+default theme's legacy page regions (owner `region`), each with its valid
+draft in previews as `CanvasPageVariant` builds them; a disabled template is
+read in its own preview only, as Canvas renders it nowhere else. The dialog
+reads a page's chrome as a draft for whoever may edit the page, and its
+status says when what it shows includes such a draft (`chrome_drafts`: the
+labels of the parts read from their drafts).
+`Sources::instances()` lists what renders: each instance with its component,
+its owner and the version it was placed with; a personalization case other
+than the one Canvas renders for a visitor in no segment (its `segments` hold
+`default`) is reported (`personalized`)
+and what is inside it left out with it, and an instance whose component or
+version cannot be loaded is reported and logged (`error`), what is inside it
+left out with it. A failure of the whole reading (Canvas cannot build the
+tree) is caught in `Resolver::trail()`: the head is built without component
+values and reports one `error` with an empty uuid; a breadcrumb builder that
+fails costs the trail only, reported as the breadcrumb's `error`. What was
+left out is the report's `skipped_parts` ({uuid, component, label, owner,
+reason, prop?, version?}); the dialog lists all but `personalized` under Good
+to know, for site builders only, one row per component, reason and prop with
+how many copies.
+
+`Sources::props($instance, $kinds, $page)` reads chosen props of one
+instance against the prop definitions of its own version
+(`Component::getSettings($version)`): a prop that version lacks is
+`prop-missing` (with the prop and version) and gives nothing. Each value is
+evaluated by the account rule of linked values (`read()`: anonymous when
+anonymous visitors may view the page), whatever its source: a static input is
+evaluated as Canvas builds its source from the definition. An image is read
+through its file with the same expression rewrite as a linked image (never
+`src_with_alternate_widths`), formatted text as stored; a value visitors may
+not see is `access`. The instance's own cacheability is collected apart: on
+a page anonymous visitors may view, a value that varies by `user` or
+`session` (the contexts `read()` records apart before it drops them, as an
+anonymous reading keeps tags and max-age only) or a max-age that is not
+permanent leaves the whole instance out (`cacheability`) and adds nothing to
+the head; a page they may not view is read as the user who asks, whose head
+it is, and keeps its values with their cacheability. A throw costs that
+instance only (`error`, logged). `Resolver::parts()` makes addresses
+absolute on the public base and images public files with their size
+(`uriImage()`). `Sources::usage()` counts the content items (default
+revisions, each once) and templates that place a component. The head reads
+the instance list (for the breadcrumb); values are read through `props()` by
+their consumers.
+
+The breadcrumb: when `block.system_breadcrumb_block` renders on a page that
+is not the front page, `Resolver::breadcrumb()` asks Drupal's breadcrumb
+builder (`breadcrumb`, the block's own) for the entity's canonical route,
+with the request context's path set to the entity's own path (the path of
+its generated address only, since a language served on its own domain is
+linked with its host; a path-based trail follows its aliases; a draft's own
+alias, not saved yet, as the dialog's address line shows it, compared
+decoded and set encoded) and as an anonymous visitor. When the
+request is in another language than the entity, a request for the entity's
+own address, with the current session (session-based negotiation reads it),
+is pushed and the language manager renegotiated, with the translation's and
+the config overrides' language, so aliases, titles and "Home" are the
+entity's; what was changed is restored after the call, also when it fails.
+Only tags and max-age are kept. Each crumb has a name and an absolute
+address on the public base in the entity's language; only the last may have
+none. A trail of fewer than two crumbs (a top-level page's "Home") gives no
+list: it says nothing about where the page sits. `SchemaGraph` emits the
+`BreadcrumbList` (origin `page`; Output names it by its crumbs) and the page
+node's `breadcrumb`; the search preview shows the crumbs after the host in
+the result's address line, each isolated (`<bdi>`), less the first when the
+builder linked it to the front page (the report's `trail_home`). The
+`breadcrumb` search feature needs two named items (`rules[].min` on
+`itemListElement.name`, mirrored in `features.ts`), which only a hand-added
+trail can miss; the module's own trail is judged in the Schema view only,
+never as a Checks row, since nothing in the dialog sets it.
+
 ### Search features and the report (dialog only)
 
 `data/search-features.json` lists each search feature the module knows
@@ -605,12 +683,16 @@ by more text, and a re-encode probe with the output's flags. A refusal keeps
 its sentence in `errors` and adds `error_paths` ({item, path}). A hand-added
 item never takes an id of `SchemaGraph::MODULE_IDS` (`identity`, `logo`,
 `website`, `return-policy` on `{home}`; `webpage`, `primaryimage`, `primary`,
-`group` and the prefix `c-` on `{url}`), and two never share one; values
-stored before that rule are renamed `‹id›-2` when read
+`group`, `breadcrumb` and the prefix `c-` on `{url}`), and two never share
+one; values stored before that rule are renamed `‹id›-2` when read
 (`Values::renameReserved()`) and by
 `canvas_metatag_post_update_own_jsonld_as_written`, which also writes stored
-text out with two spaces in its own key order. The text is stored as written,
-never re-encoded.
+text out with two spaces in its own key order. A page id other than the ones
+the module took later (`SchemaGraph::LATER_IDS`: `breadcrumb`) was the
+module's own node, so its renamed item stays left out (`skip`); a hand-added
+`#breadcrumb` was output before, so `#breadcrumb-2` keeps its output and
+references, as `canvas_metatag_post_update_reserve_breadcrumb` stores it. The
+text is stored as written, never re-encoded.
 
 On output (`SchemaGraph::preparer()`), `#name` ids are put on `{url}` except
 the short ids of the site's own items, which point at `{home}`; fixed names
@@ -847,6 +929,22 @@ loudly.
 | Response JSON `head`, `route.entity.{entityType,id,langcode}` | decorator | caught; Canvas's head is kept | `HeadlessHeadTest::testPublishedPage`, `headless.spec.ts` |
 | `FrontendUrl::fromConfig()`, `canvas_headless.settings:frontends.0.url` | `Resolver::origin()` | public base falls back to the request host | `ResolverTest::testFrontendBase` |
 | `hook_canvas_extension_info_alter`, extension `type: canvas`, `api_version: 1.0` | `canvasExtensionInfoAlter()`, `canvas_metatag.canvas_extension.yml` | the dialog does not open, or a stale build is served | every Playwright spec |
+| `ContentTemplate::getExposedSlots()` (one exposed slot, an open `@todo`), `getComponentTree($entity)`, `ComponentTreeItemList::injectSubTreeItemList()`, `ComponentTreeLoader::load()` | `Sources::tree()` | an item's own slot is missed, or the tree cannot be built (the head is built without component values, one `error`) | `SourcesTreeTest::testTree`, `ResolverTest::testUnreadableComponents` |
+| `ComponentTreeItem::getComponentVersion()`, `getInputs()`, `getParentUuid()`; `Component::getSettings($version)` and its `prop_field_definitions` (`field_type`, `expression`, `field_storage_settings`, `field_instance_settings`, `cardinality`) | `Sources::instances()`, `props()` | instances are `error`, or props are read against the wrong version | `SourcesTreeTest::testVersions`, `testErrors`, `ResolverTest::testUnreadableComponents` |
+| `PropSource::parse()` of a whole stored input (static or entity-field), `evaluate($host, FALSE)` and its `EvaluationResult` cacheability | `Sources::props()` | values read nothing (`broken`) | `SourcesTreeTest::testValues`, `testGuards` |
+| The image prop's expression on a media reference, ending in `{src↠src_with_alternate_widths,alt↠alt,width↠width,height↠height}` | `Sources::props()` (rewritten to the file's URI, as a linked image is) | images give nothing | `SourcesTreeTest::testValues` |
+| `ComponentSourceWithSwitchCasesInterface::isCase()` and a case's input `segments` holding `default`, the case `Personalization::isNegotiatedCase()` renders for a visitor in no segment (highly experimental) | `Sources::instances()` | without the input every case is left out (fails closed) | `SourcesTreeTest::testGuards` |
+| `PageVariantResolver::resolve($entity, $template)`, `resolvePreviewVariant()`, `PageVariant::getComponentTree()`, `canvas.settings:default_page_variant`, legacy `PageRegion::loadForTheme()`; the auto-saves of the template, the variant and a region in previews (`AutoSaveManager::getAutoSaveEntity()`) | `Sources::tree()` | the chrome's components (its breadcrumb) are not seen, or a preview misses a draft | `SourcesTreeTest::testTree`, `testChrome`, `ApiTest::testChromeDraft`, `ResolverTest::testBreadcrumb` |
+| The block component `block.system_breadcrumb_block` | `Resolver::trail()` | no breadcrumb list | `ResolverTest::testBreadcrumb`, `testBrokenTrail`, `CoupledHeadTest::testComponents`, `HeadlessHeadTest::testBreadcrumb` |
+| The `component_tree` field type's `component_id` column | `Sources::usage()` | usage counts nothing | `SourcesTreeTest::testUsage` |
+
+Proved by contract tests only on Canvas 1.x: a component in an item's own
+slot (an exposed slot set up by config makes
+`ComponentTreeLoader::getCanvasFieldName()` throw on a real site, so only test
+articles have one) and an instance on a version that is gone (Canvas fails the
+page and will not open it in the editor). Both read as the scenarios say in
+`SourcesTreeTest` and `ResolverTest`; the dialog's `/state` listed the broken
+instance as `error` with a complete head.
 
 ### JavaScript (all in `extension/src/host.ts`)
 
@@ -990,6 +1088,9 @@ account; both page caches stay effective.
 | image URLs (built on the request host) | context `url.site` | `usable()` |
 | anonymous access results | their tags and max-age, `config:user.role.anonymous` | `allowed()` |
 | public base | `config:canvas_headless.settings` unless the setting is used; `url.site` when it is the request, or on a host no visitor reaches | `origin()`, `addressed()` |
+| the page's chrome | `config:canvas.settings`, the page variant (or `config:system.theme` and the page region list tag) | `Sources::tree()` |
+| a component's values | what was read, by the account rule; on a page anonymous visitors may view, an instance that would add a `user` or `session` context or a max-age is left out instead | `Sources::props()` |
+| the breadcrumb trail | its tags and max-age only: built as an anonymous visitor for the entity's own path, so not its `url.path.*` and `user.*` contexts | `Resolver::breadcrumb()` |
 
 The `settings.php` public base carries no tag: changing it needs a cache
 rebuild (README). Install invalidates `rendered`, because core's canonical and
@@ -999,6 +1100,23 @@ template, so that alter is safe. All API routes are `no_cache`.
 `Resolver` keeps results per entity object, per request and per draft flag
 in a `WeakMap` (a stored page and its draft share id and revision, so a string
 key would mix them).
+
+Reading components costs (farm site, `/pricing`, 24 instances, every prop of
+the 21 that have props, through `Resolver::parts()`; measured 2026-11-24):
+about 95 ms in a cold process (115 ms right after a cache rebuild) and 4 ms
+warm. The dialog's `GET /state` for that page took 122 ms cold and 27-31 ms
+warm in all, with the instance list read. The product owner's budget
+(decisions, item 7) is +10 ms warm at delivery and +300 ms cold on `/state`
+for 20 mapped components; `ComponentBudgetTest` holds the warm one, with the
+breadcrumb trail of a page two levels down (on a CI runner a run over the
+budget is reported incomplete rather than failed); the cold one is this
+recorded measurement.
+
+Known gap: the trail is as fresh as core's visible breadcrumb. Unpublish a
+parent page, request a child, publish the parent again: both the visible
+trail and the JSON-LD leave the parent out until the child's caches are
+invalidated, because the access result the path-based builder caches does
+not carry the parent's tag. The JSON-LD stays equal to what visitors see.
 
 ## 14. Translations
 
@@ -1175,6 +1293,7 @@ each row names the test that fails when it changes.
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
 | `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
+| `SourcesTreeTest` (`canvas_metatag_canvas_contract`), `ComponentBudgetTest` | what renders on a page (template, an item's own slot, a page, its chrome: a variant or legacy regions, their drafts in previews, no disabled template), versions, values by the account rule, images through their file, personalization, a component that throws, a per-user value, usage; 20 instances read warm within the budget | PHPUnit (kernel) |
 | `ExtendMergeTest`, `ModuleIdsTest`, `CustomFillTest`, `VocabularyTest`, `VocabularyRouteTest` | added details merged per leaf with clashes and selectors, the hand-added main thing; the module id list and short ids; whole-value fills and what an empty one leaves out; the trimmed schema.org vocabulary, its command, route and status line; `ValuesTest::testSharedFixtures` and `SearchFeaturesTest::testSharedFixtures` run `tests/fixtures/custom/` and `tests/fixtures/features/` | PHPUnit (unit, kernel) |
 | `extension/src/custom/*.test.ts`, `features.test.ts` (vitest) | the same red set as the server, one text edited by Form without moving other bytes (a property test), paste clean-up, problems with their line, path and fix, the same verdicts as the server; the sheet's pure parts: Back's names and tab memory, type search and its steering, rows (numbers while typed, zone offsets, positions), the reference menu and moving an item to its own, the item list, the caret line, the vocabulary | `npm run verify` |
 | `tests/e2e/custom-form.spec.ts` | an employer rating built with the keyboard only, Form ⇄ JSON with no byte change, the sheet's levels and Back to Output, Undo of a removal, a paste in Form; axe at 600 and 350 px tall and in a narrow frame | Playwright (`coupled`) |
@@ -1213,6 +1332,11 @@ limitations of the implementation:
   domain; nothing maps a language to a frontend host.
 - Only files in the `public` scheme are emitted; a remote wrapper serving
   public files is treated as missing.
+- The breadcrumb trail is the builder's, not what a theme's preprocess makes
+  of it, and only a breadcrumb placed as a Canvas component is seen (not one
+  in the block layout a theme page template renders). A parent page's new
+  alias reaches the trail when the page's head is rebuilt, as for core's
+  block.
 - Custom JSON-LD is decoded as arrays on output, so an empty object or an
   object with only numeric keys is emitted as a list.
 - A content type's Full template with no content to preview is read-only in

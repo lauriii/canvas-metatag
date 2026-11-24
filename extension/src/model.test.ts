@@ -489,7 +489,7 @@ describe("the search result's description", () => {
 
 describe("the search result preview's name", () => {
   const fake: Measurer = (text) => Array.from(text).length * 10;
-  const name = (description: string, robots: Robots | undefined, headless: boolean, crumbs = 'example.com › careers') =>
+  const name = (description: string, robots: Robots | undefined, headless: boolean, crumbs = ['example.com', 'careers']) =>
     resultName({ hidden: false, site: 'Example', crumbs, title: 'Careers | Example', description: resultDescription(description, robots, headless, fake) });
 
   it('ends with the description, or the sentence shown in its place', () => {
@@ -500,7 +500,7 @@ describe("the search result preview's name", () => {
   });
 
   it('leaves out an address the head does not carry', () => {
-    expect(name('Join us.', undefined, false, '')).toBe('Search result preview, estimate. Example. Title: Careers | Example. Description: Join us.');
+    expect(name('Join us.', undefined, false, [])).toBe('Search result preview, estimate. Example. Title: Careers | Example. Description: Join us.');
   });
 });
 
@@ -1570,6 +1570,17 @@ describe('footer and strips', () => {
     ).toBe('Draft of the Finnish version · goes live with the English version');
   });
 
+  it('says what it shows includes unpublished changes around the page', () => {
+    const around = (chrome_drafts: string[], over: Partial<StatePayload> = {}) =>
+      at(ready({ resolved: { head: { title: '', meta: [], link: [], script: [] }, image: null, schema: { ...EMPTY_SCHEMA, chrome_drafts } }, ...over }));
+    expect(around(['Chrome'])).toEqual({ dot: 'blue', text: 'Includes unpublished changes to “Chrome” · live once it is published', actions: ['output'] });
+    expect(around(['Header region', 'Footer region']).text).toBe('Includes unpublished changes to “Header region” and “Footer region” · live once they are published');
+    // None, or the page's own draft: as before.
+    expect(around([]).text).toBe('Matches the published page');
+    expect(around(['Chrome'], { target: target({ has_draft: true }) }).text).toBe('Draft · goes live when you publish the page');
+    expect(around(['Chrome'], { target: target({ published: false }) }).text).toBe("Not published yet · search engines can't see this page");
+  });
+
   it("a template's draft names its entry in Review changes; a page's does not", () => {
     const canvas_label = 'Article content items — Full content view';
     expect(at(ready({ target: target({ scope: 'template', has_draft: true, canvas_label }) }))).toEqual({
@@ -1883,11 +1894,15 @@ describe('footer and strips', () => {
 
 describe('what previews and rows say', () => {
   it('an address reads as a breadcrumb', () => {
-    expect(breadcrumb('https://www.example.com/blog/hello%20world')).toBe(
-      'www.example.com › blog › hello world',
-    );
-    expect(breadcrumb('https://www.example.com/')).toBe('www.example.com');
-    expect(breadcrumb('not an address')).toBe('not an address');
+    expect(breadcrumb('https://www.example.com/blog/hello%20world')).toEqual(['www.example.com', 'blog', 'hello world']);
+    expect(breadcrumb('https://www.example.com/')).toEqual(['www.example.com']);
+    // The page's breadcrumb trail, the home page as the host; a crumb named
+    // "a › b" stays one part.
+    expect(breadcrumb('https://www.example.com/shop/lamps/oak', ['Home', 'Shop', 'Lamps › Desk'], true)).toEqual(['www.example.com', 'Shop', 'Lamps › Desk']);
+    // A trail that does not start at the home page keeps its first crumb.
+    expect(breadcrumb('https://www.example.com/shop/lamps/oak', ['Catalog', 'Lamps'])).toEqual(['www.example.com', 'Catalog', 'Lamps']);
+    expect(breadcrumb('not an address')).toEqual(['not an address']);
+    expect(breadcrumb('')).toEqual([]);
   });
 
   it('a date reads in words, at the time as written', () => {

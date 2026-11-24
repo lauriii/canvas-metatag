@@ -529,6 +529,44 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
   }
 
   /**
+   * The page's breadcrumb trail, next to a component Canvas renders broken.
+   *
+   * The broken one costs the head nothing, and the head stays cached for
+   * every visitor. (An instance whose version is gone makes Canvas fail the
+   * whole page, so the reader's own `error` path is proved on the resolver:
+   * ResolverTest::testUnreadableComponents.)
+   */
+  public function testComponents(): void {
+    $this->createChrome([self::breadcrumb()]);
+    $this->createPage(['title' => 'Shop', 'path' => ['alias' => '/shop']]);
+    $page = $this->createPage([
+      'title' => 'Lamps',
+      'path' => ['alias' => '/shop/lamps'],
+      'components' => [
+        self::placed('99999999-0000-4000-8000-000000000006', 'sdc.canvas_test_sdc.props-no-slots', ['heading' => 'Broken']),
+      ],
+    ]);
+    // Required inputs it lost: Canvas renders it as broken.
+    $this->storeInstance($page, '99999999-0000-4000-8000-000000000006', ['inputs' => '{}']);
+
+    $response = $this->get('/shop/lamps');
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    $head = self::readHead($response);
+    self::assertSame(['Lamps | Example'], $head['titles']);
+    self::assertSame('Plans and prices for Example.', self::meta($head)['description']);
+    $graph = array_column($head['json_ld'][0]['@graph'], NULL, '@type');
+    self::assertSame([
+      ['@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => 'http://localhost/'],
+      ['@type' => 'ListItem', 'position' => 2, 'name' => 'Shop', 'item' => 'http://localhost/shop'],
+    ], $graph['BreadcrumbList']['itemListElement']);
+    self::assertSame(['@id' => 'http://localhost/shop/lamps#breadcrumb'], $graph['WebPage']['breadcrumb']);
+    self::assertSame('HIT', $this->get('/shop/lamps')->headers->get('X-Drupal-Cache'));
+    // A page without the breadcrumb: no trail.
+    $this->config('canvas.settings')->set('default_page_variant', NULL)->save();
+    self::assertNotContains('BreadcrumbList', array_column(self::readHead($this->get('/shop/lamps'))['json_ld'][0]['@graph'], '@type'));
+  }
+
+  /**
    * The canonical and shortlink relations of a parsed head, sorted.
    *
    * @return list<string>

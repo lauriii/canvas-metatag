@@ -16,7 +16,10 @@ use Drupal\node\NodeInterface;
  * Counts anonymous view access checks, by node and by field.
  *
  * In the state "canvas_metatag_count_test": `node` => id => count, `field`
- * => machine name => count. Grants nothing, denies nothing.
+ * => machine name => count. Grants nothing, denies nothing. The field named
+ * in the state "canvas_metatag_count_test.expires" gets an access result that
+ * expires in a minute, as a value shown for a while does; the one named in
+ * "canvas_metatag_count_test.varies" one that varies by user.
  */
 final class CountHooks {
 
@@ -39,7 +42,12 @@ final class CountHooks {
     if ($operation === 'view' && $account->isAnonymous()) {
       $this->count('field', $field_definition->getName());
     }
-    return AccessResult::neutral();
+    $state = \Drupal::state();
+    return match ($field_definition->getName()) {
+      $state->get('canvas_metatag_count_test.expires') => AccessResult::neutral()->setCacheMaxAge(60),
+      $state->get('canvas_metatag_count_test.varies') => AccessResult::neutral()->addCacheContexts(['user']),
+      default => AccessResult::neutral(),
+    };
   }
 
   /**

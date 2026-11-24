@@ -1,7 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import type { FrameLocator, Locator, Page } from '@playwright/test';
 
-import { IMAGES, PAGES, SITE_NAME, UI, USERS } from './constants';
+import { IMAGES, PAGES, SITE_NAME, TEST_ID, UI, USERS } from './constants';
 import { SEO_IFRAME, button, expect, openPage, openSeo, pageQuery, seoState, sheet, tab, test, writeDraft } from './fixture';
 
 /**
@@ -315,6 +315,69 @@ test('a kind this site no longer knows is said, and the page stays a web page', 
   await expect(frame.locator('.seo-field[data-path="schema.type"]')).toContainText('Not known: “Movie”');
   await button(frame, UI.tab.checks).click();
   await expect(sheet(frame, 'Checks').getByText('Choose what this page is')).toBeVisible();
+});
+
+test('a page that shows a breadcrumb describes its trail; one that does not, none', async ({ page }) => {
+  const frame = await schema(page, PAGES.trail.id);
+  // The line the search feature gets: Home › About us is two items.
+  await expect(stage(frame).locator('[data-line^="breadcrumb|"]')).toContainText('Breadcrumb');
+  await expect(stage(frame).locator('[data-line^="breadcrumb|"]')).toHaveAttribute('data-verdict', 'ready');
+  // Output lists the trail as this page's own.
+  await button(frame, UI.schema.code).click();
+  const row = sheet(frame, 'Output').locator('.seo-outline-row').filter({ hasText: 'BreadcrumbList' });
+  await expect(row).toContainText('This page');
+  // Named by its crumbs.
+  await expect(row).toContainText('BreadcrumbList · Home › About us');
+  await expect(row).toContainText('/about/team#breadcrumb');
+  // Nothing to set here: no Add details.
+  await expect(row.getByRole('button')).toHaveCount(0);
+  const state = await seoState(page, pageQuery(PAGES.trail.id));
+  expect(JSON.stringify(state.resolved)).toContain('"name":"About us"');
+
+  // The pricing page shows none.
+  const other = await schema(page, PAGES.pricing.id);
+  await expect(stage(other).locator('[data-line^="breadcrumb|"]')).toHaveCount(0);
+});
+
+test('a trail added by hand is a line of its own, with a way to what it needs', async ({ page }) => {
+  const id = PAGES.trail.id;
+  const trail = { '@type': 'BreadcrumbList', '@id': '#trail', itemListElement: [{ '@type': 'ListItem', position: 1, name: 'Team' }] };
+  await writeDraft(page, `canvas_page/${id}`, `layout/canvas_page/${id}`, { schema: { custom: JSON.stringify(trail) } });
+  try {
+    // The search result's address shows the page's own trail after the host.
+    await openPage(page, id);
+    const frame = await openSeo(page);
+    const address = frame.getByTestId(TEST_ID.search).locator('.seo-result-address');
+    await expect(address).toHaveText(/^[^ ]+ › About us$/);
+    // The host and each crumb isolated on their own.
+    await expect(address.locator('bdi')).toHaveText([/^[^ ]+$/, 'About us']);
+
+    await tab(frame, UI.tab.schema).click();
+    await expect(stage(frame).locator('[data-line^="breadcrumb|"]')).toHaveCount(2);
+    const module = stage(frame).locator('[data-line^="breadcrumb|"][data-line$="#breadcrumb"]');
+    const hand = stage(frame).locator('[data-line^="breadcrumb|"][data-line$="#trail"]');
+    // The module's own trail: where it comes from, nothing to meet.
+    await expect(module).toContainText('Breadcrumb');
+    await expect(module).not.toContainText('added by hand');
+    await module.getByRole('button').click();
+    const own = frame.getByRole('dialog', { name: 'Breadcrumb', exact: true });
+    await expect(own).toContainText("It is the site's own breadcrumb, as visitors see it on the published page, and changes when the page moves in the site.");
+    await expect(own.getByRole('button', { name: /^Edit/ })).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    // The hand-added one says so, and what it needs.
+    await expect(hand).toContainText('Breadcrumb (added by hand)');
+    await expect(hand).toContainText('Needs a second named item');
+    await hand.getByRole('button').click();
+    const proof = frame.getByRole('dialog', { name: 'Breadcrumb (added by hand)' });
+    await expect(proof).toContainText('With a second named item, it can show in results.');
+    // Its proof shows the crumbs it has, each isolated.
+    await expect(proof.locator('.seo-proof-facts bdi')).toHaveText(['Team']);
+    // Its fix is where it was added.
+    await proof.getByRole('button', { name: 'Edit the breadcrumb trail you added by hand' }).click();
+    await expect(sheet(frame, UI.schema.ownJsonLd)).toBeVisible();
+  } finally {
+    await writeDraft(page, `canvas_page/${id}`, `layout/canvas_page/${id}`, {});
+  }
 });
 
 test('a blog post is an article, its kind of article in More details', async ({ page }) => {

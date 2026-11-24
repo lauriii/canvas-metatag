@@ -47,6 +47,14 @@
     "path": "/@id"
   },
   {
+    "name": "the breadcrumb trail's id, kept where no breadcrumb shows",
+    "input": "{\"@type\": \"BreadcrumbList\", \"@id\": \"#breadcrumb\"}",
+    "accepted": false,
+    "message": "“#breadcrumb” is kept for the breadcrumb trail of the page. Give the item another @id.",
+    "item": 0,
+    "path": "/@id"
+  },
+  {
     "name": "a component part's id",
     "input": "{\"@type\": \"Offer\", \"@id\": \"#c-1234\"}",
     "accepted": false,

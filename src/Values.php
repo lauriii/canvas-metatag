@@ -1491,7 +1491,9 @@ final class Values {
       $id = $node->{'@id'} ?? NULL;
       if ($extend === NULL && is_string($id)) {
         if (self::reserved($id, $mode['origin'] ?? NULL)) {
-          return $fail(sprintf('“%s” is made by this page. Use Add details, or give the item another @id.', $id), $index, '/@id');
+          // The breadcrumb trail's id is kept even where no breadcrumb
+          // shows, and has no details to add.
+          return $fail(sprintf(str_ends_with($id, '#breadcrumb') ? '“%s” is kept for the breadcrumb trail of the page. Give the item another @id.' : '“%s” is made by this page. Use Add details, or give the item another @id.', $id), $index, '/@id');
         }
         if (isset($ids[$id])) {
           return $fail(sprintf('“%s” is used by two items. Give the second another @id.', $id), $index, '/@id');
@@ -1665,8 +1667,9 @@ final class Values {
    * item is renamed "‹id›-2" ("#item-c-…" for an id with the components'
    * prefix); references to it are renamed too when they
    * reached it (a site id, "#identity", was the page's own "#identity"
-   * then); an item that was left out (one of the page's ids, or the second
-   * of two) is listed in `skip`.
+   * then, and "#breadcrumb" the item's own until the module took it); an
+   * item that was left out (one of the page's other ids, or the second of
+   * two) is listed in `skip`.
    *
    * @param mixed $data
    *   The decoded text (\stdClass objects).
@@ -1704,8 +1707,9 @@ final class Values {
       }
       $taken[$new] = TRUE;
       // An id of the page was its node, never this item; a site id on a
-      // page, or a "#c-…" id, was this item. The second of two was left out.
-      $page_id = $reserved && (SchemaGraph::MODULE_IDS[$name] ?? NULL) === 'url';
+      // page, a "#c-…" id, or one the module took later, was this item. The
+      // second of two was left out.
+      $page_id = $reserved && (SchemaGraph::MODULE_IDS[$name] ?? NULL) === 'url' && !in_array($name, SchemaGraph::LATER_IDS, TRUE);
       $renames[] = ['from' => $id, 'to' => $new, 'skip' => $page_id || $duplicate];
       if (!$page_id && !$duplicate) {
         $refs[$id] = $new;

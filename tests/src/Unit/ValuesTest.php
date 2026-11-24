@@ -731,6 +731,25 @@ final class ValuesTest extends UnitTestCase {
   }
 
   /**
+   * The breadcrumb trail's id is the module's since it describes trails.
+   *
+   * A new hand-added "#breadcrumb" is refused; one stored before was the
+   * item's own, output then: it keeps its output under a new name.
+   */
+  public function testBreadcrumbIdReserved(): void {
+    $mine = '[{"@id":"#breadcrumb","@type":"BreadcrumbList","name":"Mine"},{"@type":"WebPage","breadcrumb":{"@id":"#breadcrumb"}}]';
+    self::assertSame(
+      '“#breadcrumb” is kept for the breadcrumb trail of the page. Give the item another @id.',
+      Values::clean(['schema' => ['custom' => $mine]], 'page', self::accepts())[1]['schema.custom'],
+    );
+    $clean = Values::clean(['schema' => ['custom' => $mine]], 'page', NULL)[0]['schema'];
+    $items = json_decode($clean['custom'], TRUE);
+    self::assertSame('#breadcrumb-2', $items[0]['@id']);
+    self::assertSame(['@id' => '#breadcrumb-2'], $items[1]['breadcrumb']);
+    self::assertArrayNotHasKey('skip', $clean);
+  }
+
+  /**
    * Commerce details, the left-out list and the site currency.
    */
   public function testCommerce(): void {

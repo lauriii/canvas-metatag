@@ -8,6 +8,7 @@ import {
   type ButtonHTMLAttributes,
   type ReactNode,
   type SVGProps,
+  Fragment,
   forwardRef,
   useEffect,
   useRef,
@@ -327,4 +328,19 @@ export const Sk = (props: { w: string | number; h: number; mt?: number }) => (
     className="seo-sk"
     style={{ width: props.w, height: props.h, marginTop: props.mt }}
   />
+);
+
+/**
+ * A trail, "example.com › Shop › Lamps": each part isolated, so a part
+ * written right to left never reorders the parts next to it or the separators.
+ */
+export const Crumbs = (props: { parts: string[] }) => (
+  <>
+    {props.parts.map((part, at) => (
+      <Fragment key={at}>
+        {at > 0 && ' › '}
+        <bdi>{part}</bdi>
+      </Fragment>
+    ))}
+  </>
 );

@@ -398,7 +398,7 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
   }
 
   /**
-   * Creates Canvas pages 1 to 5.
+   * Creates Canvas pages 1 to 7.
    */
   private function createPages(Component $heading, Media $hero, Media $small): void {
     $home = Page::create([
@@ -456,6 +456,24 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
       'title' => 'Night at the cinema',
       'path' => ['alias' => '/night-at-the-cinema'],
       'canvas_metatag' => \json_encode(['schema' => ['type' => 'Movie']], JSON_THROW_ON_ERROR),
+      'status' => 1,
+      'changed' => 946684800,
+    ])->save();
+
+    // Shows Drupal's breadcrumb: Home › About us, under the About page.
+    $breadcrumb = Component::load('block.system_breadcrumb_block');
+    \assert($breadcrumb instanceof Component);
+    Page::create([
+      'title' => 'Our team',
+      'path' => ['alias' => '/about/team'],
+      'components' => [
+        [
+          'uuid' => '5e8b1c2d-3f4a-4b6c-8d7e-9f0a1b2c3d4e',
+          'component_id' => $breadcrumb->id(),
+          'component_version' => $breadcrumb->getActiveVersion(),
+          'inputs' => ['label' => '', 'label_display' => '0'],
+        ],
+      ],
       'status' => 1,
       'changed' => 946684800,
     ])->save();

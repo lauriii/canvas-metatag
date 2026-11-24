@@ -25,7 +25,7 @@ import { draftKey, dropDraft, keepDraft, readDraft, readTab, keepTab, sweepDraft
 import { FilterList, ItemForm, VerdictBox } from './ItemForm';
 import { JsonView, ProblemList } from './JsonView';
 import { PasteReview, reviewOf, type Reviewed } from './PasteReview';
-import { problems as problemsOf, readable, savable } from './problems';
+import { notSaved, problems as problemsOf, readable, savable, withRefusal } from './problems';
 import { aType, detailLabel, sentence, typeLabel, typesOf, type Item } from './project';
 import { controlOf, ROW_CONTROL, type LinkField } from './Row';
 import { typeOptions, type Steer } from './search';
@@ -295,20 +295,24 @@ export function CustomSheet(props: { node?: CustomNode; start?: 'search'; from?:
     const extend = Object.entries(othersSchema.extend ?? {}).reduce((sum, [name, one]) => sum + (`schema.extend.${name}` !== field ? minified(one) : 0), 0);
     return extend + (field !== 'schema.custom' ? minified(othersSchema.custom) : 0);
   }, [othersSchema.extend, othersSchema.custom, field]);
-  // A refusal the server gave for this text, placed where it says.
+  // A refusal the server gave for this text, placed where it says. It holds
+  // for the text that was sent (the stored one) only: once the text changes,
+  // the change is what gets checked and sent.
   const refusal = state.errors[scope][path];
   const refusedAt = state.places?.[path];
-  const found = useMemo(() => {
-    const own = problemsOf(text, rules, vocabulary, mode, tidy, others);
-    if (!refusal || own.some((one) => one.tone === 'red')) return own;
-    const at = refusedAt ? [...(props.node ? [] : itemPath(parse(text), refusedAt.item)), ...fromPointer(refusedAt.path)] : [];
-    const offset = offsetOf(text, at);
-    const line = text.slice(0, offset).split('\n').length;
-    const server: Problem = { tone: 'red', line, offset, path: at, message: `Line ${line}: ${refusal}`, words: refusal };
-    return [server, ...own];
-  }, [text, rules, vocabulary, others, refusal, refusedAt]); // eslint-disable-line react-hooks/exhaustive-deps
+  const found = useMemo(
+    () =>
+      withRefusal(problemsOf(text, rules, vocabulary, mode, tidy, others), text, stored, refusal, () =>
+        refusedAt ? [...(props.node ? [] : itemPath(parse(text), refusedAt.item)), ...fromPointer(refusedAt.path)] : [],
+      ),
+    [text, stored, rules, vocabulary, others, refusal, refusedAt], // eslint-disable-line react-hooks/exhaustive-deps
+  );
   const problemsFor = (next: string, words: typeof vocabulary = vocabulary) => problemsOf(next, rules, words, mode, undefined, others);
   const ok = savable(found);
+  // A refusal after "Saved" was said: never left saying it saved.
+  useEffect(() => {
+    if (refusal) setSaid(notSaved(refusal));
+  }, [refusal]);
   // "Not saved: line 4 …" ends with the problem.
   useEffect(() => {
     if (ok) setSaid((last) => (last.startsWith('Not saved') ? '' : last));

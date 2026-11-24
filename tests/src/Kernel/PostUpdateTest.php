@@ -33,6 +33,7 @@ use Psr\Log\LoggerInterface;
 #[CoversFunction('canvas_metatag_post_update_event_organizer')]
 #[CoversFunction('canvas_metatag_post_update_country_codes')]
 #[CoversFunction('canvas_metatag_post_update_own_jsonld_as_written')]
+#[CoversFunction('canvas_metatag_post_update_reserve_breadcrumb')]
 #[Group('canvas_metatag')]
 #[Group('canvas_metatag_canvas_contract')]
 final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterface {
@@ -474,6 +475,58 @@ final class PostUpdateTest extends CanvasKernelTestBase implements LoggerInterfa
       "page {$big->id()} (en): over 64 KB as written, left as it is",
       "page {$huge->id()} (en): has a value that can't be written out, left as it is",
     ]), canvas_metatag_post_update_own_jsonld_as_written());
+  }
+
+  /**
+   * A hand-added "#breadcrumb" keeps its output under a new name.
+   *
+   * Text with nothing to rename, a template's, its draft's or a page
+   * draft's, stays exactly as the editor wrote it.
+   */
+  public function testReserveBreadcrumb(): void {
+    $auto_save = $this->container->get(AutoSaveManager::class);
+    $this->setUpCurrentUser();
+    $mine = '[{"@id":"#breadcrumb","@type":"BreadcrumbList","name":"Mine"},{"@id":"#about","@type":"Thing","subjectOf":{"@id":"#breadcrumb"}}]';
+    $page = $this->createPage(['canvas_metatag' => Values::encode(['schema' => ['custom' => $mine]])]);
+    $other = $this->createPage(['path' => ['alias' => '/other']]);
+    $pages = $this->container->get('entity_type.manager')->getStorage(Page::ENTITY_TYPE_ID);
+    $compact = static fn (string $name): array => ['schema' => ['custom' => '{"@type":"Person","author":"{field.field_byline}","name":"' . $name . '"}']];
+    $template = $this->createTemplate(TRUE, $compact('Template'));
+    $template_draft = clone $template;
+    $template_draft->setThirdPartySetting('canvas_metatag', 'values', $compact('Template draft'));
+    $auto_save->saveEntity($template_draft, self::CLIENT);
+    $page_draft = clone $pages->load($other->id());
+    $page_draft->set('canvas_metatag', Values::encode($compact('Page draft')));
+    $auto_save->saveEntity($page_draft, self::CLIENT);
+    $unchanged = function () use ($auto_save, $pages, $template, $other, $compact): void {
+      $stored = ContentTemplate::load($template->id());
+      \assert($stored instanceof ContentTemplate);
+      self::assertSame($compact('Template'), $stored->getThirdPartySetting('canvas_metatag', 'values'));
+      $entity = $auto_save->getAutoSaveEntity($stored, TRUE)->entity;
+      \assert($entity instanceof ContentTemplate);
+      self::assertSame($compact('Template draft'), $entity->getThirdPartySetting('canvas_metatag', 'values'));
+      $pages->resetCache();
+      self::assertSame($compact('Page draft'), Values::decode($auto_save->getAutoSaveEntity($pages->load($other->id()), TRUE)->entity->get('canvas_metatag')->value));
+    };
+    $graph = fn (): array => $this->resolver()->resolve($pages->load($page->id()))['head']['script'][0]['textContent'];
+    $before = $graph();
+    self::assertContains('Mine', array_column($before['@graph'], 'name'));
+
+    \Drupal::moduleHandler()->loadInclude('canvas_metatag', 'php', 'canvas_metatag.post_update');
+    self::assertSame(implode("\n", [
+      'Hand-added JSON-LD changed in one place.',
+      "page {$page->id()} (en): #breadcrumb is now #breadcrumb-2",
+    ]), canvas_metatag_post_update_reserve_breadcrumb());
+    $pages->resetCache();
+    self::assertSame($before, $graph());
+    $items = json_decode(Values::decode($pages->load($page->id())->get('canvas_metatag')->value)['schema']['custom'], TRUE);
+    self::assertSame('#breadcrumb-2', $items[0]['@id']);
+    self::assertSame(['@id' => '#breadcrumb-2'], $items[1]['subjectOf']);
+    self::assertNull($pages->load($other->id())->get('canvas_metatag')->value);
+    $unchanged();
+    // Run again: nothing to change.
+    self::assertSame('Hand-added JSON-LD changed in 0 places.', canvas_metatag_post_update_reserve_breadcrumb());
+    $unchanged();
   }
 
   /**

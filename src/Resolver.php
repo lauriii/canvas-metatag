@@ -7,7 +7,9 @@ namespace Drupal\canvas_metatag;
 use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas_headless\FrontendUrl;
+use Drupal\Component\Utility\UrlHelper;
 use Drupal\Core\Access\AccessibleInterface;
+use Drupal\Core\Breadcrumb\ChainBreadcrumbBuilderInterface;
 use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Config\ConfigFactoryInterface;
@@ -24,8 +26,15 @@ use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\File\FileUrlGeneratorInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Language\LanguageInterface;
+use Drupal\Core\Language\LanguageManagerInterface;
+use Drupal\Core\Routing\RequestContext;
+use Drupal\Core\Routing\RouteMatch;
+use Drupal\Core\Routing\RouteProviderInterface;
+use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\Core\Site\Settings;
+use Drupal\Core\StringTranslation\TranslationInterface;
+use Drupal\Core\StringTranslation\TranslationManager;
 use Drupal\Core\StreamWrapper\StreamWrapperManager;
 use Drupal\Core\Url;
 use Drupal\file\FileInterface;
@@ -33,6 +42,7 @@ use Drupal\media\MediaInterface;
 use Drupal\media\Plugin\media\Source\Image;
 use Drupal\path_alias\AliasManagerInterface;
 use Drupal\user\EntityOwnerInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 
 /**
@@ -49,6 +59,11 @@ final class Resolver {
    * The dialog's link preview uses the same rule (`smallCard()` in model.ts).
    */
   private const LARGE_CARD = ['width' => 600, 'height' => 157];
+
+  /**
+   * The component that shows Drupal's breadcrumb trail.
+   */
+  private const BREADCRUMB = 'block.system_breadcrumb_block';
 
   /**
    * What the dialog calls the facts.
@@ -92,6 +107,12 @@ final class Resolver {
     private readonly Sources $sources,
     private readonly LoggerChannelFactoryInterface $loggers,
     private readonly Words $words,
+    private readonly ChainBreadcrumbBuilderInterface $breadcrumbs,
+    private readonly RequestContext $requestContext,
+    private readonly RouteProviderInterface $routeProvider,
+    private readonly AccountSwitcherInterface $accountSwitcher,
+    private readonly LanguageManagerInterface $languageManager,
+    private readonly TranslationInterface $translation,
   ) {
     $this->resolved = new \WeakMap();
     $this->anonymous = new AnonymousUserSession();
@@ -849,6 +870,9 @@ final class Resolver {
     if (preg_match('/\b\d{4}-\d{2}-\d{2} /', json_encode($effective['schema']['props']['openingHoursSpecification'] ?? []))) {
       $cacheability->mergeCacheMaxAge(max(60, $today->modify('tomorrow')->getTimestamp() - $today->getTimestamp()));
     }
+    // The front page in the entity's language, with its prefix.
+    $front = $own === $this->publicUrl(Url::fromRoute('<front>', [], ['language' => $entity->language()]), $cacheability);
+    [$trail, $skipped, $drafts] = $this->trail($entity, $draft, $front, $cacheability);
     $report = SchemaGraph::build([
       'scope' => $entity->getEntityTypeId() === 'canvas_page' ? 'page' : 'template',
       'today' => $today->format('Y-m-d'),
@@ -864,6 +888,7 @@ final class Resolver {
       'identity' => ['kind' => $identity['kind'], 'name' => $site_name, 'same_as' => $identity['same_as']],
       'logo' => $identity['logo'] === '' ? NULL : $this->image($identity['logo'], $cacheability),
       'image' => $image,
+      'breadcrumb' => $trail,
       'facts' => ['sep' => $identity['separator'], 'image' => $facts['image']['image']['url'] ?? '']
       + array_map(static fn (array $fact): string => $fact['value'], array_diff_key($facts, ['image' => TRUE])),
       'fill' => $entity->getEntityTypeId() === 'node' ? fn (string $name, string $expects): array => $this->fill($name, $expects, $entity, $cacheability) : NULL,
@@ -880,8 +905,12 @@ final class Resolver {
     $og_type = SchemaGraph::types()[$effective['schema']['type'] ?? 'WebPage']['og_type'] ?? 'website';
     // Where the front page's identity and website nodes are judged, and the
     // addresses report() judges them with.
-    // The front page in the entity's language, with its prefix.
-    $report['front'] = $own === $this->publicUrl(Url::fromRoute('<front>', [], ['language' => $entity->language()]), $cacheability);
+    $report['front'] = $front;
+    $report['skipped_parts'] = $skipped;
+    // The parts of the page's chrome a preview read from their drafts.
+    $report['chrome_drafts'] = $drafts;
+    // The trail starts at the home page (in the page's language).
+    $report['trail_home'] = !empty($trail[0]['home']);
     $report['home'] = $origin['url'] . '/';
     $report['today'] = $today->format('Y-m-d');
     $report['url'] = $own;
@@ -1104,6 +1133,196 @@ final class Resolver {
     // rules to judge: its nodes point into a graph that is not there.
     $result['schema']['rules'] = empty($schema['unaddressed']) ? SchemaGraph::rules($graph, ['home' => $home], $schema['nodes']) : [];
     return $result;
+  }
+
+  /**
+   * The breadcrumb trail the page shows, and the components not read.
+   *
+   * A failure of the whole reading costs the component values only: the
+   * head is built without them. A trail that cannot be built costs the
+   * trail only, reported as its breadcrumb's error.
+   *
+   * @return array{0: list<array{name: string, url: string, home: bool}>|null, 1: list<array>, 2: list<string>}
+   *   The trail when a breadcrumb renders on the page, else NULL; what was
+   *   skipped (Sources::instances()); and the labels of the parts of the
+   *   page's chrome read from their drafts (Sources::tree()).
+   */
+  private function trail(ContentEntityInterface $entity, bool $draft, bool $front, CacheableMetadata $cacheability): array {
+    $log = fn (string $what, \Throwable $e) => $this->loggers->get('canvas_metatag')->warning('@what of @type @id could not be read: @message', [
+      '@what' => $what,
+      '@type' => $entity->getEntityTypeId(),
+      '@id' => $entity->id(),
+      '@message' => $e->getMessage(),
+    ]);
+    try {
+      $tree = $this->sources->tree($entity, $draft, $cacheability);
+      [$instances, $skipped] = $this->sources->instances($tree);
+    }
+    catch (\Throwable $e) {
+      $log('The components', $e);
+      return [NULL, [['uuid' => '', 'component' => '', 'label' => '', 'reason' => 'error']], []];
+    }
+    $drafts = array_values(array_filter(array_map(static fn (array $part): string => $part['owner'] === 'region' ? $part['draft'] : '', $tree)));
+    // The front page shows no trail.
+    $shown = $front ? [] : array_filter($instances, static fn (array $instance): bool => $instance['component'] === self::BREADCRUMB);
+    if ($shown === []) {
+      return [NULL, $skipped, $drafts];
+    }
+    try {
+      return [$this->breadcrumb($entity, $cacheability), $skipped, $drafts];
+    }
+    catch (\Throwable $e) {
+      $log('The breadcrumb trail', $e);
+      $part = array_intersect_key(reset($shown), array_flip(['uuid', 'component', 'label', 'owner']));
+      return [NULL, [...$skipped, $part + ['reason' => 'error']], $drafts];
+    }
+  }
+
+  /**
+   * Drupal's breadcrumb trail for an entity's page, as a visitor gets it.
+   *
+   * Built by the breadcrumb block's own builder, for the entity's route and
+   * the path visitors request (a path-based trail follows its aliases), as
+   * an anonymous visitor, in the entity's language: only tags and max-age
+   * are kept.
+   *
+   * @return list<array{name: string, url: string, home: bool}>|null
+   *   Each crumb's name and absolute address on the public base, and whether
+   *   it is the home page. Only the last may have no address; a crumb
+   *   without a name is left out. NULL
+   *   for fewer than two crumbs (a top-level page's "Home"): a trail of one
+   *   says nothing about where the page sits.
+   */
+  private function breadcrumb(ContentEntityInterface $entity, CacheableMetadata $cacheability): ?array {
+    $language = $entity->language();
+    $url = $entity->toUrl('canonical', ['language' => $language]);
+    $name = $url->getRouteName();
+    $match = new RouteMatch($name, $this->routeProvider->getRouteByName($name), [$entity->getEntityTypeId() => $entity], array_map('strval', $url->getRouteParameters()));
+    $request = $this->requestStack->getCurrentRequest();
+    $base = (string) $request?->getBasePath();
+    $path = $this->requestContext->getPathInfo();
+    // Another language than the request's: its aliases, its titles and its
+    // "Home", negotiated from a request for the entity's own address.
+    $other = $this->languageManager->isMultilingual() && array_filter(
+      [LanguageInterface::TYPE_INTERFACE, LanguageInterface::TYPE_CONTENT, LanguageInterface::TYPE_URL],
+      fn (string $type): bool => $this->languageManager->getCurrentLanguage($type)->getId() !== $language->getId(),
+    ) !== [];
+    $overrides = $this->languageManager->getConfigOverrideLanguage();
+    // The addresses first: nothing is changed yet when one cannot be built.
+    $absolute = $other ? (clone $url)->setAbsolute()->toString(TRUE)->getGeneratedUrl() : '';
+    // The path only: a language served on another domain is linked with its
+    // host.
+    $own = (string) parse_url((clone $url)->toString(TRUE)->getGeneratedUrl(), PHP_URL_PATH);
+    $own = $base !== '' && str_starts_with($own, $base . '/') ? substr($own, strlen($base)) : $own;
+    // A draft's trail follows the alias it will be published with, as the
+    // dialog's address line does. Aliases are stored decoded; the path is
+    // encoded.
+    $alias = $entity->hasField('path') ? $entity->get('path')->alias : NULL;
+    if (is_string($alias) && str_starts_with($alias, '/')) {
+      $stored = $this->aliasManager->getAliasByPath('/' . $url->getInternalPath(), $language->getId());
+      $decoded = rawurldecode($own);
+      if ($stored !== $alias && str_ends_with($decoded, $stored)) {
+        $own = UrlHelper::encodePath(substr($decoded, 0, -strlen($stored)) . $alias);
+      }
+    }
+    $pushed = $switched = FALSE;
+    try {
+      if ($other) {
+        $sub = Request::create($absolute, 'GET', [], [], [], $request?->server->all() ?? []);
+        // Session-based negotiation reads the session.
+        if ($request?->hasSession()) {
+          $sub->setSession($request->getSession());
+        }
+        $this->requestStack->push($sub);
+        $pushed = TRUE;
+        $this->languageManager->reset();
+        $this->languageManager->setConfigOverrideLanguage($language);
+        if ($this->translation instanceof TranslationManager) {
+          $this->translation->setDefaultLangcode($language->getId());
+        }
+      }
+      $this->requestContext->setPathInfo($own);
+      $this->accountSwitcher->switchTo($this->anonymous);
+      $switched = TRUE;
+      $built = $this->breadcrumbs->build($match);
+      // Names as text while the entity's language holds: "Home" is
+      // translated when it is cast.
+      $names = array_map(static fn ($link): string => is_array($text = $link->getText()) ? '' : (string) $text, $built->getLinks());
+    }
+    finally {
+      // Only what was changed is put back.
+      if ($switched) {
+        $this->accountSwitcher->switchBack();
+      }
+      $this->requestContext->setPathInfo($path);
+      if ($pushed) {
+        $this->requestStack->pop();
+        $this->languageManager->reset();
+        $this->languageManager->setConfigOverrideLanguage($overrides);
+        if ($this->translation instanceof TranslationManager) {
+          $this->translation->setDefaultLangcode($this->languageManager->getCurrentLanguage()->getId());
+        }
+      }
+    }
+    $cacheability->addCacheTags($built->getCacheTags())->mergeCacheMaxAge($built->getCacheMaxAge());
+    $links = $built->getLinks();
+    $trail = [];
+    foreach ($links as $at => $link) {
+      $target = $link->getUrl();
+      // The home page: a search result's address says it with the host.
+      $home = $target->isRouted() && $target->getRouteName() === '<front>';
+      $crumb = ['name' => Values::plain($names[$at], 255), 'url' => '', 'home' => $home];
+      try {
+        $crumb['url'] = match (TRUE) {
+          $target->isExternal() => $target->toString(),
+          $target->isRouted() && in_array($target->getRouteName(), ['<none>', '<nolink>', '<button>'], TRUE) => '',
+          // In the entity's language, as its own address is.
+          default => $this->publicUrl($target->setOption('language', $target->getOption('language') ?? $language), $cacheability),
+        };
+      }
+      catch (\Exception) {
+        // A crumb that leads nowhere.
+      }
+      $crumb['url'] = Values::isHttpUrl($crumb['url']) ? $crumb['url'] : '';
+      if ($crumb['name'] !== '' && ($crumb['url'] !== '' || $at === array_key_last($links))) {
+        $trail[] = $crumb;
+      }
+    }
+    return count($trail) < 2 ? NULL : $trail;
+  }
+
+  /**
+   * The values of some props of a component instance, as the head uses them.
+   *
+   * Sources::props(), with an address made absolute on the public base and
+   * an image as a public file with its size (as a linked image is).
+   *
+   * @param array $instance
+   *   One of Sources::instances().
+   * @param array<string, string> $kinds
+   *   Prop name => kind.
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The entity whose page it renders on.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the values depend on.
+   *
+   * @return array{0: array<string, array{0: string, 1: mixed}>, 1: list<array>}
+   *   By prop, the status and the value; and what was skipped.
+   */
+  public function parts(array $instance, array $kinds, ContentEntityInterface $entity, CacheableMetadata $cacheability): array {
+    [$values, $skipped] = $this->sources->reading(fn (): array => $this->sources->props($instance, $kinds, $entity, $cacheability));
+    foreach ($values as $prop => [$status, $value]) {
+      if ($status !== 'ok') {
+        continue;
+      }
+      $value = match ($kinds[$prop]) {
+        'address' => $this->address((string) $value, $entity->language(), $cacheability),
+        'image' => $this->uriImage($value, $cacheability),
+        default => $value,
+      };
+      $values[$prop] = [$value === NULL || $value === '' ? 'empty' : 'ok', $value];
+    }
+    return [$values, $skipped];
   }
 
   /**

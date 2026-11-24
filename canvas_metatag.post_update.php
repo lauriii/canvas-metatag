@@ -387,13 +387,53 @@ function _canvas_metatag_post_update_pages(string $like, callable $change): int 
  */
 function canvas_metatag_post_update_own_jsonld_as_written(): string {
   $listed = [];
-  $change = static function (mixed $values, string $where) use (&$listed): ?array {
+  $change = _canvas_metatag_post_update_jsonld($listed);
+  $count = _canvas_metatag_post_update_templates($change);
+  $count += _canvas_metatag_post_update_pages('"custom"', $change);
+  $message = (string) \Drupal::translation()->formatPlural($count, 'Hand-added JSON-LD is stored as written in one place.', 'Hand-added JSON-LD is stored as written in @count places.');
+  return implode("\n", [$message, ...array_values(array_unique($listed))]);
+}
+
+/**
+ * Renames hand-added "#breadcrumb" items: the breadcrumb trail now has it.
+ *
+ * Each keeps its output as "#breadcrumb-2", with the references that reached
+ * it (Values::renameReserved()), as read mode already does. Text with
+ * nothing to rename stays exactly as written.
+ */
+function canvas_metatag_post_update_reserve_breadcrumb(): string {
+  $listed = [];
+  $change = _canvas_metatag_post_update_jsonld($listed, TRUE);
+  $count = _canvas_metatag_post_update_templates($change);
+  $count += _canvas_metatag_post_update_pages('#breadcrumb', $change);
+  $message = (string) \Drupal::translation()->formatPlural($count, 'Hand-added JSON-LD changed in one place.', 'Hand-added JSON-LD changed in @count places.');
+  return implode("\n", [$message, ...array_values(array_unique($listed))]);
+}
+
+/**
+ * What changes stored hand-added JSON-LD: written out, with ids renamed.
+ *
+ * @param list<string> $listed
+ *   Collects what changed, and what was left as it is, for the update's
+ *   message.
+ * @param bool $renames_only
+ *   Change only text that has an id to rename; other text, however it is
+ *   written, stays as it is and is not listed.
+ *
+ * @return callable(mixed, string): ?array
+ *   Stored values and where they are => the changed values, or NULL.
+ */
+function _canvas_metatag_post_update_jsonld(array &$listed, bool $renames_only = FALSE): callable {
+  return static function (mixed $values, string $where) use (&$listed, $renames_only): ?array {
     $text = is_array($values) ? $values['schema']['custom'] ?? NULL : NULL;
     if (!is_string($text) || trim($text) === '') {
       return NULL;
     }
     if (strlen($text) > Values::CUSTOM_RAW_MAX) {
-      $listed[] = "$where: over 64 KB as written, left as it is";
+      // Read mode refuses it: it has no output to keep.
+      if (!$renames_only) {
+        $listed[] = "$where: over 64 KB as written, left as it is";
+      }
       return NULL;
     }
     $data = json_decode($text, FALSE, 64);
@@ -401,6 +441,9 @@ function canvas_metatag_post_update_own_jsonld_as_written(): string {
       return NULL;
     }
     [$data, $renames] = Values::renameReserved($data);
+    if ($renames_only && !$renames) {
+      return NULL;
+    }
     foreach ($renames as $rename) {
       $listed[] = "$where: {$rename['from']} is now {$rename['to']}" . ($rename['skip'] ? ', left out as before' : '');
       if ($rename['skip']) {
@@ -421,7 +464,7 @@ function canvas_metatag_post_update_own_jsonld_as_written(): string {
     if ($pretty === $text && !$renames) {
       return NULL;
     }
-    $strings = json_decode($pretty, TRUE);
+    $strings = $renames_only ? [] : json_decode($pretty, TRUE);
     array_walk_recursive($strings, static function (mixed $value) use (&$listed, $where): void {
       if (is_string($value) && preg_match('/^\{field\.[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)?\}$/D', $value)) {
         $listed[] = "$where: $value is now filled from its field";
@@ -430,10 +473,6 @@ function canvas_metatag_post_update_own_jsonld_as_written(): string {
     $values['schema']['custom'] = $pretty;
     return $values;
   };
-  $count = _canvas_metatag_post_update_templates($change);
-  $count += _canvas_metatag_post_update_pages('"custom"', $change);
-  $message = (string) \Drupal::translation()->formatPlural($count, 'Hand-added JSON-LD is stored as written in one place.', 'Hand-added JSON-LD is stored as written in @count places.');
-  return implode("\n", [$message, ...array_values(array_unique($listed))]);
 }
 
 /**

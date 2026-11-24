@@ -186,7 +186,9 @@ function Outline() {
     <ul className="seo-outline" aria-labelledby="seo-out-schema">
       {nodes.map((node, index) => {
         const data = node.at === undefined ? undefined : list[node.at];
-        const name = typeof data?.name === 'string' ? data.name : typeof data?.headline === 'string' ? data.headline : '';
+        // A trail by its crumbs: "Home › About".
+        const crumbs = Array.isArray(data?.itemListElement) ? (data.itemListElement as { name?: unknown }[]).map((one) => one?.name).filter((one): one is string => typeof one === 'string') : [];
+        const name = typeof data?.name === 'string' ? data.name : typeof data?.headline === 'string' ? data.headline : data?.['@type'] === 'BreadcrumbList' ? crumbs.join(' › ') : '';
         const reason = leftOut(server, node);
         return (
           <li key={index} className="seo-outline-row" data-left-out={node.left_out ? '' : undefined}>
@@ -239,7 +241,8 @@ function TestButton(props: { graph: string }) {
   const { state, host } = useApp();
   const server = state.server!;
   const [said, setSaid] = useState('');
-  const live = !!server.target?.published && !server.target.has_draft && !unsent(state) && !!server.preview?.published;
+  // A draft of the page, or of what is around it, is not at its address yet.
+  const live = !!server.target?.published && !server.target.has_draft && !server.resolved?.schema.chrome_drafts?.length && !unsent(state) && !!server.preview?.published;
   return (
     <>
       <Btn

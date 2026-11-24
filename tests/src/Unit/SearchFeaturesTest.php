@@ -390,6 +390,25 @@ final class SearchFeaturesTest extends UnitTestCase {
   }
 
   /**
+   * A breadcrumb trail can show from two items.
+   */
+  public function testBreadcrumb(): void {
+    $trail = [
+      ['name' => 'Home', 'url' => self::HOME],
+      ['name' => 'Shop', 'url' => self::HOME . 'shop'],
+      ['name' => 'Lamps', 'url' => self::HOME . 'shop/lamps'],
+      ['name' => 'Oak desk lamp', 'url' => ''],
+    ];
+    self::assertSame(['verdict' => 'ready'], self::verdicts([], ['breadcrumb' => $trail])['breadcrumb #breadcrumb']);
+    // Only the current page: it needs a second named item.
+    self::assertSame([
+      'verdict' => 'needs',
+      'missing' => [['path' => 'itemListElement.name', 'rule' => 0]],
+    ], self::verdicts([], ['breadcrumb' => [['name' => 'Home', 'url' => self::HOME]]])['breadcrumb #breadcrumb']);
+    self::assertSame('a second named item', SchemaGraph::searchFeatures()['features']['breadcrumb']['rules'][0]['need']);
+  }
+
+  /**
    * Retired features, and references inside the graph.
    */
   public function testRetiredAndReferences(): void {

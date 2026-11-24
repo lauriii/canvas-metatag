@@ -28,6 +28,7 @@ import type {
   SearchFeatures,
   SeoValues,
   SiteSettings,
+  SkippedPart,
   StatePayload,
   Source,
   Tab,
@@ -1232,9 +1233,10 @@ function structured(
     return set && part?.short ? `the ${label(part.group!).toLowerCase()}'s ${part.short.toLowerCase()}` : label(key);
   };
 
-  // The verdicts.
+  // The verdicts. The page's own breadcrumb trail has two crumbs or more
+  // (Resolver::breadcrumb()), so it never needs anything here.
   const verdicts = report?.features ?? [];
-  const needs = new Map<string, { fact: FeatureFact; fors: string[]; feature: string | null }>();
+  const needs = new Map<string, { fact: FeatureFact; fors: string[]; feature: string | null; node?: string | null }>();
   for (const verdict of verdicts) {
     const feature = verdict.feature === null ? undefined : rules.features[verdict.feature];
     const name = feature?.label ?? '';
@@ -1270,7 +1272,7 @@ function structured(
     } else if (verdict.verdict === 'needs') {
       for (const fact of verdict.missing ?? []) {
         const key = fact.prop ?? fact.site ?? `${verdict.node}:${fact.path}`;
-        const entry = needs.get(key) ?? { fact, fors: [], feature: verdict.feature };
+        const entry = needs.get(key) ?? { fact, fors: [], feature: verdict.feature, node: verdict.node };
         entry.fors.push(feature?.for ?? name.toLowerCase());
         needs.set(key, entry);
       }
@@ -1309,7 +1311,7 @@ function structured(
       issues.push({ id: 'feature-none', severity: 'info', message: `No search feature for ${kind?.name ?? 'this page'}`, detail: 'It still tells search engines what the page is about.' });
     }
   }
-  for (const [key, { fact, fors, feature }] of needs) {
+  for (const [key, { fact, fors, feature, node }] of needs) {
     // A part of a group withheld or incomplete is asked for by that row.
     if (fact.prop && (asked(fact.prop) || linkedEmpty(fact.prop) || hidden.includes(`schema.props.${fact.prop}`) || broken.includes(`schema.props.${fact.prop}`))) {
       continue;
@@ -1322,11 +1324,16 @@ function structured(
     const rule = fact.rule === undefined || feature === null ? undefined : rules.features[feature]?.rules?.[fact.rule];
     const need = rule?.need ?? needOf(rules, fact.path, fact.prop ? label(fact.prop) : fact.path, props.find((one) => one.key === fact.prop)?.label);
     const image = fact.prop && props.find((one) => one.key === fact.prop)?.kind === 'image';
+    // A rule's need is no missing value: "a second named item" is for the
+    // item as a whole, said for the item added by hand.
+    const handNode = nodes.find((one): one is Record<string, unknown> => isNode(one) && one['@id'] === node);
+    const handKind = handNode && typeof handNode['@type'] === 'string' ? rules.labels?.[handNode['@type']]?.toLowerCase() : undefined;
+    const handRule = !fact.prop && !fact.site && rule && handKind;
     issues.push({
       id: `feature-needs:${key}`,
       severity: 'improve',
-      message: `Add ${need} for ${[...new Set(fors)].join(' and ')}`,
-      detail: fact.prop || fact.site ? undefined : 'It is missing from an item you added by hand.',
+      message: handRule ? `Add ${need} to your ${handKind}` : `Add ${need} for ${[...new Set(fors)].join(' and ')}`,
+      detail: fact.prop || fact.site ? undefined : handRule ? `You added this ${handKind} by hand. It can show in results once it has one.` : 'It is missing from an item you added by hand.',
       jump: fact.prop ? prop(fact.prop) : fact.site ? { scope: 'site', tab: 'identity', field: fact.site } : custom,
       fix: image ? { label: 'Choose an image', image: `schema.props.${fact.prop}` } : undefined,
     });
@@ -1416,6 +1423,17 @@ function structured(
   }
 
   issues.push(...handReport(input, report, label, custom));
+  // Components that were not read: told to those who build the site, as
+  // something to know (nothing in this dialog changes them). Personalized
+  // content gives its default case by design: not a row.
+  if (input.can.site) {
+    issues.push(
+      ...skippedRows(
+        (resolved?.schema.skipped_parts ?? []).filter((part) => part.reason !== 'personalized'),
+        (owner) => (owner === 'template' ? `in the ${input.typeLabel} template` : owner === 'region' ? 'around the page' : `on ${page}`),
+      ),
+    );
+  }
 
   // What is not on the page. Never codes or identifiers; never defaults.
   if (!facts) {
@@ -1423,6 +1441,20 @@ function structured(
   }
   const text = normal(facts.text);
   const onThePage = (value: string) => text.includes(normal(value));
+  // A value from a component is compared like a typed one: a component can
+  // hold a value it does not show.
+  for (const [key, { label: from, value }] of Object.entries(report?.from_components ?? {})) {
+    if (normal(value) && !onThePage(value)) {
+      issues.push({
+        id: `schema-component-not-on-page:${key}`,
+        severity: 'improve',
+        message: `Couldn't find “${value.length > 60 ? `${value.slice(0, 60).trimEnd()}…` : value}” on this page`,
+        detail: `It comes from the ${from} component. Put it on the page, or change the text in the component. Structured data should describe what visitors see.`,
+        // Leads to the detail it fills, where this kind has one.
+        jump: props.some((one) => one.key === key) ? prop(key) : undefined,
+      });
+    }
+  }
   for (const item of props) {
     const stored = schema.props?.[item.key];
     // A stored value: typed, linked or a fact named here; never a default.
@@ -1588,6 +1620,68 @@ const extendJump = (node: string, path?: string): Jump => ({
   tab: 'schema',
   ...(path !== undefined && { at: { item: 0, path } }),
 });
+
+/** A prop's name as words: "monthlyPrice" reads "Monthly price". */
+const propWords = (prop = '') => {
+  const words = prop.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+};
+
+/**
+ * The components that were not read, for those who build the site: never
+ * counted. Copies of one component skipped for one reason in one place are
+ * one row that says how many: a row per copy would say the same thing again.
+ * Every row is one statement, what is left out (or couldn't be read) and
+ * where; its detail says why and, where there is one, the remedy.
+ *
+ * `where` words an owner: "on this page", "in the Article template".
+ */
+export function skippedRows(parts: SkippedPart[], where: (owner: SkippedPart['owner']) => string): Issue[] {
+  const groups = new Map<string, SkippedPart[]>();
+  for (const part of parts) {
+    // The version stays out: a hash means nothing to read.
+    const key = `${part.component}:${part.reason}:${part.prop ?? ''}:${part.owner ?? ''}`;
+    groups.set(key, [...(groups.get(key) ?? []), part]);
+  }
+  return [...groups].map(([key, [part, ...more]]) => {
+    const name = part.label || part.component || 'component';
+    const one = more.length === 0;
+    const times = one ? '' : ` in ${more.length + 1} places`;
+    const place = where(part.owner);
+    const prop = propWords(part.prop);
+    const id = `component-skipped:${key}`;
+    switch (part.reason) {
+      case 'prop-missing':
+        return {
+          id,
+          severity: 'info',
+          message: `The ${name}'s ${prop.toLowerCase()} ${place} is left out${times}`,
+          detail: `${one ? 'The component is an older version' : 'The components are older versions'} without “${prop}”. Replace ${one ? 'it' : 'them'} with the current version.`,
+        };
+      case 'access':
+        return {
+          id,
+          severity: 'info',
+          message: `The ${name}'s ${prop.toLowerCase()} ${place} is left out${times}`,
+          detail: "Visitors can't see it.",
+        };
+      case 'cacheability':
+        return {
+          id,
+          severity: 'info',
+          message: `The ${name} ${place} is left out${times}`,
+          detail: 'What it shows changes for each visitor, or over time.',
+        };
+      default:
+        return {
+          id,
+          severity: 'info',
+          message: part.uuid ? `The ${name} ${place} couldn't be read${times}` : "This page's components couldn't be read",
+          detail: 'Details are in the site log. The rest of the page is described as usual.',
+        };
+    }
+  });
+}
 
 function handReport(input: ChecksInput, report: Resolved['schema'] | null, label: (key: string) => string, custom: Jump): Issue[] {
   const issues: Issue[] = [];

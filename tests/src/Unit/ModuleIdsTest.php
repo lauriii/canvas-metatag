@@ -72,6 +72,8 @@ final class ModuleIdsTest extends UnitTestCase {
     foreach (array_keys(SchemaGraph::MODULE_IDS) as $name) {
       self::assertTrue(Values::reserved("#$name"), $name);
     }
+    // The breadcrumb trail's, on the page.
+    self::assertSame('url', SchemaGraph::MODULE_IDS['breadcrumb']);
     self::assertTrue(Values::reserved('#c-0f9b'));
     self::assertFalse(Values::reserved('#identity-2'));
   }

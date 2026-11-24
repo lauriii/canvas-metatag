@@ -7,8 +7,8 @@ The module's nodes MUST use these `@id`s, where `{home}` is the home address
 `{home}#identity`, the logo `{home}#logo`, the website `{home}#website`, the
 page `{url}#webpage`, the page image `{url}#primaryimage`, the main node
 `{url}#primary`, the breadcrumb `{url}#breadcrumb`. `{url}` MUST NOT follow a
-canonical override, so that a page's identity stays when its canonical moves.
-Custom nodes MUST NOT take these fragments.
+canonical override. Custom nodes MUST NOT take a module id (see "The module's
+ids are reserved").
 
 #### Scenario: A canonical override
 
@@ -22,8 +22,13 @@ Custom nodes MUST NOT take these fragments.
 
 #### Scenario: A custom breadcrumb id
 
-- **WHEN** a custom node uses the `@id` `#breadcrumb`
-- **THEN** it MUST be dropped and reported
+- **WHEN** an editor saves a custom node with the `@id` `#breadcrumb`
+- **THEN** it MUST be refused; and a custom node that reaches the graph with that id without being renamed MUST be dropped and reported
+
+#### Scenario: A custom breadcrumb id stored before
+
+- **WHEN** a custom node stored before this release has the `@id` `#breadcrumb`
+- **THEN** it MUST keep its output under the `@id` `#breadcrumb-2`, with the references to it
 
 #### Scenario: A frontend under a path
 

@@ -512,6 +512,27 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
   }
 
   /**
+   * The content API's structured data carries the page's breadcrumb trail.
+   */
+  public function testBreadcrumb(): void {
+    $this->createChrome([self::breadcrumb()]);
+    $this->createPage(['title' => 'Shop', 'path' => ['alias' => '/shop']]);
+    $page = $this->createPage(['title' => 'Lamps', 'path' => ['alias' => '/shop/lamps']]);
+    $head = self::decodeResponse($this->content('/shop/lamps'))['head'];
+    // The same trail as the coupled page, on the frontend.
+    $expected = $this->resolver()->resolve(Page::load($page->id()))['head'];
+    self::assertSame(json_decode((string) json_encode($expected), TRUE), $head);
+    self::assertSame([
+      '@type' => 'BreadcrumbList',
+      '@id' => self::FRONTEND . '/shop/lamps#breadcrumb',
+      'itemListElement' => [
+        ['@type' => 'ListItem', 'position' => 1, 'name' => 'Home', 'item' => self::FRONTEND . '/'],
+        ['@type' => 'ListItem', 'position' => 2, 'name' => 'Shop', 'item' => self::FRONTEND . '/shop'],
+      ],
+    ], self::graph($head)['breadcrumb']);
+  }
+
+  /**
    * Everything that is not a canonical route of an owned entity is Canvas's.
    */
   public function testOtherRoutesAreUntouched(): void {

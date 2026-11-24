@@ -20,7 +20,7 @@ import {
   socialImage,
 } from '../model';
 import { PICKED } from './MediaPicker';
-import { IconBtn, InfoTip, Sk, SparkleIcon } from './ui';
+import { Crumbs, IconBtn, InfoTip, Sk, SparkleIcon } from './ui';
 
 /** A value that follows `value` once it has been still for `ms`. */
 function useSettled<T>(value: T, ms: number): T {
@@ -191,7 +191,10 @@ export function SearchPreview() {
   const titleEnd = title.slice(titleMain.length);
   const shownDescription = resultDescription(texts.description, view.effective.robots, server.headless, measurer);
   const { text: description, muted } = shownDescription;
-  const crumbs = breadcrumb(address);
+  // The page's own breadcrumb trail, when it has one, as a result shows it.
+  const graph = (server.resolved?.head.script.find((script) => script.type === 'application/ld+json')?.textContent as { '@graph'?: Record<string, unknown>[] } | undefined)?.['@graph'] ?? [];
+  const trail = graph.find((node) => node['@id'] === `${server.preview?.url}#breadcrumb`)?.itemListElement;
+  const crumbs = breadcrumb(address, Array.isArray(trail) ? trail.map((crumb) => String((crumb as { name?: unknown }).name ?? '')) : [], !!server.resolved?.schema.trail_home);
   const name = useSettled(resultName({ hidden: !!view.hidden, site, crumbs, title, description: shownDescription }), 1000);
   const template = target.scope === 'template';
   const note = previewNote({
@@ -248,7 +251,7 @@ export function SearchPreview() {
               {site}
             </div>
             <div className="seo-result-address" dir="auto">
-              {crumbs}
+              <Crumbs parts={crumbs} />
             </div>
           </div>
         </div>
@@ -311,7 +314,7 @@ export function SearchSkeleton(props: {
             <Sk w={120} h={12} />
             <div className="seo-result-address">
               {props.host && props.alias
-                ? breadcrumb(`https://${props.host}${props.alias}`)
+                ? breadcrumb(`https://${props.host}${props.alias}`).join(' › ')
                 : ' '}
             </div>
           </div>
