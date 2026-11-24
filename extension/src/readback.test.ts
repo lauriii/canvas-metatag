@@ -170,6 +170,10 @@ describe('readback()', () => {
       expect(dateWords('2027-06-19', 'en')).toBe('June 19, 2027');
       setDateLocale('en-GB');
       expect(dateWords('2027-06-19', 'en')).toBe('19 June 2027');
+      // Thai defaults to the Buddhist calendar (2570); the server writes
+      // the Gregorian year, and so does the box.
+      setDateLocale('th-TH');
+      expect(dateWords('2027-06-19', 'en')).toContain('2027');
       // Nothing usable: by the dialog's language.
       setDateLocale('not a locale');
       expect(dateWords('2027-06-19', 'en')).toBe('19 June 2027');

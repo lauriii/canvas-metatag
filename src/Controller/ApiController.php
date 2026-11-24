@@ -538,10 +538,14 @@ final class ApiController implements ContainerInjectionInterface {
     }
     $broken = [];
     foreach ($kinds as $path => $kind) {
-      // A place that composes reads its fields as words.
-      $kind = Values::composes($props[$path] ?? NULL, $path, 'template') ? 'words' : $kind;
       $value = NestedArray::getValue($values, explode('.', $path));
-      $links = is_array($value) && isset($value['parts']) ? $value['parts'] : [$value];
+      $composed = is_array($value) && isset($value['parts']);
+      // As saving reads them: a place that composes reads its fields as
+      // words, and the parts of a title-like composition as one line.
+      if (Values::composes($props[$path] ?? NULL, $path, 'template')) {
+        $kind = $composed && Values::titleLike($path) ? 'line' : 'words';
+      }
+      $links = $composed ? $value['parts'] : [$value];
       foreach ($links as $at => $link) {
         $source = is_array($link) ? $link['source'] ?? NULL : NULL;
         $reason = is_array($source) ? $this->sources->problem($bundle, $source, $kind) : NULL;
@@ -582,12 +586,14 @@ final class ApiController implements ContainerInjectionInterface {
   private static function carry(array $sent, array $clean, array $errors, array $current, string $scope, string $type = 'WebPage'): array {
     $carried = [];
     // Compared in canonical form: a value sent back with its keys in another
-    // order, or its composition written another way, is the same value.
-    $canonical = Values::clean($sent, $scope, NULL, $type)[0];
+    // order, or its composition written another way, is the same value. Not
+    // when cleaning it changed it: a title cut back to its stored length is
+    // new text lost, not the stored value.
+    [$canonical, $changed] = Values::clean($sent, $scope, NULL, $type);
     foreach (array_keys($errors) as $path) {
       $parents = explode('.', (string) $path);
       $kept = NestedArray::getValue($current, $parents, $exists);
-      if ($exists && ($kept === NestedArray::getValue($sent, $parents) || $kept === NestedArray::getValue($canonical, $parents))) {
+      if ($exists && ($kept === NestedArray::getValue($sent, $parents) || (!isset($changed[$path]) && $kept === NestedArray::getValue($canonical, $parents)))) {
         NestedArray::setValue($clean, $parents, $kept);
         $carried[$path] = $errors[$path];
         unset($errors[$path]);
