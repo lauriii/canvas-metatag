@@ -716,7 +716,11 @@ final class SchemaGraph {
     ];
     $ref = static fn (string $name): array => ['@id' => $ids[$name]];
     $logo = $ctx['logo'] ?? NULL;
-    $page_image = $ctx['image'] ?? NULL;
+    // The page's own image: never the site's image, never a made one.
+    $page_image = ($ctx['image']['source'] ?? '') === 'site' ? NULL : $ctx['image'] ?? NULL;
+    // An image property that picks the site's image is written out, not
+    // pointed at a #primaryimage node this page has no reason to emit.
+    $ctx['image'] = $page_image;
     $trail = $ctx['breadcrumb'] ?? [];
     $report = [
       'withheld' => NULL,
@@ -1573,9 +1577,15 @@ final class SchemaGraph {
               }
               continue;
             }
-            // So many values or more: a trail of two items.
+            // So many entries with a value or more: a trail of two named
+            // items. Each entry counts once, however many values it has.
             if (isset($rule['min'])) {
-              if (count(self::at($object, $rule['path'], $index)) < $rule['min']) {
+              $last = strrpos($rule['path'], '.');
+              $entries = $last === FALSE ? self::at($object, $rule['path'], $index) : array_filter(
+                self::at($object, substr($rule['path'], 0, $last), $index),
+                static fn (mixed $entry): bool => self::at($entry, substr($rule['path'], $last + 1), $index) !== [],
+              );
+              if (count($entries) < $rule['min']) {
                 $missing[] = $fact($rule['path'], $at);
               }
               continue;

@@ -5,6 +5,8 @@ identity:
   separator: '|'
   logo: ''
   default_image: ''
+  colour: ''
+  share_fallback: card
   same_as: {  }
 values:
   robots:

@@ -341,7 +341,8 @@ final class ComposeTest extends CanvasKernelTestBase {
     self::assertStringStartsWith(mb_substr((string) $long->label(), 0, 200), $title);
     self::assertStringNotContainsString('Helsinki', $title);
     self::assertStringNotContainsString('·', $title);
-    self::assertStringEndsWith(' first | Events', $title);
+    self::assertStringEndsWith(' first… | Events', $title);
+    self::assertStringNotContainsString(' in …', $title);
     self::assertLessThanOrEqual(255, mb_strlen($title));
   }
 

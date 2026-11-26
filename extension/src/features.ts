@@ -177,9 +177,12 @@ export function itemVerdicts(item: Item, graph: Item[], rules: SearchFeatures, h
     }
     feature.rules?.forEach((rule, at_) => {
       if (rule.when) return;
-      // So many values or more: a trail of two items.
+      // So many entries with a value or more: a trail of two named items.
+      // Each entry counts once, however many values it has.
       if (rule.min !== undefined) {
-        if (at(item, rule.path, index).length < rule.min) missing.push({ path: rule.path, rule: at_ });
+        const last = rule.path.lastIndexOf('.');
+        const entries = last < 0 ? at(item, rule.path, index) : at(item, rule.path.slice(0, last), index).filter((entry) => at(entry, rule.path.slice(last + 1), index).length > 0);
+        if (entries.length < rule.min) missing.push({ path: rule.path, rule: at_ });
         return;
       }
       for (const found of at(item, rule.path, index)) {

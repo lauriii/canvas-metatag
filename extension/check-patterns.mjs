@@ -50,9 +50,13 @@ readFileSync('index.html', 'utf8')
 // imports. 243,711 bytes before compose-values-from-fields; 256,426 after it
 // (+5.2 %, within design D10's 15 %: the composing rules in values.ts, words
 // in model.ts and checks.ts, and the composer's place in Value.tsx; the
-// editor library is its own chunk below), plus 5 KB. Raise it on purpose,
-// never by accident.
-const BUDGET = 256426 + 5 * 1024;
+// editor library is its own chunk below), plus 5 KB; 263,165 after
+// strengthen-zero-config-defaults (Site › Sharing with its colour sheet, the
+// image field's source lines and the sharing checks), plus 3 KB; 266,459 with
+// read-page-components built beside it (the breadcrumb in the Schema view and
+// the search preview, the skipped component rows), plus 3 KB. Raise it on
+// purpose, never by accident.
+const BUDGET = 266459 + 3 * 1024;
 const size = (file) => gzipSync(readFileSync(`dist/${file}`), { level: 9 }).length;
 const main = readFileSync('dist/main.js', 'utf8');
 const imported = [...main.matchAll(/from"\.\/([\w-]+\.js)"/g)].map((match) => match[1]);

@@ -10,6 +10,7 @@ use Drupal\canvas_metatag\Hook\CanvasMetatagHooks;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\Cache\Cache;
+use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
 use Drupal\Core\Extension\ModuleInstallerInterface;
 use Drupal\language\Entity\ConfigurableLanguage;
@@ -21,6 +22,7 @@ use Drupal\Tests\canvas\Traits\GenerateComponentConfigTrait;
 use Drupal\Tests\content_translation\Traits\ContentTranslationTestTrait;
 use Drupal\user\Entity\Role;
 use Drupal\views\Entity\View;
+use Masterminds\HTML5;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -42,6 +44,7 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
   use GenerateComponentConfigTrait;
   use RequestTrait;
   use SeoFixtureTrait;
+  use ShareTestTrait;
 
   /**
    * {@inheritdoc}
@@ -79,6 +82,201 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
   public function register(ContainerBuilder $container): void {
     parent::register($container);
     self::allowPageCaches($container);
+    self::spyOnRenderer($container);
+  }
+
+  /**
+   * The share rows of a page with a photo and of one without, in order.
+   *
+   * Head-output "The head has fixed rows in a fixed order".
+   */
+  public function testShareRows(): void {
+    $photo = $this->createImage('Lakeside photo', ['width' => 1600, 'height' => 900, 'alt' => 'The lake at dusk']);
+    $page = $this->createPage(['image' => $photo->id()]);
+    $page->addTranslation('fr', ['title' => 'Tarifs', 'status' => TRUE, 'path' => ['alias' => '/tarifs']])->save();
+    $head = self::readHead($this->get('/pricing'));
+    $url = $this->resolver()->shareUrl(Page::load($page->id()), new CacheableMetadata());
+    self::assertSame([
+      ['name' => 'description', 'content' => 'Plans and prices for Example.'],
+      ['name' => 'robots', 'content' => 'max-image-preview:large'],
+      ['property' => 'og:type', 'content' => 'website'],
+      ['property' => 'og:site_name', 'content' => 'Example'],
+      ['property' => 'og:locale', 'content' => 'en_US'],
+      ['property' => 'og:locale:alternate', 'content' => 'fr_FR'],
+      ['property' => 'og:title', 'content' => 'Pricing'],
+      ['property' => 'og:description', 'content' => 'Plans and prices for Example.'],
+      ['property' => 'og:url', 'content' => 'http://localhost/pricing'],
+      ['property' => 'og:image', 'content' => $url],
+      ['property' => 'og:image:type', 'content' => 'image/jpeg'],
+      ['property' => 'og:image:width', 'content' => '1200'],
+      ['property' => 'og:image:height', 'content' => '630'],
+      ['property' => 'og:image:alt', 'content' => 'The lake at dusk'],
+      ['name' => 'twitter:card', 'content' => 'summary_large_image'],
+    ], $head['meta']);
+    self::assertMatchesRegularExpression('#^http://localhost/canvas-metatag/share/en/canvas_page/\d+/[0-9a-f]{16}\.jpg$#', self::meta($head)['og:image']);
+
+    // A fresh install's page without an image: the card's rows.
+    $this->createPage(['title' => 'Services', 'description' => '', 'path' => ['alias' => '/services']]);
+    $meta = self::meta(self::readHead($this->get('/services')));
+    self::assertSame([
+      'robots',
+      'og:type',
+      'og:site_name',
+      'og:locale',
+      'og:title',
+      'og:url',
+      'og:image',
+      'og:image:type',
+      'og:image:width',
+      'og:image:height',
+      'og:image:alt',
+      'twitter:card',
+    ], array_keys($meta));
+    self::assertSame(['image/png', '1200', '630', 'Services, Example', 'summary_large_image'], [
+      $meta['og:image:type'],
+      $meta['og:image:width'],
+      $meta['og:image:height'],
+      $meta['og:image:alt'],
+      $meta['twitter:card'],
+    ]);
+  }
+
+  /**
+   * Sharing inputs invalidate a cached page; delivery draws nothing.
+   *
+   * Head-output "Sharing inputs invalidate the head"; design D15.
+   */
+  public function testShareCacheability(): void {
+    // Public files on disk: a theme logo is read by its real path.
+    $public = sys_get_temp_dir() . '/canvas-metatag-public-' . bin2hex(random_bytes(4));
+    mkdir($public);
+    $this->setSetting('file_public_path', $public);
+    $this->container->get('theme_installer')->install(['stark', 'olivero']);
+    $this->config('system.theme')->set('default', 'stark')->save();
+    // Saved before, as the Appearance form does: creating a configuration
+    // object invalidates no tag.
+    $this->config('stark.settings')->set('logo.use_default', TRUE)->save();
+    $this->createPage(['title' => 'Services', 'path' => ['alias' => '/services']]);
+    NodeType::create(['type' => 'event', 'name' => 'Event'])->save();
+    $template = ContentTemplate::create([
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'event',
+      'content_entity_type_view_mode' => 'full',
+      'component_tree' => [],
+      'status' => TRUE,
+    ]);
+    $template->save();
+    $node = Node::create(['type' => 'event', 'title' => 'Midsummer', 'uid' => $this->author->id()]);
+    $node->save();
+    $image = fn (string $path): string => self::meta(self::readHead($this->get($path)))['og:image'] ?? '';
+
+    $changes = [
+      // Without a logo of the site's own, the theme's.
+      'the theme\'s logo' => function (): void {
+        imagepng(imagecreatetruecolor(64, 64), 'public://theme-logo.png');
+        $this->config('stark.settings')->set('logo.use_default', FALSE)->set('logo.path', 'public://theme-logo.png')->save();
+      },
+      'the logo' => function (): void {
+        $this->config('canvas_metatag.site')->set('identity.logo', $this->createImage('Logo')->uuid())->save();
+      },
+      'a replaced logo' => function (): void {
+        $this->config('canvas_metatag.site')->set('identity.logo', $this->createImage('Other logo')->uuid())->save();
+      },
+      // Its file replaced, as a new upload to the same media item is.
+      'the logo\'s file' => function (): void {
+        $uuid = $this->config('canvas_metatag.site')->get('identity.logo');
+        $media = current($this->container->get('entity_type.manager')->getStorage('media')->loadByProperties(['uuid' => $uuid]));
+        $file = $media->get('field_media_image')->entity;
+        $file->setChangedTime($file->getChangedTime() + 60)->save();
+      },
+      'the default theme' => function (): void {
+        $this->config('system.theme')->set('default', 'olivero')->save();
+      },
+      'the colour' => function (): void {
+        $this->config('canvas_metatag.site')->set('identity.colour', '#0F8A7E')->save();
+      },
+      'what pages without an image share' => function (): void {
+        $this->config('canvas_metatag.site')->set('identity.share_fallback', 'none')->save();
+      },
+    ];
+    foreach (['/services', '/node/' . $node->id()] as $path) {
+      $before = $image($path);
+      self::assertNotSame('', $before, $path);
+      self::assertSame('HIT', $this->get($path)->headers->get('X-Drupal-Cache'), $path);
+    }
+    foreach ($changes as $label => $change) {
+      $before = $image('/services');
+      self::assertSame('HIT', $this->get('/services')->headers->get('X-Drupal-Cache'), $label);
+      $change();
+      $response = $this->get('/services');
+      self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'), $label);
+      // A core theme has no logo of its own: the same card.
+      if ($label !== 'the default theme') {
+        self::assertNotSame($before, self::meta(self::readHead($response))['og:image'] ?? '', $label);
+      }
+    }
+    $this->config('canvas_metatag.site')->set('identity.share_fallback', 'card')->save();
+    // The bundle's name: the node's page is built again.
+    $path = '/node/' . $node->id();
+    $this->get($path);
+    self::assertSame('HIT', $this->get($path)->headers->get('X-Drupal-Cache'));
+    NodeType::load('event')->set('name', 'Concert')->save();
+    self::assertSame('MISS', $this->get($path)->headers->get('X-Drupal-Cache'));
+
+    // No page delivery drew anything; the card address draws it, once.
+    self::assertSame([], ShareRendererSpy::$drawn);
+    self::assertSame(200, $this->fetch($image('/services'))->getStatusCode());
+    self::assertCount(1, ShareRendererSpy::$drawn);
+    $this->container->get('file_system')->deleteRecursive($public);
+  }
+
+  /**
+   * The owned front page carries the site icons, in place of core's.
+   *
+   * Head-output "The owned front page carries the site icon".
+   */
+  public function testFrontPageIcons(): void {
+    $this->container->get('theme_installer')->install(['stark']);
+    $this->config('system.theme')->set('default', 'stark')->save();
+    $this->createPage(['title' => 'Home', 'path' => ['alias' => '/home']]);
+    $this->createPage(['title' => 'Services', 'path' => ['alias' => '/services']]);
+    $this->config('system.site')->set('page.front', '/home')->save();
+    // The icon links of a page, with their attributes, in document order.
+    $icons = static function (Response $response): array {
+      $links = [];
+      foreach ((new HTML5())->loadHTML((string) $response->getContent())->getElementsByTagName('link') as $link) {
+        if (in_array($link->getAttribute('rel'), ['icon', 'apple-touch-icon'], TRUE)) {
+          $attributes = [];
+          foreach ($link->attributes as $attribute) {
+            $attributes[$attribute->name] = $attribute->value;
+          }
+          $links[] = $attributes;
+        }
+      }
+      return $links;
+    };
+
+    $front = $icons($this->get('/'));
+    self::assertSame(['icon', 'icon', 'apple-touch-icon'], array_column($front, 'rel'));
+    self::assertSame(['32x32', '192x192', '180x180'], array_column($front, 'sizes'));
+    foreach ($front as $link) {
+      self::assertMatchesRegularExpression('#^http://localhost/canvas-metatag/share/icon/(32|192|180)/[0-9a-f]{16}\.png$#', $link['href']);
+    }
+    // Another page keeps core's favicon and gets none of the module's.
+    self::assertSame([['rel' => 'icon', 'href' => '/core/misc/favicon.ico', 'type' => 'image/vnd.microsoft.icon']], $icons($this->get('/services')));
+    // A theme with its own favicon keeps it, also on the front page: the
+    // cached front page is built again (head-output "Sharing inputs
+    // invalidate the head").
+    self::assertSame('HIT', $this->get('/')->headers->get('X-Drupal-Cache'));
+    $type = 'image/vnd.microsoft.icon';
+    $favicon = ['use_default' => FALSE, 'path' => 'core/themes/olivero/favicon.ico', 'mimetype' => $type];
+    $this->config('stark.settings')->set('favicon', $favicon)->save();
+    // Theme settings are kept for the rest of a request: the next request
+    // reads them again.
+    $this->container->get('cache.memory')->deleteAll();
+    $response = $this->get('/');
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame([['rel' => 'icon', 'href' => '/core/themes/olivero/favicon.ico', 'type' => $type]], $icons($response));
   }
 
   /**
@@ -112,10 +310,13 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
       'robots',
       'og:type',
       'og:site_name',
+      'og:locale',
+      'og:locale:alternate',
       'og:title',
       'og:description',
       'og:url',
       'og:image',
+      'og:image:type',
       'og:image:width',
       'og:image:height',
       'og:image:alt',
@@ -185,10 +386,10 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
       'the page' => ['Prices | Shop', 'Example', 'Pricing "table"'],
       'the image media' => ['Prices | Shop', 'Example', 'New alt'],
       'the site name' => ['Prices | Shop', 'Example Ltd', 'New alt'],
-      // Visitors may no longer see media: no image.
-      'the anonymous role' => ['Prices | Shop', 'Example Ltd', NULL],
+      // Visitors may no longer see media: the card made from the title.
+      'the anonymous role' => ['Prices | Shop', 'Example Ltd', 'Prices, Example Ltd'],
     ], $seen);
-    self::assertArrayNotHasKey('og:image', self::meta($head));
+    self::assertMatchesRegularExpression('#^http://localhost/canvas-metatag/share/en/canvas_page/\d+/[0-9a-f]{16}\.png$#', self::meta($head)['og:image']);
 
     // A resolver that throws costs the page its SEO head, never the page:
     // the head is core's, and the failure is logged. An invalid site
@@ -290,10 +491,12 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
       'robots' => 'max-image-preview:large',
       'og:type' => 'article',
       'og:site_name' => 'Example',
+      'og:locale' => 'en_US',
       'og:title' => 'Hello',
       'og:description' => 'A first post.',
       'og:url' => $url,
-      'og:image' => $this->imageOf($hero)['url'],
+      'og:image' => $this->sharedPhoto($node, $hero, FALSE),
+      'og:image:type' => 'image/jpeg',
       'og:image:width' => '1200',
       'og:image:height' => '630',
       'og:image:alt' => 'A waving hand',
@@ -339,7 +542,7 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
     // Loaded again: the cached article predates the field.
     $this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($node->id())
       ?->set('field_photo', $photo->id())->save();
-    self::assertSame($this->imageOf($hero)['url'], self::meta(self::readHead($this->get($path)))['og:image']);
+    self::assertSame($this->sharedPhoto($node, $hero, FALSE), self::meta(self::readHead($this->get($path)))['og:image']);
     self::assertSame('HIT', $this->get($path)->headers->get('X-Drupal-Cache'));
     $this->container->get('entity_display.repository')->getFormDisplay('node', 'article')
       ->setComponent('field_photo', ['weight' => 1])
@@ -347,7 +550,7 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
       ->save();
     $response = $this->get($path);
     self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
-    self::assertSame($this->imageOf($photo)['url'], self::meta(self::readHead($response))['og:image']);
+    self::assertSame($this->sharedPhoto($node, $photo, FALSE), self::meta(self::readHead($response))['og:image']);
     // Moving the field on the existing form invalidates it again.
     self::assertSame('HIT', $this->get($path)->headers->get('X-Drupal-Cache'));
     $this->container->get('entity_display.repository')->getFormDisplay('node', 'article')
@@ -355,7 +558,7 @@ final class CoupledHeadTest extends CanvasKernelTestBase {
       ->save();
     $response = $this->get($path);
     self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
-    self::assertSame($this->imageOf($hero)['url'], self::meta(self::readHead($response))['og:image']);
+    self::assertSame($this->sharedPhoto($node, $hero, FALSE), self::meta(self::readHead($response))['og:image']);
 
     // A node without a template and a Views route that lists the article:
     // what they answer with the module is what they answer without it.

@@ -506,6 +506,16 @@ describe('a composition for the previewed item', () => {
   it('cuts a long text at a sentence, else a word', () => {
     expect(sentences('One. Two. Three is long.', 12)).toBe('One. Two.');
     expect(sentences('alpha beta gamma delta', 13)).toBe('alpha beta…');
+    // A title before a name ends no sentence (ValuesTest::testSentences).
+    expect(
+      sentences('Dr. Kallio leads the choir, e.g. on Fridays. Rehearsals start at 18 and run late into the evening.', 60),
+    ).toBe('Dr. Kallio leads the choir, e.g. on Fridays.');
+    // Shared with ValuesTest::testSentences.
+    for (const { text, room, expected } of textCases.sentences) {
+      expect(sentences(text, room)).toBe(expected);
+    }
+    // Never inside a character drawn as one (ResolverTest::testFacts).
+    expect(sentences(`${'a'.repeat(157)}\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} tail`, 160)).toBe(`${'a'.repeat(157)}…`);
   });
 });
 

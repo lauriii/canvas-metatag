@@ -107,6 +107,14 @@
     "verdicts": [{"feature": "breadcrumb", "node": "https://example.com/shop/lamp#trail", "verdict": "needs", "missing": [{"path": "itemListElement.name", "rule": 0}]}]
   },
   {
+    "name": "a breadcrumb trail of one item with two names, added by hand",
+    "graph": [
+      {"@type": "BreadcrumbList", "@id": "https://example.com/shop/lamp#trail", "itemListElement": [{"@type": "ListItem", "position": 1, "name": ["Home", "Accueil"], "item": "https://example.com/"}]}
+    ],
+    "item": 0,
+    "verdicts": [{"feature": "breadcrumb", "node": "https://example.com/shop/lamp#trail", "verdict": "needs", "missing": [{"path": "itemListElement.name", "rule": 0}]}]
+  },
+  {
     "name": "a breadcrumb trail of two items, added by hand",
     "graph": [
       {"@type": "BreadcrumbList", "@id": "https://example.com/shop/lamp#trail", "itemListElement": [{"@type": "ListItem", "position": 1, "name": "Home", "item": "https://example.com/"}, {"@type": "ListItem", "position": 2, "name": "Oak desk lamp"}]}

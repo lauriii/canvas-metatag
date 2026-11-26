@@ -96,6 +96,14 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
   public const string IMAGE_HERO = 'E2E Hero';
   public const string IMAGE_SMALL = 'E2E Small';
   public const string IMAGE_LOGO = 'E2E Logo';
+  // Chosen, it is sent as it is: a small card (page.spec.ts).
+  public const string IMAGE_TINY = 'E2E Tiny';
+
+  /**
+   * A theme's own logo file in the public files.
+   */
+  public const string THEME_LOGO = 'e2e-theme-logo.png';
+  public const string THEME_LOGO_SVG = 'e2e-theme-logo.svg';
   public const string IMAGE_ARTICLE = 'E2E Article';
 
   // Article nodes 1 and 2, then a Basic page (a type without a template).
@@ -171,7 +179,14 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     $hero = $this->createImage(self::IMAGE_HERO, 1200, 630, 'Pricing table');
     $small = $this->createImage(self::IMAGE_SMALL, 300, 200, 'A small picture');
     $this->createImage(self::IMAGE_LOGO, 512, 512, 'Example logo');
+    // A teal logo a theme may name as its own (site.spec.ts): no media item.
+    $theme_logo = \imagecreatetruecolor(256, 256);
+    \assert($theme_logo !== FALSE);
+    \imagefill($theme_logo, 0, 0, (int) \imagecolorallocate($theme_logo, 15, 138, 126));
+    \imagepng($theme_logo, 'public://' . self::THEME_LOGO);
+    \file_put_contents('public://' . self::THEME_LOGO_SVG, '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#0F8A7E"/></svg>');
     $article_image = $this->createImage(self::IMAGE_ARTICLE, 1600, 900, 'An editor at work');
+    $this->createImage(self::IMAGE_TINY, 150, 150, 'A tiny square');
 
     $heading = $this->createHeadingComponent();
     $this->createPages($heading, $hero, $small);
@@ -291,7 +306,8 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
     $roles = [
       'e2e_canvas' => $canvas,
       'e2e_seo' => \array_merge(['edit canvas metatag'], $ai ? ['use canvas metatag ai'] : []),
-      'e2e_seo_admin' => ['administer canvas metatag'],
+      // Themes too: Site › Sharing reads the theme's own logo.
+      'e2e_seo_admin' => ['administer canvas metatag', 'administer themes'],
       'e2e_seo_only' => ['access content', 'view media', 'edit canvas metatag'],
     ];
     foreach ($roles as $id => $permissions) {
@@ -477,6 +493,18 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
       'status' => 1,
       'changed' => 946684800,
     ])->save();
+
+    // No description: its own text after its heading describes it.
+    Page::create([
+      'title' => 'Our story',
+      'path' => ['alias' => '/our-story'],
+      'components' => [
+        ...self::heading($heading, '4c1f8e20-6b7a-4d93-a2e5-0f9b3c6d8a11', 'Our story', 'h1'),
+        ...self::heading($heading, '7e2a9c41-3d5b-4f86-b1c0-8a4e6f2d9b22', 'We started as two editors who wanted every page to read as well as it looks.', 'h2'),
+      ],
+      'status' => 1,
+      'changed' => 946684800,
+    ])->save();
   }
 
   /**
@@ -654,12 +682,29 @@ class CanvasMetatagTestSetup implements TestSetupInterface {
         ],
       ],
     ];
+    // A course page shows its summary: what the page shows is what can
+    // describe it.
+    $paragraph = Component::load('js.paragraph');
+    \assert($paragraph instanceof Component);
+    $trees = [
+      'course' => [
+        [
+          'uuid' => ComplexContent::uuid('course_summary'),
+          'component_id' => $paragraph->id(),
+          'component_version' => $paragraph->getActiveVersion(),
+          'inputs' => [
+            'text' => ['sourceType' => 'entity-field', 'expression' => 'ℹ︎␜entity:node:course␝body␞␟processed'],
+            'variant' => 'body',
+          ],
+        ],
+      ],
+    ];
     foreach ($templates as $bundle => $schema) {
       ContentTemplate::create([
         'content_entity_type_id' => 'node',
         'content_entity_type_bundle' => $bundle,
         'content_entity_type_view_mode' => 'full',
-        'component_tree' => [],
+        'component_tree' => $trees[$bundle] ?? [],
         'status' => TRUE,
         'third_party_settings' => ['canvas_metatag' => ['values' => ['schema' => $schema]]],
       ])->save();

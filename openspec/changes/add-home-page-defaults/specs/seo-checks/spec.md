@@ -170,6 +170,11 @@ MUST ask for a description of the whole site.
 - **WHEN** a page or a template is titled "Pricing" and its description is "Pricing for teams of every size, billed monthly or yearly, with every feature included and a free month to try it before you decide which plan fits."
 - **THEN** "Make the description say more" MUST NOT be listed
 
+#### Scenario: A description written from the page's text
+
+- **WHEN** no description is typed and the module writes it from the page's own text, cut at whole sentences
+- **THEN** "Shorten the description" MUST NOT be listed: the editor never wrote it
+
 #### Scenario: No description on the home page
 
 - **WHEN** the front page has no description

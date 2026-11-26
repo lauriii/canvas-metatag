@@ -2,16 +2,18 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 
-import { type ChecksInput, QUIET, checks, countIssues, identityGaps, notYetText, rankImages, verdictText } from './checks';
+import { type ChecksInput, QUIET, checks, countIssues, identityGaps, isOwnNode, notYetText, rankImages, verdictText } from './checks';
 import { EMPTY_SCHEMA, REGISTRY, RULES } from './data.test-helper';
-import { cascade, merge, source, texts as textsOf } from './model';
+import { cascade, imageSize, merge, source, texts as textsOf } from './model';
 import type {
   BrokenLink,
   Fact,
+  Identity,
   ImageInfo,
   Issue,
   Resolved,
   SeoValues,
+  ShareInfo,
   Part,
   SkippedPart,
   SourceRow,
@@ -73,7 +75,9 @@ const SITE = {
     separator: '|',
     logo: '6f1c2a0e-5b7d-4c1e-9a53-0d6f7c1b2e44',
     default_image: '',
-    same_as: ['https://social.example.com/example'],
+    colour: '',
+    share_fallback: 'card' as const,
+same_as: ['https://social.example.com/example'],
   },
   values: {
     robots: { max_image_preview: 'large' as const },
@@ -695,6 +699,17 @@ describe('fixes', () => {
         'title-site-twice',
       )!.fix,
     ).toBeUndefined();
+  });
+
+  it("leaves the length to the module while it writes the description from the page's own text", () => {
+    const run = (setup: Setup) => {
+      const one = input({ facts: { description: long(25) }, ...setup });
+      one.lookup.facts.description!.derived = true;
+      return checks(one).find((issue) => issue.id === 'description-long');
+    };
+    expect(run({})).toBeUndefined();
+    // Typed, the editor's own: listed.
+    expect(run({ target: { description: t(long(25)) } })).toBeDefined();
   });
 
   it('suggest is offered at page scope with AI only', () => {
@@ -1835,8 +1850,7 @@ describe('rules with conditions', () => {
     }
     // A structured data property linked to a field this event has no value
     // in: a fact too, said once, and not in the counted row.
-    const linked = checks(
-      input({
+    const linkedSetup: Setup = {
         target: {
           schema: {
             type: 'Event',
@@ -1858,8 +1872,8 @@ describe('rules with conditions', () => {
           },
         },
         input: template,
-      }),
-    );
+      };
+    const linked = checks(input(linkedSetup));
     expect(linked.find((issue) => issue.id === 'feature-helps:event')?.message).toBe(
       'Also helps the event result: Venue.',
     );
@@ -1871,6 +1885,12 @@ describe('rules with conditions', () => {
       jump: { scope: 'target', tab: 'schema', field: 'schema.props.endDate' },
     });
     expect(ids(linked)).toContain('schema-empty:image');
+    // While the event shares a card for want of a Poster, the social row
+    // says so; a second row about the same gap is not added.
+    const carded = input({ ...linkedSetup, resolved: { ...linkedSetup.resolved, image: null, share: { made: 'card', url: '/preview' } } });
+    carded.lookup.facts.image = { ...carded.lookup.facts.image!, via: 'Poster', image: null };
+    expect(ids(checks(carded))).toContain('image-card');
+    expect(ids(checks(carded))).not.toContain('schema-empty:image');
     // At page scope it stays a task.
     expect(
       find(
@@ -1903,6 +1923,11 @@ describe('rules with conditions', () => {
         'image-format',
       )?.detail,
     ).toBe('BMP images do not show on many services.');
+    // A size Drupal doesn't know (0 × 0) is no size row: the format says it.
+    const unknown = { resolved: { image: { ...IMAGE, mime: 'image/x-ms-bmp', width: 0, height: 0, bytes: 2306102 } } };
+    expect(find(unknown, 'image-format')).toBeDefined();
+    expect(find(unknown, 'image-small')).toBeUndefined();
+    expect(find(unknown, 'image-ratio')).toBeUndefined();
   });
 
   it('the words a long text may be cut after end without their own mark', () => {
@@ -2138,5 +2163,271 @@ describe('compositions (compose-values-from-fields)', () => {
       input: { ...template, facts: { h1: ['Pricing'], imagesWithoutAlt: [], text: 'Pricing.' } },
     };
     expect(find(both, 'schema-not-on-page:name')).toBeUndefined();
+  });
+});
+
+describe('social image as the module shares it (strengthen-zero-config-defaults)', () => {
+  const card = { made: 'card' as const, url: '/preview' };
+  const judge = (setup: Setup, change?: (given: ChecksInput) => void) => {
+    const given = input(setup);
+    change?.(given);
+    return checks(given);
+  };
+  const imageRows = (issues: Issue[]) => issues.filter((issue) => issue.id.startsWith('image-'));
+  const schema = (type: string) => ({ ...EMPTY_SCHEMA, type });
+
+  it('a card on an event asks for a photo; on a landing page it says nothing', () => {
+    const event = imageRows(judge({ target: { schema: { type: 'Event' } }, resolved: { image: null, share: card, schema: schema('Event') } }));
+    expect(event).toMatchObject([
+      {
+        id: 'image-card',
+        severity: 'improve',
+        message: 'Add a photo of this event',
+        detail: 'Links show a card made from the title. A photo of this event usually gets more attention.',
+        fix: { label: 'Choose image', image: 'social.image' },
+      },
+    ]);
+    expect(imageRows(judge({ resolved: { image: null, share: card } }))).toEqual([]);
+  });
+
+  it('on a template, asks for the field an item lacks: never one image for every item', () => {
+    const event = imageRows(
+      judge({ target: { schema: { type: 'Event' } }, resolved: { image: null, share: card, schema: schema('Event') }, input: { scope: 'template', typeLabel: 'Event' } }, (given) => {
+        given.lookup.facts.image = { ...given.lookup.facts.image!, via: 'Poster', image: null };
+      }),
+    );
+    expect(event).toEqual([
+      {
+        id: 'image-card',
+        severity: 'improve',
+        message: 'Add a Poster to this event',
+        detail: 'Links show a card made from the title until then.',
+        jump: expect.anything(),
+      },
+    ]);
+  });
+
+  it('a found image too small to share says so: the page shares a card instead', () => {
+    const issues = judge({ resolved: { image: null, share: card } }, (given) => {
+      given.lookup.facts.image = { ...given.lookup.facts.image!, image: { ...IMAGE, width: 500, height: 300 } };
+    });
+    expect(imageRows(issues)).toMatchObject([
+      {
+        id: 'image-small',
+        severity: 'improve',
+        message: 'Use a larger social image',
+        detail: 'The image is 500 × 300, too small to share, so links show a card made from the title. An image of 1200 × 630 fills the card.',
+      },
+    ]);
+  });
+
+  it('an image without alt text: says what the head sends instead', () => {
+    const alt = (content: string, source: 'entity' | 'site') =>
+      imageRows(
+        judge({ resolved: { image: { ...IMAGE, alt: '', source } } }, (given) => {
+          given.resolved!.head.meta.push({ property: 'og:image:alt', content });
+        }),
+      ).filter((issue) => issue.id === 'image-alt');
+    expect(alt('Choir rehearsing in the old church', 'entity')).toMatchObject([
+      { message: 'The social image has no alt text', detail: 'People who cannot see it get its name, “Choir rehearsing in the old church”, instead.' },
+    ]);
+    expect(alt('', 'entity')).toMatchObject([{ detail: 'People who cannot see it get no description.' }]);
+    // The site's image gets the site name: Site › Sharing's row says so.
+    expect(alt('Example', 'site')).toEqual([]);
+  });
+
+  it('a chosen image over 24 megapixels is not shared: says so, never "not public"', () => {
+    const huge = imageRows(
+      judge({ target: { social: { image: { media: 'huge' } } }, resolved: { image: null, share: card } }, (given) => {
+        given.lookup.media.huge = { ...IMAGE, width: 9000, height: 9000 };
+      }),
+    );
+    expect(huge).toEqual([
+      {
+        id: 'image-large',
+        severity: 'fix',
+        message: 'Use a smaller social image',
+        detail: 'The chosen image is 9000\u00a0×\u00a09000, over 24 megapixels: too large to share, so links show a card made from the title.',
+        jump: expect.anything(),
+        fix: { label: 'Choose image', image: 'social.image' },
+      },
+    ]);
+    // One the server shares: no such row.
+    const shared = imageRows(
+      judge({ target: { social: { image: { media: 'big' } } }, resolved: { image: { ...IMAGE, width: 4000, height: 3000, source: 'override' }, share: { made: 'cover', url: '/x' } } }, (given) => {
+        given.lookup.media.big = { ...IMAGE, width: 4000, height: 3000 };
+      }),
+    );
+    expect(shared.map((issue) => issue.id)).not.toContain('image-large');
+  });
+
+  it('no image at all, by the site\'s choice: add one', () => {
+    expect(imageRows(judge({ resolved: { image: null, share: null } }))).toMatchObject([{ id: 'image-missing', severity: 'improve', message: 'Add a social image' }]);
+  });
+
+  it('says what is made of an image: cropped, sharper, shown whole, too small', () => {
+    const image = (width: number, height: number, made: 'cover' | 'frame' | 'original', source: 'override' | 'entity' = 'entity') =>
+      imageRows(judge({ resolved: { image: { ...IMAGE, width, height, source }, share: { made, url: '/x' } } }));
+    // As ShareImage::treatment() decides: cropped when that enlarges it
+    // 1.25× at most, else shown whole.
+    expect(image(1000, 525, 'cover')).toMatchObject([
+      {
+        id: 'image-small',
+        severity: 'info',
+        message: 'The social image could be sharper',
+        detail: 'It is 1000 × 525 and shared cropped to 1200 × 630. An image of 1200 × 630 looks sharper.',
+      },
+    ]);
+    expect(image(800, 420, 'frame')).toMatchObject([
+      {
+        id: 'image-ratio',
+        severity: 'info',
+        message: 'The social image is shown whole',
+        detail: 'It is 800 × 420, so links show it whole on its own colours. An image of 1200 × 630 fills the card.',
+      },
+    ]);
+    // A large one that loses much to the crop: one row, never "will be
+    // cropped" besides. A 16:9 photo loses little: nothing to say.
+    expect(image(1600, 1200, 'cover')).toMatchObject([
+      {
+        id: 'image-ratio',
+        severity: 'info',
+        message: 'The social image is cropped',
+        detail: 'It is 1600 × 1200 and shared cropped to 1200 × 630 around its centre.',
+      },
+    ]);
+    expect(image(1770, 996, 'cover')).toEqual([]);
+    expect(image(1200, 630, 'cover')).toEqual([]);
+    expect(image(800, 800, 'frame', 'override')).toMatchObject([
+      {
+        id: 'image-ratio',
+        severity: 'info',
+        message: 'The social image is shown whole',
+        detail: 'It is 800 × 800, so links show it whole on its own colours. An image of 1200 × 630 fills the card.',
+      },
+    ]);
+    expect(image(150, 150, 'original', 'override')).toMatchObject([
+      {
+        id: 'image-small',
+        severity: 'fix',
+        message: 'Use a larger social image',
+        detail: 'The social image is 150 × 150, too small to share large: links show it as a small thumbnail. An image of 1200 × 630 fills the card.',
+      },
+    ]);
+    expect(countIssues(image(800, 800, 'frame', 'override'))).toBe(0);
+  });
+
+  it('says the weight in one unit, as the image field does', () => {
+    const issues = judge({ resolved: { image: { ...IMAGE, bytes: 10665459 }, share: { made: 'original', url: '/x' } } });
+    expect(issues.find((issue) => issue.id === 'image-heavy')?.message).toBe('The social image is 10.2 MB');
+    // A share version is sent instead: its weight is the module's.
+    const made = judge({ resolved: { image: { ...IMAGE, bytes: 10665459 }, share: { made: 'cover', url: '/x' } } });
+    expect(made.find((issue) => issue.id === 'image-heavy')).toBeUndefined();
+    expect(imageSize({ ...IMAGE, bytes: 10665459 })).toBe('1200 × 630 · 10.2 MB');
+  });
+
+  it('asks to name a page still called by the name for a new page: to improve, then to fix once published', () => {
+    const named = (published: boolean) =>
+      judge({ input: { published } }, (given) => {
+        given.lookup.facts.title = { ...given.lookup.facts.title!, value: 'Our services', placeholder: 'Untitled page' };
+      }).find((issue) => issue.id === 'title-placeholder');
+    expect(named(false)).toMatchObject({ severity: 'improve', message: 'Name this page' });
+    expect(named(true)).toMatchObject({
+      severity: 'fix',
+      message: 'Name this page',
+      detail: 'It is still called “Untitled page”, so links use its first heading. Give it a title in Page data.',
+    });
+    expect(find({}, 'title-placeholder')).toBeUndefined();
+  });
+
+  it('says links already shared keep their old preview while a published page shares another', () => {
+    const changed = (published: boolean, change: boolean) =>
+      find({ resolved: { share: card, share_changed: change }, input: { published } }, 'share-changed');
+    expect(changed(true, true)).toMatchObject({ severity: 'info', message: 'Links already shared keep their old preview for a while' });
+    expect(changed(true, false)).toBeUndefined();
+    expect(changed(false, true)).toBeUndefined();
+  });
+});
+
+describe('sharing rows for site administrators', () => {
+  const SHARE: ShareInfo = { missing: null, theme_logo: null, svg: false, site_alt: 'Our studio', host: null };
+  const rows = (setup: Setup, share: Partial<ShareInfo> = {}, site: Partial<Identity> = {}) =>
+    checks(input({ ...setup, input: { share: { ...SHARE, ...share }, site: { ...SITE, identity: { ...SITE.identity, ...site } }, ...setup.input } })).filter((issue) => issue.id.startsWith('share-'));
+  const only = (issues: Issue[]) => issues.map(({ id, severity, message, detail }) => ({ id, severity, message, ...(detail ? { detail } : {}) }));
+
+  it('says why no image can be made, and what links use instead', () => {
+    expect(only(rows({}, { missing: 'fonts' }))).toEqual([
+      { id: 'share-unmade', severity: 'info', message: "Shared images can't be made on this server", detail: 'Its image library has no font support, so links use no image.' },
+    ]);
+    expect(rows({}, { missing: 'fonts' }, { default_image: 'uuid', share_fallback: 'image' })[0].detail).toBe(
+      "Its image library has no font support, so links use the site's image.",
+    );
+  });
+
+  it('names an address visitors cannot reach', () => {
+    expect(only(rows({}, { host: 'http://cms:8080' }))).toEqual([
+      {
+        id: 'share-host',
+        severity: 'info',
+        message: "Visitors' apps can't reach shared images",
+        detail: "They are addressed at http://cms:8080, where the frontend fetches Drupal. Have it fetch Drupal at its public address, or set Drupal's reverse proxy settings in settings.php.",
+      },
+    ]);
+  });
+
+  it('asks for a PNG version of an SVG logo', () => {
+    expect(rows({}, { svg: true })).toMatchObject([
+      { id: 'share-svg', message: 'Shared images show your initial because your logo is an SVG', jump: { scope: 'site', field: 'identity.logo' } },
+    ]);
+  });
+
+  it('names the script of a title the fonts cannot draw, whatever the page language', () => {
+    const script = (title: string) => {
+      const given = input({ resolved: { image: null, share: null }, input: { share: SHARE } });
+      given.texts = { ...given.texts, social_title: title };
+      return checks(given).filter((issue) => issue.id === 'share-script');
+    };
+    // An English page with a Japanese title.
+    expect(script('湖畔の夏至コンサート')).toMatchObject([{ severity: 'info', message: "Shared images can't be made for Japanese titles yet" }]);
+    // Not a script the dialog names, or a title of emoji only: this title.
+    expect(script('ᚠᚢᚦ')[0].message).toBe("Shared images can't be made for this title yet");
+    expect(script('🚀🎉')[0].message).toBe("Shared images can't be made for this title yet");
+    // A card was made: nothing to say.
+    expect(rows({ resolved: { image: null, share: { made: 'card', url: '/x' } } })).toEqual([]);
+  });
+
+  it('offers a card from each page\'s title where every page shares one image, and asks for the site image\'s alt text', () => {
+    const issues = rows({}, { site_alt: '' }, { default_image: 'uuid', share_fallback: 'image' });
+    expect(issues).toMatchObject([
+      {
+        id: 'share-one-picture',
+        message: 'Pages without an image share the same image',
+        fix: { label: 'Make one from the title', site: { path: 'identity.share_fallback', value: 'card' } },
+      },
+      { id: 'share-site-alt', message: "The site's image has no alt text" },
+    ]);
+    expect(rows({}, {}, { default_image: 'uuid', share_fallback: 'image' }).map((issue) => issue.id)).toEqual(['share-one-picture']);
+  });
+
+  it('tells an editor none of it', () => {
+    const editor = checks(
+      input({ input: { can: { target: true, site: false }, share: { ...SHARE, missing: 'fonts', svg: true, host: 'http://cms:8080' }, site: { ...SITE, identity: { ...SITE.identity, default_image: 'uuid', share_fallback: 'image' as const } } } }),
+    );
+    expect(editor.filter((issue) => issue.id.startsWith('share-'))).toEqual([]);
+  });
+});
+
+describe('isOwnNode', () => {
+  const nodes = [
+    { id: 'https://example.com/about#breadcrumb', type: 'BreadcrumbList', origin: 'page' as const, at: 2 },
+    { id: 'https://other.example/#breadcrumb', type: 'BreadcrumbList', origin: 'hand' as const, item: 0, at: 3 },
+  ];
+  it('knows the module\'s own trail by its full id', () => {
+    expect(isOwnNode(nodes, 'https://example.com/about#breadcrumb')).toBe(true);
+  });
+  it('does not take a hand-added item with the same fragment for the module\'s', () => {
+    expect(isOwnNode(nodes, 'https://other.example/#breadcrumb')).toBe(false);
+    expect(isOwnNode(nodes, 'https://example.com/elsewhere#breadcrumb')).toBe(false);
+    expect(isOwnNode(nodes, null)).toBe(false);
   });
 });

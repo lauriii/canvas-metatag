@@ -14,7 +14,7 @@ The site card MUST show the logo, else the name's first letter, large; the Site 
 - **WHEN** the site card is drawn for a site without a slogan whose identity description is "Human expertise that amplifies what your AI agents can do: creative direction, editorial judgment and strategy."
 - **THEN** it MUST show the logo, the Site name and "Human expertise that amplifies what your AI agents can do"
 
-#### Scenario: A site card without a slogan or a description
+#### Scenario: A site card without a slogan
 
 - **WHEN** the site card is drawn for a site with a logo, no Drupal slogan and no identity description
 - **THEN** it MUST show the logo and the Site name, and no line

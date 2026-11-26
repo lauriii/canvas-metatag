@@ -32,6 +32,8 @@ API and in the dialog's previews, comes from one PHP class, `Resolver`.
                    PUT  /canvas-metatag/api/draft/content_template/{id}
                    PUT  /canvas-metatag/api/site
                    GET  /canvas-metatag/api/media
+                   GET  /canvas-metatag/api/share-preview, share-sample
+   ShareController GET  /canvas-metatag/share/...  (made images, section 8)
         |  writes                       |  reads
         v                               v
    Canvas AutoSaveManager       Resolver::resolve()  <-- Values (rules)
@@ -601,7 +603,8 @@ instance only (`error`, logged). `Resolver::parts()` makes addresses
 absolute on the public base and images public files with their size
 (`uriImage()`). `Sources::usage()` counts the content items (default
 revisions, each once) and templates that place a component. The head reads
-the instance list (for the breadcrumb); values are read through `props()` by
+the instance list (for the breadcrumb, and through `PageContent` for a Canvas
+page's heading, text and first image); values are read through `props()` by
 their consumers.
 
 The breadcrumb: when `block.system_breadcrumb_block` renders on a page that
@@ -721,8 +724,8 @@ and keeps every other tag (`Resolver::script()`, `unencodable`).
 |---|---|---|
 | title | `head_title` in `preprocess_html` | `head.title` |
 | `description`, `robots`, `twitter:card` | `<meta name>` via `html_head` | `head.meta[]` |
-| `og:type`, `og:site_name`, `og:title`, `og:description`, `og:url`, `og:image` (+ `:width`, `:height`, `:alt`), `article:published_time`, `article:modified_time` | `<meta property>` | `head.meta[]` |
-| canonical, hreflang alternates | `<link>` via `html_head` (not `html_head_link`, so no Link headers) | `head.link[]` |
+| `og:type`, `og:site_name`, `og:locale` (+ `:alternate`), `og:title`, `og:description`, `og:url`, `og:image` (+ `:type`, `:width`, `:height`, `:alt`), `article:published_time`, `article:modified_time` | `<meta property>` | `head.meta[]` |
+| canonical, hreflang alternates, the owned front page's icons | `<link>` via `html_head` (not `html_head_link`, so no Link headers) | `head.link[]` |
 | JSON-LD | one `<script type="application/ld+json">` | `head.script[0]` with `textContent` as an object |
 
 The card hint is `summary_large_image` from an effective image of 600 × 157
@@ -748,6 +751,99 @@ A failure while building the coupled head is caught in
 `CanvasMetatagHooks::head()`, logged to the `canvas_metatag` channel, and the
 page is served with core's head (and Metatag's, if installed). The same holds
 for the headless decorator. The head may be lost; the page never is.
+
+### Share images
+
+The image chain (head-output "The social image follows a chain") ends in
+`Resolver::share()`: a share version of a chosen or found file, an original
+file sent as it is (a chosen image under 200 × 200, or a site that cannot
+make images), a card, or nothing. The site's choice for pages without one is
+`identity.share_fallback` (`card`, `image`, `none`). The head only computes
+addresses; nothing is decoded or drawn at delivery. The one file read is the
+EXIF header of a page's own JPEG (`ShareRenderer::upright()`), so its size is
+the upright one.
+
+- **`CardInput`** (`Resolver::share()`'s `card`): what a card draws, as plain
+  values: layout, the `og:title` as emitted, the small line (`ShareLabel`, from
+  the kind registry and the `Words` date), the direction, the langcode and the
+  brand (`Resolver::brand()`: Site name, the logo by file URI and changed
+  time, else the default theme's own logo by path and modification time, the
+  colour, `ShareRenderer::VERSION`), all read from the entity and from
+  configuration in the entity's language, never from the request.
+  `Resolver::hash()` is the first 16 hex digits of sha256 over its JSON. A
+  photo's input (`photoInput()`) is its file id, changed time, the chosen flag
+  and the version; an icon's is the brand in the default language.
+- **Routes** (`ShareController`): `canvas_metatag.share.entity`
+  `/canvas-metatag/share/{langcode}/{entity_type}/{id}/{hash}.png` (the card)
+  or `.jpg` (the share version of the entity's own photo: never an address by
+  file id), `.share.site` `/canvas-metatag/share/site/{hash}.jpg` (the site
+  image's share version, one for every page and language that shares it,
+  hashed from `photoInput()` of its file: the site's image is no entity's,
+  and an entity's address of it redirects there) and `.share.icon`
+  `/canvas-metatag/share/icon/{size}/{hash}.png`, outside the files path, so no web server rule is involved. The route
+  requirements check every parameter before anything loads, and the
+  controller matches the name case-sensitively (the router does not; its 404
+  and 302 answers are plain text, which core's active-link filter skips); the controller checks ownership and
+  anonymous view access (404 otherwise), sets the configuration override
+  language to the path's langcode, rebuilds the input and renders only when
+  its hash is the requested one. Otherwise it answers an uncached 302 (the
+  routes' `no_cache` option: core's page cache would keep a redirect for
+  good) to the current address, never a lasting 301 (an edit and its undo
+  would loop in a shared cache).
+- **Storage** (`ShareStore`): under `public://canvas-metatag/share-{secret}/`
+  (`ShareStore::dir()`, 16 characters of an HMAC of the hash salt) at the
+  route's own path, one folder per entity and language, the site image's
+  (`site/`) or an icon size. No
+  address under the files path can be worked out or is linked, so a card is
+  only ever served by the route, with its `noindex`, on any web server. A
+  render writes `{name}.{random}.tmp` and renames it, then deletes the
+  folder's other files: renders are deterministic, so no lock. Served as a
+  `BinaryFileResponse` with `public, max-age=31536000, s-maxage=86400,
+  immutable` (no tags a purger reads, so proxies keep it a day at most);
+  cards add `X-Robots-Tag: noindex`. A failure is logged, remembered for
+  five minutes in `cache.default` and answered 404 `no-cache`. The marker is
+  the draw's start time before drawing: a request that finds one under a
+  minute old draws too (same bytes), an older one is a draw whose process
+  died (a fatal), so it counts as failed; a `.tmp` left by a dead request
+  goes after a minute. `ShareHooks` deletes an entity's folders on delete, translation
+  delete, unpublish and loss of anonymous view access (not a forward draft),
+  that file's photo versions when a media item is unpublished or deleted or
+  a file deleted, everything on a save of the anonymous role, and
+  checks GD with FreeType, a local public stream and a test card for the
+  status report. Access lost without a save it sees deletes the folder at
+  the route's next 404; `ShareConfigSubscriber` deletes every stored card
+  when pages without an image stop sharing cards.
+- **Renderers**: `ShareCard` (page card, site card, icons, colour and marks),
+  `ShareImage` (the 1200 × 630 JPEG of a page's own image), `ShareLayout`
+  (title steps and line breaks) and `ShareText` (cleaning, font coverage,
+  Arabic forms, right-to-left order) are static GD code with the fonts in
+  `fonts/`; `ShareRenderer` is the service that wraps them. The look and its
+  measured rules are the change's `reference/` folder; four cards the module
+  rendered are committed in `tests/fixtures/share-cards/` with their
+  `layout.json`.
+- **Previews**: `GET /canvas-metatag/api/share-preview` draws a page's or a
+  template preview's draft in memory, with the state route's checks, and
+  `GET /canvas-metatag/api/share-sample` draws Site › Sharing's samples from
+  the identity being edited. Neither writes a file: the preview answers
+  `private, max-age=3600` (its `v` hashes what is drawn), the sample
+  `no-store`; a
+  draft head (`resolve(draft: TRUE)`) points at the preview, so no public
+  address is computed from draft values. A page read as a draft without a
+  draft of its own (the dialog reads every page's chrome as a draft) shares
+  what is live, at its public address, as Output shows it.
+- **A Canvas page's own content**: `PageContent::read()` gives its first
+  heading (the Title fact of a placeholder-named page), its text candidates
+  and its component images, through the one component reader ("The page's
+  components and its breadcrumb trail"): the page's own tree from
+  `Sources::tree()`, what renders from `Sources::instances()` (a personalized
+  part gives its default case, what link previews and crawlers get), walked
+  in render order, and the text and image props of code components read by
+  `Sources::props()` (a block gives nothing; a switch is read through).
+  `Resolver::componentImage()` takes the first image visitors may see that
+  is large enough (`uriImage()`). The result is kept per page object for the
+  request and its tree. `PageText` keeps a key-value index per
+  language of which published pages offer which text, and invalidates its tag
+  only when a text moves between one page and several.
 
 ## 9. Writing into Canvas drafts
 
@@ -911,6 +1007,8 @@ loudly.
 | `onCanvasConfigEntitySave()` drops a template draft when the stored template changes | `canvas_metatag_uninstall()` writes drafts back | uninstall loses or keeps template drafts | `InstallTest::testUninstallAndReinstall` |
 | `Entity\ContentTemplate::loadForEntity($entity, 'full')`, `getTargetEntityTypeId()`, `getMode()`, `getTargetBundle()`; config name `canvas.content_template.*.*.*` (schema) | `Resolver::owns()/layers()`, hooks, `ApiController`, config schema | node ownership; failures are caught and logged (head lost, page served) | `ResolverTest::testOwnershipAndLayers`, `CoupledHeadTest::testNodeAndOtherRoutes` |
 | `Entity\Page`: base fields `description`, `image`, `created`, `changed`, owner; route `entity.canvas_page.canonical` | `Resolver::facts()`, hooks | facts and the coupled head | `ResolverTest::testFacts`, `CoupledHeadTest::testPage` |
+| The label Canvas gives a new page, `ApiContentControllers::defaultTitle()`: "Untitled @singular_entity_type_label" with the type's singular label, translated | `PageContent::placeholders()`: such a page's Title fact is its first heading | a placeholder-named page shares as "Untitled page" | `CanvasPlaceholderTest` (contract group) |
+| A page's own tree in its `components` field, read through `Sources::tree()`/`instances()`/`props()` (rows below); a heading component named `…heading` (`-heading` or `_heading`), a `title`, `heading` or `headline` prop of a top-level instance, a component's `source` `js` or `sdc` | `PageContent::read()`: a Canvas page's first heading, its own text and first component image | the page has no derived title, description or component image | `ResolverTest::testPlaceholderTitle`, `testShareChain`, `PageTextTest` (`testPersonalizedContent`) |
 | Stored shape `{expression, sourceType: 'entity-field'}` and the expression grammar | template values and their drafts | a stored link reads nothing (broken, each node its default) | `SourcesTest::testEvaluate` (round trip per field type), the `phpunit (canvas dev)` CI job |
 | `PropSource::parse()`, `EntityFieldPropSource::evaluate($host, FALSE)`, `EvaluationResult` | `Sources::evaluate()` | links read nothing | `SourcesTest::testEvaluate` |
 | The expression grammar's field-item delta (`␝field␞0␟…`): one item of a field of several values; a hop through a multi-value reference fails as a whole when one target is denied | `Sources::words()` reads such a field item by item, so a hidden item is left out and the rest kept | in words a field of several values gives nothing, or every item is hidden | `ComposeTest::testComposedHead` (a hidden performer), `testCacheability` |
@@ -1091,6 +1189,7 @@ account; both page caches stay effective.
 | the page's chrome | `config:canvas.settings`, the page variant (or `config:system.theme` and the page region list tag) | `Sources::tree()` |
 | a component's values | what was read, by the account rule; on a page anonymous visitors may view, an instance that would add a `user` or `session` context or a max-age is left out instead | `Sources::props()` |
 | the breadcrumb trail | its tags and max-age only: built as an anonymous visitor for the entity's own path, so not its `url.path.*` and `user.*` contexts | `Resolver::breadcrumb()` |
+| share images: the default theme and its settings (logo, favicon), the logo media and file, the bundle (its name is the small line), a page's own text | `config:system.theme`, `config:<theme>.settings`, their tags, the bundle's config, the `PageText` tag of each candidate | `brand()`, `card()`, `icons()`, `PageText::description()` |
 
 The `settings.php` public base carries no tag: changing it needs a cache
 rebuild (README). Install invalidates `rendered`, because core's canonical and
@@ -1138,7 +1237,7 @@ not carry the parent's tag. The JSON-LD stays equal to what visitors see.
 
 ## 15. Security model
 
-Routes (all `no_cache`, all `_auth: ['cookie']`, so a bearer token cannot
+API routes (all `no_cache`, all `_auth: ['cookie']`, so a bearer token cannot
 skip the CSRF check):
 
 | Route | Requirements |
@@ -1148,6 +1247,7 @@ skip the CSRF check):
 | `PUT draft/content_template` | `edit canvas metatag`, `content_template.update`, CSRF header; must be a node `full` template, loaded override-free |
 | `PUT site` | `administer canvas metatag` (restricted), CSRF header |
 | `GET media` | either permission; published image media, per-item view access, public files only |
+| `GET share-preview`, `GET share-sample` | either permission; the preview as `GET state` (view, plus update for a draft); the sample's identity members cleaned as a save cleans them; the preview `private, max-age=3600`, the sample `no-store`; no file written |
 | `POST ai/suggest` (submodule) | `use canvas metatag ai` and `edit canvas metatag`, CSRF header, flood 30 per 5 minutes per user |
 
 The submodule's prompts are edited in the AI module's Prompt Library, under
@@ -1159,6 +1259,15 @@ and the submodule's route subscriber adds `_entity_access: ai_prompt.delete`
 to the Prompt Library's delete form, which otherwise checks only the
 permission.
 
+- The made-image routes (section 8) are open to everyone: parameters are
+  checked by the route before anything is loaded, the entity must be owned
+  and viewable by an anonymous visitor, and an image is drawn only for the
+  current hash, from the entity and configuration, never from the request
+  (a forged `Host` writes nothing). Inputs are bounded: logos over 4096 px a
+  side and photos over 24 megapixels, or too large for the memory left, are
+  skipped, an SVG is only read for
+  its colour, a theme logo must lie inside the theme's folder or public
+  files, and the module fetches no address.
 - Input: `Values::clean()` in write mode is the gate; bodies over 128 KiB are
   refused. Output: everything is cleaned again in read mode, every fact and
   link of a published node is read as anonymous, attributes are escaped by the
@@ -1299,6 +1408,8 @@ each row names the test that fails when it changes.
 | `tests/e2e/custom-form.spec.ts` | an employer rating built with the keyboard only, Form ⇄ JSON with no byte change, the sheet's levels and Back to Output, Undo of a removal, a paste in Form; axe at 600 and 350 px tall and in a narrow frame | Playwright (`coupled`) |
 | `scripts/vocabulary-lint.php` (CI `vocabulary-lint`) | every type and name in the registry, the rules file (its `expects` too) and the graph fixtures is schema.org's, on the pinned release | CI |
 | `extension/src/*.test.ts` (vitest) | model rules mirror PHP (same fixtures), the write loop, pending storage, checks (verdict rows, parity with the page, hand-added items, what a node left out), the read-back, kinds, API client, host adapter parsing; `coverage.test.ts` (every offered detail has a control), `controls.test.ts` (controls by shape, durations, the hours grammar, pickers, group lines) | `npm run verify` |
+| `FontsTest`, `ShareTextTest`, `ShareLayoutTest`, `ShareCardTest`, `ShareImageTest`, `ShareLabelTest` | the bundled fonts and their coverage files; cleaning, Arabic forms, right-to-left order; title steps, breaks and cuts, and `testReferenceLayouts` against `tests/fixtures/share-cards/layout.json`; colour, contrast and marks; photo treatments and encoding; the small line. Drawing tests require `imagettftext` | PHPUnit (unit) |
+| `CardInputTest`, `ShareRouteTest`, `ShareRouteFunctionalTest`, `SharePreviewTest`, `ShareRequirementsTest`, `ShareUpdateTest`, `PageTextTest`, `CanvasPlaceholderTest` | what changes a card's address; the routes (404s, redirects, a forged host, one render, failures), deletion; through the front controller; draft previews and samples; the status report; the upgrade; a page's own text and its index; Canvas's placeholder label (contract group) | PHPUnit (kernel, functional) |
 | Playwright `host-contract` | every Canvas internal of section 11 in the real editor | runs first |
 | Playwright `coupled` (`page`, `template`, `site`, `access`, `schema`) |
  the dialog in the real editor end to end: inheritance, draft saves surviving editor saves, closing mid-edit, publish to head, Output catching up, templates linked to fields, title endings, site settings, read-only and conflict states, keyboard, axe scan, 200 % zoom, windows 350 and 420 px tall | |
@@ -1380,18 +1491,29 @@ limitations of the implementation:
 ## 19. Where to change what
 
 ```
-canvas_metatag.routing.yml        the five API routes and their access
+canvas_metatag.routing.yml        the API routes, the made-image routes,
+                                  and their access
 canvas_metatag.services.yml       Resolver; the headless decorator
-canvas_metatag.install            install (cache), uninstall (drafts)
+canvas_metatag.install            install (cache, the page text index),
+                                  uninstall (drafts)
 config/schema/*.yml               stored shape of site and template values
 data/schema-types.json            structured data types and properties
+data/locales.json                 og:locale territories
+fonts/                            bundled fonts, licence files, coverage
+                                  (fonts/build.sh regenerates them)
 src/Values.php                    validation, cascade, text outputs
                                   (change model.ts and the fixtures too)
 src/SchemaGraph.php               registry, literal checks, @graph, @ids
 src/Sources.php                   EVERY Canvas prop source dependency (PHP)
 src/Resolver.php                  ownership, layers, facts, links, images,
                                   public base, URLs, the head, cacheability
-src/Controller/ApiController.php  state, draft writes, site, media
+src/Controller/ApiController.php  state, draft writes, site, media,
+                                  share preview and sample
+src/Controller/ShareController.php  made images: rebuild, render, serve
+src/Share*.php                    card, photo, layout, text, label,
+                                  renderer service, storage
+src/Hook/ShareHooks.php           stored images deleted; status report
+src/PageContent.php, PageText.php a Canvas page's heading, text, image
 src/Controller/
   HeadlessContentController.php   the canvas_headless adapter
 src/Hook/CanvasMetatagHooks.php   coupled head, field, Metatag, forms,

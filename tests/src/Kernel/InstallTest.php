@@ -10,6 +10,8 @@ use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas_headless\Controller\CanvasContentController;
 use Drupal\canvas_metatag\Controller\HeadlessContentController;
+use Drupal\canvas_metatag\PageText;
+use Drupal\canvas_metatag\ShareStore;
 use Drupal\Core\Extension\Exception\UnknownExtensionException;
 use Drupal\Core\Extension\MissingDependencyException;
 use Drupal\Core\Extension\ModuleExtensionList;
@@ -125,6 +127,8 @@ final class InstallTest extends CanvasKernelTestBase {
         'separator' => '|',
         'logo' => '',
         'default_image' => '',
+        'colour' => '',
+        'share_fallback' => 'card',
         'same_as' => [],
       ],
       // No ending: every title ends with the site name.
@@ -189,8 +193,16 @@ final class InstallTest extends CanvasKernelTestBase {
     $untouched = $this->autoSave()->getAutoSaveEntity($neither, TRUE)->hash;
     self::assertContains('canvas_metatag', $both->getDependencies()['module']);
 
+    // A stored share image and the page text index.
+    mkdir(ShareStore::dir() . '/en/canvas_page/1', 0777, TRUE);
+    file_put_contents(ShareStore::dir() . '/en/canvas_page/1/0123456789abcdef.png', 'png');
+    $this->container->get('keyvalue')->get(PageText::COLLECTION . 'en')->set('text', [1]);
+
     $this->container->get(ModuleInstallerInterface::class)->uninstall(['canvas_metatag']);
 
+    // Nothing stays reachable in the public files, and the index is gone.
+    self::assertDirectoryDoesNotExist(ShareStore::ROOT);
+    self::assertSame([], $this->container->get('keyvalue')->get(PageText::COLLECTION . 'en')->getAll());
     foreach ([$both, $draft_only, $stored_only, $neither] as $template) {
       $raw = $this->config('canvas.content_template.' . $template->id())->getRawData();
       self::assertArrayNotHasKey('canvas_metatag', $raw['third_party_settings'] ?? [], $template->id());

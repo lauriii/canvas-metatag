@@ -188,6 +188,11 @@ absolute http(s) URLs MUST be left out.
 - **THEN** the description, `og:title`, `og:description` and every `og:image` row MUST be left out
 - **AND** the title MUST be the site name
 
+#### Scenario: A fresh install
+
+- **WHEN** a Canvas page titled "Pricing" on a fresh English install is requested
+- **THEN** its head MUST carry, in this order, `og:locale` `en_US`, `og:title` "Pricing", `og:image`, `og:image:type` `image/png`, `og:image:width` 1200, `og:image:height` 630 and `og:image:alt`, and the card hint `summary_large_image`
+
 #### Scenario: Every kind of row
 
 - **WHEN** a page has AI use set, the site has a verification code, an other meta tag and an other link

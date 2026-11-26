@@ -298,6 +298,8 @@ export function SearchTab() {
   // Canvas's own Description: the field's text is its own while it has focus.
   const [typing, setTyping] = useState<string | null>(null);
   const live = state.live.description ?? view.facts.description?.value ?? '';
+  // Nothing typed: the page's own text describes it.
+  const derived = !!view.facts.description?.derived && !(typing ?? live).trim();
   const handOver = () => {
     if (typing !== null) {
       commitDescription(typing);
@@ -358,7 +360,7 @@ export function SearchTab() {
           scope="target"
           path="description"
           label="Description"
-          source="Also in Page data"
+          source={derived ? "From the page's text" : 'Also in Page data'}
           meter={descriptionMeter}
           onSuggest={() => setSuggesting('description')}
           after={tray('description')}
@@ -375,6 +377,7 @@ export function SearchTab() {
                 aria-describedby={field.describedBy}
                 aria-description="The same field as Page data. Translated with the page."
                 value={typing ?? live}
+                placeholder={derived ? view.facts.description?.value : undefined}
                 onFocus={() => setTyping(live)}
                 onChange={(event) => {
                   // Canvas refuses its whole layout for half a character.

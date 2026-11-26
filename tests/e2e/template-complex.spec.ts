@@ -386,12 +386,13 @@ test('the dialog follows the previewed event, also through hidden references and
   await expect(menu).toBeHidden();
   // An image hidden for this event: the social image is linked to Poster ›
   // Image, and this event's poster is unpublished. The row says so, and what
-  // is used instead; the Schema tab's image says the same.
+  // is shared instead (this site has no image of its own, so the card);
+  // the Schema tab's image says the same.
   await tab(frame, UI.tab.social).click();
   const socialImage = frame.locator('.seo-field[data-path="social.image"]');
   await expect(socialImage.locator('.seo-image-tag')).toHaveText('Poster › Image');
   await expect(socialImage.locator('.seo-image-name > [data-state]')).toHaveText('Hidden from visitors for this event');
-  await expect(socialImage.locator('.seo-guide')).toHaveText(/^So .+ (is used|is shared)\.$/);
+  await expect(socialImage.locator('.seo-guide')).toHaveText('So it shares a card made from its title.');
   // Its link goes with its ×, as a box's does; there is no Reset beside it.
   await expect(button(frame, 'Unlink image')).toBeVisible();
   await tab(frame, UI.tab.schema).click();
@@ -529,6 +530,27 @@ test('the dialog follows the previewed event, also through hidden references and
   await expect.poll(draft, { timeout: 30_000 }).toBeUndefined();
 });
 
+test("the Event template's image follows each event's poster, and says what events without one share", async ({
+  drupal,
+  page,
+}) => {
+  await drupal.login(USERS.editor);
+  await openTemplate(page, event.id, 'event');
+  const frame = await openSeo(page);
+  await tab(frame, UI.tab.social).click();
+  const card = frame.getByTestId(TEST_ID.social);
+  await expect(frame.locator('.seo-stage', { has: card }).locator('.seo-stage-cap-l')).toContainText('When this event is shared');
+  const field = frame.locator('.seo-field[data-path="social.image"]');
+  // The row names the field it follows; what an event without one shares
+  // is said only while the field is in use.
+  await expect(field).not.toContainText('without one shares');
+  await field.getByRole('button').first().focus();
+  await expect(field.locator('.seo-guide-text')).toHaveText('An event without one shares a card made from its title.');
+  // The preview shows the picture: the field says it in words.
+  await expect(field.locator('.seo-thumb')).toHaveCount(0);
+  await frame.locator('body').screenshot({ path: test.info().outputPath('event-image-field.png') });
+});
+
 test('on a long event the link menu works by keyboard in a short window, long values stay short at rest', async ({
   drupal,
   page,
@@ -622,6 +644,14 @@ test('on a long event the link menu works by keyboard in a short window, long va
   await expect(worked).toContainText('· from Description (body)');
   expect(await worked.locator('.seo-menu-via').evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await page.keyboard.press('Escape');
+
+  // This event has no Poster: its image row is the link alone, and one
+  // sentence under it says what it shares instead.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await tab(frame, UI.tab.social).click();
+  const image = frame.locator('.seo-field[data-path="social.image"]');
+  await expect(image.locator('.seo-guide')).toHaveText('This event has no Poster, so it shares a card made from its title.');
+  await expect(image.locator('.seo-image-name')).toHaveText('Poster › Image');
 });
 
 test('in a short window the link menu shows its values', async ({ drupal, page }) => {
@@ -800,7 +830,7 @@ test('in a short window the link menu shows its values', async ({ drupal, page }
   await expect(status(frame)).toContainText(new RegExp(`${UI.footer.draftTemplate}|^Unlinked`), { timeout: 30_000 });
 });
 
-test('a job posting: its group is named in the menu, its square logo makes a small card everywhere', async ({
+test('a job posting: its group is named in the menu, its square logo gives way to a card made from its title', async ({
   drupal,
   page,
 }) => {
@@ -862,28 +892,15 @@ test('a job posting: its group is named in the menu, its square logo makes a sma
   await page.keyboard.press('Escape');
   await expect(menu).toBeHidden();
 
-  // A 400 x 400 logo: a small card in the link preview and in the head.
+  // A found 400 x 400 logo is passed over: the link preview shows the card
+  // the server makes from the title, large, as the head sends it.
   await tab(frame, UI.tab.social).click();
   const card = frame.getByTestId(TEST_ID.social);
-  await expect(card).toHaveAttribute('data-layout', 'compact');
-  // The caption says it is small; its information says why.
+  await expect(card).toHaveAttribute('data-layout', 'large');
   const socialStage = frame.locator('.seo-stage', { has: card });
-  await expect(socialStage.locator('.seo-stage-cap-l')).toHaveText(/^Link preview\s*· Small card$/);
-  const about = socialStage.getByRole('button', { name: 'About this preview' });
-  await expect(about).toHaveAttribute('aria-description', 'Small card: image under 600 px wide.');
-  // Its tip opens below the caption, never over the header and its tabs.
-  await about.click();
-  const tipBox = frame.locator('.rt-TooltipContent', { hasText: 'Small card: image under 600 px wide.' });
-  await expect(tipBox).toBeVisible();
-  expect((await tipBox.boundingBox())!.y).toBeGreaterThanOrEqual((await about.boundingBox())!.y + 10);
-  await frame.locator('body').screenshot({ path: test.info().outputPath('social-tip-below.png') });
-  await about.click();
-  await expect(tipBox).toHaveCount(0);
-  // A square thumbnail, and a card no taller than it.
-  const thumb = (await card.locator('.seo-social-image').boundingBox())!;
-  expect(Math.abs(thumb.width - thumb.height)).toBeLessThanOrEqual(1);
-  expect((await card.boundingBox())!.height).toBeLessThanOrEqual(thumb.height + 1);
-  await card.screenshot({ path: test.info().outputPath('social-small-card.png') });
+  await expect(socialStage.locator('.seo-stage-cap-l')).toHaveText(/^When this job posting is shared$/);
+  await expect(card.locator('.seo-social-image img[data-front]')).toHaveAttribute('src', /\/canvas-metatag\/api\/share-preview\?/);
+  await card.screenshot({ path: test.info().outputPath('social-card.png') });
   // At 200 % zoom, a frame half as wide: the caption and the host end in an
   // ellipsis rather than mid-word, and the value menu leaves out its hints.
   await page.locator(SEO_IFRAME).evaluate((element) => {
@@ -924,7 +941,9 @@ test('a job posting: its group is named in the menu, its square logo makes a sma
   });
   await button(frame, UI.action.output).click();
   await expect(sheet(frame, 'Output').getByText(UI.output.updating)).toHaveCount(0);
-  expect((await outputRows(frame))['twitter:card']).toBe('summary');
+  // The head passes a found logo over and shares the card made from the
+  // title (head-output "A small logo found on a job posting").
+  expect((await outputRows(frame))['twitter:card']).toBe('summary_large_image');
 });
 
 test('Checks on a product say that its image has no alt text, and its currency is a code', async ({ drupal, page }) => {
@@ -1000,7 +1019,7 @@ test('a node that is not published is named as such in the caption', async ({ dr
     'aria-description',
     /^This event isn't published yet\. Its fields are read with your access until visitors can see it\. /,
   );
-  await expect(frame.locator('.seo-stage-cap-l', { hasText: 'Link preview' })).toContainText('Not published yet');
+  await expect(frame.locator('.seo-stage-cap-l', { hasText: 'When this event is shared' })).toContainText('Not published yet');
   // A click or a tap shows the sentence; a second one hides it, however
   // long after the first, and it stays hidden under the pointer.
   const about = frame.getByRole('button', { name: 'About this preview' });

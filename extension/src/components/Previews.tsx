@@ -11,16 +11,22 @@ import { useApp } from '../App';
 import {
   breadcrumb,
   emptyDescription,
+  inSentence,
   previewNote,
   previewText,
   resultDescription,
   resultName,
   shownAddresses,
   smallCard,
-  socialImage,
+  sharedImage,
 } from '../model';
 import { PICKED } from './MediaPicker';
 import { Crumbs, IconBtn, InfoTip, Sk, SparkleIcon } from './ui';
+
+/** A text as a sentence of a name: one full stop, never two. */
+export function closed(text: string): string {
+  return /[.!?…]$/u.test(text.trim()) ? text.trim() : `${text.trim()}.`;
+}
 
 /** A value that follows `value` once it has been still for `ms`. */
 function useSettled<T>(value: T, ms: number): T {
@@ -352,26 +358,28 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
       : '';
   const [broken, setBroken] = useState<string | null>(null);
   const texts = { ...view.texts, ...trial };
-  const { image } = socialImage(state, view);
+  // What links show: the server's own image for the draft.
+  const image = sharedImage(state, view);
   const small = smallCard(image);
   const large = !small;
-  // The image on screen changes only once the next one has loaded, and
-  // a large card waits for the file itself rather than show its thumbnail.
+  // The image on screen changes only once the next one has loaded.
   const [front, setFront] = useState<{ src: string; prev?: string } | null>(
     null,
   );
-  const src = image
-    ? large
-      ? (image.url ?? (front ? front.src : image.thumb))
-      : image.thumb
-    : '';
+  const src = image?.src ?? '';
+  // A card drawn from an older title while the server draws the new one, or
+  // a newer image still loading.
+  const drawnTitle = server.resolved?.head.meta.find((row) => row.property === 'og:title')?.content;
+  const pending =
+    (server.resolved?.share?.made === 'card' && drawnTitle !== undefined && drawnTitle !== view.texts.social_title) ||
+    (!!front && front.src !== src);
   // Upper case in CSS only: assistive technology reads the name as a word.
   const { host } = useAddresses();
   const emptyCard = emptyDescription('card', server.headless);
   const name = useSettled(
     `Social card preview. ${
       large ? 'Large image' : image ? 'Small image' : 'No image'
-    }. ${host}. Title: ${texts.social_title}.${
+    }. ${host}. Title: ${closed(texts.social_title)}${
       texts.social_description
         ? ` Description: ${texts.social_description}`
         : emptyCard && ` ${emptyCard}`
@@ -392,7 +400,11 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
           </span>
         ) : (
           <>
-            <span>Link preview</span>
+            <span>
+              {target?.scope === 'template'
+                ? `When this ${inSentence(target.label)} is shared`
+                : 'When this page is shared'}
+            </span>
             {small && <span>· Small card</span>}
             {unpublished && <span>· Not published yet</span>}
           </>
@@ -421,7 +433,7 @@ export function SocialPreview(props: { suggest?: ReactNode }) {
         data-testid="seo-social-preview"
         data-layout={large ? 'large' : 'compact'}
       >
-        <div className="seo-social-image">
+        <div className="seo-social-image" data-pending={pending || undefined}>
           {src && src !== broken ? (
             <>
               {front?.prev && <img key={front.prev} src={front.prev} alt="" />}

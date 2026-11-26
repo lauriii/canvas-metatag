@@ -341,7 +341,8 @@ test('a page that shows a breadcrumb describes its trail; one that does not, non
 
 test('a trail added by hand is a line of its own, with a way to what it needs', async ({ page }) => {
   const id = PAGES.trail.id;
-  const trail = { '@type': 'BreadcrumbList', '@id': '#trail', itemListElement: [{ '@type': 'ListItem', position: 1, name: 'Team' }] };
+  // An id of another site that ends as the module's does: still the editor's.
+  const trail = { '@type': 'BreadcrumbList', '@id': 'https://other.example/#breadcrumb', itemListElement: [{ '@type': 'ListItem', position: 1, name: 'Team' }] };
   await writeDraft(page, `canvas_page/${id}`, `layout/canvas_page/${id}`, { schema: { custom: JSON.stringify(trail) } });
   try {
     // The search result's address shows the page's own trail after the host.
@@ -354,8 +355,8 @@ test('a trail added by hand is a line of its own, with a way to what it needs', 
 
     await tab(frame, UI.tab.schema).click();
     await expect(stage(frame).locator('[data-line^="breadcrumb|"]')).toHaveCount(2);
-    const module = stage(frame).locator('[data-line^="breadcrumb|"][data-line$="#breadcrumb"]');
-    const hand = stage(frame).locator('[data-line^="breadcrumb|"][data-line$="#trail"]');
+    const hand = stage(frame).locator('[data-line="breadcrumb|https://other.example/#breadcrumb"]');
+    const module = stage(frame).locator('[data-line^="breadcrumb|"][data-line$="#breadcrumb"]:not([data-line*="other.example"])');
     // The module's own trail: where it comes from, nothing to meet.
     await expect(module).toContainText('Breadcrumb');
     await expect(module).not.toContainText('added by hand');

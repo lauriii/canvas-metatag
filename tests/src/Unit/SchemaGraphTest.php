@@ -635,6 +635,41 @@ final class SchemaGraphTest extends UnitTestCase {
   }
 
   /**
+   * The page node's image is only the page's own, as its original file.
+   *
+   * Structured-data "The page node describes the page": a page that shares a
+   * card or the site's image has none; a phone photo keeps its upright size.
+   */
+  public function testPrimaryImageOfPage(): void {
+    $page = static fn (array $ctx): array => array_column(self::build(['type' => 'WebPage'], [], [], $ctx)['graph']['@graph'], NULL, '@id');
+    // A page that shares a card has no image of its own.
+    $nodes = $page([]);
+    self::assertArrayNotHasKey('primaryImageOfPage', $nodes[self::URL . '#webpage']);
+    self::assertArrayNotHasKey(self::URL . '#primaryimage', $nodes);
+    // The site's image is never the page's.
+    $nodes = $page(['image' => ['source' => 'site'] + self::IMAGE]);
+    self::assertArrayNotHasKey('primaryImageOfPage', $nodes[self::URL . '#webpage']);
+    self::assertArrayNotHasKey(self::URL . '#primaryimage', $nodes);
+    // The site's image picked for the main node is written out, never a
+    // reference to the #primaryimage node the page does not emit.
+    $graph = self::build([
+      'type' => 'Article',
+      'props' => ['image' => ['media' => self::UUID]],
+    ], [], [self::UUID => self::IMAGE], ['image' => ['source' => 'site'] + self::IMAGE])['graph']['@graph'];
+    self::assertArrayNotHasKey(self::URL . '#primaryimage', array_column($graph, NULL, '@id'));
+    self::assertSame(['@type' => 'ImageObject', 'url' => self::IMAGE['url'], 'width' => 1200, 'height' => 630], end($graph)['image']);
+    // A photo stored sideways: its upright size, as the resolver reads it.
+    $nodes = $page(['image' => ['source' => 'entity', 'width' => 3000, 'height' => 4000] + self::IMAGE]);
+    self::assertSame(['@id' => self::URL . '#primaryimage'], $nodes[self::URL . '#webpage']['primaryImageOfPage']);
+    self::assertSame([self::IMAGE['url'], 3000, 4000, 'A waving hand'], [
+      $nodes[self::URL . '#primaryimage']['contentUrl'],
+      $nodes[self::URL . '#primaryimage']['width'],
+      $nodes[self::URL . '#primaryimage']['height'],
+      $nodes[self::URL . '#primaryimage']['caption'],
+    ]);
+  }
+
+  /**
    * Literals per kind, with options and pattern.
    */
   #[DataProvider('providerLiterals')]

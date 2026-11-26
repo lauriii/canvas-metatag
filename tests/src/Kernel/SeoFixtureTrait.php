@@ -13,9 +13,11 @@ use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\DependencyInjection\ContainerBuilder;
+use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\Sql\SqlContentEntityStorage;
 use Drupal\Core\PageCache\ChainRequestPolicy;
 use Drupal\Core\PageCache\RequestPolicy\NoSessionOpen;
+use Drupal\Core\Url;
 use Drupal\field\Entity\FieldConfig;
 use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\file\Entity\File;
@@ -155,6 +157,38 @@ trait SeoFixtureTrait {
   }
 
   /**
+   * A page's component tree, each instance at the top of the page.
+   *
+   * Call generateComponentConfig() first.
+   *
+   * @param array{0: string, 1: array, 2?: int, 3?: string} ...$instances
+   *   A Canvas test SDC's name (heading, my-hero, image), its inputs, and
+   *   optionally the position of the instance it is placed in and the slot.
+   *
+   * @return list<array>
+   *   The value of the page's `components` field.
+   */
+  protected static function components(array ...$instances): array {
+    $tree = [];
+    foreach ($instances as $at => $instance) {
+      $id = 'sdc.canvas_test_sdc.' . $instance[0];
+      $component = Component::load($id);
+      \assert($component instanceof Component);
+      $tree[] = [
+        'uuid' => sprintf('00000000-0000-4000-8000-%012d', $at + 1),
+        'component_id' => $id,
+        'component_version' => $component->getActiveVersion(),
+        'inputs' => $instance[1],
+      ];
+      if (isset($instance[2])) {
+        $tree[$at]['parent_uuid'] = sprintf('00000000-0000-4000-8000-%012d', $instance[2] + 1);
+        $tree[$at]['slot'] = $instance[3];
+      }
+    }
+    return $tree;
+  }
+
+  /**
    * Saves an image media item and its file.
    *
    * @param string $name
@@ -202,6 +236,27 @@ trait SeoFixtureTrait {
       'name' => (string) $media->label(),
       'thumb' => $generator->transformRelative($style->buildUrl($file->getFileUri())),
     ];
+  }
+
+  /**
+   * The address of the share version of a media item's image.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The translation that shares it.
+   * @param \Drupal\media\MediaInterface $media
+   *   The image's media item.
+   * @param bool $chosen
+   *   Chosen by an editor, not found.
+   */
+  protected function sharedPhoto(ContentEntityInterface $entity, MediaInterface $media, bool $chosen): string {
+    $file = $media->get('field_media_image')->entity;
+    \assert($file instanceof File);
+    return Url::fromRoute('canvas_metatag.share.entity', [
+      'langcode' => $entity->language()->getId(),
+      'entity_type' => $entity->getEntityTypeId(),
+      'id' => $entity->id(),
+      'name' => Resolver::hash(Resolver::photoInput($file, $chosen)) . '.jpg',
+    ], ['absolute' => TRUE, 'path_processing' => FALSE])->toString();
   }
 
   /**
@@ -377,8 +432,9 @@ trait SeoFixtureTrait {
           'heading' => ['sourceType' => 'entity-field', 'expression' => 'ℹ︎␜entity:node:article␝title␞␟value'],
         ]),
       ],
+      // Keyed by the field that backs the slot, as Canvas requires.
       'exposed_slots' => [
-        'content' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
+        'field_canvas' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
       ],
       'status' => TRUE,
     ]);

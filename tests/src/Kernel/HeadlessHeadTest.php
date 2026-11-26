@@ -64,6 +64,7 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
   use GenerateComponentConfigTrait;
   use RequestTrait;
   use SeoFixtureTrait;
+  use ShareTestTrait;
   use UserCreationTrait;
 
   private const FRONTEND = 'https://www.example.com';
@@ -169,6 +170,98 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
   public function register(ContainerBuilder $container): void {
     parent::register($container);
     self::allowPageCaches($container);
+    self::spyOnRenderer($container);
+  }
+
+  /**
+   * The content API carries the coupled head's share images.
+   *
+   * Headless-head "The content API carries the same share images".
+   */
+  public function testShareImages(): void {
+    $page = $this->createPage([
+      'title' => 'Services',
+      'description' => '',
+      'components' => [
+        ['uuid' => '2c6e91ae-23ac-433d-9bb8-687144464b34', 'component_id' => 'js.canvas_headless_test', 'inputs' => []],
+      ],
+    ]);
+    $page->addTranslation('fr', ['title' => 'Services', 'status' => TRUE, 'path' => ['alias' => '/fr-services']])->save();
+    $rows = static fn (array $head): array => array_values(array_filter(
+      $head['meta'],
+      static fn (array $row): bool => str_starts_with($row['property'] ?? '', 'og:image') || str_starts_with($row['property'] ?? '', 'og:locale') || ($row['name'] ?? '') === 'twitter:card',
+    ));
+    $head = self::decodeResponse($this->content('/pricing'))['head'];
+    // The coupled adapter emits what the resolver gives.
+    $coupled = $this->resolver()->resolve(Page::load($page->id()))['head'];
+    self::assertSame($rows($coupled), $rows($head));
+    $meta = self::meta($head);
+    self::assertSame(['en_US', 'fr_FR', 'image/png', '1200', '630', 'Services, Example'], [
+      $meta['og:locale'],
+      $meta['og:locale:alternate'],
+      $meta['og:image:type'],
+      $meta['og:image:width'],
+      $meta['og:image:height'],
+      $meta['og:image:alt'],
+    ]);
+    // On Drupal's own address, where the card is made.
+    self::assertMatchesRegularExpression('#^http://localhost/canvas-metatag/share/en/canvas_page/\d+/[0-9a-f]{16}\.png$#', $meta['og:image']);
+    self::assertSame([], ShareRendererSpy::$drawn);
+    $card = $this->fetch($meta['og:image']);
+    self::assertSame(200, $card->getStatusCode());
+    self::assertSame('image/png', $card->headers->get('Content-Type'));
+    self::assertSame('Services', ShareRendererSpy::$drawn[0][1]['title']);
+
+    // Fetched at an address visitors' apps can't reach, the images are
+    // addressed there too: remembered for the administrators' checks, and
+    // forgotten once the frontend uses a public one. Only where trusted host
+    // patterns checked the host: elsewhere anyone may send any Host.
+    $state = $this->container->get('state');
+    $internal = self::meta(self::decodeResponse($this->content('/pricing', drupal: 'http://cms:8080'))['head']);
+    self::assertStringStartsWith('http://cms:8080/canvas-metatag/share/', $internal['og:image']);
+    self::assertNull($state->get('canvas_metatag.share_host'));
+    Request::setTrustedHosts(['^cms$', '^cms\\.example\\.com$', '^localhost$']);
+    try {
+      $this->content('/pricing', drupal: 'http://cms:8081');
+      self::assertSame('http://cms:8081', $state->get('canvas_metatag.share_host'));
+      $this->content('/pricing', drupal: 'https://cms.example.com');
+      self::assertNull($state->get('canvas_metatag.share_host'));
+      // A public host, but http while visitors use https.
+      $this->content('/pricing', drupal: 'http://cms.example.com');
+      self::assertSame('http://cms.example.com', $state->get('canvas_metatag.share_host'));
+      // A production site is not excused by fetching through localhost: the
+      // site's public origin decides whether this is a development copy.
+      $this->setSetting('canvas_metatag_public_base', 'https://www.example.com');
+      $this->content('/pricing', drupal: 'http://localhost:8080');
+      self::assertSame('http://localhost:8080', $state->get('canvas_metatag.share_host'));
+    }
+    finally {
+      $this->setSetting('canvas_metatag_public_base', NULL);
+      Request::setTrustedHosts([]);
+    }
+    $state->delete('canvas_metatag.share_host');
+
+    // The owned front page carries the coupled head's site icons.
+    $this->container->get('theme_installer')->install(['stark']);
+    $this->config('system.theme')->set('default', 'stark')->save();
+    $this->config('system.site')->set('page.front', '/pricing')->save();
+    $icons = static fn (array $links): array => array_values(array_filter(
+      $links,
+      static fn (array $link): bool => in_array($link['rel'], ['icon', 'apple-touch-icon'], TRUE),
+    ));
+    $front = $icons(self::decodeResponse($this->content('/pricing', drupal: 'http://localhost'))['head']['link']);
+    self::assertSame(['icon', 'icon', 'apple-touch-icon'], array_column($front, 'rel'));
+    self::assertSame($icons($this->resolver()->resolve(Page::load($page->id()))['head']['link']), $front);
+
+    // A preview token: the draft's image is never at a public address.
+    $this->disableModules(['page_cache']);
+    $draft = Page::load($page->id());
+    $draft->set('title', 'Draft services');
+    $this->container->get(AutoSaveManager::class)->saveEntity($draft);
+    $this->setCurrentAccount($this->tokenAccount(TRUE));
+    $image = self::meta(self::decodeResponse($this->content('/pricing'))['head'])['og:image'];
+    self::assertStringStartsWith('http://localhost/canvas-metatag/api/share-preview?', $image);
+    self::assertStringNotContainsString('/canvas-metatag/share/', $image);
   }
 
   /**
@@ -212,7 +305,7 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     // A development frontend in production: no canonical, og:url, hreflang
     // or script; the title, description and image stay.
     $response = $this->content('/pricing', drupal: 'https://cms.example.com');
-    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Dynamic-Cache'));
     $production = self::decodeResponse($response)['head'];
     self::assertSame([], $production['link']);
     self::assertSame([], $production['script']);
@@ -229,12 +322,13 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     self::assertSame('http://localhost:3000/pricing', self::meta($development)['og:url']);
     self::assertCount(1, $development['script']);
 
-    // Each Drupal host keeps its own head in the page cache.
+    // Each Drupal host keeps its own head in the dynamic page cache (Canvas
+    // keeps its content API out of the internal page cache).
     $cached = $this->content('/pricing', drupal: 'https://cms.example.com');
-    self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
+    self::assertSame('HIT', $cached->headers->get('X-Drupal-Dynamic-Cache'));
     self::assertSame($production, self::decodeResponse($cached)['head']);
     $cached = $this->content('/pricing', drupal: 'https://cms.example.test');
-    self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
+    self::assertSame('HIT', $cached->headers->get('X-Drupal-Dynamic-Cache'));
     self::assertSame($development, self::decodeResponse($cached)['head']);
 
     // Drupal on an internal name is production-like, as a private address
@@ -301,7 +395,7 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     $page->save();
 
     $response = $this->content('/pricing');
-    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Dynamic-Cache'));
     $data = self::decodeResponse($response);
     self::assertSame(['content', 'head', 'route', 'context'], array_keys($data));
     $head = $data['head'];
@@ -321,8 +415,8 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
       ['rel' => 'alternate', 'hreflang' => 'x-default', 'href' => self::FRONTEND . '/pricing'],
     ], $head['link']);
     self::assertSame(self::FRONTEND . '/plans', self::meta($head)['og:url']);
-    self::assertSame($this->imageOf($hero)['url'], self::meta($head)['og:image']);
-    self::assertStringStartsWith('http://localhost/', self::meta($head)['og:image']);
+    // The page's own image, as its share version made by Drupal.
+    self::assertMatchesRegularExpression('#^http://localhost/canvas-metatag/share/en/canvas_page/\d+/[0-9a-f]{16}\.jpg$#', self::meta($head)['og:image']);
     // The script is the graph as an object, never a string of HTML.
     self::assertSame(['type', 'textContent'], array_keys($head['script'][0]));
     self::assertSame('https://schema.org', $head['script'][0]['textContent']['@context']);
@@ -345,14 +439,14 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     }
     self::assertNotContains(AutoSaveManager::CACHE_TAG, $response->getCacheableMetadata()->getCacheTags());
 
-    // The second request is served from the page cache with our head, and a
-    // dependency of ours invalidates it.
+    // The second request is served from the dynamic page cache with our
+    // head, and a dependency of ours invalidates it.
     $cached = $this->content('/pricing');
-    self::assertSame('HIT', $cached->headers->get('X-Drupal-Cache'));
+    self::assertSame('HIT', $cached->headers->get('X-Drupal-Dynamic-Cache'));
     self::assertSame($response->getContent(), $cached->getContent());
     $this->config('canvas_metatag.site')->set('identity.name', 'Example Ltd')->save();
     $response = $this->content('/pricing');
-    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Dynamic-Cache'));
     self::assertSame('Pricing | Example Ltd', self::decodeResponse($response)['head']['title']);
     // The translation Canvas rendered.
     $french = self::decodeResponse($this->content('/fr/tarifs'))['head'];
@@ -374,7 +468,7 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
     $this->container->get('config.factory')->clearStaticCache();
     Cache::invalidateTags(['canvas_page:' . $page->id()]);
     $response = $this->content('/pricing');
-    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Dynamic-Cache'));
     $without = (string) $response->getContent();
     self::assertSame(['title' => 'Pricing'], self::decodeResponse($response)['head']);
     self::assertCount(1, $this->errors());

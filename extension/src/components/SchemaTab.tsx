@@ -20,7 +20,7 @@ import {
 } from 'react';
 
 import { useApp } from '../App';
-import { QUIET, groupGap, lineName, notYetText, retiredText, stageMatch, verdictText } from '../checks';
+import { QUIET, groupGap, isOwnNode, lineName, notYetText, retiredText, stageMatch, verdictText } from '../checks';
 import {
   andList,
   catchingUp,
@@ -1357,7 +1357,7 @@ function Stage(props: { onReveal(key: string): void }) {
         {verdicts.map((verdict) => {
           // A feature said twice: the line of a hand-added item says so.
           const twice = verdicts.filter((one) => one.feature === verdict.feature).length > 1;
-          const hand = twice && !server.module_ids?.[(verdict.node ?? '').split('#').pop()!];
+          const hand = twice && !isOwnNode(report?.nodes, verdict.node);
           const label = `${featureLabel(rules, verdict.feature)}${hand ? ' (added by hand)' : ''}`;
           const words = verdictText(server, verdict, emptyFor);
           const action = fix(verdict);
@@ -1549,8 +1549,7 @@ function Proof(props: { verdict: Verdict; label: string; words: string }) {
     .filter((fact) => fact.rule !== undefined && (ruleOnly(fact) || !asked.includes(fact.path)))
     .map((fact) => feature.rules?.[fact.rule!]?.need ?? rules.facts[fact.path]?.need ?? fact.path);
   // The module's own items and the hand-added ones.
-  const fragment = (verdict.node ?? '').split('#').pop() ?? '';
-  const ownNode = !!server.module_ids?.[fragment];
+  const ownNode = isOwnNode(report?.nodes, verdict.node);
   const ownTrail = ownNode && verdict.feature === 'breadcrumb';
   const kindLabel = typeof node?.['@type'] === 'string' ? rules.labels?.[node['@type']]?.toLowerCase() : undefined;
   return (

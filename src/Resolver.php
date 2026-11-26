@@ -14,6 +14,7 @@ use Drupal\Core\Cache\Cache;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Entity\Display\EntityDisplayInterface;
 use Drupal\Core\Entity\Display\EntityFormDisplayInterface;
 use Drupal\Core\Entity\EntityFieldManagerInterface;
 use Drupal\Core\Entity\EntityInterface;
@@ -24,20 +25,21 @@ use Drupal\Core\Extension\ModuleHandlerInterface;
 use Drupal\Core\Field\FieldDefinitionInterface;
 use Drupal\Core\Field\FieldItemInterface;
 use Drupal\Core\File\FileUrlGeneratorInterface;
-use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
+use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Routing\RequestContext;
 use Drupal\Core\Routing\RouteMatch;
 use Drupal\Core\Routing\RouteProviderInterface;
 use Drupal\Core\Session\AccountSwitcherInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\Core\Site\Settings;
+use Drupal\Core\StreamWrapper\StreamWrapperManager;
 use Drupal\Core\StringTranslation\TranslationInterface;
 use Drupal\Core\StringTranslation\TranslationManager;
-use Drupal\Core\StreamWrapper\StreamWrapperManager;
 use Drupal\Core\Url;
 use Drupal\file\FileInterface;
+use Drupal\language\ConfigurableLanguageManagerInterface;
 use Drupal\media\MediaInterface;
 use Drupal\media\Plugin\media\Source\Image;
 use Drupal\path_alias\AliasManagerInterface;
@@ -95,6 +97,16 @@ final class Resolver {
    */
   private readonly AnonymousUserSession $anonymous;
 
+  /**
+   * The file of each image array built, by its URL (fileArray()).
+   *
+   * Read right after the image array it belongs to, and emptied as each
+   * head is built (resolve()).
+   *
+   * @var array<string, \Drupal\file\FileInterface>
+   */
+  private array $files = [];
+
   public function __construct(
     private readonly EntityTypeManagerInterface $entityTypeManager,
     private readonly ConfigFactoryInterface $configFactory,
@@ -113,6 +125,9 @@ final class Resolver {
     private readonly AccountSwitcherInterface $accountSwitcher,
     private readonly LanguageManagerInterface $languageManager,
     private readonly TranslationInterface $translation,
+    private readonly ShareRenderer $renderer,
+    private readonly PageContent $content,
+    private readonly PageText $pageText,
   ) {
     $this->resolved = new \WeakMap();
     $this->anonymous = new AnonymousUserSession();
@@ -210,9 +225,10 @@ final class Resolver {
    *   Without an entity: the node type whose form names `via`, so that a
    *   template of a type with no item yet says where its values come from.
    *
-   * @return array<string, array{label: string, kind: string, value: string, text?: string, image?: ?array, via?: string}>
+   * @return array<string, array{label: string, kind: string, value: string, text?: string, image?: ?array, hidden?: true, via?: string}>
    *   Name => fact. The Image fact has an empty `value` and an `image`: the
-   *   image array without `source`, or NULL. `via`: the field a node's
+   *   image array without `source`, or NULL; `hidden` when a Canvas page's
+   *   Image field holds one visitors can't see. `via`: the field a node's
    *   Description or Image fact is taken from, as the link menu names it
    *   ("Body › Summary" for a summary), else the first that could give it.
    *   `text`: a date fact in words, as a place that composes reads it
@@ -246,16 +262,37 @@ final class Resolver {
     }
 
     if ($entity?->getEntityTypeId() === 'canvas_page') {
+      // A page still named with Canvas's placeholder is named by its first
+      // heading; one without its own description is described by its text.
+      $own = $entity->language()->getId();
+      if (in_array($facts['title']['value'], $this->content->placeholders($own), TRUE)) {
+        // The dialog asks for a name ("Name this page").
+        $facts['title']['placeholder'] = $facts['title']['value'];
+        $facts['title']['value'] = $this->content->read($entity, $cacheability)['heading'] ?: $facts['title']['value'];
+      }
       $facts['description']['value'] = (string) $entity->get('description')->value;
-      $facts['image']['image'] = $this->mediaImage($entity->get('image')->entity, $langcode, $cacheability);
+      if (trim($facts['description']['value']) === '') {
+        $facts['description']['value'] = Values::sentences($this->pageText->description($entity, $cacheability), 160, $own);
+        // The dialog says so ("From the page's text").
+        $facts['description']['derived'] = $facts['description']['value'] !== '';
+      }
+      $media = $entity->get('image')->entity;
+      $facts['image']['image'] = $this->mediaImage($media, $langcode, $cacheability);
+      // The dialog says why the page shares something else.
+      if ($media !== NULL && $facts['image']['image'] === NULL) {
+        $facts['image']['hidden'] = TRUE;
+      }
       return $facts;
     }
 
     // The first formatted text with a summary, the text fields named for a
-    // description, and the first image that resolves, in the order of the
-    // form. Without an entity, only the fields they would come from.
+    // description, the formatted and long text fields, and the first image
+    // that resolves, in the order of the form. Without an entity, only the
+    // fields they would come from.
     $formatted = NULL;
     $named = [];
+    $longs = [];
+    $shown = $this->shown($entity?->getEntityTypeId() ?? 'node', $entity?->bundle() ?? $bundle, $cacheability);
     foreach ($this->formFields($entity?->getEntityTypeId() ?? 'node', $entity?->bundle() ?? $bundle, $cacheability) as $name => $definition) {
       $type = $definition->getType();
       $image = $type === 'image' || $this->referencesImageMedia($definition);
@@ -263,6 +300,10 @@ final class Resolver {
       if (in_array('description', $this->sources->namedFor($definition), TRUE)) {
         $named[$name] = (string) $definition->getLabel();
         continue;
+      }
+      // Not one the page keeps out of view, as an editorial note is.
+      if (in_array($type, ['text_with_summary', 'text_long', 'string_long'], TRUE) && ($shown === NULL || isset($shown[$name]))) {
+        $longs[$name] = (string) $definition->getLabel();
       }
       if (($type !== 'text_with_summary' || $formatted !== NULL) && (!$image || $facts['image']['image'] !== NULL)) {
         continue;
@@ -303,10 +344,17 @@ final class Resolver {
         return $facts;
       }
     }
-    if ($formatted !== NULL) {
-      $facts['description']['value'] = Values::excerpt(Values::fromHtml((string) $formatted[1]?->get('value')->getValue()));
+    // Else the first formatted or long text with text, cut to its sentences.
+    foreach ($entity === NULL ? [] : $longs as $name => $label) {
+      $items = $entity->get($name);
+      $value = $this->allowed($items, 'view', $cacheability) ? (string) $items->first()?->get('value')->getValue() : '';
+      $text = $items->getFieldDefinition()->getType() === 'string_long' ? Values::plain($value, PHP_INT_MAX) : Values::fromHtml($value);
+      if ($text !== '') {
+        $facts['description'] = ['value' => Values::sentences($text, 160, $langcode), 'via' => $label] + $facts['description'];
+        return $facts;
+      }
     }
-    $via = $formatted[0] ?? reset($named);
+    $via = $formatted[0] ?? reset($longs) ?: reset($named);
     if ($via !== FALSE) {
       $facts['description']['via'] = $via;
     }
@@ -781,8 +829,9 @@ final class Resolver {
    * @param bool $draft
    *   Read the content template's Canvas draft for the type layer.
    *
-   * @return array{head: array{title: string, meta: list<array<string, string>>, link: list<array<string, string>>, script: list<array{type: string, textContent: array}>}, image: ?array, schema: array, cacheability: \Drupal\Core\Cache\CacheableMetadata}
-   *   The head in emission order, the effective social image, what building
+   * @return array{head: array{title: string, meta: list<array<string, string>>, link: list<array<string, string>>, script: list<array{type: string, textContent: array}>}, image: ?array, share: ?array, schema: array, cacheability: \Drupal\Core\Cache\CacheableMetadata}
+   *   The head in emission order, the effective social image, what the
+   *   module makes of it (share()), what building
    *   the structured data reported (SchemaGraph::build(), without the graph)
    *   and everything the result depends on. Nothing only the dialog shows is
    *   computed here: see report().
@@ -795,6 +844,9 @@ final class Resolver {
       return $kept['result'];
     }
 
+    // The files of this head's images only: the map never outgrows one head
+    // in a long process, nor keeps a file saved since.
+    $this->files = [];
     $cacheability = (new CacheableMetadata())
       ->addCacheableDependency($entity)
       ->addCacheContexts(['languages:language_content']);
@@ -849,19 +901,35 @@ final class Resolver {
     }
 
     // The social image (a media item: an override; the Image fact or a
-    // linked field: the entity's), the Image fact, the site default.
+    // linked field: the entity's), the Image fact, a Canvas page's first
+    // component image; then the site's image when the site chose it (the
+    // card comes after the graph: sent()). A found image no share version is
+    // made of is passed over while the site makes them; the structured data
+    // still names the page's first own image, as its original file.
+    $made = $this->renderer->available();
     $image = NULL;
+    $first = NULL;
     $chain = [
       [$effective['social']['image'] ?? NULL, isset($effective['social']['image']['media']) ? 'override' : 'entity'],
       [['fact' => 'image'], 'entity'],
-      [$identity['default_image'] === '' ? NULL : ['media' => $identity['default_image']], 'site'],
+      [$entity->getEntityTypeId() === 'canvas_page' ? 'component' : NULL, 'component'],
     ];
     foreach ($chain as [$reference, $source]) {
-      $image = $reference === NULL ? NULL : $value($reference, 'image');
-      if (is_array($image)) {
-        $image['source'] = $source;
-        break;
+      $found = match (TRUE) {
+        !$reference => NULL,
+        $reference === 'component' => $this->componentImage($entity, $cacheability),
+        default => $value($reference, 'image'),
+      };
+      if (is_array($found)) {
+        $first ??= $found + ['source' => $source];
+        if (!$made || $this->treatment($found, $source === 'override') !== 'skip') {
+          $image = $found + ['source' => $source];
+          break;
+        }
       }
+    }
+    if ($image === NULL && $identity['share_fallback'] === 'image') {
+      $image = $this->siteImage($identity, $made, $cacheability);
     }
 
     // Dated opening hours that have passed are left out: a head that has
@@ -887,7 +955,7 @@ final class Resolver {
       'currency' => $this->site($cacheability)['currency'],
       'identity' => ['kind' => $identity['kind'], 'name' => $site_name, 'same_as' => $identity['same_as']],
       'logo' => $identity['logo'] === '' ? NULL : $this->image($identity['logo'], $cacheability),
-      'image' => $image,
+      'image' => $first ?? $image,
       'breadcrumb' => $trail,
       'facts' => ['sep' => $identity['separator'], 'image' => $facts['image']['image']['url'] ?? '']
       + array_map(static fn (array $fact): string => $fact['value'], array_diff_key($facts, ['image' => TRUE])),
@@ -915,30 +983,13 @@ final class Resolver {
     $report['today'] = $today->format('Y-m-d');
     $report['url'] = $own;
     $article = $og_type === 'article';
+    [$image, $share, $sent] = $this->sent($entity, $draft, $image, $identity, [
+      'social_title' => $texts['social_title'],
+      'site' => $site_name,
+      'title' => $facts['title']['value'],
+    ], $report, $cacheability);
 
-    $meta = [
-      ['name' => 'description', 'content' => $texts['description']],
-      ['name' => 'robots', 'content' => implode(', ', $directives)],
-      ['property' => 'og:type', 'content' => $og_type],
-      ['property' => 'og:site_name', 'content' => $site_name],
-      ['property' => 'og:title', 'content' => $texts['social_title']],
-      ['property' => 'og:description', 'content' => $texts['social_description']],
-      ['property' => 'og:url', 'content' => Values::isHttpUrl($canonical) ? $canonical : ''],
-      ['property' => 'og:image', 'content' => $image['url'] ?? ''],
-      ['property' => 'og:image:width', 'content' => (string) (($image['width'] ?? 0) ?: '')],
-      ['property' => 'og:image:height', 'content' => (string) (($image['height'] ?? 0) ?: '')],
-      ['property' => 'og:image:alt', 'content' => $image['alt'] ?? ''],
-      ['property' => 'article:published_time', 'content' => $article ? $facts['published']['value'] : ''],
-      ['property' => 'article:modified_time', 'content' => $article ? $facts['modified']['value'] : ''],
-      // A literal protocol token. Nothing else of that family is emitted;
-      // consumers fall back to the Open Graph values.
-      [
-        'name' => 'twitter:card',
-        'content' => $image !== NULL && $image['width'] >= self::LARGE_CARD['width'] && $image['height'] >= self::LARGE_CARD['height'] ? 'summary_large_image' : 'summary',
-      ],
-    ];
-
-    $link = [['rel' => 'canonical', 'href' => $canonical]];
+    // Each published translation the hreflang links name, and their locales.
     $alternates = [];
     foreach ($addressed ? array_keys($entity->getTranslationLanguages()) : [] as $langcode) {
       $translation = $entity->getTranslation($langcode);
@@ -946,12 +997,50 @@ final class Resolver {
         $alternates[$langcode] = $this->url($translation, $cacheability);
       }
     }
+    $country = (string) $this->configFactory->get('system.date')->get('country.default');
+    $locale = $entity->language()->isLocked() ? '' : OgLocale::of($entity->language()->getId(), $country);
+    // Each other locale once: two langcodes can share one ("en" and
+    // "en-x-simple"), and the page's own is no alternate.
+    $others = count($alternates) > 1 ? array_diff(array_keys($alternates), [$entity->language()->getId()]) : [];
+    $other_locales = array_map(static fn ($langcode): string => OgLocale::of((string) $langcode, $country), $others);
+    $locales = array_map(
+      static fn (string $other): array => ['property' => 'og:locale:alternate', 'content' => $other],
+      array_values(array_diff(array_unique($other_locales), [$locale, ''])),
+    );
+
+    $meta = [
+      ['name' => 'description', 'content' => $texts['description']],
+      ['name' => 'robots', 'content' => implode(', ', $directives)],
+      ['property' => 'og:type', 'content' => $og_type],
+      ['property' => 'og:site_name', 'content' => $site_name],
+      ['property' => 'og:locale', 'content' => $locale],
+      ...$locales,
+      ['property' => 'og:title', 'content' => $texts['social_title']],
+      ['property' => 'og:description', 'content' => $texts['social_description']],
+      ['property' => 'og:url', 'content' => Values::isHttpUrl($canonical) ? $canonical : ''],
+      ['property' => 'og:image', 'content' => $sent['url'] ?? ''],
+      ['property' => 'og:image:type', 'content' => $sent['type'] ?? ''],
+      ['property' => 'og:image:width', 'content' => (string) (($sent['width'] ?? 0) ?: '')],
+      ['property' => 'og:image:height', 'content' => (string) (($sent['height'] ?? 0) ?: '')],
+      ['property' => 'og:image:alt', 'content' => $sent['alt'] ?? ''],
+      ['property' => 'article:published_time', 'content' => $article ? $facts['published']['value'] : ''],
+      ['property' => 'article:modified_time', 'content' => $article ? $facts['modified']['value'] : ''],
+      // A literal protocol token. Nothing else of that family is emitted;
+      // consumers fall back to the Open Graph values.
+      [
+        'name' => 'twitter:card',
+        'content' => $sent !== NULL && $sent['width'] >= self::LARGE_CARD['width'] && $sent['height'] >= self::LARGE_CARD['height'] ? 'summary_large_image' : 'summary',
+      ],
+    ];
+
+    $link = [['rel' => 'canonical', 'href' => $canonical]];
     if (count($alternates) > 1) {
       $default = $entity->getUntranslated()->language()->getId();
       foreach ($alternates + (isset($alternates[$default]) ? ['x-default' => $alternates[$default]] : []) as $hreflang => $href) {
         $link[] = ['rel' => 'alternate', 'hreflang' => (string) $hreflang, 'href' => $href];
       }
     }
+    $link = [...$link, ...$this->icons($report['front'], $cacheability)];
 
     // A page without an address carries no structured data: every @id is
     // one. script() sets $error; without it, there is none.
@@ -979,11 +1068,27 @@ final class Resolver {
         'script' => $script,
       ],
       'image' => $image,
+      'share' => $share,
       'schema' => array_diff_key($report, ['graph' => TRUE]),
       'cacheability' => $cacheability,
     ];
-    $this->resolved[$entity] = ['request' => $request, 'draft' => $draft, 'result' => $result];
+    // The card it would share, for a sample of a choice not saved yet
+    // (cardInput()). Given the entity, so the map's value holds no key.
+    $card = fn (ContentEntityInterface $entity, CacheableMetadata $cacheability): array => $share['card']
+      ?? $this->card($entity, $texts['social_title'], $report['type'], $report['graph'], $report['url'], $cacheability);
+    $this->resolved[$entity] = ['request' => $request, 'draft' => $draft, 'result' => $result, 'card' => $card];
     return $result;
+  }
+
+  /**
+   * The card an entity shares, or would share were cards the site's choice.
+   *
+   * What resolve() gives a card to draw (Site › Sharing samples a choice
+   * before it is saved), whatever the entity shares now.
+   */
+  public function cardInput(ContentEntityInterface $entity, CacheableMetadata $cacheability): array {
+    $cacheability->addCacheableDependency($this->resolve($entity)['cacheability']);
+    return $this->resolved[$entity]['card']($entity, $cacheability);
   }
 
   /**
@@ -1326,6 +1431,415 @@ final class Resolver {
   }
 
   /**
+   * What a card draws (CardInput), from the head's own values.
+   *
+   * Built from the entity and from configuration read in the entity's
+   * language, never from the request: the same for every host and
+   * interface language. Its hash() is the card's address; share() gives it.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The translation.
+   * @param string $title
+   *   The og:title as emitted.
+   * @param string $type
+   *   The page's schema type.
+   * @param array $graph
+   *   The head's graph, with its @context.
+   * @param string $url
+   *   The entity's own URL: the @id of its nodes.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the input depends on.
+   */
+  private function card(ContentEntityInterface $entity, string $title, string $type, array $graph, string $url, CacheableMetadata $cacheability): array {
+    // The values of the main thing and of the page, as visitors get them.
+    $nodes = array_column($graph['@graph'] ?? [], NULL, '@id');
+    $values = array_filter(($nodes["$url#primary"] ?? []) + ($nodes["$url#webpage"] ?? []), 'is_string');
+    $langcode = $entity->language()->getId();
+    // A renamed bundle is a new head (design D15).
+    $bundle_type = $entity->getEntityType()->getBundleEntityType();
+    $bundle = $bundle_type === NULL ? NULL : $this->entityTypeManager->getStorage($bundle_type)->load($entity->bundle());
+    if ($bundle !== NULL) {
+      $cacheability->addCacheableDependency($bundle);
+    }
+    return [
+      'layout' => 'page',
+      'title' => $title,
+      'label' => ShareLabel::text($type, $values, $langcode, $this->words, $this->translation, $cacheability),
+      'dir' => $entity->language()->getDirection() === LanguageInterface::DIRECTION_RTL ? 'R' : 'L',
+      'langcode' => $langcode,
+    ] + $this->brand($langcode, $cacheability);
+  }
+
+  /**
+   * What Site › Sharing draws its samples with.
+   *
+   * The brand in the default language, with the name, logo and colour being
+   * edited. Never stored, never given an address.
+   *
+   * @param array{name: string, logo: string, colour: string} $editing
+   *   Cleaned identity members (Values::cleanIdentity()); an empty name is
+   *   the Site name.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the brand depends on.
+   */
+  public function sampleBrand(array $editing, CacheableMetadata $cacheability): array {
+    return $this->brand($this->languageManager->getDefaultLanguage()->getId(), $cacheability, $editing);
+  }
+
+  /**
+   * What the site icons draw: the brand in the default language.
+   */
+  public function iconInput(CacheableMetadata $cacheability): array {
+    return $this->brand($this->languageManager->getDefaultLanguage()->getId(), $cacheability);
+  }
+
+  /**
+   * The address of a made image's input: 16 hex digits.
+   */
+  public static function hash(array $input): string {
+    return substr(hash('sha256', json_encode($input, JSON_THROW_ON_ERROR)), 0, 16);
+  }
+
+  /**
+   * What a photo's share version is made from.
+   *
+   * @param \Drupal\file\FileInterface $file
+   *   The image file.
+   * @param bool $chosen
+   *   Chosen by an editor, not found: never enlarged, never skipped.
+   */
+  public static function photoInput(FileInterface $file, bool $chosen): array {
+    return [
+      'file' => (int) $file->id(),
+      'changed' => (int) $file->getChangedTime(),
+      'chosen' => $chosen,
+      'version' => ShareRenderer::VERSION,
+    ];
+  }
+
+  /**
+   * The image an entity shares, as the module makes it (resolve()).
+   *
+   * @return array{file: \Drupal\file\FileInterface, chosen: bool, site?: true}|array{original: array}|array{card: array}|null
+   *   A share version of a file, chosen by someone (never enlarged) or found,
+   *   `site` for the site's image (made()); an original file sent as it is;
+   *   a card; NULL when the entity shares no image.
+   */
+  public function share(ContentEntityInterface $entity, CacheableMetadata $cacheability, bool $draft = FALSE): ?array {
+    $result = $this->resolve($entity, $draft);
+    $cacheability->addCacheableDependency($result['cacheability']);
+    return $result['share'];
+  }
+
+  /**
+   * The address of the image an entity shares (share()), or NULL.
+   */
+  public function shareUrl(ContentEntityInterface $entity, CacheableMetadata $cacheability): ?string {
+    $result = $this->resolve($entity);
+    $cacheability->addCacheableDependency($result['cacheability']);
+    $url = NULL;
+    foreach ($result['head']['meta'] as $row) {
+      $url = ($row['property'] ?? '') === 'og:image' ? $row['content'] : $url;
+    }
+    return $url;
+  }
+
+  /**
+   * What a head sends as its image, and the image it describes.
+   *
+   * The chain's image as the module makes it; without one, the site's
+   * choice: a card made from the title, else the site's image when no card
+   * can be made. Decided from values already resolved: nothing is drawn.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The translation.
+   * @param bool $draft
+   *   A draft's made images are previewed, never given a public address; a
+   *   page without a draft of its own shares what is live.
+   * @param array|null $image
+   *   The chain's image, with its source.
+   * @param array $identity
+   *   The identity.
+   * @param array{social_title: string, site: string, title: string} $words
+   *   The og:title, the Site name and the Title fact.
+   * @param array $report
+   *   What SchemaGraph::build() reported, with the graph.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the result depends on.
+   *
+   * @return array{0: ?array, 1: ?array, 2: ?array}
+   *   The image sent, with its source; share(); and the rows: url, type,
+   *   width, height and alt.
+   */
+  private function sent(ContentEntityInterface $entity, bool $draft, ?array $image, array $identity, array $words, array $report, CacheableMetadata $cacheability): array {
+    $made = $this->renderer->available();
+    $fallback = $identity['share_fallback'];
+    $share = $image === NULL ? NULL : $this->made($image, $made);
+    if ($image === NULL && $made && $fallback === 'card') {
+      $card = $this->card($entity, $words['social_title'], $report['type'], $report['graph'], $report['url'], $cacheability);
+      $text = ShareText::clean($card['title']);
+      $share = $text !== '' && ShareText::tokens($text, 'title') !== NULL ? ['card' => $card] : NULL;
+    }
+    // No card can be made: the site's image.
+    if ($image === NULL && $share === NULL && $fallback === 'card') {
+      $image = $this->siteImage($identity, $made, $cacheability);
+      $share = $image === NULL ? NULL : $this->made($image, $made);
+    }
+    if ($share === NULL) {
+      return [$image, NULL, NULL];
+    }
+    // A made image lives under its entity's address, where the route checks
+    // that visitors may view the entity and rebuilds what it shares; the
+    // site's image under the site's, once for every page that shares it.
+    if (isset($share['file'])) {
+      $cacheability->addCacheableDependency($share['file']);
+    }
+    // Draft values are previewed, never given a public address. A page read
+    // as a draft without one of its own (only its chrome may have one) shares
+    // what is live, at its public address.
+    $preview = $draft;
+    if ($draft && $entity->getEntityTypeId() === 'canvas_page') {
+      $own = $this->autoSaveManager->getAutoSaveEntity($entity);
+      $cacheability->addCacheableDependency($own);
+      $preview = !$own->isEmpty();
+    }
+    $url = fn (): string => $preview || isset($share['site']) ? $this->previewUrl($entity, $share, $cacheability) : $this->madeUrl('canvas_metatag.share.entity', [
+      'langcode' => $entity->language()->getId(),
+      'entity_type' => $entity->getEntityTypeId(),
+      'id' => $entity->id(),
+      'name' => isset($share['card']) ? self::hash($share['card']) . '.png' : self::hash(self::photoInput($share['file'], $share['chosen'])) . '.jpg',
+    ], $cacheability);
+    $made = ['width' => ShareCard::W, 'height' => ShareCard::H];
+    $rows = match (TRUE) {
+      isset($share['card']) => ['url' => $url(), 'type' => 'image/png'] + $made + [
+        'alt' => implode(', ', array_filter([$words['social_title'], $words['site']], 'strlen')),
+      ],
+      isset($share['file']) => ['url' => $url(), 'type' => 'image/jpeg'] + $made,
+      default => ['url' => $image['url'], 'type' => $image['mime']] + array_intersect_key($image, $made),
+    };
+    $rows['alt'] ??= match (TRUE) {
+      $image['alt'] !== '' => $image['alt'],
+      $image['source'] === 'site' => $words['site'],
+      default => self::describes($image['name'], $words['title']) ? $image['name'] : '',
+    };
+    return [$image, $share, $rows];
+  }
+
+  /**
+   * What the module sends of an image: a share version or the original.
+   *
+   * @return array{file: \Drupal\file\FileInterface, chosen: bool, site?: true}|array{original: array}|null
+   *   `site`: the site's image, whose share version has the site's address.
+   *   NULL for an image no share version is made of and that is not sent.
+   */
+  private function made(array $image, bool $made): ?array {
+    $chosen = in_array($image['source'], ['override', 'site'], TRUE);
+    $treatment = $made ? $this->treatment($image, $chosen) : 'original';
+    $file = $this->files[$image['url']] ?? NULL;
+    return match (TRUE) {
+      $treatment === 'skip' => NULL,
+      // A WebP image this GD cannot read is sent as it is.
+      $treatment === 'original' || $file === NULL || !$this->renderer->reads($image['mime']) => ['original' => $image],
+      default => ['file' => $file, 'chosen' => $chosen] + ($image['source'] === 'site' ? ['site' => TRUE] : []),
+    };
+  }
+
+  /**
+   * What becomes of an image (ShareImage::treatment()), by its upright size.
+   *
+   * An image of a kind no share version is made of is skipped when found,
+   * and sent as it is when chosen.
+   */
+  private function treatment(array $image, bool $chosen): string {
+    return in_array($image['mime'], ['image/jpeg', 'image/png', 'image/webp'], TRUE)
+      ? ShareImage::treatment($image['width'], $image['height'], $chosen)
+      : ($chosen ? 'original' : 'skip');
+  }
+
+  /**
+   * What the site's image is sent as (made()), or NULL without one.
+   *
+   * Whichever page shares it: the share route of the site's image rebuilds
+   * it from configuration alone.
+   */
+  public function siteShare(CacheableMetadata $cacheability): ?array {
+    $made = $this->renderer->available();
+    $image = $this->siteImage($this->site($cacheability)['identity'], $made, $cacheability);
+    return $image === NULL ? NULL : $this->made($image, $made);
+  }
+
+  /**
+   * The one address of the site image's share version.
+   *
+   * Hashed from its file alone: every page and language that shares it
+   * shares one stored image (design D2).
+   */
+  public function siteShareUrl(FileInterface $file, CacheableMetadata $cacheability): string {
+    return $this->madeUrl('canvas_metatag.share.site', ['name' => self::hash(self::photoInput($file, TRUE)) . '.jpg'], $cacheability);
+  }
+
+  /**
+   * The site's image, as the chain's image, or NULL.
+   */
+  private function siteImage(array $identity, bool $made, CacheableMetadata $cacheability): ?array {
+    $image = $identity['default_image'] === '' ? NULL : $this->image($identity['default_image'], $cacheability);
+    return $image !== NULL && (!$made || $this->treatment($image, TRUE) !== 'skip') ? $image + ['source' => 'site'] : NULL;
+  }
+
+  /**
+   * Whether a media name says what its image shows.
+   *
+   * Three words or more, not a file name or a version ("final", "copy",
+   * "v2"), and not the page's title.
+   */
+  private static function describes(string $name, string $title): bool {
+    $name = Values::plain($name, 1000);
+    return count(preg_split('/\s+/u', $name, -1, PREG_SPLIT_NO_EMPTY)) >= 3
+      && !preg_match('/\.[a-z0-9]{2,5}$|_|\b(?:final|copy|draft|edit(?:ed)?|v\d+|img|dsc|scan|screenshot|untitled)\b|\d{4,}/iu', $name)
+      && mb_strtolower($name) !== mb_strtolower(Values::plain($title, 1000));
+  }
+
+  /**
+   * The address of the editor's preview of a draft's made image.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $entity
+   *   The page translation, or the node a template is previewed with.
+   * @param array $share
+   *   What share() gave: a card or a share version of a file. The site's
+   *   image is no draft's: its preview is its public address.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the address depends on.
+   */
+  public function previewUrl(ContentEntityInterface $entity, array $share, CacheableMetadata $cacheability): string {
+    if (isset($share['site'])) {
+      return $this->siteShareUrl($share['file'], $cacheability);
+    }
+    $query = $entity->getEntityTypeId() === 'canvas_page'
+      ? ['entity_type' => 'canvas_page', 'id' => $entity->id(), 'langcode' => $entity->language()->getId()]
+      : [
+        'entity_type' => ContentTemplate::ENTITY_TYPE_ID,
+        'id' => ContentTemplate::loadForEntity($entity, 'full')?->id(),
+        'preview' => $entity->id(),
+      ];
+    $query['v'] = self::hash($share['card'] ?? self::photoInput($share['file'], $share['chosen']));
+    return $this->madeUrl('canvas_metatag.api.share_preview', [], $cacheability, $query);
+  }
+
+  /**
+   * The site icon links of the owned front page.
+   *
+   * While the theme uses core's default favicon (design D13).
+   *
+   * @return list<array<string, string>>
+   *   Two icons and a touch icon, or none.
+   */
+  private function icons(bool $front, CacheableMetadata $cacheability): array {
+    if (!$front || !$this->renderer->available()) {
+      return [];
+    }
+    $theme = (string) $this->configFactory->get('system.theme')->get('default');
+    $cacheability->addCacheTags([
+      'config:system.theme',
+      'config:system.theme.global',
+      "config:$theme.settings",
+      'config:core.extension',
+    ]);
+    $input = $this->iconInput($cacheability);
+    $letter = mb_strtoupper(ShareText::graphemes(ShareText::clean($input['site_name']))[0] ?? '');
+    if (!$this->renderer->coreFavicon($theme) || ($input['logo'] === NULL && ($letter === '' || ShareText::tokens($letter, 'title') === NULL))) {
+      return [];
+    }
+    $name = self::hash($input) . '.png';
+    $url = fn (int $size): string => $this->madeUrl('canvas_metatag.share.icon', ['size' => $size, 'name' => $name], $cacheability);
+    return [
+      ['rel' => 'icon', 'sizes' => '32x32', 'type' => 'image/png', 'href' => $url(32)],
+      ['rel' => 'icon', 'sizes' => '192x192', 'type' => 'image/png', 'href' => $url(192)],
+      ['rel' => 'apple-touch-icon', 'sizes' => '180x180', 'href' => $url(180)],
+    ];
+  }
+
+  /**
+   * The address of a site icon of a size: 32, 180 or 192.
+   */
+  public function iconUrl(int $size, CacheableMetadata $cacheability): string {
+    $name = self::hash($this->iconInput($cacheability)) . '.png';
+    return $this->madeUrl('canvas_metatag.share.icon', ['size' => $size, 'name' => $name], $cacheability);
+  }
+
+  /**
+   * Runs a callable with configuration read in a language.
+   *
+   * Only where configuration is translatable; elsewhere it is the same in
+   * every language.
+   */
+  public function inLanguage(string $langcode, callable $build): mixed {
+    $manager = $this->languageManager;
+    $language = $manager->getLanguage($langcode);
+    if (!$manager instanceof ConfigurableLanguageManagerInterface || $language === NULL) {
+      return $build();
+    }
+    $previous = $manager->getConfigOverrideLanguage();
+    $manager->setConfigOverrideLanguage($language);
+    try {
+      return $build();
+    }
+    finally {
+      $manager->setConfigOverrideLanguage($previous);
+    }
+  }
+
+  /**
+   * The brand a made image draws, read in a language.
+   *
+   * The Site name; the logo (the identity's media file, else the default
+   * theme's own logo) by its file and changed time, so a replaced logo gets
+   * a new address; the colour set in Site.
+   *
+   * @param string $langcode
+   *   The language configuration is read in.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Collects what the brand depends on.
+   * @param array{name?: string, logo?: string, colour?: string} $editing
+   *   Identity members being edited in Site, drawn instead of the stored
+   *   ones (sample()).
+   *
+   * @return array{site_name: string, logo: ?array, colour: string, version: int}
+   *   The brand.
+   */
+  private function brand(string $langcode, CacheableMetadata $cacheability, array $editing = []): array {
+    return $this->inLanguage($langcode, function () use ($cacheability, $editing): array {
+      $identity = $editing + $this->site($cacheability)['identity'];
+      $image = $identity['logo'] === '' ? NULL : $this->image($identity['logo'], $cacheability);
+      $file = $image === NULL ? NULL : $this->files[$image['url']] ?? NULL;
+      $themes = $this->configFactory->get('system.theme');
+      $theme = (string) $themes->get('default');
+      // The theme's logo setting over the global one, as Drupal reads it.
+      $cacheability->addCacheableDependency($themes)
+        ->addCacheableDependency($this->configFactory->get('system.theme.global'))
+        ->addCacheableDependency($this->configFactory->get("$theme.settings"));
+      return [
+        'site_name' => Values::plain(($editing['name'] ?? '') ?: $this->facts(NULL, $cacheability)['site']['value'], 255),
+        'logo' => $file !== NULL
+          ? ['uri' => (string) $file->getFileUri(), 'changed' => (int) $file->getChangedTime()]
+          : $this->renderer->themeLogo($theme),
+        'colour' => $identity['colour'],
+        'version' => ShareRenderer::VERSION,
+      ];
+    });
+  }
+
+  /**
+   * An absolute address of a made image, on Drupal's own host.
+   *
+   * Without a language prefix or an alias: the address is the same in
+   * every interface language.
+   */
+  private function madeUrl(string $route, array $parameters, CacheableMetadata $cacheability, array $query = []): string {
+    $cacheability->addCacheContexts(['url.site']);
+    return Url::fromRoute($route, $parameters, ['absolute' => TRUE, 'path_processing' => FALSE, 'query' => $query])->toString(TRUE)->getGeneratedUrl();
+  }
+
+  /**
    * The site layer, the identity and the currency, read with overrides.
    *
    * @return array{site: array, identity: array, currency: string}
@@ -1371,6 +1885,37 @@ final class Resolver {
     // On the form by weight, then the rest; a tie by name.
     uasort($fields, static fn (array $a, array $b): int => array_slice($a, 0, 3) <=> array_slice($b, 0, 3));
     return array_map(static fn (array $field): FieldDefinitionInterface => $field[3], $fields);
+  }
+
+  /**
+   * The fields the entity's page shows.
+   *
+   * A node type with a `full` content template: the fields the template
+   * links, as the template replaces the entity view display (whatever that
+   * display holds, as Field UI adds every new field to it). Without one, the
+   * display its page renders with: `full` when it is enabled, else
+   * `default`.
+   *
+   * @return array<string, mixed>|null
+   *   By field name, or NULL without a template or either display.
+   */
+  private function shown(string $entityTypeId, string $bundle, CacheableMetadata $cacheability): ?array {
+    $template = $entityTypeId === 'node' ? ContentTemplate::loadFor('node', $bundle, 'full') : NULL;
+    if ($template !== NULL) {
+      $cacheability->addCacheableDependency($template);
+      return $this->sources->linked($template);
+    }
+    $cacheability->addCacheTags($this->entityTypeManager->getDefinition(ContentTemplate::ENTITY_TYPE_ID)->getListCacheTags());
+    $storage = $this->entityTypeManager->getStorage('entity_view_display');
+    $full = $storage->load("$entityTypeId.$bundle.full");
+    $display = $full?->status() ? $full : $storage->load("$entityTypeId.$bundle.default");
+    // Creating or enabling a display invalidates only the list tag.
+    $cacheability->addCacheTags($this->entityTypeManager->getDefinition('entity_view_display')->getListCacheTags());
+    if (!$display instanceof EntityDisplayInterface) {
+      return NULL;
+    }
+    $cacheability->addCacheableDependency($display);
+    return $display->getComponents();
   }
 
   /**
@@ -1465,6 +2010,23 @@ final class Resolver {
   }
 
   /**
+   * A Canvas page's first component image an anonymous visitor may see.
+   *
+   * Read through its file on public files (PageContent): an address is never
+   * read. One too small or of a kind to be found (an icon, a small logo, an
+   * SVG) is passed over for the next.
+   */
+  private function componentImage(ContentEntityInterface $page, CacheableMetadata $cacheability): ?array {
+    foreach ($this->content->read($page, $cacheability)['images'] as $found) {
+      $image = $this->uriImage($found, $cacheability);
+      if ($image !== NULL && $this->treatment($image, FALSE) !== 'skip') {
+        return $image;
+      }
+    }
+    return NULL;
+  }
+
+  /**
    * The source field item of a media item whose source is an image.
    */
   private static function sourceItem(MediaInterface $media): ?FieldItemInterface {
@@ -1513,6 +2075,11 @@ final class Resolver {
     // Every emitted URL is absolute http(s), or there is no image.
     if (!Values::isHttpUrl($url)) {
       return NULL;
+    }
+    $this->files[$url] = $file;
+    // The size it is seen at: a camera's sideways photo turned upright.
+    if ($file->getMimeType() === 'image/jpeg') {
+      [$width, $height] = $this->renderer->upright($uri, $width, $height);
     }
     // Big enough for a picker tile at twice the pixel density; core's
     // thumbnail where there is no medium.

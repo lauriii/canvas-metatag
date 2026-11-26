@@ -272,6 +272,36 @@ export function reveal(
 }
 
 /**
+ * Shows `to` with as much as fits above it: from the first of `from` (in
+ * order of preference) whose span down to `to` fits in the scroller, else
+ * `to` alone. 'start' puts that element at the top; 'nearest' scrolls only
+ * as far as the span needs. True when one of `from` was shown with it.
+ */
+export function revealSpan(
+  from: (Element | null | undefined)[],
+  to: Element,
+  block: 'start' | 'nearest' = 'start',
+): boolean {
+  const scroller = to.parentElement?.closest<HTMLElement>('.seo-body');
+  if (!scroller) {
+    return false;
+  }
+  const view = scroller.getBoundingClientRect();
+  const style = getComputedStyle(scroller);
+  const top = view.top + (parseFloat(style.scrollPaddingTop) || 0);
+  const bottom = view.bottom - (parseFloat(style.scrollPaddingBottom) || 0);
+  const end = to.getBoundingClientRect().bottom;
+  const first = from.find((element) => element && end - element.getBoundingClientRect().top <= bottom - top);
+  if (!first) {
+    reveal(to, 'nearest');
+    return false;
+  }
+  const start = first.getBoundingClientRect().top;
+  scroller.scrollTop += block === 'start' ? start - top : start < top ? start - top : end > bottom ? end - bottom : 0;
+  return true;
+}
+
+/**
  * A select's list that opens scrolled to its checked item starts on a whole
  * row: the nearest group heading below the cut, else the nearest option.
  * For a `Select.Content` ref; Radix scrolls the item in after positioning.

@@ -10,9 +10,12 @@ declare(strict_types=1);
 use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas_metatag\Legacy;
+use Drupal\canvas_metatag\PageText;
+use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\Cache\Cache;
+use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Config\Entity\ConfigEntityStorageInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Entity\EntityInterface;
@@ -405,7 +408,9 @@ function canvas_metatag_post_update_reserve_breadcrumb(): string {
   $listed = [];
   $change = _canvas_metatag_post_update_jsonld($listed, TRUE);
   $count = _canvas_metatag_post_update_templates($change);
-  $count += _canvas_metatag_post_update_pages('#breadcrumb', $change);
+  // Every page with hand-added JSON-LD: the id may be written with escapes
+  // ("#\u0062readcrumb"), and the decoded text decides.
+  $count += _canvas_metatag_post_update_pages('"custom"', $change);
   $message = (string) \Drupal::translation()->formatPlural($count, 'Hand-added JSON-LD changed in one place.', 'Hand-added JSON-LD changed in @count places.');
   return implode("\n", [$message, ...array_values(array_unique($listed))]);
 }
@@ -513,4 +518,43 @@ function _canvas_metatag_post_update_templates(callable $change): int {
     }
   }
   return $count;
+}
+
+/**
+ * Indexes the texts Canvas pages offer as their description.
+ *
+ * A Canvas page without a description is described by its own text, unless
+ * another published page offers the same text (PageText). Pages saved before
+ * are indexed here; saves keep the index from now on.
+ */
+function canvas_metatag_post_update_page_text(array &$sandbox): string {
+  $sandbox['next'] = \Drupal::service(PageText::class)->indexFrom($sandbox['next'] ?? 0);
+  $sandbox['#finished'] = $sandbox['next'] === NULL ? 1 : 0.5;
+  if ($sandbox['next'] === NULL) {
+    Cache::invalidateTags(['rendered']);
+  }
+  return (string) t('Indexed the text of Canvas pages for their descriptions.');
+}
+
+/**
+ * Keeps an upgraded site sharing its site image on pages without one.
+ *
+ * Pages without an image now share a card made from their title, unless the
+ * site chose otherwise. A site with a default image keeps sharing it ("Use
+ * this image"); a site without one gets the card.
+ */
+function canvas_metatag_post_update_share_fallback(): string {
+  $config = \Drupal::configFactory()->getEditable('canvas_metatag.site');
+  // Only an image visitors can still see: a stale one (deleted, unpublished,
+  // not public) would leave pages sharing nothing.
+  $uuid = (string) $config->get('identity.default_image');
+  $image = $uuid !== '' && \Drupal::service(Resolver::class)->image($uuid, new CacheableMetadata()) !== NULL;
+  $config
+    ->set('identity.share_fallback', $image ? 'image' : 'card')
+    ->set('identity.colour', (string) ($config->get('identity.colour') ?? ''))
+    ->save();
+  Cache::invalidateTags(['rendered']);
+  return $image
+    ? (string) t('Pages without an image keep sharing the site image.')
+    : (string) t('Pages without an image now share a card made from their title.');
 }

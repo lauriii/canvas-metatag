@@ -4,6 +4,7 @@ import type {
   MediaPage,
   SchemaSuggestion,
   SeoValues,
+  ShareSample,
   SiteEffect,
   SiteSettings,
   StatePayload,
@@ -205,6 +206,19 @@ export function createApi(base: string, fetchFn: typeof fetch = fetch) {
     /** GET /media: image media the user may view, newest first. */
     getMedia(q: string, page: number): Promise<MediaPage> {
       return request(`media?${new URLSearchParams({ q, page: String(page) })}`);
+    },
+
+    /** GET /share-sample: what links show, as Site › Sharing draws it from what is being edited. */
+    shareSample(sample: {
+      sample: 'home' | 'page';
+      title: string;
+      name: string;
+      logo: string;
+      colour: string;
+      share_fallback: 'card' | 'image' | 'none';
+      default_image: string;
+    }): Promise<ShareSample> {
+      return request(`share-sample?${new URLSearchParams(sample)}`);
     },
 
     /** POST /ai/suggest (the AI submodule). */

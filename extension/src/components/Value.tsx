@@ -20,7 +20,9 @@ import { useApp } from '../App';
 import {
   dateText,
   getPath,
+  fromHeading,
   inSentence,
+  pageTitleSource,
   setPath,
   typeOf,
   wellFormed,
@@ -1185,7 +1187,8 @@ function useLink(options: LinkOptions) {
   ) : linked && (shown.status === 'empty' || shown.status === 'hidden') && options.instead ? (
     // The box (or the image row) says the state; this, what is used.
     shown.status === 'empty'
-      ? `This ${type} has no ${tag}, so ${options.instead}.`
+      ? // An image by its field ("Poster"), not the image inside it.
+        `This ${type} has no ${kind === 'image' ? tag.split(' › ')[0] : tag}, so ${options.instead}.`
       : `So ${options.instead}.`
   ) : null);
 
@@ -1204,8 +1207,11 @@ function useLink(options: LinkOptions) {
         : byDefault
           ? { text: tag, look: 'default' as const }
           : undefined;
-  /** An image row's value line when the link gives nothing. */
-  const imageState = linked && shown.status !== 'ok' ? stateWords(shown.status, type, why, item) : byDefault ? none : undefined;
+  /** An image row's value line when the link gives nothing: none when the note under it says so. */
+  const imageState =
+    linked && shown.status === 'empty' && options.instead
+      ? ''
+      : linked && shown.status !== 'ok' ? stateWords(shown.status, type, why, item) : byDefault ? none : undefined;
 
   // The length of a composition with a field is this item's.
   const varies = showComposer && chipParts.some((part) => !('fact' in part) || part.fact !== 'site') ? type : undefined;
@@ -1267,6 +1273,8 @@ export function ValueField(
       after?: ReactNode;
       noStage?: boolean;
       note?: ReactNode;
+      /** A line shown while the field is in use, when nothing else is said. */
+      hint?: string;
       group?: boolean;
       /** Lines a box shows at rest. */
       lines?: number;
@@ -1292,7 +1300,7 @@ export function ValueField(
       note={props.note}
       group={props.group}
       varies={link.varies}
-      hint={link.hint}
+      hint={link.hint ?? props.hint}
       meter={link.empty ? undefined : props.meter}
       quietCount={link.showComposer}
       resetTip={props.resetTip ?? link.resetTip}
@@ -1559,9 +1567,11 @@ export function TitleField(
     placeholder?: string;
   },
 ) {
-  const { state, dispatch, locked } = useApp();
+  const { state, dispatch, locked, view } = useApp();
   const server = state.server!;
   const template = props.scope === 'target' && server.target?.scope === 'template';
+  // A page still named for a new page: its title is its first heading.
+  const heading = server.target?.scope === 'page' && state.edits.target.title === undefined && !!view && fromHeading(view.facts);
   // Only the ending set: the aside names it, and what Reset goes back to.
   const endingOnly = state.edits.target.title === undefined && state.edits.target.title_end !== undefined;
   const bothSet = state.edits.target.title !== undefined && state.edits.target.title_end !== undefined;
@@ -1599,7 +1609,9 @@ export function TitleField(
           ? server.target?.scope === 'page'
             ? 'Ending set on this page'
             : `Ending set for every ${server.target?.label}`
-          : undefined
+          : heading
+            ? pageTitleSource(view!.facts)
+            : undefined
       }
       // Reset clears both parts: said where both are set.
       resetTip={endingOnly ? 'the site ending' : bothSet ? `the default title and the site ending` : undefined}

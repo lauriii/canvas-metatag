@@ -14,6 +14,10 @@ itself and for sites that deliver through `canvas_headless`.
 - [Drupal Canvas](https://www.drupal.org/project/canvas). The module is
   developed and tested against Canvas 1.x-dev. Earlier releases are untested.
 
+To make share images (see "Sharing"): PHP's GD extension with FreeType, and
+public files on the server's own disk. Without them, pages share their
+original images, and the status report's "SEO share images" row says why.
+
 Optional, each detected when present: `canvas_headless` (headless delivery),
 `content_translation` (hreflang), the `ai` module 1.5 or later (suggestions,
 through the `canvas_metatag_ai` submodule), and the Metatag module (see below).
@@ -257,6 +261,97 @@ item is its first formatted text with a summary, its page image the first
 image that resolves), first means the order of the content type's form. Fields
 not on the form come last.
 
+## Sharing
+
+Every page the module owns shares as a large 1200 × 630 image with nothing
+configured. The image is the first of these that a page has:
+
+1. the social image chosen for the page or its content type;
+2. the page's own image (a Canvas page's image, a node's first image field);
+3. on a Canvas page, the first image among its own components;
+4. what Site › Sharing says for a page without an image: **Make one from the
+   title** (the default), **Use this image** or **No image**. When no card can
+   be made for a page, it shares the site's image, if there is one.
+
+A found image smaller than 600 × 315, an SVG or a GIF is skipped; a chosen
+image is used from 200 × 200 up.
+
+- **A page's own image** is sent as a 1200 × 630 JPEG of at most 300 KB. A
+  wide photo is cropped around its centre; a square, tall, very wide or
+  transparent image is shown whole on a wash of its own colour; a phone photo
+  stored sideways is turned upright. `og:image:type`, `:width`, `:height`
+  and `:alt` describe what is sent.
+- **A card** is drawn from the page's social title, the Site name and the
+  logo (or the name's first letter), in the site's colour: the one set in
+  Site › Sharing, else one picked from the logo, else a neutral dark. A small
+  line names the kind of page where that helps ("EVENT · JUNE 19, 2027",
+  "RECIPE"). Text is measured to stay readable over the whole card, and short
+  titles stay inside the centre square that compact previews keep. Titles are
+  drawn with fonts bundled in `fonts/` (SIL Open Font License) for Latin,
+  Greek, Cyrillic, Arabic and Hebrew script; a title with characters they do
+  not cover gets no card. Cards never go into structured data.
+- **The front page**, when the module owns it and the theme uses core's
+  default favicon, gets site icons made from the logo (32 and 192 px, and a
+  180 px touch icon).
+
+`og:locale` names each page's language and region (`en_US`, `pt_BR`), with
+`og:locale:alternate` for its other published translations.
+
+With nothing typed, a Canvas page still named "Untitled page" takes its first
+heading as its title, and a Canvas page without a description uses the first
+text of at least 50 characters that it places itself after that heading,
+unless another published page offers the same text. A node with neither a
+summary nor a description field uses its first long text field. A
+description made from text is cut at whole sentences in the page's language.
+Installing the module reads the text of the first 500 Canvas pages at once
+and of the rest on cron; until then a page's text may describe it although a
+page not read yet offers the same text.
+
+### How made images are served
+
+Each made image has an address of its own on Drupal, outside the files path,
+so no web server rule is needed:
+
+| Image | Address |
+|---|---|
+| A card | `/canvas-metatag/share/{language}/{entity type}/{id}/{hash}.png` |
+| A page's own image | `/canvas-metatag/share/{language}/{entity type}/{id}/{hash}.jpg` |
+| The site's image | `/canvas-metatag/share/site/{hash}.jpg` |
+| A front page icon | `/canvas-metatag/share/icon/{size}/{hash}.png` |
+
+The hash covers what is drawn: the title, the small line, the Site name, the
+logo file, the colour and the language, never the request's host. A changed
+title therefore gets a new address, which apps that cache link previews by
+image address fetch again. Nothing is drawn while a page is delivered: an
+image is made on the first request for its address, stored under
+`public://canvas-metatag/share-{secret}/` and served with the Cache-Control
+directives `public`, `max-age=31536000`, `s-maxage=86400` and `immutable`; cards
+carry `X-Robots-Tag: noindex`. A served image carries no cache tags, so a
+reverse proxy or CDN keeps it until it expires: a day at most, after which
+the image of a page unpublished or deleted since answers 404 there too. An
+outdated address redirects (302, never cached) to the image the page shares
+now, or answers 404 when it shares none. The address of a page anonymous visitors
+cannot view answers 404, and unpublishing, deleting or restricting a page
+deletes its stored images; choosing "No image" or the site's image for pages
+without one deletes the stored cards. An image that cannot be made is logged under `canvas_metatag`
+and, for five minutes, answers 404 (a card) or redirects to the page's
+original file (a photo too large to decode in the memory PHP has left, or in
+a format this server's GD cannot read).
+
+Images are only ever fetched through these addresses. The stored folder's
+name is derived from the site's hash salt, so no one can work out a stored
+file's address under the files path, and nothing links to it: Apache, nginx
+or any other web server needs no rule for cards to stay out of search
+results. A changed hash salt starts a new folder; the old one can be deleted.
+
+Disk use is about 40 KB per card and up to 300 KB per photo version, for
+each page and language whose image has been fetched; only the newest image of
+each is kept. The site's image is one version for the whole site, whichever
+pages and languages share it, drawn once. `public://canvas-metatag` can be deleted at any time:
+images are made again on request. The dialog's link preview and Site ›
+Sharing's samples are drawn in memory from what is being edited, never stored
+and never given a public address.
+
 ## Permissions
 
 - **Edit SEO settings in Canvas**: use the dialog for pages and content
@@ -360,8 +455,11 @@ With `canvas_headless`, the same head is the `head` member of the content API
 response (`title`, `meta`, `link`, `script`), for published content and for
 draft previews of the full view. Addresses in it (the canonical link, `og:url`,
 hreflang, every JSON-LD `@id`) use the public address, and the page on Drupal's
-own address declares that copy canonical. Image addresses stay on Drupal, where
-the files are.
+own address declares that copy canonical. Image addresses, made share images
+included, stay on Drupal, where the files are. When the frontend fetches
+Drupal at an address visitors cannot reach (`http://cms:8080`), Checks tell
+site administrators so, on a site whose `trusted_host_patterns` checked that
+host; without them any visitor could name a host, so none is recorded.
 
 The public address is, in this order: the `canvas_metatag_public_base` setting,
 the first configured headless frontend, else the address of the request. The
@@ -385,7 +483,7 @@ packages do with `head`:
 
 | Package | What it renders from `head` |
 |---|---|
-| `@drupal-canvas/headless-next` (`toNextMetadata()`) | Title, description, robots, canonical, hreflang, the card hint, and Open Graph title, description, URL, type, site name and image. It loses `og:image:width`, `og:image:height`, `og:image:alt`, `article:published_time`, `article:modified_time` and the JSON-LD, and a page without a description or a canonical keeps its layout's. A test checks that list against the Canvas release it runs on; the recipe below fills the gaps |
+| `@drupal-canvas/headless-next` (`toNextMetadata()`) | Title, description, robots, canonical, hreflang, the card hint, and Open Graph title, description, URL, type, site name and image. It loses `og:image:type`, `og:image:width`, `og:image:height`, `og:image:alt`, `article:published_time`, `article:modified_time` and the JSON-LD, and a page without a description or a canonical keeps its layout's. A test checks that list against the Canvas release it runs on; the recipe below fills the gaps |
 | `@drupal-canvas/headless-tanstack-start` (`toTanStackHead()`) | Everything, including JSON-LD. Read in the Canvas 1.x-dev source, not tested |
 | `@drupal-canvas/headless-angular` (`CanvasDocumentHead`) | Everything, including JSON-LD. Read in the source, not tested |
 | `@drupal-canvas/headless-nuxt`, `@drupal-canvas/headless-astro`, `@drupal-canvas/headless-react` | Nothing by themselves: the app passes `head` to its own head manager. Read in the source, not tested |
@@ -632,6 +730,11 @@ the type's name, the values the module works out under "Automatic".
   the error unless given `--uri`. A value of `canvas_metatag_public_base`
   that is not an absolute http or https address is ignored, and the row
   says so.
+- Share images (release note). A site with a default social image keeps
+  sharing it ("Use this image" in Site › Sharing), now as a 1200 × 630
+  version; a site without one now shares a card made from each page's title.
+  The update refreshes cached pages. A Canvas page still named "Untitled
+  page" now shares under its first heading, and a cut title keeps its ending.
 - To keep a staging site out of search engines, override the site setting in
   its `settings.php`. The dialog shows such pages as hidden and says the
   setting comes from outside:
@@ -650,7 +753,10 @@ data where no breadcrumb shows; repeating structured data typed line by line,
 such as FAQs (lists come
 only from multi-value fields and one text's list items; add your own JSON-LD
 for the rest); robots rules for single crawlers and AI-training opt-outs (those
-belong in `robots.txt`); `og:locale`; image upload or image styles; a site-wide
+belong in `robots.txt`); an image upload interface or image styles (the
+module makes only its own share images: cards, 1200 × 630 versions of a page's
+own image and the front page's icons); icons on other pages, a theme colour or
+a web app manifest; a site-wide
 default description or social text; a UI for translating template or site
 values; editing a translation's own SEO text where the Canvas editor cannot
 open that translation; a frontend npm package; dark mode. Site settings are not
@@ -674,6 +780,10 @@ locked while someone edits them: the last save wins.
   layout instead of Canvas is not seen. Like the visible breadcrumb, the
   trail can leave out a parent page that was unpublished and published
   again until the child page's caches are cleared.
+- A title in a script other than Latin, Greek, Cyrillic, Arabic or Hebrew gets
+  no card: the page shares the site's image, or none.
+- Apps that already show a link's preview keep it for a while after the page
+  changes; Checks tells editors so.
 - Under a configuration override of a content template's SEO setting, the
   dialog's fields show the stored setting while its previews and the output
   use the override.

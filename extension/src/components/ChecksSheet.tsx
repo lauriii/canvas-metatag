@@ -22,6 +22,9 @@ const FIELDS: [RegExp, string][] = [
   [/^social\.description$/, 'social description'],
   [/^(values\.)?robots\./, 'visibility'],
   [/^values\./, 'site default'],
+  [/^identity\.share_fallback$/, 'what pages without an image share'],
+  [/^identity\.default_image$/, 'site image'],
+  [/^identity\.logo$/, 'logo'],
   [/^identity\./, 'site identity'],
   [/^schema\.type$/, 'kind of page'],
   [/^schema\.custom$/, 'JSON-LD added by hand'],
@@ -146,11 +149,27 @@ export function ChecksSheet() {
                 kind: 'image',
                 request: {
                   minWidth: 600,
+                  share: fix.image === 'social.image',
                   chosen: undefined,
                   onPick: (value) => dispatch({ type: 'edit', scope: 'target', path: fix.image, value }),
                 },
               })
             }
+          >
+            {fix.label}
+          </Btn>
+        )}
+        {fix && 'site' in fix && !locked.site && (
+          <Btn
+            variant="soft"
+            aria-describedby={titleId}
+            onClick={() => {
+              dispatch({ type: 'edit', scope: 'site', path: fix.site.path, value: fix.site.value });
+              // Saved there, with the rest of Site.
+              if (jump) {
+                goTo(jump);
+              }
+            }}
           >
             {fix.label}
           </Btn>

@@ -872,6 +872,8 @@ final class ValuesTest extends UnitTestCase {
         'separator' => '–',
         'logo' => self::UUID,
         'default_image' => '',
+        'colour' => '',
+        'share_fallback' => 'card',
         'same_as' => ['https://social.example.com/ada', 'https://example.org/ada'],
       ],
       [],
@@ -902,6 +904,8 @@ final class ValuesTest extends UnitTestCase {
       'separator' => '|',
       'logo' => '',
       'default_image' => '',
+      'colour' => '',
+      'share_fallback' => 'card',
       'same_as' => ['https://example.org/a'],
     ], $clean);
 
@@ -913,10 +917,32 @@ final class ValuesTest extends UnitTestCase {
         'separator' => '|',
         'logo' => '',
         'default_image' => '',
+        'colour' => '',
+        'share_fallback' => 'card',
         'same_as' => [],
       ],
       [],
     ], Values::cleanIdentity([]));
+
+    // What pages without an image share, and the cards' colour.
+    $image = ['default_image' => self::UUID];
+    self::assertSame(['identity.share_fallback' => 'Choose the image to use.'], Values::cleanIdentity(['share_fallback' => 'image'])[1]);
+    self::assertSame('card', Values::cleanIdentity(['share_fallback' => 'image'])[0]['share_fallback']);
+    [$clean, $errors] = Values::cleanIdentity(['share_fallback' => 'image'] + $image);
+    self::assertSame(['image', []], [$clean['share_fallback'], $errors]);
+    self::assertSame(['identity.share_fallback'], array_keys(Values::cleanIdentity(['share_fallback' => 'photo'])[1]));
+    self::assertSame('none', Values::cleanIdentity(['share_fallback' => 'none'])[0]['share_fallback']);
+    // A site from before the choice keeps sharing its image.
+    self::assertSame(['image', 'card'], [
+      Values::cleanIdentity($image)[0]['share_fallback'],
+      Values::cleanIdentity([])[0]['share_fallback'],
+    ]);
+    foreach (['blue', '#0F8A7', '0F8A7E', '#0F8A7E ', 7] as $colour) {
+      self::assertSame(['identity.colour'], array_keys(Values::cleanIdentity(['colour' => $colour])[1]), var_export($colour, TRUE));
+    }
+    [$clean, $errors] = Values::cleanIdentity(['colour' => '#0F8A7E']);
+    self::assertSame(['#0F8A7E', []], [$clean['colour'], $errors]);
+    self::assertSame('#0F8A7E', Values::cleanIdentity(['colour' => '#0f8a7e'])[0]['colour']);
 
     foreach (['', '    ', 'a', '1', '||||', '| |'] as $separator) {
       self::assertArrayHasKey('identity.separator', Values::cleanIdentity(['separator' => $separator])[1], "Separator '$separator'");
@@ -1302,6 +1328,19 @@ final class ValuesTest extends UnitTestCase {
     self::assertSame('One. Two.', Values::sentences('One. Two. Three is long.', 12));
     self::assertSame('Short.', Values::sentences('Short.', 70));
     self::assertSame('alpha beta…', Values::sentences('alpha beta gamma delta', 13));
+    // A title before a name ends no sentence, by the marks or by the
+    // language's own rules.
+    $text = 'Dr. Kallio leads the choir, e.g. on Fridays. Rehearsals start at 18 and run late into the evening.';
+    self::assertSame('Dr. Kallio leads the choir, e.g. on Fridays.', Values::sentences($text, 60));
+    if (class_exists(\IntlBreakIterator::class)) {
+      self::assertSame('Dr. Kallio leads the choir, e.g. on Fridays.', Values::sentences($text, 60, 'en'));
+      self::assertSame('Mr. Smith sings.', Values::sentences('Mr. Smith sings. Mrs. Smith plays the organ every Sunday.', 30, 'en'));
+    }
+    // Shared with values.test.ts: with the language's rules and without.
+    foreach (self::fixture()['sentences'] as $case) {
+      self::assertSame($case['expected'], Values::sentences($case['text'], $case['room']), $case['note']);
+      self::assertSame($case['expected'], Values::sentences($case['text'], $case['room'], 'en'), $case['note']);
+    }
   }
 
   /**

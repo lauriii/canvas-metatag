@@ -63,6 +63,8 @@ final class CanvasMetatagHooks {
     // Only the status report reads it: built when it does, never for a page.
     #[AutowireServiceClosure(Vocabulary::class)]
     private readonly \Closure $vocabulary,
+    #[AutowireServiceClosure(ShareHooks::class)]
+    private readonly \Closure $share,
   ) {}
 
   /**
@@ -170,16 +172,19 @@ final class CanvasMetatagHooks {
     // Tag and attribute names are ours and the values are plain text; the
     // render system escapes them. Links go to html_head, not html_head_link,
     // so that no Link headers are sent.
+    // A key names one element: a row that repeats (og:locale:alternate, an
+    // icon of another size) is told apart by its value.
     foreach ($resolved['head']['meta'] as $meta) {
+      $key = $meta['name'] ?? $meta['property'];
       $attachments['#attached']['html_head'][] = [
         ['#tag' => 'meta', '#attributes' => $meta],
-        'canvas_metatag:' . ($meta['name'] ?? $meta['property']),
+        'canvas_metatag:' . $key . ($key === 'og:locale:alternate' ? ':' . $meta['content'] : ''),
       ];
     }
     foreach ($resolved['head']['link'] as $link) {
       $attachments['#attached']['html_head'][] = [
         ['#tag' => 'link', '#attributes' => $link],
-        'canvas_metatag:' . $link['rel'] . (isset($link['hreflang']) ? ':' . $link['hreflang'] : ''),
+        'canvas_metatag:' . $link['rel'] . (isset($link['hreflang']) ? ':' . $link['hreflang'] : '') . (isset($link['sizes']) ? ':' . $link['sizes'] : ''),
       ];
     }
     if ($head['json_ld'] !== NULL) {
@@ -202,14 +207,17 @@ final class CanvasMetatagHooks {
    * Implements hook_page_attachments_alter().
    *
    * The hreflang links of content_translation point at the Drupal origin and
-   * have no x-default; ours replace them.
+   * have no x-default; ours replace them. Where the head carries the site
+   * icons, they replace core's default favicon.
    */
   #[Hook('page_attachments_alter')]
   public function pageAttachmentsAlter(array &$attachments): void {
-    if (isset($attachments['#attached']['html_head_link']) && $this->head() !== NULL) {
+    $head = isset($attachments['#attached']['html_head_link']) ? $this->head() : NULL;
+    if ($head !== NULL) {
+      $icons = in_array('icon', array_column($head['resolved']['head']['link'], 'rel'), TRUE);
       $attachments['#attached']['html_head_link'] = array_values(array_filter(
         $attachments['#attached']['html_head_link'],
-        static fn (array $link): bool => !isset($link[0]['hreflang']),
+        static fn (array $link): bool => !isset($link[0]['hreflang']) && !($icons && ($link[0]['rel'] ?? NULL) === 'icon'),
       ));
     }
   }
@@ -331,8 +339,9 @@ final class CanvasMetatagHooks {
    * Which schema.org release the hand-added JSON-LD form reads. The headless
    * head is ours only while the controller canvas_headless
    * resolves is our decorator, and nothing else would tell that it stopped
-   * being: the controller resolver makes this same call. And whether
-   * visitors can use the public base (publicAddresses()).
+   * being: the controller resolver makes this same call. Whether visitors
+   * can use the public base (publicAddresses()), and whether the site makes
+   * share images (ShareHooks::requirements()).
    */
   #[Hook('runtime_requirements')]
   public function runtimeRequirements(): array {
@@ -366,6 +375,7 @@ final class CanvasMetatagHooks {
         ];
       }
     }
+    $requirements += ($this->share)()->requirements();
     $addresses = $this->publicAddresses();
     if ($addresses !== NULL) {
       $requirements['canvas_metatag_public_base'] = ['title' => new TranslatableMarkup('SEO public addresses')] + $addresses;
