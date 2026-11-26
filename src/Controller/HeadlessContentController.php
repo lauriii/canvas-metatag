@@ -131,8 +131,9 @@ final class HeadlessContentController {
     }
     $host = $request->getHost();
     $public = $this->resolver->origin(new CacheableMetadata())['url'];
-    // A development copy fetches itself however it likes.
-    $unreachable = !Values::isDevelopmentHost($host)
+    // A development copy fetches itself however it likes. Judged by the
+    // public origin: a production frontend may fetch through localhost.
+    $unreachable = !Values::isDevelopmentHost((string) parse_url($public, PHP_URL_HOST))
       && (!Values::isPublicHost($host) || ($request->getScheme() === 'http' && str_starts_with($public, 'https:')));
     $address = $unreachable ? $request->getSchemeAndHttpHost() : NULL;
     if ($this->state->get('canvas_metatag.share_host') !== $address) {

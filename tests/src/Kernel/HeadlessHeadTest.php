@@ -229,8 +229,14 @@ final class HeadlessHeadTest extends CanvasKernelTestBase {
       // A public host, but http while visitors use https.
       $this->content('/pricing', drupal: 'http://cms.example.com');
       self::assertSame('http://cms.example.com', $state->get('canvas_metatag.share_host'));
+      // A production site is not excused by fetching through localhost: the
+      // site's public origin decides whether this is a development copy.
+      $this->setSetting('canvas_metatag_public_base', 'https://www.example.com');
+      $this->content('/pricing', drupal: 'http://localhost:8080');
+      self::assertSame('http://localhost:8080', $state->get('canvas_metatag.share_host'));
     }
     finally {
+      $this->setSetting('canvas_metatag_public_base', NULL);
       Request::setTrustedHosts([]);
     }
     $state->delete('canvas_metatag.share_host');

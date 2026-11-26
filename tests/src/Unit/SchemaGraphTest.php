@@ -650,6 +650,14 @@ final class SchemaGraphTest extends UnitTestCase {
     $nodes = $page(['image' => ['source' => 'site'] + self::IMAGE]);
     self::assertArrayNotHasKey('primaryImageOfPage', $nodes[self::URL . '#webpage']);
     self::assertArrayNotHasKey(self::URL . '#primaryimage', $nodes);
+    // The site's image picked for the main node is written out, never a
+    // reference to the #primaryimage node the page does not emit.
+    $graph = self::build([
+      'type' => 'Article',
+      'props' => ['image' => ['media' => self::UUID]],
+    ], [], [self::UUID => self::IMAGE], ['image' => ['source' => 'site'] + self::IMAGE])['graph']['@graph'];
+    self::assertArrayNotHasKey(self::URL . '#primaryimage', array_column($graph, NULL, '@id'));
+    self::assertSame(['@type' => 'ImageObject', 'url' => self::IMAGE['url'], 'width' => 1200, 'height' => 630], end($graph)['image']);
     // A photo stored sideways: its upright size, as the resolver reads it.
     $nodes = $page(['image' => ['source' => 'entity', 'width' => 3000, 'height' => 4000] + self::IMAGE]);
     self::assertSame(['@id' => self::URL . '#primaryimage'], $nodes[self::URL . '#webpage']['primaryImageOfPage']);

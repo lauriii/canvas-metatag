@@ -1903,7 +1903,7 @@ final class Resolver {
     $template = $entityTypeId === 'node' ? ContentTemplate::loadFor('node', $bundle, 'full') : NULL;
     if ($template !== NULL) {
       $cacheability->addCacheableDependency($template);
-      return Sources::linked($template);
+      return $this->sources->linked($template);
     }
     $cacheability->addCacheTags($this->entityTypeManager->getDefinition(ContentTemplate::ENTITY_TYPE_ID)->getListCacheTags());
     $storage = $this->entityTypeManager->getStorage('entity_view_display');

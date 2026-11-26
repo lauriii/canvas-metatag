@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Drupal\Tests\canvas_metatag\Kernel;
 
 use Drupal\canvas\Entity\Component;
+use Drupal\canvas\Entity\ContentTemplate;
 use Drupal\canvas\Entity\Page;
 use Drupal\canvas\Entity\PageRegion;
 use Drupal\canvas_metatag\PageContent;
 use Drupal\canvas_metatag\PageText;
 use Drupal\canvas_metatag\Plugin\QueueWorker\PageTextIndex;
+use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_personalization\Entity\Segment;
 use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\language\Entity\ConfigurableLanguage;
@@ -344,6 +346,41 @@ final class PageTextTest extends CanvasKernelTestBase {
     self::assertSame('component', $resolved['image']['source']);
     self::assertSame($this->imageOf($welcome)['url'], $resolved['image']['url']);
     self::assertSame('The hall at night', $meta['og:image:alt']);
+  }
+
+  /**
+   * A template's fields are the ones every visitor gets.
+   *
+   * A field linked only in a personalized case is never what an anonymous
+   * visitor sees, so it is not one the page shows (the description's rule).
+   */
+  public function testLinkedFields(): void {
+    $heading = static fn (string $uuid, string $case, string $field): array => self::placed($uuid, 'sdc.canvas_test_sdc.heading', [
+      'text' => [
+        'sourceType' => 'entity-field',
+        'expression' => "ℹ︎␜entity:node:article␝{$field}␞␟value",
+      ],
+      'element' => 'h2',
+    ], $case, 'content');
+    $template = ContentTemplate::create([
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'article',
+      'content_entity_type_view_mode' => 'full',
+      'component_tree' => [
+        self::placed(self::SWITCH, 'p13n.switch', ['variants' => ['default', 'halloween']]),
+        self::placed(self::OTHER_CASE, 'p13n.case', [
+          'variant_id' => 'halloween',
+          'segments' => ['halloween'],
+        ], self::SWITCH, 'content'),
+        $heading('99999999-0000-4000-8000-000000000101', self::OTHER_CASE, 'field_notes'),
+        self::placed(self::DEFAULT_CASE, 'p13n.case', [
+          'variant_id' => 'default',
+          'segments' => [Segment::DEFAULT_ID],
+        ], self::SWITCH, 'content'),
+        $heading('99999999-0000-4000-8000-000000000201', self::DEFAULT_CASE, 'field_hours'),
+      ],
+    ]);
+    self::assertSame(['field_hours' => TRUE], $this->container->get(Sources::class)->linked($template));
   }
 
   /**

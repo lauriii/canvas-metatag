@@ -718,6 +718,9 @@ final class SchemaGraph {
     $logo = $ctx['logo'] ?? NULL;
     // The page's own image: never the site's image, never a made one.
     $page_image = ($ctx['image']['source'] ?? '') === 'site' ? NULL : $ctx['image'] ?? NULL;
+    // An image property that picks the site's image is written out, not
+    // pointed at a #primaryimage node this page has no reason to emit.
+    $ctx['image'] = $page_image;
     $trail = $ctx['breadcrumb'] ?? [];
     $report = [
       'withheld' => NULL,

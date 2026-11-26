@@ -1019,6 +1019,11 @@ Only users who may change site settings MUST see, as good to know: that shared i
 - **WHEN** a headless frontend fetches the content API from `http://cms:8080`, on a site whose trusted host patterns checked that host (without them any visitor could name a host, so none is recorded), and the share image addresses use that host
 - **THEN** a site administrator MUST see that visitors' apps can't reach the images, naming the address and how to give Drupal its public one (the frontend fetching Drupal there, or Drupal's reverse proxy settings)
 
+#### Scenario: A production site fetched through localhost
+
+- **WHEN** the site's public origin is a production address and its frontend fetches the content API from `http://localhost:8080`
+- **THEN** a site administrator MUST see that visitors' apps can't reach the images: only a site whose public origin is itself a development host is exempt
+
 #### Scenario: Titles in an uncovered script
 
 - **WHEN** a Japanese page's title can't be drawn

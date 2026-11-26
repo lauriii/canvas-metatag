@@ -287,12 +287,14 @@ final class Sources {
    * The host fields a content template's own components link.
    *
    * What a page rendered with the template shows of its node: the template
-   * replaces the entity view display. Inside an adapted input too.
+   * replaces the entity view display. Inside an adapted input too. Only
+   * instances every visitor gets (instances()): a field linked only in a
+   * personalized case is not what an anonymous visitor sees.
    *
    * @return array<string, true>
    *   By field machine name.
    */
-  public static function linked(ContentTemplate $template): array {
+  public function linked(ContentTemplate $template): array {
     $fields = [];
     $walk = static function (mixed $input) use (&$walk, &$fields): void {
       if (!is_array($input)) {
@@ -305,10 +307,16 @@ final class Sources {
         $walk($inner);
       }
     };
-    foreach ($template->getComponentTree() as $item) {
-      \assert($item instanceof ComponentTreeItem);
+    $tree = [
+      'list' => $template->getComponentTree(),
+      'owner' => 'template',
+      'host' => NULL,
+      'item' => [],
+    ];
+    [$instances] = $this->instances([$tree]);
+    foreach ($instances as $instance) {
       try {
-        $walk($item->getInputs());
+        $walk($instance['item']->getInputs());
       }
       catch (\Throwable) {
         // An instance whose inputs cannot be read renders nothing of them.
