@@ -78,6 +78,20 @@ final class Values {
   private const FILLED = '/\{(title|description|site|sep|url|author|published|modified|image)\}/';
 
   /**
+   * A title before a name that ends a text but no sentence: "Dr.", "Prof.".
+   *
+   * Mirrored in values.ts.
+   */
+  private const TITLE_ABBREVIATION = '/(?:^|\s)(?:Dr|Prof|Mr|Mrs|Ms|Mx|St|Jr|Sr)\.$/uD';
+
+  /**
+   * A sentence's end mark: before a space and a word that is not lower case.
+   *
+   * Mirrored in values.ts.
+   */
+  private const SENTENCE_END = '/[.!?…。！？][\p{Pe}\p{Pf}"\'»]*(?=\s(?!\s*\p{Ll}))/u';
+
+  /**
    * C0, DEL and C1 controls except tab, LF and CR; bidi overrides and isolates.
    */
   private const UNSAFE = '/[\x{00}-\x{08}\x{0B}\x{0C}\x{0E}-\x{1F}\x{7F}-\x{9F}\x{202A}-\x{202E}\x{2066}-\x{2069}]/u';
@@ -210,6 +224,8 @@ final class Values {
       'separator' => '|',
       'logo' => '',
       'default_image' => '',
+      'colour' => '',
+      'share_fallback' => 'card',
       'same_as' => [],
     ];
 
@@ -249,6 +265,29 @@ final class Values {
       else {
         $errors["identity.$key"] = self::IMAGE;
       }
+    }
+
+    // What pages without an image share. Without a stored choice (a site
+    // from before the choice, until its update runs), the site's image where
+    // one is set. Only the update checks that visitors can still see it:
+    // this function loads nothing, and the gap lasts until the update runs.
+    $fallback = $input['share_fallback'] ?? ($clean['default_image'] !== '' ? 'image' : 'card');
+    if ($fallback === 'image' && $clean['default_image'] === '') {
+      $errors['identity.share_fallback'] = 'Choose the image to use.';
+    }
+    elseif (in_array($fallback, ['card', 'image', 'none'], TRUE)) {
+      $clean['share_fallback'] = $fallback;
+    }
+    else {
+      $errors['identity.share_fallback'] = self::LITERAL['enum'];
+    }
+
+    $colour = $input['colour'] ?? '';
+    if (is_string($colour) && preg_match('/^(#[0-9A-Fa-f]{6})?$/D', $colour)) {
+      $clean['colour'] = strtoupper($colour);
+    }
+    else {
+      $errors['identity.colour'] = 'Use a colour code like #0F8A7E.';
     }
 
     $same_as = $input['same_as'] ?? [];
@@ -570,29 +609,68 @@ final class Values {
   /**
    * A text cut to a room at its last whole sentence, else at a word with "…".
    *
+   * The one sentence cut: a composition's long text and a description
+   * derived from text.
+   *
    * @param string $text
    *   The text.
    * @param int $room
    *   The code points it may have.
+   * @param string|null $langcode
+   *   The text's language: its sentences are found by the intl extension's
+   *   rules for it, which know its abbreviations. NULL, or without intl, by
+   *   their marks: a stop, question or exclamation mark followed by a space.
+   *   Either way a title such as "Dr." ends none.
    */
-  public static function sentences(string $text, int $room): string {
+  public static function sentences(string $text, int $room, ?string $langcode = NULL): string {
     $text = self::plain($text, PHP_INT_MAX);
     if (mb_strlen($text) <= $room) {
       return $text;
     }
-    // The last sentence end within the room, followed by a space.
-    $start = mb_substr($text, 0, $room + 1);
-    if (preg_match_all('/[.!?…。！？][\p{Pe}\p{Pf}"\'»]*(?=\s)/u', $start, $ends, PREG_OFFSET_CAPTURE)) {
-      [$mark, $offset] = end($ends[0]);
-      return substr($start, 0, $offset + strlen($mark));
+    // The last sentence end within the room.
+    $ends = [];
+    if ($langcode !== NULL && class_exists(\IntlBreakIterator::class)) {
+      $iterator = \IntlBreakIterator::createSentenceInstance(strtr($langcode, '-', '_') . '@ss=standard');
+      $iterator->setText($text);
+      foreach ($iterator as $boundary) {
+        $sentence = rtrim(substr($text, 0, $boundary));
+        // Boundaries come in order: none further on fits.
+        if (mb_strlen($sentence) > $room) {
+          break;
+        }
+        if ($boundary > 0 && $boundary < strlen($text)) {
+          $ends[] = $sentence;
+        }
+      }
     }
-    // Else at a word, with room for the ellipsis.
-    $cut = mb_substr($text, 0, max(1, $room - 1));
+    // Without ICU: a mark before a space ends a sentence, unless the next
+    // word starts in lower case ("e.g. on", "etc. and"), as ICU's rule SB8
+    // has it.
+    elseif (preg_match_all(self::SENTENCE_END, mb_substr($text, 0, $room + 64), $marks, PREG_OFFSET_CAPTURE)) {
+      foreach ($marks[0] as [$mark, $offset]) {
+        $sentence = substr($text, 0, $offset + strlen($mark));
+        if (mb_strlen($sentence) <= $room) {
+          $ends[] = $sentence;
+        }
+      }
+    }
+    $ends = array_filter($ends, static fn (string $sentence): bool => !preg_match(self::TITLE_ABBREVIATION, $sentence));
+    if ($ends !== []) {
+      return end($ends);
+    }
+    // Else at a word, with room for the ellipsis, never inside a character
+    // drawn as one, and never right after a title ("Dr.…").
+    $whole = self::whole($text, mb_substr($text, 0, max(1, $room - 1)));
+    $cut = $whole;
     $space = mb_strrpos($cut, ' ');
     if (mb_substr($text, mb_strlen($cut), 1) !== ' ' && $space !== FALSE && $space > 0) {
       $cut = mb_substr($cut, 0, $space);
     }
-    return rtrim($cut, ' ,;:') . '…';
+    $cut = rtrim($cut, ' ,;:');
+    if (preg_match(self::TITLE_ABBREVIATION, $cut)) {
+      $cut = rtrim((string) preg_replace('/\S+$/u', '', $cut), ' ,;:') ?: $whole;
+    }
+    return $cut . '…';
   }
 
   /**
@@ -919,11 +997,34 @@ final class Values {
     $glue = ' ' . self::plain($separator, 3) . ' ';
     $text = self::plain(implode('', $main), PHP_INT_MAX);
     $room = $end === '' || $text === '' ? 255 : 255 - mb_strlen($glue) - mb_strlen($end);
-    $main = $room > 0 ? self::cut(implode('', self::fit($main, $room)), min(255, $room)) : '';
+    $main = $room > 0 ? self::shorten(implode('', self::fit($main, $room)), min(255, $room)) : '';
     if ($main === '' || $end === '') {
       return [$main . $end, $main, $end];
     }
     return [$main . $glue . $end, $main, $end];
+  }
+
+  /**
+   * The title's main part in its room: whole words, then "…".
+   *
+   * Words come off its end, with a short word or a separator they would
+   * leave last (" in", " ·"), until it fits with the "…". A text without a
+   * space in the last tenth of the room is cut at the room, as cut() does.
+   */
+  private static function shorten(string $text, int $room): string {
+    $full = self::plain($text, PHP_INT_MAX);
+    if (mb_strlen($full) <= $room) {
+      return $full;
+    }
+    $cut = self::plain($full, $room - 1);
+    $space = ($full[strlen($cut)] ?? '') === ' ';
+    $words = $space ? $cut : (string) preg_replace('/\s+\S*$/u', '', $cut);
+    if ((!$space && $words === $cut) || mb_strlen($words) < $room - intdiv($room, 10)) {
+      return self::plain($full, $room);
+    }
+    // Never a dangling connector or separator before the "…".
+    $words = (string) preg_replace('/(?:\s+(?:\p{Ll}{1,3}|[^\p{L}\p{N}]+))+$/u', '', $words);
+    return rtrim($words, ' ,;:') . '…';
   }
 
   /**

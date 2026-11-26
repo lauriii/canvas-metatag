@@ -156,7 +156,8 @@ test('type-level values are linked to fields, follow the previewed article and p
   await expect(sheet(frame, 'Choose image')).toHaveCount(0);
   // The image row names the link, path and all.
   await expect(frame.getByText(/^Hero image › /)).toBeVisible();
-  await expect(frame.getByText(`${article.image.width} × ${article.image.height}`, { exact: false }).first()).toBeVisible();
+  // The preview above shows the picture: the row names it, without its size.
+  await expect(frame.locator('.seo-field[data-path="social.image"] .seo-image-name')).not.toContainText(`${article.image.width} × ${article.image.height}`);
   // The image's link menu ends with the library; leaving it from there
   // returns to the field.
   await frame.getByRole('button', { name: UI.action.changeLink('Image') }).click();
@@ -220,7 +221,7 @@ test('type-level values are linked to fields, follow the previewed article and p
   // in the previews and in the linked boxes.
   await tab(frame, UI.tab.search).click();
   await page.getByTestId('select-content-preview-item').click();
-  await page.getByRole('menuitem', { name: second.title }).click();
+  await page.getByTestId(`preview-item-${second.id}`).click();
   await expect(page).toHaveURL(new RegExp(`/canvas/template/node/article/full/${second.id}$`));
   await expect(caption).toContainText(second.title);
   await expect(preview).toContainText(`${second.title} | Blog`);
@@ -242,8 +243,9 @@ test("each article's head comes from its own fields; a type without a template i
       description: [node.summary],
       'og:type': ['article'],
       'og:title': [node.title],
-      'og:image': [expect.stringMatching(new RegExp(`/${node.image.file}$`))],
-      'og:image:width': [String(node.image.width)],
+      // Each article's own image, as its 1200 × 630 share version.
+      'og:image': [expect.stringMatching(/\/canvas-metatag\/share\/en\/node\/\d+\/[0-9a-f]{16}\.jpg$/)],
+      'og:image:width': ['1200'],
     });
     expect(head.jsonLd).toHaveLength(1);
     expect(graphNode(head.jsonLd[0], '#primary')).toMatchObject({

@@ -34,6 +34,8 @@ export const PAGES = {
   unknownKind: { id: 6, title: 'Night at the cinema', path: './night-at-the-cinema' },
   /** Shows Drupal's breadcrumb: Home › About us. */
   trail: { id: 7, title: 'Our team', path: './about/team' },
+  /** No description: described by its own text after its heading. */
+  story: { id: 8, title: 'Our story', path: './our-story' },
 } as const;
 
 /** Image media, by name. The file is the lower-cased, hyphenated name. */
@@ -42,6 +44,7 @@ export const IMAGES = {
   small: { name: 'E2E Small', file: 'e2e-small.png', width: 300, height: 200 },
   logo: { name: 'E2E Logo', file: 'e2e-logo.png', width: 512, height: 512 },
   article: { name: 'E2E Article', file: 'e2e-article.png', width: 1600, height: 900 },
+  tiny: { name: 'E2E Tiny', file: 'e2e-tiny.png', width: 150, height: 150 },
 } as const;
 
 /** Nodes, by id. Articles have the enabled template; the Basic page has none. */
@@ -244,7 +247,8 @@ export const UI = {
     show: /^Show [a-z ]+$/,
     titleLong: /^Shorten the title/,
     imageSmall: 'Use a larger social image',
-    imageSmallDetail: /^The social image is \d+\u00a0×\u00a0\d+\./,
+    // A found image too small to share: links show a card made from the title.
+    imageSmallDetail: /^The image is \d+\u00a0×\u00a0\d+, too small to share, so links show a card made from the title\./,
     siteTwice: 'Remove the repeated site name',
     removeRepeat: 'Remove the repeat',
     goToTitle: /^Show title$/,

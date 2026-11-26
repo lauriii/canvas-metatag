@@ -62,6 +62,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
   use AutoSaveRequestTestTrait;
   use ComplexContentTrait;
   use RequestTrait;
+  use ShareTestTrait;
   use UserCreationTrait;
 
   private const STATE = '/canvas-metatag/api/state';
@@ -99,6 +100,10 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
   public function register(ContainerBuilder $container): void {
     parent::register($container);
     self::allowPageCaches($container);
+    // This class pins how complex content reads, with the original files a
+    // site that makes no share images sends. ResolverTest pins the made ones.
+    self::spyOnRenderer($container);
+    ShareRendererSpy::$unavailable = TRUE;
   }
 
   /**
@@ -292,12 +297,12 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     // texts: the module asks for one, so steps can be linked.
     self::assertSame(['expression' => 'ℹ︎␜entity:node:recipe␝field_steps␞␟value', 'sourceType' => 'entity-field'], $sources->sourceFor('recipe', 'field_steps', 'text'));
 
-    // A long body without a summary: its text, cut at a word boundary within
-    // 160 characters.
+    // A long body without a summary: its text, cut to the whole sentences
+    // that fit in 160 characters.
     $description = $fact('event_long', 'description');
     self::assertStringStartsWith('Each work is introduced by the musicians who play it', $description);
     self::assertLessThanOrEqual(160, mb_strlen($description));
-    self::assertGreaterThan(100, mb_strlen($description));
+    self::assertStringEndsWith('.', $description);
 
     // Long HTML: plain text with entities decoded, no markup, and nothing of
     // the script at its end. The heading, the list items and the table rows
@@ -395,10 +400,12 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       'robots' => 'max-image-preview:large',
       'og:type' => 'website',
       'og:site_name' => 'Example',
+      'og:locale' => 'en_US',
       'og:title' => 'Midsummer Night Concert',
       'og:description' => self::EVENT_SUMMARY,
       'og:url' => 'http://localhost/complex/events/midsummer-night-concert',
       'og:image' => $poster['url'],
+      'og:image:type' => 'image/png',
       'og:image:width' => '1600',
       'og:image:height' => '900',
       'og:image:alt' => 'An orchestra on an open-air stage at dusk',
@@ -435,18 +442,19 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     }
 
     // A long title keeps its ending whole and loses the last words of its
-    // main part, cut at a word within 255 characters.
-    self::assertStringEndsWith('rehearsed and first | Events', $heads['event_long']['title']);
+    // main part, which ends in "…", within 255 characters.
+    self::assertStringEndsWith('rehearsed and first… | Events', $heads['event_long']['title']);
     self::assertLessThanOrEqual(255, mb_strlen($heads['event_long']['title']));
 
     // A product: its description is its Description fact, the start of its
     // body cut at a word within 160 characters; a gallery whose first image
-    // has no alt text gives the image without one.
+    // has no alt text gives the image without one, and its media name, which
+    // says what it shows, as the shared image's alt.
     $meta = self::meta($heads['product_lamp']);
     self::assertLessThanOrEqual(160, mb_strlen($meta['description']));
     self::assertStringStartsWith('Made to last. Solid oak, turned by hand & finished with natural oil.', $meta['description']);
     self::assertSame($this->fileUrl('lamp_front'), $meta['og:image']);
-    self::assertArrayNotHasKey('og:image:alt', $meta);
+    self::assertSame('Oak lamp, front', $meta['og:image:alt']);
     self::assertArrayNotHasKey('caption', self::graph($heads['product_lamp'])['primaryimage']);
     // An unpublished first gallery item: no image anywhere, the small card.
     $meta = self::meta($heads['product_rtl']);
@@ -928,16 +936,18 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
       self::assertStringStartsWith('http://localhost/', self::meta($head)['og:image'], $key);
     }
     self::assertSame('Midsummer Night Concert | Events', self::decodeResponse($this->content($this->complex['path']['event_full']))['head']['title']);
-    // A change to a referenced media item reaches the cached response.
+    // A change to a referenced media item reaches the cached response (the
+    // dynamic page cache: Canvas keeps its content API out of the internal
+    // page cache).
     $event_path = $this->complex['path']['event_full'];
     $response = $this->content($event_path);
-    self::assertSame('HIT', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('HIT', $response->headers->get('X-Drupal-Dynamic-Cache'));
     self::assertSame('An orchestra on an open-air stage at dusk', self::meta(self::decodeResponse($response)['head'])['og:image:alt']);
     $poster = $this->entity('media', 'poster');
     \assert($poster instanceof MediaInterface);
     $poster->set('field_media_image', ['alt' => 'The stage at dusk'] + (array) $poster->get('field_media_image')->first()?->getValue())->save();
     $response = $this->content($event_path);
-    self::assertSame('MISS', $response->headers->get('X-Drupal-Cache'));
+    self::assertSame('MISS', $response->headers->get('X-Drupal-Dynamic-Cache'));
     self::assertSame('The stage at dusk', self::meta(self::decodeResponse($response)['head'])['og:image:alt']);
     // Not owned: Canvas's own head.
     self::assertSame(['title' => 'Lakeside Concert Hall'], self::decodeResponse($this->content($this->complex['path']['venue_hall']))['head']);
@@ -1061,7 +1071,7 @@ final class ComplexTemplateTest extends CanvasKernelTestBase {
     $path = $this->complex['path']['event_hidden_refs'];
     $read = function () use ($path): array {
       $response = $this->content($path);
-      return [$response->headers->get('X-Drupal-Cache'), self::decodeResponse($response)['head']['title']];
+      return [$response->headers->get('X-Drupal-Dynamic-Cache'), self::decodeResponse($response)['head']['title']];
     };
 
     $seen = [];

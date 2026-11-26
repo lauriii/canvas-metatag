@@ -204,6 +204,20 @@ canvas_metatag.site:
         default_image:
           type: string
           label: 'Default social image media UUID'
+        colour:
+          type: string
+          label: 'Share card colour, in hex (empty: picked from the logo)'
+          # Absent on a site from before the choice until its update runs.
+          requiredKey: false
+          constraints:
+            Regex:
+              pattern: '/^(#[0-9A-Fa-f]{6})?$/'
+        share_fallback:
+          type: string
+          label: 'What pages without an image share: card, image or none'
+          requiredKey: false
+          constraints:
+            Choice: [card, image, none]
         same_as:
           type: sequence
           label: 'Profiles'

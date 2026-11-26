@@ -11,6 +11,8 @@ use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\RegistryStrings;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\SchemaGraph;
+use Drupal\canvas_metatag\ShareImage;
+use Drupal\canvas_metatag\ShareRenderer;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
 use Drupal\canvas_metatag\Vocabulary;
@@ -27,10 +29,13 @@ use Drupal\Core\Entity\EntityPublishedInterface;
 use Drupal\Core\Entity\EntityRepositoryInterface;
 use Drupal\Core\Entity\EntityTypeManagerInterface;
 use Drupal\Core\Extension\ModuleHandlerInterface;
+use Drupal\Core\File\FileUrlGeneratorInterface;
 use Drupal\Core\KeyValueStore\KeyValueFactoryInterface;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Language\LanguageManagerInterface;
 use Drupal\Core\Session\AccountInterface;
+use Drupal\Core\Session\AnonymousUserSession;
+use Drupal\Core\State\StateInterface;
 use Drupal\Core\StringTranslation\TranslatableMarkup;
 use Drupal\Core\Url;
 use Drupal\locale\StringStorageInterface;
@@ -59,6 +64,14 @@ final class ApiController implements ContainerInjectionInterface {
   private const MAX_BODY = 131072;
 
   private const PAGE_SIZE = 24;
+
+  /**
+   * A short, typical title: Site › Sharing's samples away from a page.
+   *
+   * The colour's contrast is measured on it when the title the sample shows
+   * can't be drawn. Mirrored in model.ts (SAMPLE_TITLE).
+   */
+  public const SAMPLE_TITLE = 'About us';
 
   /**
    * The places a site save names before it counts the rest.
@@ -107,6 +120,9 @@ final class ApiController implements ContainerInjectionInterface {
     private readonly Words $words,
     #[Autowire(service: 'keyvalue')]
     private readonly KeyValueFactoryInterface $keyValue,
+    private readonly ShareRenderer $shareRenderer,
+    private readonly FileUrlGeneratorInterface $fileUrlGenerator,
+    private readonly StateInterface $state,
   ) {}
 
   /**
@@ -210,6 +226,7 @@ final class ApiController implements ContainerInjectionInterface {
         // chooses another (state only).
         'timezone' => (string) ($this->configFactory->get('system.date')->get('timezone.default') ?: 'UTC'),
       ],
+      'share' => $this->sharing($identity),
       'registry' => self::shown(SchemaGraph::types(), $strings, $translated, $ui),
       'codes' => ['country' => SchemaGraph::codes('country')],
       // The ids the module emits, by name, with what each is anchored on:
@@ -241,8 +258,244 @@ final class ApiController implements ContainerInjectionInterface {
       'sources' => $template ? $this->resolver->sourceRows($entity, $bundle, $cacheability) : [],
       'broken' => (object) $broken,
       'media' => (object) $media,
-      'resolved' => $entity === NULL ? NULL : array_diff_key($this->resolver->report($entity, $draft), ['cacheability' => TRUE]),
+      'resolved' => $entity === NULL ? NULL : $this->resolved($entity, $draft, $context['live'] ?? NULL),
     ]);
+  }
+
+  /**
+   * The head the dialog shows, and the image it shares as the dialog sees it.
+   *
+   * `share`: what the module sends (a card, a share version cropped or
+   * framed, or the original file), at the address the dialog previews it
+   * from: the draft's image drawn in memory, never a public file; NULL when
+   * no image is shared. On a published page with a draft, `share_changed`
+   * says whether the draft shares another title or image than links already
+   * shared show.
+   */
+  private function resolved(ContentEntityInterface $entity, bool $draft, ?ContentEntityInterface $live): array {
+    $report = $this->resolver->report($entity, $draft);
+    $share = $report['share'];
+    $cacheability = new CacheableMetadata();
+    $made = match (TRUE) {
+      $share === NULL => NULL,
+      isset($share['card']) => 'card',
+      isset($share['file']) => ShareImage::treatment($report['image']['width'], $report['image']['height'], $share['chosen']) === 'cover' ? 'cover' : 'frame',
+      default => 'original',
+    };
+    $result = array_diff_key($report, ['cacheability' => TRUE, 'share' => TRUE]);
+    $result['share'] = $made === NULL ? NULL : [
+      'made' => $made,
+      'url' => $made === 'original' ? $share['original']['url'] : $this->resolver->previewUrl($entity, $share, $cacheability),
+    ];
+    if ($live !== NULL) {
+      $shared = $this->resolver->resolve($live);
+      $title = static fn (array $head): string => array_column($head['meta'], 'content', 'property')['og:title'] ?? '';
+      $result['share_changed'] = $title($shared['head']) !== $title($report['head']) || self::shareKey($shared['share']) !== self::shareKey($share);
+    }
+    return $result;
+  }
+
+  /**
+   * What tells one shared image from another: its input's hash, or its URL.
+   */
+  private static function shareKey(?array $share): ?string {
+    return match (TRUE) {
+      $share === NULL => NULL,
+      isset($share['card']) => Resolver::hash($share['card']),
+      isset($share['file']) => Resolver::hash(Resolver::photoInput($share['file'], $share['chosen'])),
+      default => $share['original']['url'],
+    };
+  }
+
+  /**
+   * What Site › Sharing and the administrators' checks need to know.
+   *
+   * Why the site makes no share images ('fonts', 'files' or NULL); the
+   * default theme's own logo; whether the logo cards are drawn with is an
+   * SVG (they show its initial); the site image's alt text; whether there is
+   * a front page to show as a sample; and, for
+   * administrators, an address a headless frontend fetched the content API
+   * at that visitors cannot reach (HeadlessContentController).
+   */
+  private function sharing(array $identity): array {
+    $cacheability = new CacheableMetadata();
+    $theme = (string) $this->configFactory->get('system.theme')->get('default');
+    $theme_logo = $this->shareRenderer->themeLogo($theme);
+    $logo = $identity['logo'] === '' ? NULL : $this->resolver->image($identity['logo'], $cacheability);
+    $site = $identity['default_image'] === '' ? NULL : $this->resolver->image($identity['default_image'], $cacheability);
+    return [
+      'missing' => $this->shareRenderer->missing(),
+      'theme_logo' => $theme_logo === NULL ? NULL : $this->fileUrlGenerator->generateString($theme_logo['path']),
+      'svg' => $logo !== NULL
+        ? $logo['mime'] === 'image/svg+xml'
+        : $theme_logo !== NULL && str_ends_with(strtolower($theme_logo['path']), '.svg'),
+      'site_alt' => $site['alt'] ?? '',
+      // Whether Site › Sharing offers the front page as a sample.
+      'home' => $this->frontPage() !== NULL,
+      'host' => $this->currentUser->hasPermission('administer canvas metatag') ? $this->state->get('canvas_metatag.share_host') : NULL,
+    ];
+  }
+
+  /**
+   * A sample of what links show for Site › Sharing, from what is being edited.
+   *
+   * `sample` is `home` (what the front page shares: its own image, else what
+   * a page without one shares) or `page` (a page without an image, titled
+   * `title`); `name`, `logo`, `colour`, `share_fallback` and `default_image`
+   * are the identity members as edited, checked as a save checks them ("Use
+   * this image" before one is chosen shows none yet). Only administrators
+   * edit them: for anyone else the stored ones are drawn, so no other image
+   * is ever decoded here. Drawn in memory, never stored, never cached. The
+   * answer carries the image (a data URL, or the address of an image the
+   * site already serves), what it `shows` ('card', 'photo' or 'none': a link
+   * without an image, as for a title the fonts cannot draw), the home page's
+   * `description`, and what cards are drawn with: the colour, whether it was
+   * picked from the logo, the text colour and the title's measured contrast.
+   */
+  public function shareSample(Request $request): JsonResponse {
+    $query = $request->query->all();
+    $sample = $query['sample'] ?? NULL;
+    $title = $query['title'] ?? '';
+    $members = array_flip(['name', 'logo', 'colour', 'share_fallback', 'default_image']);
+    $editing = array_intersect_key($query, $members);
+    if (!$this->currentUser->hasPermission('administer canvas metatag')) {
+      $stored = $this->configFactory->get('canvas_metatag.site')->get('identity');
+      $editing = array_intersect_key(is_array($stored) ? $stored : [], $members);
+    }
+    [$identity, $errors] = Values::cleanIdentity($editing);
+    $fallback = $editing['share_fallback'] ?? $identity['share_fallback'];
+    unset($errors['identity.share_fallback']);
+    $valid = in_array($sample, ['home', 'page'], TRUE) && in_array($fallback, ['card', 'image', 'none'], TRUE);
+    if (!$valid || !is_string($title) || mb_strlen($title) > 255 || $errors) {
+      return self::badRequest();
+    }
+    if (!$this->shareRenderer->available()) {
+      return new JsonResponse(['image' => NULL, 'shows' => 'card'], 200, ['Cache-Control' => 'no-store']);
+    }
+    $cacheability = new CacheableMetadata();
+    $brand = $this->resolver->sampleBrand(array_intersect_key($identity, array_flip(['name', 'logo', 'colour']), $editing), $cacheability);
+    $card = [
+      'layout' => 'page',
+      'title' => Values::plain($title, 255),
+      'label' => '',
+      'dir' => $this->languageManager->getDefaultLanguage()->getDirection() === LanguageInterface::DIRECTION_RTL ? 'R' : 'L',
+    ];
+    $image = NULL;
+    $shows = NULL;
+    $description = '';
+    $front = $sample === 'home' ? $this->frontPage() : NULL;
+    if ($front !== NULL) {
+      $resolved = $this->resolver->resolve($front);
+      $meta = array_column($resolved['head']['meta'], 'content', 'property');
+      $description = $meta['og:description'] ?? '';
+      // Its own image: the address the head sends.
+      if (in_array($resolved['image']['source'] ?? '', ['override', 'entity', 'component'], TRUE)) {
+        $image = $meta['og:image'] ?? NULL;
+        $shows = 'photo';
+      }
+      // Else its card as the head draws it, or would were cards the choice.
+      $card = $this->resolver->cardInput($front, $cacheability);
+    }
+    $drawn = $this->shareRenderer->sample(array_diff_key($card, $brand) + $brand);
+    // A title the fonts cannot draw: the head sends no card for it but the
+    // site's image, if any, and the colour is described from a short title.
+    $undrawn = $drawn['png'] === NULL;
+    if ($undrawn) {
+      $drawn = ['png' => NULL] + $this->shareRenderer->sample(['title' => self::SAMPLE_TITLE] + array_diff_key($card, $brand) + $brand);
+    }
+    if ($shows === NULL) {
+      $site = $fallback === 'image' || ($fallback === 'card' && $undrawn) ? $this->siteImageSample($identity['default_image']) : NULL;
+      [$image, $shows] = match (TRUE) {
+        $fallback === 'card' && !$undrawn => ['data:image/png;base64,' . base64_encode($drawn['png']), 'card'],
+        $site !== NULL => [$site, 'photo'],
+        default => [NULL, 'none'],
+      };
+    }
+    return new JsonResponse([
+      'image' => $image,
+      'shows' => $shows,
+      // The title and description the link shows beside it.
+      'title' => (string) $card['title'],
+      'description' => $description,
+      // An SVG logo is never drawn: cards show its initial.
+      'svg' => str_ends_with(strtolower($brand['logo']['uri'] ?? $brand['logo']['path'] ?? ''), '.svg'),
+    ] + array_diff_key($drawn, ['png' => TRUE]), 200, ['Cache-Control' => 'no-store']);
+  }
+
+  /**
+   * The site's image as pages without one share it: a data URL, an address.
+   *
+   * NULL when none is chosen, or none an anonymous visitor may see.
+   */
+  private function siteImageSample(string $uuid): ?string {
+    $image = $uuid === '' ? NULL : $this->resolver->image($uuid, new CacheableMetadata());
+    $media = $image === NULL ? [] : $this->entityTypeManager->getStorage('media')->loadByProperties(['uuid' => $uuid]);
+    $fid = ($media = reset($media)) ? $media->getSource()->getSourceFieldValue($media) : NULL;
+    $file = $fid === NULL ? NULL : $this->entityTypeManager->getStorage('file')->load($fid);
+    if ($image === NULL || $file === NULL) {
+      return NULL;
+    }
+    $treatment = in_array($image['mime'], ['image/jpeg', 'image/png', 'image/webp'], TRUE)
+      ? ShareImage::treatment($image['width'], $image['height'], TRUE)
+      : 'original';
+    $bytes = in_array($treatment, ['cover', 'frame'], TRUE) ? $this->shareRenderer->photo((string) $file->getFileUri(), TRUE) : NULL;
+    return match (TRUE) {
+      $bytes !== NULL => 'data:image/jpeg;base64,' . base64_encode($bytes),
+      $treatment === 'skip' => NULL,
+      default => $image['url'],
+    };
+  }
+
+  /**
+   * The front page an anonymous visitor sees, when the module makes its head.
+   */
+  private function frontPage(): ?ContentEntityInterface {
+    // The front page setting holds a system path or its alias.
+    $front = (string) $this->configFactory->get('system.site')->get('page.front');
+    $url = str_starts_with($front, '/') ? Url::fromUserInput($front) : NULL;
+    $route = $url?->isRouted() ? $url->getRouteName() : '';
+    if (!preg_match('/^entity\.(canvas_page|node)\.canonical$/', $route, $match)) {
+      return NULL;
+    }
+    $entity = $this->entityTypeManager->getStorage($match[1])->load($url->getRouteParameters()[$match[1]] ?? 0);
+    $entity = $entity instanceof ContentEntityInterface ? $this->entityRepository->getTranslationFromContext($entity) : NULL;
+    return $entity instanceof ContentEntityInterface && $this->resolver->owns($entity) && $entity->access('view', new AnonymousUserSession()) ? $entity : NULL;
+  }
+
+  /**
+   * The image the page or template preview shares, drawn from its draft.
+   *
+   * The same context and checks as state(): view access, and the draft only
+   * with update access. Drawn in memory, never stored: a draft's values
+   * never reach a public address. `v` hashes what is drawn, so the editor's
+   * browser alone keeps the bytes for an hour (`private`), and a remount of
+   * the link preview decodes no photo again. 404 when the page shares no
+   * made image.
+   */
+  public function sharePreview(Request $request): Response {
+    $query = $request->query->all();
+    $context = match (TRUE) {
+      ($query['entity_type'] ?? NULL) === 'canvas_page' && is_string($query['id'] ?? NULL) && !isset($query['preview'])
+        => $this->pageContext($query['id'], $query['langcode'] ?? NULL),
+      ($query['entity_type'] ?? NULL) === 'content_template' && is_string($query['id'] ?? NULL) && is_string($query['preview'] ?? NULL) && !isset($query['langcode'])
+        => $this->templateContext($query['id'], $query['preview']),
+      default => self::badRequest(),
+    };
+    if ($context instanceof JsonResponse) {
+      return $context;
+    }
+    $share = $this->resolver->share($context['entity'], new CacheableMetadata(), $context['draft']);
+    [$bytes, $type] = match (TRUE) {
+      isset($share['card']) => [$this->shareRenderer->card($share['card']), 'image/png'],
+      isset($share['file']) => [
+        $this->shareRenderer->photo((string) $share['file']->getFileUri(), $share['chosen']),
+        'image/jpeg',
+      ],
+      default => [NULL, ''],
+    };
+    return $bytes === NULL
+      ? self::error(404, 'not_found', 'This page shares no image made by the site.')
+      : new Response($bytes, 200, ['Content-Type' => $type, 'Cache-Control' => 'private, max-age=3600']);
   }
 
   /**
@@ -293,7 +546,10 @@ final class ApiController implements ContainerInjectionInterface {
     if ($body['dry_run'] ?? FALSE) {
       return new JsonResponse(['effect' => $currency === $stored_currency ? NULL : $this->effect()]);
     }
-    $config->set('identity', $identity)->set('values', $values)->set('currency', $currency)->save();
+    $config->set('identity', $identity)->set('values', $values);
+    // No currency is no key, as installed: a save of the same values leaves
+    // the exported configuration as it was.
+    ($currency === '' ? $config->clear('currency') : $config->set('currency', $currency))->save();
     $site = ['identity' => $identity, 'values' => (object) $values, 'currency' => $currency];
     return new JsonResponse(['site' => $site]);
   }
@@ -746,6 +1002,8 @@ final class ApiController implements ContainerInjectionInterface {
       'entity' => $entity,
       // The editor previews the page's chrome as a draft too.
       'draft' => $update,
+      // What links already shared show, while a draft may change it.
+      'live' => $entity !== $page && $stored && $page->isPublished() ? $page : NULL,
       'vocabulary' => [Page::ENTITY_TYPE_ID, Page::ENTITY_TYPE_ID],
     ];
   }

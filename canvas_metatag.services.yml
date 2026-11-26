@@ -6,6 +6,15 @@ services:
   Drupal\canvas_metatag\Sources: {}
   Drupal\canvas_metatag\Words: {}
   Drupal\canvas_metatag\Vocabulary: {}
+  Drupal\canvas_metatag\ShareRenderer: {}
+  Drupal\canvas_metatag\ShareStore:
+    tags:
+      - { name: needs_destruction }
+  Drupal\canvas_metatag\PageContent: {}
+  Drupal\canvas_metatag\PageText: {}
+  Drupal\canvas_metatag\ShareConfigSubscriber:
+    tags:
+      - { name: event_subscriber }
   # Removed from the container when canvas_headless is not installed.
   Drupal\canvas_metatag\Controller\HeadlessContentController:
     decorates: Drupal\canvas_headless\Controller\CanvasContentController

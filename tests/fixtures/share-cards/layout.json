@@ -1,0 +1,94 @@
+{
+    "c04-event-86": {
+        "size": [
+            1200,
+            630
+        ],
+        "px": 88.0,
+        "label": "EVENT · JUNE 19, 2027",
+        "lines": [
+            "Midsummer",
+            "Night Concert"
+        ],
+        "mark": "tile",
+        "field": [
+            "#1D399A",
+            "#172E7C"
+        ],
+        "text": "#FFFFFF",
+        "contrast": {
+            "title": 8.95,
+            "small": 5.28,
+            "small_opacity": 0.7
+        }
+    },
+    "c12-rtl-arabic": {
+        "size": [
+            1200,
+            630
+        ],
+        "px": 88.0,
+        "label": "فعالية",
+        "lines": [
+            "حفل ليلة منتصف الصيف",
+            "على ضفاف البحيرة"
+        ],
+        "mark": "tile",
+        "field": [
+            "#1D399A",
+            "#172E7C"
+        ],
+        "text": "#FFFFFF",
+        "contrast": {
+            "title": 8.95,
+            "small": 5.28,
+            "small_opacity": 0.7
+        }
+    },
+    "c17-no-logo-announcement": {
+        "size": [
+            1200,
+            630
+        ],
+        "px": 88.0,
+        "label": null,
+        "lines": [
+            "New summer",
+            "opening hours"
+        ],
+        "mark": "monogram",
+        "field": [
+            "#22252C",
+            "#0E0F13"
+        ],
+        "text": "#FFFFFF",
+        "contrast": {
+            "title": 13.8,
+            "small": 7.58,
+            "small_opacity": 0.7
+        }
+    },
+    "c21-light-brand": {
+        "size": [
+            1200,
+            630
+        ],
+        "px": 88.0,
+        "label": null,
+        "lines": [
+            "New summer",
+            "opening hours"
+        ],
+        "mark": "monogram",
+        "field": [
+            "#EEC42E",
+            "#E6B813"
+        ],
+        "text": "#111318",
+        "contrast": {
+            "title": 9.83,
+            "small": 5.08,
+            "small_opacity": 0.7
+        }
+    }
+}

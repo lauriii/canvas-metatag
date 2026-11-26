@@ -461,8 +461,10 @@ final class RefTargetsTest extends CanvasKernelTestBase {
    * A list page of courses counts the complete ones it links.
    */
   public function testCourseList(): void {
-    // Articles described as courses, listed from an announcement.
-    self::describe('article', ['type' => 'Course']);
+    // Articles described as courses, listed from an announcement. The
+    // template renders no field, so a course's description is its body by
+    // link: a templated type takes no description from what it doesn't show.
+    self::describe('article', ['type' => 'Course', 'props' => ['description' => self::link('article', 'body␞␟value')]]);
     FieldStorageConfig::create([
       'field_name' => 'field_courses',
       'entity_type' => 'node',

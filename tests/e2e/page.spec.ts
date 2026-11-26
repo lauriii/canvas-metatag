@@ -132,16 +132,76 @@ test("Edit beside an inherited ending leads to the site's ending, by keyboard", 
   await expect(frame.locator('.seo-field[data-path="identity.separator"]')).toBeInViewport();
 });
 
-test('after Reset the social image says where it now comes from, beside Undo', async ({ page }) => {
+test('after Reset the social image row says where it now comes from, with Undo beside the field', async ({ page }) => {
   const frame = await open(page);
   await tab(frame, UI.tab.social).click();
   await button(frame, UI.action.chooseImage).click();
   await sheet(frame, 'Choose image').getByRole('button', { name: IMAGES.small.name, exact: true }).click();
   await expect(sheet(frame, 'Choose image')).toHaveCount(0);
   await button(frame, 'Reset Image').click();
-  const aside = frame.locator('.seo-field[data-path="social.image"] .seo-aside');
-  await expect(aside).toHaveText(/^Reset · (From the Image field|Site default image|No image) ·Undo$/);
+  const field = frame.locator('.seo-field[data-path="social.image"]');
+  await expect(field.locator('.seo-aside')).toHaveText('Reset ·Undo');
+  // Said once, in the row: a page's row names where its image comes from.
+  await expect(field.locator('.seo-image-name > div').first()).toHaveText(/^(From the Image field|Made from the title|The site's image|No image)$/);
   await expect(status(frame)).toContainText(UI.footer.matchesPage, { timeout: 30_000 });
+});
+
+test('Social on a page without an image shows the card the server draws, and follows a typed title', async ({ page }) => {
+  const frame = await open(page, PAGES.about.id);
+  await tab(frame, UI.tab.social).click();
+  const card = frame.getByTestId(TEST_ID.social);
+  await expect(frame.locator('.seo-stage', { has: card }).locator('.seo-stage-cap-l')).toContainText('When this page is shared');
+  await expect(card).toHaveAttribute('data-layout', 'large');
+  // The server's own bytes for the draft, never a public file.
+  const image = card.locator('.seo-social-image img[data-front]');
+  await expect(image).toHaveAttribute('src', new RegExp(`/canvas-metatag/api/share-preview\\?entity_type=canvas_page&id=${PAGES.about.id}&`));
+  expect(await image.evaluate((img: HTMLImageElement) => [img.naturalWidth, img.naturalHeight])).toEqual([1200, 630]);
+  // The image field says where the image comes from, in words: no second picture.
+  const field = frame.locator('.seo-field[data-path="social.image"]');
+  // One line: "Made from the title" says it all.
+  await expect(field.locator('.seo-image-name')).toHaveText('Made from the title');
+  await expect(field.locator('.seo-thumb')).toHaveCount(0);
+  await expect(field.getByRole('button', { name: 'Choose image', exact: true })).toBeVisible();
+
+  // A typed title: the card follows, once the draft has it (400 ms, then the
+  // round trip).
+  const before = await image.getAttribute('src');
+  await textbox(frame, UI.field.title).pressSequentially('Our people');
+  await expect(card.locator('.seo-social-image img[data-front]')).not.toHaveAttribute('src', before!, { timeout: 1_000 });
+  await button(frame, 'Reset Title').click();
+  await expect(status(frame)).toContainText(UI.footer.matchesPage, { timeout: 30_000 });
+});
+
+test('a tiny chosen image is sent as it is: a small card, a square thumbnail, the small card hint', async ({ page }) => {
+  const frame = await open(page, PAGES.stored.id);
+  await tab(frame, UI.tab.social).click();
+  await button(frame, UI.action.chooseImage).click();
+  await sheet(frame, 'Choose image').getByRole('button', { name: IMAGES.tiny.name, exact: true }).click();
+  const card = frame.getByTestId(TEST_ID.social);
+  await expect(card).toHaveAttribute('data-layout', 'compact');
+  // A square thumbnail as tall as the card.
+  const thumb = (await card.locator('.seo-social-image').boundingBox())!;
+  expect(Math.abs(thumb.width - thumb.height)).toBeLessThanOrEqual(1);
+  expect((await card.boundingBox())!.height).toBeLessThanOrEqual(thumb.height + 1);
+  const stage = frame.locator('.seo-stage', { has: card });
+  await expect(stage.getByRole('button', { name: 'About this preview' })).toHaveAttribute('aria-description', 'Small card: image under 600 px wide.');
+  await card.screenshot({ path: test.info().outputPath('social-small-card.png') });
+  // Output shows the small card hint, once the server has the draft.
+  await expect(status(frame)).toContainText(UI.footer.draftPage, { timeout: 30_000 });
+  await button(frame, UI.action.output).click();
+  await expect(sheet(frame, 'Output').getByText(UI.output.updating)).toHaveCount(0, { timeout: 30_000 });
+  expect((await outputRows(frame))['twitter:card']).toBe('summary');
+  await button(frame, 'Back').click();
+  await button(frame, 'Reset Image').click();
+  await expect(status(frame)).toContainText(UI.footer.matchesPage, { timeout: 30_000 });
+});
+
+test("a page's own text describes it: the field says so", async ({ page }) => {
+  const frame = await open(page, PAGES.story.id);
+  const field = frame.locator('.seo-field[data-path="description"]');
+  await field.hover();
+  await expect(field.locator('.seo-aside')).toContainText("From the page's text");
+  await expect(frame.getByTestId(TEST_ID.search)).toContainText('We started as two editors');
 });
 
 test("an override is saved into the page draft and survives the editor's own saves", async ({ page }) => {
@@ -466,7 +526,9 @@ test('publishing puts the override into the page head, once, and Output shows th
     'og:title': [pricing.title],
     'og:description': [pricing.description],
     'og:url': [canonical],
-    'og:image': [expect.stringMatching(/\/e2e-hero\.png$/)],
+    // The page's own image, as its 1200 × 630 share version.
+    'og:image': [expect.stringMatching(/\/canvas-metatag\/share\/en\/canvas_page\/\d+\/[0-9a-f]{16}\.jpg$/)],
+    'og:image:type': ['image/jpeg'],
     'og:image:width': ['1200'],
     'og:image:height': ['630'],
     'twitter:card': ['summary_large_image'],

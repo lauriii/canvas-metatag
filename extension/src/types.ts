@@ -82,6 +82,10 @@ export interface Identity {
   separator: string;
   logo: string;
   default_image: string;
+  /** '#RRGGBB'; '' = picked from the logo. */
+  colour: string;
+  /** What pages without an image share. */
+  share_fallback: 'card' | 'image' | 'none';
   same_as: string[];
 }
 
@@ -358,7 +362,7 @@ export interface ImageInfo {
   name: string;
   thumb: string;
   /** Set on the effective social image only. */
-  source?: 'override' | 'entity' | 'site';
+  source?: 'override' | 'entity' | 'component' | 'site';
 }
 
 export interface FactInfo {
@@ -367,11 +371,17 @@ export interface FactInfo {
   value: string;
   /** The Image fact's image. */
   image?: ImageInfo | null;
+  /** A Canvas page's Image field holds an image visitors can't see. */
+  hidden?: true;
   /**
    * The field a node's Description or Image fact is taken from; '' where it
    * reads no one field (detailLookup()).
    */
   via?: string;
+  /** A Canvas page's name for a new page, which it still has: its Title fact is its first heading. */
+  placeholder?: string;
+  /** A Canvas page's Description fact is its own text: none was typed. */
+  derived?: boolean;
   /** A date fact in words, as a place that composes reads it: the server's. */
   text?: string;
 }
@@ -459,6 +469,15 @@ export interface SkippedPart {
 export interface Resolved {
   head: Head;
   image: ImageInfo | null;
+  /**
+   * The image links show, as the module sends it: a card made from the
+   * title, a share version cropped to 1200 × 630 (`cover`) or shown whole
+   * (`frame`), or the original file. `url` previews the draft's. NULL when
+   * no image is shared.
+   */
+  share?: { made: 'card' | 'cover' | 'frame' | 'original'; url: string } | null;
+  /** A published page's draft shares another title or image. */
+  share_changed?: boolean;
   schema: {
     /** Why the main node was left out, and the node it would have been. */
     withheld: { missing: string[]; dropped: string[]; node: Record<string, unknown> } | null;
@@ -569,6 +588,8 @@ export interface StatePayload {
     } | null;
   };
   site: SiteSettings;
+  /** How this site makes share images (ApiController::sharing()). */
+  share?: ShareInfo;
   registry: Registry;
   /** The code lists of enums that have one: "country" => ISO 3166-1 codes. */
   codes?: Record<string, string[]>;
@@ -597,6 +618,43 @@ export interface StatePayload {
   broken: Record<string, BrokenLink>;
   media: Record<string, MediaInfo>;
   resolved: Resolved | null;
+}
+
+export interface ShareInfo {
+  /** Why no share image is made: no font support, or no local public files. */
+  missing: 'fonts' | 'files' | null;
+  /** The default theme's own logo, used while the identity has none. */
+  theme_logo: string | null;
+  /** The logo cards are drawn with is an SVG: they show its initial. */
+  svg: boolean;
+  /** The site's image's alt text. */
+  site_alt: string;
+  /** Administrators: an address a headless frontend reached Drupal at that visitors can't. */
+  host: string | null;
+  /** The module makes the front page's head: Site › Sharing offers it as a sample. */
+  home?: boolean;
+}
+
+/** A card Site › Sharing drew from what is being edited. */
+export interface ShareSample {
+  /** A data URL or an address the site serves, or null when there is none to show. */
+  image: string | null;
+  /** What links show: a card, a photo, or no image (a small card without one). */
+  shows?: 'card' | 'photo' | 'none';
+  /** The title the link shows. */
+  title?: string;
+  /** The home page's description, as its head sends it. */
+  description?: string;
+  /** The card's colour. */
+  colour?: string;
+  /** Picked from the logo, not chosen. */
+  picked?: boolean;
+  /** The text colour. */
+  text?: string;
+  /** The title's measured contrast. */
+  contrast?: number;
+  /** The logo is an SVG: cards show its initial. */
+  svg?: boolean;
 }
 
 /** The published places a site save changes the structured data of. */
@@ -779,7 +837,9 @@ export interface Issue {
     /** Leads to the field and opens its link menu. */
     | { label: string; link: true }
     /** Opens the image chooser for the image at this path. */
-    | { label: string; image: string };
+    | { label: string; image: string }
+    /** Changes a Site setting, to save there. */
+    | { label: string; site: { path: string; value: unknown } };
   /** The page may show it after all: reads the preview again. */
   recheck?: string;
 }

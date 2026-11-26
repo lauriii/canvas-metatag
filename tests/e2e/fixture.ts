@@ -220,11 +220,11 @@ export async function previewNode(page: Page, bundle: string, node: { id: number
   // By keyboard: a long previewed title lets Canvas's top bar cover the
   // picker's button.
   await page.getByTestId('select-content-preview-item').press('Enter');
-  await page.getByRole('menuitem', { name: node.title }).click();
+  await page.getByTestId(`preview-item-${node.id}`).click();
   await expect(page).toHaveURL(new RegExp(`/canvas/template/node/${bundle}/full/${node.id}$`));
-  // Until Canvas's menu has gone, its page takes no pointer events: a click
-  // into the dialog right after would be lost.
-  await expect(page.getByRole('menu')).toHaveCount(0);
+  // Until Canvas's picker has gone, its page may take no pointer events: a
+  // click into the dialog right after would be lost.
+  await expect(page.getByTestId(/^preview-item-/)).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents)).not.toBe('none');
 }
 

@@ -284,6 +284,40 @@ final class Sources {
   }
 
   /**
+   * The host fields a content template's own components link.
+   *
+   * What a page rendered with the template shows of its node: the template
+   * replaces the entity view display. Inside an adapted input too.
+   *
+   * @return array<string, true>
+   *   By field machine name.
+   */
+  public static function linked(ContentTemplate $template): array {
+    $fields = [];
+    $walk = static function (mixed $input) use (&$walk, &$fields): void {
+      if (!is_array($input)) {
+        return;
+      }
+      if (($input['sourceType'] ?? NULL) === 'entity-field' && ($field = self::machineName($input)) !== NULL) {
+        $fields[$field] = TRUE;
+      }
+      foreach ($input as $inner) {
+        $walk($inner);
+      }
+    };
+    foreach ($template->getComponentTree() as $item) {
+      \assert($item instanceof ComponentTreeItem);
+      try {
+        $walk($item->getInputs());
+      }
+      catch (\Throwable) {
+        // An instance whose inputs cannot be read renders nothing of them.
+      }
+    }
+    return $fields;
+  }
+
+  /**
    * Whether a value is the shape of a stored source, whatever it points at.
    */
   public static function wellShaped(mixed $source): bool {

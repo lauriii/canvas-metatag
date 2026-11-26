@@ -32,6 +32,7 @@ import { CustomSheet, type CustomNode } from './custom/CustomSheet';
 import { draftKey, readDraft } from './custom/drafts';
 import { SearchTab } from './components/SearchTab';
 import { SiteView } from './components/SiteTab';
+import { ColourSheet } from './components/Sharing';
 import { SocialTab } from './components/SocialTab';
 import { Btn, InfoTip, Notice, reveal } from './components/ui';
 import { type Host, type HostContext, createHost } from './host';
@@ -56,6 +57,7 @@ import {
   openPending,
   pendingFor,
   pendingKey,
+  tidySite,
   prune,
   readPending,
   reducer,
@@ -96,7 +98,8 @@ export type SheetState =
   | { kind: 'image'; request: ImageRequest }
   /** A group of details: the venue, the pay. */
   | { kind: 'group'; type: string; group: string; focus?: string }
-  | { kind: 'hours'; path: string; label: string };
+  | { kind: 'hours'; path: string; label: string }
+  | { kind: 'colour' };
 
 // What components get. One context, read with useApp().
 
@@ -255,7 +258,8 @@ export default function App() {
               // An entry that is on offer is not continued.
               after.offer?.scope === scope ? null : storage.get(key),
               host.uid(),
-              scope === 'site' ? after.server.site : target!.values,
+              // Like with like: the working copy is tidied.
+              scope === 'site' ? tidySite(after.server, after.server.site) : target!.values,
               after.edits[scope],
             ),
           );
@@ -573,6 +577,9 @@ export default function App() {
     }
   }, [api, dispatch, host]);
 
+  // The jump a refused site save makes to its first field (set below, once
+  // the app's goTo exists).
+  const goToRef = useRef<AppContext['goTo'] | null>(null);
   const saveSite = useCallback(async () => {
     const { server, edits, siteDirty, ctx } = now.current;
     if (
@@ -596,13 +603,20 @@ export default function App() {
       dispatch({ type: 'siteSaved', payload, sent: canon(edits.site) });
     } catch (error) {
       if (error instanceof ApiError && error.code === 'invalid') {
+        const fields = sitePaths(error.fields);
         dispatch({
           type: 'errors',
           scope: 'site',
-          fields: sitePaths(error.fields),
+          fields,
           places: sitePaths(error.places),
         });
         status({ phase: 'idle' });
+        // Focus goes to what needs attention, as Show takes it there: never
+        // left on whatever control was there before.
+        const first = Object.keys(fields)[0];
+        if (first) {
+          requestAnimationFrame(() => goToRef.current?.({ scope: 'site', tab: tabOf('site', first), field: first }));
+        }
       } else {
         status({
           phase: 'error',
@@ -897,6 +911,7 @@ export default function App() {
         'default-language',
       measurer,
       robotsSettled,
+      share: server.share,
       source: server.target.source ? { language: server.languages[server.target.source.langcode] ?? server.target.source.langcode, count: server.target.source.count } : null,
       refused: server.target.refused?.message ?? null,
       // Read again when a sheet closes: it may have left a draft.
@@ -1025,6 +1040,7 @@ export default function App() {
       trial,
     ],
   );
+  goToRef.current = app.goTo;
 
   const act: Act = (action) => {
     const { scope, errors, offer, edits, server } = now.current;
@@ -1586,6 +1602,9 @@ function SheetHost(props: { sheet: SheetState; onClose(): void }) {
       // The sheet is the kinds' own: its confirm is its foot.
       <KindSheet focus={sheet.focus} onDone={() => closeSheet()} onClose={onClose} />
     );
+  }
+  if (sheet.kind === 'colour') {
+    return <ColourSheet onClose={onClose} />;
   }
   if (sheet.kind === 'custom') {
     // One sheet per text: another node is a new sheet, never this one with old state.

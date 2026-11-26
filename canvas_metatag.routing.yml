@@ -85,3 +85,76 @@ canvas_metatag.api.media:
     # The dialog runs in a signed-in browser. A bearer token would skip the
     # CSRF check, which core applies to cookie sessions only.
     _auth: ['cookie']
+
+# Made share images. Open to everyone: the controller checks that an
+# anonymous visitor may view what is drawn, and the parameters are checked
+# here, before anything is loaded.
+canvas_metatag.share.entity:
+  path: '/canvas-metatag/share/{langcode}/{entity_type}/{id}/{name}'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ShareController::entity'
+  methods: [GET, HEAD]
+  requirements:
+    # Anonymous access to the entity is checked in the controller, which
+    # also matches the name case-sensitively: the router does not.
+    _access: 'TRUE'
+    # Core's rule for a language code; the controller refuses one that is
+    # not installed.
+    langcode: '[a-zA-Z]{1,8}(-[a-zA-Z0-9]{1,8})*'
+    entity_type: 'canvas_page|node'
+    id: '\d{1,10}'
+    # A card, or the share version of the entity's own image.
+    name: '[0-9a-f]{16}\.(png|jpg)'
+  options:
+    # Never in the page cache: a redirect moves with any edit. Stored images
+    # and 404s set their own Cache-Control.
+    no_cache: 'TRUE'
+
+canvas_metatag.share.site:
+  path: '/canvas-metatag/share/site/{name}'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ShareController::site'
+  methods: [GET, HEAD]
+  requirements:
+    # The site's image, which visitors may see: the controller checks.
+    _access: 'TRUE'
+    name: '[0-9a-f]{16}\.jpg'
+  options:
+    no_cache: 'TRUE'
+
+canvas_metatag.share.icon:
+  path: '/canvas-metatag/share/icon/{size}/{name}'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ShareController::icon'
+  methods: [GET, HEAD]
+  requirements:
+    # The site's logo and name, which every page shows.
+    _access: 'TRUE'
+    size: '32|180|192'
+    name: '[0-9a-f]{16}\.png'
+  options:
+    no_cache: 'TRUE'
+
+canvas_metatag.api.share_preview:
+  path: '/canvas-metatag/api/share-preview'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::sharePreview'
+  methods: [GET]
+  requirements:
+    _permission: 'edit canvas metatag+administer canvas metatag'
+  options:
+    no_cache: 'TRUE'
+    # The dialog runs in a signed-in browser. A bearer token would skip the
+    # CSRF check, which core applies to cookie sessions only.
+    _auth: ['cookie']
+
+canvas_metatag.api.share_sample:
+  path: '/canvas-metatag/api/share-sample'
+  defaults:
+    _controller: 'Drupal\canvas_metatag\Controller\ApiController::shareSample'
+  methods: [GET]
+  requirements:
+    _permission: 'edit canvas metatag+administer canvas metatag'
+  options:
+    no_cache: 'TRUE'
+    _auth: ['cookie']

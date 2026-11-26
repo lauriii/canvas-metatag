@@ -26,7 +26,8 @@ final class DeliveryPathTest extends UnitTestCase {
   public function testOnlyTheDialogReachesTheVerdicts(): void {
     $root = dirname(__DIR__, 3);
     $calls = self::calls($root);
-    self::assertSame(['Controller/ApiController.php::state'], $calls['report'] ?? []);
+    // ApiController::resolved() builds the state route's answer.
+    self::assertSame(['Controller/ApiController.php::resolved'], $calls['report'] ?? []);
     self::assertSame(['Resolver.php::report'], $calls['features'] ?? []);
     self::assertSame(['Resolver.php::report'], $calls['rules'] ?? []);
     // The delivery paths call resolve(), and nothing else of the three.

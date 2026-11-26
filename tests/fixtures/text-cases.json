@@ -566,7 +566,7 @@
       }
     },
     {
-      "name": "a long title keeps its ending and loses words of its main part",
+      "name": "a long title keeps its ending and loses words of its main part, ending in …",
       "facts": {
         "title": "An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first performed"
       },
@@ -576,7 +576,7 @@
         }
       },
       "expect": {
-        "title": "An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first | Events",
+        "title": "An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first… | Events",
         "title_end": "Events"
       }
     },
@@ -591,7 +591,109 @@
         }
       },
       "expect": {
-        "title": "Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring | A very long ending that a site may set"
+        "title": "Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring Spring… | A very long ending that a site may set"
+      }
+    },
+    {
+      "name": "a cut composed title leaves out its fields before any word, and no connector",
+      "target": {
+        "title": {
+          "parts": [
+            {
+              "fact": "title"
+            },
+            {
+              "text": " in "
+            },
+            {
+              "source": {
+                "expression": "city",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " · "
+            },
+            {
+              "source": {
+                "expression": "starts",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        },
+        "title_end": {
+          "text": "Events"
+        }
+      },
+      "links": {
+        "city": "Helsinki",
+        "starts": "19 June 2027"
+      },
+      "facts": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is commissioned, rehearsed, recorded and finally performed."
+      },
+      "expect": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is commissioned, rehearsed, recorded and finally performed. | Events",
+        "title_main": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is commissioned, rehearsed, recorded and finally performed."
+      }
+    },
+    {
+      "name": "a cut composed title leaves out its last field first",
+      "target": {
+        "title": {
+          "parts": [
+            {
+              "fact": "title"
+            },
+            {
+              "text": " in "
+            },
+            {
+              "source": {
+                "expression": "city",
+                "sourceType": "entity-field"
+              }
+            },
+            {
+              "text": " · "
+            },
+            {
+              "source": {
+                "expression": "starts",
+                "sourceType": "entity-field"
+              }
+            }
+          ]
+        },
+        "title_end": {
+          "text": "Events"
+        }
+      },
+      "links": {
+        "city": "Helsinki",
+        "starts": "19 June 2027"
+      },
+      "facts": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed, recorded and performed."
+      },
+      "expect": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed, recorded and performed. in Helsinki | Events",
+        "title_main": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed, recorded and performed. in Helsinki"
+      }
+    },
+    {
+      "name": "a cut title never ends in a connector before the …",
+      "target": {
+        "title_end": {
+          "text": "Events"
+        }
+      },
+      "facts": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is commissioned, rehearsed and performed together on Sunday in Helsinki"
+      },
+      "expect": {
+        "title": "An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is commissioned, rehearsed and performed together on Sunday… | Events"
       }
     },
     {
@@ -2177,6 +2279,26 @@
       "path": "title_end",
       "scope": "site",
       "expect": false
+    }
+  ],
+  "sentences": [
+    {
+      "note": "An abbreviation before a lower-case word ends no sentence, nor does a title: the text before them fits, the sentence does not.",
+      "text": "Dr. Kallio leads the choir, e.g. on Fridays when the hall is free and the doors open early. Next.",
+      "room": 40,
+      "expected": "Dr. Kallio leads the choir, e.g. on…"
+    },
+    {
+      "note": "Without a sentence in the room, the cut never ends right after a title.",
+      "text": "Dr. Kallio leads the choir.",
+      "room": 10,
+      "expected": "Dr. Kalli…"
+    },
+    {
+      "note": "A sentence that fits ends the cut.",
+      "text": "Dr. Kallio leads the choir, e.g. on Fridays. Rehearsals start at 18 and run late into the evening.",
+      "room": 60,
+      "expected": "Dr. Kallio leads the choir, e.g. on Fridays."
     }
   ]
 }

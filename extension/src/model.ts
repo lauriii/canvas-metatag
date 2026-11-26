@@ -33,6 +33,7 @@ import type {
   SchemaType,
   SearchFeatures,
   SeoValues,
+  ShareSample,
   SiteSettings,
   Source,
   State,
@@ -573,6 +574,27 @@ function cut(text: string, max: number): string {
 }
 
 /**
+ * The title's main part in its room: whole words, then "…". As
+ * Values::shorten(): words come off its end, with a short word or a separator
+ * they would leave last, until it fits with the "…"; a text without a space in
+ * the last tenth of the room is cut at the room, as cut() does.
+ */
+function shorten(text: string, room: number): string {
+  const full = plain(text, Infinity);
+  if (Array.from(full).length <= room) {
+    return full;
+  }
+  const short = plain(full, room - 1);
+  const space = full[short.length] === ' ';
+  let words = space ? short : short.replace(/\s+\S*$/u, '');
+  if ((!space && words === short) || Array.from(words).length < room - Math.floor(room / 10)) {
+    return plain(full, room);
+  }
+  words = words.replace(/(?:\s+(?:\p{Ll}{1,3}|[^\p{L}\p{N}]+))+$/u, '');
+  return words.replace(/[ ,;:]+$/, '') + '…';
+}
+
+/**
  * The four text outputs, and the two parts of the title. As Values::texts():
  * a value that is not set, or gives nothing for the item, gives its default.
  * `text` gives what a value gives for the item, '' for none.
@@ -616,7 +638,7 @@ export function texts(
   const glue = ` ${plain(separator, 3)} `;
   const full = plain(parts.join(''), Infinity);
   const room = end === '' || full === '' ? 255 : 255 - Array.from(glue).length - Array.from(end).length;
-  const main = room > 0 ? cut(fit(parts, room), Math.min(255, room)) : '';
+  const main = room > 0 ? shorten(fit(parts, room), Math.min(255, room)) : '';
   const title = main === '' || end === '' ? main + end : main + glue + end;
   const description = value(
     effective.description,
@@ -836,6 +858,8 @@ const EMPTY_IDENTITY: Identity = {
   separator: '',
   logo: '',
   default_image: '',
+  colour: '',
+  share_fallback: 'card',
   same_as: [],
 };
 
@@ -921,7 +945,11 @@ const without = (errors: Record<string, string>, paths: string[]) =>
     ),
   );
 
-/** A working copy as it may be stored: settled, and with every identity key. */
+/**
+ * A working copy as it may be stored: settled, and with every identity key.
+ * The state-only country and time zone are always the server's: never an
+ * edit, so never a change nor a pending one.
+ */
 function tidy<S extends Scope>(
   server: StatePayload,
   scope: S,
@@ -931,12 +959,18 @@ function tidy<S extends Scope>(
     return settle(server, scope, copy as SeoValues) as Edits[S];
   }
   const site = copy as SiteSettings;
+  const { country, timezone } = server.site;
   return {
     identity: { ...EMPTY_IDENTITY, ...site.identity },
     values: settle(server, scope, site.values ?? {}),
     currency: site.currency ?? '',
+    ...(country === undefined ? {} : { country }),
+    ...(timezone === undefined ? {} : { timezone }),
   } as Edits[S];
 }
+
+/** Site settings as the working copy holds them, to compare like with like. */
+export const tidySite = (server: StatePayload, site: SiteSettings): SiteSettings => tidy(server, 'site', site);
 
 /** Puts a new working copy in place: the common end of edit, reset, apply and undo. */
 function commit<S extends Scope>(
@@ -947,6 +981,10 @@ function commit<S extends Scope>(
 ): State {
   const server = state.server!;
   const changed = Object.keys(diff(state.edits[scope], copy));
+  // The site's image completes the choice that needs it.
+  if (changed.includes('identity.default_image')) {
+    changed.push('identity.share_fallback');
+  }
   const next: State = {
     ...state,
     // The same object when nothing changed, so effects do not fire.
@@ -955,7 +993,7 @@ function commit<S extends Scope>(
     errors: { ...state.errors, [scope]: without(state.errors[scope], changed) },
   };
   if (scope === 'site') {
-    next.siteDirty = canon(next.edits.site) !== canon(server.site);
+    next.siteDirty = canon(tidy(server, 'site', next.edits.site)) !== canon(tidySite(server, server.site));
     next.save = { ...state.save, site: { phase: 'idle' } };
   } else if (changed.length) {
     next.save = { ...state.save, target: { phase: 'pending' } };
@@ -1285,8 +1323,12 @@ export function view(
   const facts = { ...server.facts };
   for (const name of ['title', 'description'] as const) {
     const live = state.live[name];
-    if (facts[name] && live !== undefined) {
-      facts[name] = { ...facts[name], value: live };
+    // A page with no description typed is described by its own text; one
+    // still named for a new page, by its first heading.
+    const derived = name === 'description' ? facts.description?.derived && !live?.trim() : live === facts.title?.placeholder;
+    if (facts[name] && live !== undefined && !derived) {
+      // Renamed: no longer the name for a new page.
+      facts[name] = { ...facts[name], value: live, placeholder: undefined };
     }
   }
   const lookup = lookupOf(server, facts, picked);
@@ -1581,6 +1623,8 @@ const LABELS: [RegExp, string][] = [
   [/^identity\.separator$/, 'Title separator'],
   [/^identity\.logo$/, 'Logo'],
   [/^identity\.default_image$/, 'Default image'],
+  [/^identity\.colour$/, 'Colour'],
+  [/^identity\.share_fallback$/, 'When a page has no image'],
   [/^identity\.same_as/, 'Profiles elsewhere'],
 ];
 
@@ -1712,15 +1756,19 @@ export const wellFormed = (text: string) =>
 export const dimensions = (width: number, height: number) =>
   `${width} × ${height}`;
 
+/** Drupal knows the image's size: an image it can't read (a BMP) is 0 × 0. */
+export const sizeKnown = (image: { width: number; height: number }) => image.width > 0 && image.height > 0;
+
+/** "1200 × 630", or "Size unknown" for an image whose size Drupal doesn't know. */
+export const sizeText = (image: { width: number; height: number }) =>
+  sizeKnown(image) ? dimensions(image.width, image.height) : 'Size unknown';
+
 /** "1770 × 996 · 249 KB", the weight when the server knows it. */
 export const imageSize = (image: {
   width: number;
   height: number;
   bytes?: number;
-}) =>
-  `${dimensions(image.width, image.height)}${
-    image.bytes ? ` · ${fileSize(image.bytes)}` : ''
-  }`;
+}) => `${sizeText(image)}${image.bytes ? ` · ${fileSize(image.bytes)}` : ''}`;
 
 /**
  * A change is on its way to the server, or its output is being read back:
@@ -2218,7 +2266,18 @@ export const article = (label: string) =>
 export function socialImage(
   state: State,
   shown: View,
-): { image: ShownImage | null; from: string; state?: 'empty' | 'hidden' | 'broken' } {
+): {
+  image: ShownImage | null;
+  from: string;
+  state?: 'empty' | 'hidden' | 'broken';
+  passed?: ShownImage;
+  unshown?: true;
+  hidden?: true;
+  /** The chosen image the server does not share (unshown). */
+  chosen?: ShownImage;
+  /** The linked field whose image the server passed over, by its label. */
+  field?: string;
+} {
   const server = state.server!;
   const value = shown.effective.social?.image;
   const resolved = server.resolved?.image ?? null;
@@ -2228,28 +2287,53 @@ export function socialImage(
     settled && resolved?.source === 'site'
       ? resolved
       : (shown.lookup.media[server.site.identity.default_image] ?? null);
-  const fallback = (): { image: ShownImage | null; from: string } => {
+  // The rest of the chain: the Image fact, a Canvas page's first component
+  // image (the server's word), then the site's choice for pages without an
+  // image: a card made from the title, the site's image or none. A card that
+  // can't be made gives the site's image.
+  const fallback = (): { image: ShownImage | null; from: string; passed?: ShownImage; hidden?: true } => {
     const own = resolve({ fact: 'image' }, 'image', shown.lookup);
-    if (own.image) {
+    // The server passed over it: too small, or of a kind links can't show.
+    const passed = own.image && settled && server.resolved && server.resolved.image?.source !== 'entity' ? own.image : undefined;
+    if (own.image && !passed) {
       return { image: own.image, from: 'Image' };
     }
-    return site
+    // The page's Image field holds one visitors can't see: said why.
+    const hidden = !own.image && shown.facts.image?.hidden ? { hidden: true as const } : {};
+    return { ...rest(), ...(passed ? { passed } : {}), ...hidden };
+  };
+  const rest = (): { image: ShownImage | null; from: string } => {
+    if (settled && resolved?.source === 'component') {
+      return { image: resolved, from: 'Component' };
+    }
+    const choice = server.site.identity.share_fallback ?? (site ? 'image' : 'card');
+    const card = settled && server.resolved ? server.resolved.share?.made === 'card' : !server.share?.missing;
+    if (choice === 'card' && card) {
+      return { image: null, from: 'Card' };
+    }
+    return choice !== 'none' && site
       ? { image: site, from: 'Site default image' }
       : { image: null, from: 'No image' };
   };
   if (value && 'media' in value) {
     if (settled && server.resolved && resolved?.source !== 'override') {
       // Chosen, but the server cannot emit it (not public, unpublished,
-      // gone): what is shown is what is shared instead.
+      // gone, too large): what is shared instead, in the words of rest().
+      const chosen = shown.lookup.media[value.media];
       return {
+        ...(chosen ? { chosen } : {}),
         image: resolved,
-        from: `The chosen image can't be shown publicly · ${
+        from:
           resolved?.source === 'site'
-            ? 'using the site default'
-            : resolved
-              ? 'using the page image'
-              : 'no image'
-        }`,
+            ? 'Site default image'
+            : resolved?.source === 'component'
+              ? 'Component'
+              : resolved
+                ? 'Image'
+                : server.resolved.share?.made === 'card'
+                  ? 'Card'
+                  : 'No image',
+        unshown: true,
       };
     }
     return {
@@ -2268,8 +2352,14 @@ export function socialImage(
   }
   if (value && 'source' in value) {
     const link = resolve(value, 'image', shown.lookup);
+    const label = rowOf(shown.lookup, value)?.label ?? '';
+    // The server passed over the item's image (too small, too large, of a
+    // kind links can't show): what it shares instead, and why.
+    if (link.image && settled && server.resolved && (resolved?.source !== 'entity' || (!!link.image.url && resolved.url !== link.image.url))) {
+      return { ...fallback(), passed: link.image, field: label.split(' › ')[0] };
+    }
     if (link.image) {
-      return { image: link.image, from: rowOf(shown.lookup, value)?.label ?? '' };
+      return { image: link.image, from: label };
     }
     // Empty, hidden or broken for this item: the default is used.
     const instead = fallback();
@@ -2279,6 +2369,199 @@ export function socialImage(
     };
   }
   return fallback();
+}
+
+/**
+ * The image the link preview shows, and its size: the server's own bytes for
+ * the draft (a card, a share version or the original file) while the image
+ * is what the server saw; a newly chosen image until the server has it.
+ */
+export function sharedImage(
+  state: State,
+  shown: View,
+): { src: string; width: number; height: number } | null {
+  const server = state.server!;
+  const resolved = server.resolved;
+  const saw = JSON.stringify(server.target?.values?.social?.image ?? null);
+  if (resolved && JSON.stringify(state.edits.target.social?.image ?? null) === saw) {
+    const share = resolved.share;
+    if (share?.made && share.url && share.made !== 'original') {
+      return { src: share.url, width: 1200, height: 630 };
+    }
+    return share?.url && resolved.image ? { src: share.url, width: resolved.image.width, height: resolved.image.height } : null;
+  }
+  const { image } = socialImage(state, shown);
+  return image ? { src: image.url ?? image.thumb, width: image.width, height: image.height } : null;
+}
+
+/**
+ * Where the social image comes from, in the image field's words. `from` is
+ * socialImage()'s.
+ */
+export function imageSource(from: string): string {
+  const words: Record<string, string> = {
+    Image: 'From the Image field',
+    Component: "From the page's first image",
+    Card: 'Made from the title',
+    'Site default image': "The site's image",
+  };
+  return words[from] ?? from;
+}
+
+/**
+ * Why a page's image field names what is shared instead of its image, once:
+ * a chosen image or the Image field's image visitors can't see, or one the
+ * server passed over. `via` names the field.
+ */
+export function imageNote(
+  found: { passed?: ShownImage; unshown?: true; hidden?: true; chosen?: ShownImage },
+  via = 'Image',
+): string | undefined {
+  if (found.unshown) {
+    return found.chosen && found.chosen.width * found.chosen.height > SHARE_MAX_PIXELS
+      ? 'The chosen image is too large to share (over 24 megapixels)'
+      : "The chosen image can't be shown publicly";
+  }
+  if (found.passed) {
+    return found.passed.width < 600 || found.passed.height < 315
+      ? `The ${via} field's image is too small to share (${dimensions(found.passed.width, found.passed.height)})`
+      : `Links can't show the ${via} field's image`;
+  }
+  return found.hidden ? `The ${via} field's image can't be shown publicly` : undefined;
+}
+
+/**
+ * Where a page's title comes from while nothing is typed for it: its name,
+ * or, while it still has the name Canvas gives a new page ("Name this page"
+ * in Checks), its first heading.
+ */
+export function pageTitleSource(facts: View['facts']): string {
+  return fromHeading(facts) ? "From the page's first heading" : 'From the page title';
+}
+
+/** Whether a page still named for a new page is titled by its first heading. */
+export function fromHeading(facts: View['facts']): boolean {
+  const title = facts.title;
+  return !!title?.placeholder && title.value !== title.placeholder;
+}
+
+/**
+ * At template scope, why the previewed item shares something else than its
+ * image, as the missing-image case says it: "This article's Image is too
+ * small to share (500 × 300), so it shares a card made from its title."
+ * `field` names the field passed over, `from` is socialImage()'s and `via`
+ * the field an Image fact it shares instead comes from.
+ */
+export function passedNote(passed: ShownImage, field: string, typeLabel: string, from: string, via?: string): string {
+  const why = !sizeKnown(passed)
+    ? "can't be shared"
+    : passed.width < 600 || passed.height < 315
+      ? `is too small to share (${dimensions(passed.width, passed.height)})`
+      : passed.width * passed.height > SHARE_MAX_PIXELS
+        ? 'is too large to share (over 24 megapixels)'
+        : "can't be shared";
+  const shares =
+    from === 'Card'
+      ? 'a card made from its title'
+      : from === 'Site default image'
+        ? "the site's image"
+        : from === 'Image'
+          ? `its ${via ?? 'Image'} field's image`
+          : 'no image';
+  return `This ${inSentence(typeLabel)}'s ${field} ${why}, so it shares ${shares}.`;
+}
+
+/**
+ * What items of a type without an image share, by the site's choice: "Each
+ * event without one shares a card made from its title." For a type whose
+ * image follows a field its row already names, only what an item without it
+ * shares: "An event without one shares a card made from its title."
+ */
+export function withoutImage(state: State, typeLabel: string, field?: boolean): string {
+  const server = state.server!;
+  const { share_fallback: choice, default_image } = server.site.identity;
+  const shares =
+    choice === 'card' && !server.share?.missing
+      ? 'a card made from its title'
+      : choice !== 'none' && default_image
+        ? "the site's image"
+        : 'no image';
+  const type = inSentence(typeLabel);
+  return field
+    ? `${article(type) === 'an' ? 'An' : 'A'} ${type} without one shares ${shares}.`
+    : `Each ${type} without one shares ${shares}.`;
+}
+
+/** Site › Sharing's samples: the home page only when the module makes its head. */
+export function shareSamples(home: boolean | undefined): Array<'home' | 'page'> {
+  return home ? ['home', 'page'] : ['page'];
+}
+
+/** The most pixels an image links share may have (ShareImage::MAX_PIXELS). */
+export const SHARE_MAX_PIXELS = 24_000_000;
+
+/**
+ * What a picker tile warns of for an image links share, '' when it is used:
+ * one under 200 pixels on either side is sent as a small thumbnail, one over
+ * 24 megapixels is not shared. Anything else is shared, whole or cropped.
+ */
+export function shareWarning(item: { width: number; height: number }): string {
+  // An unknown size (0 × 0) is no warning: the format is what matters then.
+  if (!sizeKnown(item)) {
+    return '';
+  }
+  return item.width < 200 || item.height < 200 ? 'Too small' : item.width * item.height > SHARE_MAX_PIXELS ? 'Too large' : '';
+}
+
+/** The short, typical title of a page sample away from a page. Mirrored in ApiController (SAMPLE_TITLE). */
+export const SAMPLE_TITLE = 'About us';
+
+/**
+ * The page sample's title: the page in the editor at page scope; elsewhere,
+ * and in the colour's sheet (a card it can always draw), a short, typical
+ * one. Never longer than a title the server draws.
+ */
+export function sampleTitle(scope: string | undefined, title: string | undefined, colourSheet = false): string {
+  return ((!colourSheet && scope === 'page' && title) || SAMPLE_TITLE).slice(0, 255);
+}
+
+/** The largest side of a logo cards are drawn with (ShareCard::LOGO_MAX). */
+export const LOGO_MAX = 4096;
+
+/**
+ * What the Logo row says under it: add one, or why shared images show the
+ * initial instead (an SVG first: a smaller SVG would not help).
+ */
+export function logoNote(logo: { own: boolean; theme: boolean; svg: boolean; size: { width: number; height: number } | null }): string | undefined {
+  if (!logo.own && !logo.theme) {
+    return 'Add your logo. It goes on shared images and your site icon.';
+  }
+  if (logo.svg) {
+    return 'Shared images show your initial because your logo is an SVG. Choose a PNG version.';
+  }
+  if (logo.own && logo.size && Math.max(logo.size.width, logo.size.height) > LOGO_MAX) {
+    return `Shared images show your initial because your logo is over ${LOGO_MAX} pixels. Choose a smaller version.`;
+  }
+  return undefined;
+}
+
+/** Where the cards' colour comes from, in words: no code, no contrast. */
+export function colourWords(colour: string, drawn: ShareSample | null): string {
+  return colour ? 'Your colour' : drawn?.picked ? 'Picked from your logo' : 'Neutral';
+}
+
+/** The colour sheet's contrast, measured on the card: "White text on #1A358D reads at 9.1:1." */
+export function contrastText(drawn: ShareSample, typed = ''): string {
+  if (!drawn.contrast) {
+    return '';
+  }
+  const ink = drawn.text === '#FFFFFF' ? 'white' : 'dark';
+  const contrast = `${drawn.contrast.toFixed(1)}:1`;
+  // A colour of the user's own that the card shaded: said as theirs.
+  if (typed && drawn.colour && typed.toUpperCase() !== drawn.colour.toUpperCase()) {
+    return `Your ${typed.toUpperCase()} is shaded to ${drawn.colour} so ${ink} text reaches ${contrast}.`;
+  }
+  return `${ink === 'white' ? 'White' : 'Dark'} text on ${drawn.colour} reads at ${contrast}.`;
 }
 
 /** The Site working copy resolved for the page in context: what "Becomes:" shows there. */

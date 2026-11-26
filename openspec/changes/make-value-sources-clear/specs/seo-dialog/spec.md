@@ -917,22 +917,21 @@ a select, named by its time and what it shows.
 
 ### Requirement: The link preview
 
-The Social view MUST open with the card a shared link shows: the site's host,
-the social title and description, and the image. The card MUST be large only
-when the image is at least 600 px wide and 157 px tall, the same rule as the
-head's card hint (head-output). A small card MUST show the image as a square
-thumbnail beside the text, no taller than the card; the caption MUST add
-"Small card", and the preview's information MUST say why. The image field MUST
-say where the image comes from in its source control.
+The Social view MUST open with the card a shared link shows: the server's image for the draft, the social title and description, and the site's host. It MUST be large only when the image is at least 600 px wide and 157 px tall, as in the head; a small card shows a square thumbnail no taller than the card. The caption MUST read "When this page is shared" (on a type, "When this ‹type› is shared"), adding "Small card". The image field MUST say where the image comes from in its source control.
+
+#### Scenario: A page without an image
+
+- **WHEN** an editor opens Social on a page with no image on a fresh install
+- **THEN** the preview MUST show the card made from the page's title as the server draws it, and the image field's source control MUST read `Title card`, its menu opening with "Choose image…"
 
 #### Scenario: A small or missing image
 
-- **WHEN** the image is under 600 px wide, under 157 px tall, or there is none
+- **WHEN** the image sent is under 600 px wide, under 157 px tall, or there is none
 - **THEN** the card MUST be small, its caption MUST add "Small card", and "About this preview" MUST say "Small card: image under 600 px wide.", "Small card: image under 157 px tall." or "Small card: no image."
 
 #### Scenario: The card the head asks for
 
-- **WHEN** the image is a 400 × 400 logo
+- **WHEN** the image sent is an original file under 600 px wide, such as a chosen 150 × 150 image, or a 400 × 400 logo on a site that cannot make images
 - **THEN** the card MUST be small, with a square thumbnail as tall as the card at Canvas's dialog width, and Output MUST show the card hint `summary`
 
 #### Scenario: No social text set
@@ -942,13 +941,48 @@ say where the image comes from in its source control.
 
 #### Scenario: Where the image comes from
 
-- **WHEN** no image is chosen for the page and the page has an image
-- **THEN** the image field's source control MUST read "Page data › Image"; with no page image, its read-out MUST say what is used instead, the site's image or "No image"
+- **WHEN** no image is chosen for the page
+- **THEN** the image field's source control MUST read "Page data › Image" (or "Page's first image" for a component image) when the page has one, else `Title card`, `Site image` or "No image" by the site's choice
+
+#### Scenario: A found image too small to share
+
+- **WHEN** the page's own image is 500 × 300, so the page shares a card made from its title
+- **THEN** the source control MUST read `Title card`, and its read-out MUST say that the Image field's image is too small to share, with its size
+
+#### Scenario: The page's own image is not public
+
+- **WHEN** the media item in a page's Image field is unpublished or not a public file, so the page shares a card made from its title
+- **THEN** the source control MUST read `Title card`, and its read-out MUST say "The Image field's image can't be shown publicly"
+
+#### Scenario: A content type
+
+- **WHEN** a site builder opens Social on the Event template, whose image is linked to Poster
+- **THEN** the source control MUST read "Poster › Image" and its read-out MUST say that an event without one shares a card made from its title; for a previewed event without a Poster, only "This event has no Poster, so it shares a card made from its title."
+
+#### Scenario: A content type's image too small to share
+
+- **WHEN** Social on the Article template previews an article whose Image is 500 × 300, so it shares a card made from its title
+- **THEN** the image field's read-out MUST say "This article's Image is too small to share (500 × 300), so it shares a card made from its title.", as the missing-image case says it, and not what an article without one shares
+
+#### Scenario: A page still named for a new page
+
+- **WHEN** a page still has the name Canvas gives a new page and is titled by its first heading
+- **THEN** the social title's and the search title's source controls MUST say the title comes from the page's first heading while it is not typed
+
+#### Scenario: A content type's missing image in Checks
+
+- **WHEN** the previewed event has no Poster, so it shares a card
+- **THEN** Checks MUST ask to add a Poster to this event in words, without a Choose image fix: an image chosen on the template would be every event's
 
 #### Scenario: A chosen image that is not public
 
 - **WHEN** the chosen image is unpublished or not a public file
-- **THEN** the field MUST say "The chosen image can't be shown publicly" and name what is used instead
+- **THEN** the source control MUST name what is shared instead (`Title card` when a card is, `Site image`, "Page data › Image", or "No image" only when nothing is shared), and its read-out MUST say "The chosen image can't be shown publicly" whole on a line
+
+#### Scenario: Text from the page
+
+- **WHEN** a Canvas page's description comes from its own text
+- **THEN** the description field's source control MUST read "Page's text"
 
 ### Requirement: Preview and fields point at each other
 

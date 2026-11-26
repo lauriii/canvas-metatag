@@ -11,13 +11,16 @@ use Drupal\canvas\Entity\Page;
 use Drupal\canvas_metatag\Resolver;
 use Drupal\canvas_metatag\Sources;
 use Drupal\canvas_metatag\Values;
-use Drupal\field\Entity\FieldConfig;
 use Drupal\Core\Breadcrumb\Breadcrumb;
 use Drupal\Core\Breadcrumb\ChainBreadcrumbBuilderInterface;
 use Drupal\Core\Cache\CacheableMetadata;
+use Drupal\Core\DependencyInjection\ContainerBuilder;
+use Drupal\Core\Entity\Entity\EntityViewDisplay;
 use Drupal\Core\Language\LanguageInterface;
 use Drupal\Core\Link;
 use Drupal\Core\Url;
+use Drupal\field\Entity\FieldConfig;
+use Drupal\field\Entity\FieldStorageConfig;
 use Drupal\file\Entity\File;
 use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\node\Entity\Node;
@@ -27,6 +30,8 @@ use Drupal\Tests\canvas\Traits\GenerateComponentConfigTrait;
 use Drupal\Tests\content_translation\Traits\ContentTranslationTestTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use Drupal\user\Entity\Role;
+use GuzzleHttp\Client;
+use GuzzleHttp\HandlerStack;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
@@ -45,7 +50,15 @@ final class ResolverTest extends CanvasKernelTestBase {
   use ContentTranslationTestTrait;
   use GenerateComponentConfigTrait;
   use SeoFixtureTrait;
+  use ShareTestTrait;
   use UserCreationTrait;
+
+  /**
+   * Requests the HTTP client was asked to send: none may be.
+   *
+   * @var list<string>
+   */
+  public static array $requests = [];
 
   /**
    * {@inheritdoc}
@@ -82,6 +95,20 @@ final class ResolverTest extends CanvasKernelTestBase {
     // The language path processor exists only on a multilingual site.
     $this->container->get('kernel')->rebuildContainer();
     $this->generateComponentConfig();
+  }
+
+  /**
+   * {@inheritdoc}
+   */
+  public function register(ContainerBuilder $container): void {
+    parent::register($container);
+    self::spyOnRenderer($container);
+    // The module never fetches an address: any request is recorded.
+    $handler = HandlerStack::create(static function ($request): never {
+      ResolverTest::$requests[] = (string) $request->getUri();
+      throw new \LogicException('No request may be made.');
+    });
+    $container->register('http_client', Client::class)->setArguments([['handler' => $handler]]);
   }
 
   /**
@@ -181,7 +208,8 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame('noindex, max-image-preview:large', $meta['robots']);
     self::assertSame('article', $meta['og:type']);
     self::assertSame('Titre social', $meta['og:title']);
-    self::assertSame($this->imageOf($image)['url'], $meta['og:image']);
+    self::assertSame($this->imageOf($image)['url'], $resolved['image']['url']);
+    self::assertSame($this->sharedPhoto($french, $image, TRUE), $meta['og:image']);
     self::assertSame('override', $resolved['image']['source']);
     // Neither the canonical nor the text of the other language.
     self::assertSame('http://localhost/fr/tarifs', $meta['og:url']);
@@ -267,7 +295,8 @@ final class ResolverTest extends CanvasKernelTestBase {
     $cacheability = new CacheableMetadata();
     $facts = $resolver->facts($node, $cacheability);
     // No summary: the text, cut at a word boundary within 160 characters.
-    self::assertSame(str_repeat('Lorem ipsum dolor sit amet. ', 5) . 'Lorem ipsum dolor', $facts['description']['value']);
+    // Its text cut to the whole sentences that fit in 160 characters.
+    self::assertSame(rtrim(str_repeat('Lorem ipsum dolor sit amet. ', 5)), $facts['description']['value']);
     self::assertSame('Body', $facts['description']['via']);
     // Without a form, the first image by name.
     self::assertSame($this->imageOf($article_hero), $facts['image']['image']);
@@ -316,8 +345,8 @@ final class ResolverTest extends CanvasKernelTestBase {
     // The cut never ends inside a character drawn as one.
     $family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
     foreach ([
-      [str_repeat('a', 157) . $family . ' tail', str_repeat('a', 157)],
-      [str_repeat('a', 159) . "e\u{301} tail", str_repeat('a', 159)],
+      [str_repeat('a', 157) . $family . ' tail', str_repeat('a', 157) . '…'],
+      [str_repeat('a', 159) . "e\u{301} tail", str_repeat('a', 159) . '…'],
     ] as [$body, $description]) {
       $node->set('field_body', ['value' => "<p>$body</p>", 'summary' => ''])->save();
       self::assertSame($description, $resolver->facts(Node::load($node->id()), new CacheableMetadata())['description']['value']);
@@ -509,10 +538,10 @@ final class ResolverTest extends CanvasKernelTestBase {
     // A value that looks like a name is literal text.
     self::assertSame('{site} | Example', $resolved['head']['title']);
     self::assertSame('How teams turn output into stories.', $meta['description']);
-    self::assertSame($this->imageOf($hero)['url'], $meta['og:image']);
+    self::assertSame($this->sharedPhoto($node, $hero, FALSE), $meta['og:image']);
     self::assertSame([
-      '800',
-      '400',
+      '1200',
+      '630',
       'A waving hand',
     ], [$meta['og:image:width'], $meta['og:image:height'], $meta['og:image:alt']]);
     self::assertSame('entity', $resolved['image']['source']);
@@ -553,7 +582,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     $node = $nodes->load($node->id());
     $node->set('field_hero', NULL)->set('field_photo', $photo->id())->save();
     $meta = self::meta($head()['head']);
-    self::assertSame([$this->imageOf($photo)['url'], 'A photo'], [$meta['og:image'], $meta['og:image:alt']]);
+    self::assertSame([$this->sharedPhoto($node, $photo, FALSE), 'A photo'], [$meta['og:image'], $meta['og:image:alt']]);
     // A linked image whose file is not public gives none: the head falls
     // back the same way.
     $node->set('field_hero', $hero->id())->save();
@@ -566,7 +595,7 @@ final class ResolverTest extends CanvasKernelTestBase {
       $value,
     ] = $resolver->link($this->linkTo('Hero › Image', 'image')['source'], Node::load($node->id()), 'image', new CacheableMetadata());
     self::assertNull($value);
-    self::assertSame($this->imageOf($photo)['url'], self::meta($head()['head'])['og:image']);
+    self::assertSame($this->sharedPhoto($node, $photo, FALSE), self::meta($head()['head'])['og:image']);
     $file->setFileUri('public://hero.png');
     $file->save();
     $node->set('field_photo', NULL)->save();
@@ -648,6 +677,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     $this->config('canvas_metatag.site')
       ->set('identity.logo', $logo->uuid())
       ->set('identity.default_image', $default->uuid())
+      ->set('identity.share_fallback', 'image')
       ->set('identity.same_as', ['https://social.example.com/example'])
       ->save();
 
@@ -662,10 +692,12 @@ final class ResolverTest extends CanvasKernelTestBase {
       ['name' => 'robots', 'content' => 'max-image-preview:large'],
       ['property' => 'og:type', 'content' => 'website'],
       ['property' => 'og:site_name', 'content' => 'Example'],
+      ['property' => 'og:locale', 'content' => 'en_US'],
       ['property' => 'og:title', 'content' => 'Pricing'],
       ['property' => 'og:description', 'content' => 'Plans and prices for Example.'],
       ['property' => 'og:url', 'content' => $url],
-      ['property' => 'og:image', 'content' => $image_url],
+      ['property' => 'og:image', 'content' => $this->sharedPhoto($page, $hero, FALSE)],
+      ['property' => 'og:image:type', 'content' => 'image/jpeg'],
       ['property' => 'og:image:width', 'content' => '1200'],
       ['property' => 'og:image:height', 'content' => '630'],
       ['property' => 'og:image:alt', 'content' => 'Pricing table'],
@@ -783,7 +815,9 @@ final class ResolverTest extends CanvasKernelTestBase {
     self::assertSame('override', $resolved['image']['source']);
     // Too small for the large card.
     self::assertSame('summary', $meta['twitter:card']);
-    // The large card needs 600 x 157, as the dialog's link preview does.
+    // The large card needs 600 x 157, as the dialog's link preview does. A
+    // chosen image from 200 × 200 up is sent as a 1200 × 630 version, a
+    // smaller one as it is.
     $cards = [];
     foreach ([[400, 400], [600, 315], [1200, 630], [1200, 150], [599, 630], [600, 157]] as [$width, $height]) {
       $image = $this->createImage("Card $width x $height", ['width' => $width, 'height' => $height]);
@@ -791,11 +825,11 @@ final class ResolverTest extends CanvasKernelTestBase {
       $cards["$width x $height"] = self::meta($resolver->resolve($page)['head'])['twitter:card'];
     }
     self::assertSame([
-      '400 x 400' => 'summary',
+      '400 x 400' => 'summary_large_image',
       '600 x 315' => 'summary_large_image',
       '1200 x 630' => 'summary_large_image',
       '1200 x 150' => 'summary',
-      '599 x 630' => 'summary',
+      '599 x 630' => 'summary_large_image',
       '600 x 157' => 'summary_large_image',
     ], $cards);
     self::assertArrayNotHasKey('og:image:alt', $meta);
@@ -835,7 +869,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     $resolved = $resolver->resolve($this->createPage(['description' => '', 'title' => '']));
     self::assertNull($resolved['image']);
     $meta = self::meta($resolved['head']);
-    self::assertSame(['robots', 'og:type', 'og:site_name', 'og:url', 'twitter:card'], array_keys($meta));
+    self::assertSame(['robots', 'og:type', 'og:site_name', 'og:locale', 'og:url', 'twitter:card'], array_keys($meta));
     self::assertSame('summary', $meta['twitter:card']);
     // An empty title falls back to the site name. An unusable logo is no logo.
     self::assertSame('Example', $resolved['head']['title']);
@@ -1096,7 +1130,7 @@ final class ResolverTest extends CanvasKernelTestBase {
     $hero = $this->createImage('Hero');
     $shared = $this->createImage('Shared');
     $default = $this->createImage('Default');
-    $this->config('canvas_metatag.site')->set('identity.default_image', $default->uuid())->set('currency', 'EUR')->save();
+    $this->config('canvas_metatag.site')->set('identity.default_image', $default->uuid())->set('identity.share_fallback', 'image')->set('currency', 'EUR')->save();
     $product = ['schema' => ['type' => 'Product', 'props' => ['offers_price' => ['text' => '89']]]];
     $image = function (array $values, array $page = []) use ($product): ?string {
       $graph = self::graph($this->resolver()->resolve($this->createPage($page + [
@@ -1320,8 +1354,10 @@ final class ResolverTest extends CanvasKernelTestBase {
    */
   public function testUnreadableComponents(): void {
     // A template whose slot the type has no field for: Canvas cannot build
-    // the article's tree.
-    ContentTemplate::create([
+    // the article's tree. Canvas refuses to save one, so it is stored as a
+    // template is left behind when its field is deleted: straight into the
+    // active configuration.
+    $template = ContentTemplate::create([
       'content_entity_type_id' => 'node',
       'content_entity_type_bundle' => 'article',
       'content_entity_type_view_mode' => 'full',
@@ -1330,7 +1366,12 @@ final class ResolverTest extends CanvasKernelTestBase {
         'content' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
       ],
       'status' => TRUE,
-    ])->save();
+    ]);
+    $name = $template->getConfigDependencyName();
+    $this->container->get('config.storage')->write($name, $template->toArray());
+    $this->container->get('config.factory')->reset($name);
+    $this->container->get('entity_type.manager')->getStorage('content_template')->resetCache();
+    self::assertNotNull(ContentTemplate::load($template->id()));
     $node = Node::create(['type' => 'article', 'title' => 'Hello', 'status' => TRUE]);
     $node->save();
     $result = $this->resolver()->resolve($node);
@@ -1394,6 +1435,566 @@ final class ResolverTest extends CanvasKernelTestBase {
         'reason' => 'error',
       ],
     ], $result['schema']['skipped_parts']);
+  }
+
+  /**
+   * The social image chain, and what the head sends of it.
+   *
+   * Head-output "The social image follows a chain" and "The card hint
+   * follows the image size"; share-images "A page without an image shares a
+   * card made from its title" and "Without the tools, sharing degrades to
+   * the original files".
+   */
+  public function testShareChain(): void {
+    $resolver = $this->resolver();
+    $keys = ['og:image', 'og:image:type', 'og:image:width', 'og:image:height', 'og:image:alt', 'twitter:card'];
+    $rows = static fn (array $head): array => array_intersect_key(self::meta($head), array_flip($keys));
+    $card = '#^http://localhost/canvas-metatag/share/en/canvas_page/%d/[0-9a-f]{16}\.png$#';
+    $photo = '#^http://localhost/canvas-metatag/share/en/canvas_page/%d/[0-9a-f]{16}\.jpg$#';
+    // The site's image has one address of the site's.
+    $site = '#^http://localhost/canvas-metatag/share/site/[0-9a-f]{16}\.jpg$#';
+
+    // A fresh install: a card made from the title, and no image of the page
+    // in the structured data.
+    $page = $this->createPage(['description' => '']);
+    $head = $resolver->resolve($page)['head'];
+    $sent = $rows($head);
+    self::assertMatchesRegularExpression(sprintf($card, $page->id()), $sent['og:image']);
+    self::assertSame(['image/png', '1200', '630', 'Pricing, Example', 'summary_large_image'], array_values(array_slice($sent, 1)));
+    self::assertArrayNotHasKey('primaryimage', self::graph($head));
+    self::assertNull($resolver->resolve($page)['image']);
+    // Building the head drew nothing.
+    self::assertSame([], ShareRendererSpy::$drawn);
+
+    // Emoji in a title: the head keeps them; the card is given the same
+    // title, and leaves out at drawing only what its fonts can't draw.
+    $title = 'Launch week 🚀 five new things for editors ✨';
+    $resolved = $resolver->resolve($this->createPage(['title' => $title, 'path' => ['alias' => '/launch']]));
+    $meta = self::meta($resolved['head']);
+    self::assertStringContainsString('🚀', $meta['og:title']);
+    self::assertStringStartsWith($title, $meta['og:title']);
+    self::assertSame($meta['og:title'], $resolved['share']['card']['title']);
+    self::assertMatchesRegularExpression('#\.png$#', $meta['og:image']);
+
+    // A job posting's small company logo is passed over: the card.
+    $logo = $this->createImage('Company logo', ['width' => 400, 'height' => 400]);
+    $job = $this->createPage([
+      'title' => 'Conductor wanted',
+      'image' => $logo->id(),
+      'path' => ['alias' => '/conductor'],
+      'canvas_metatag' => Values::encode(['schema' => ['type' => 'JobPosting']]),
+    ]);
+    $resolved = $resolver->resolve($job);
+    self::assertMatchesRegularExpression(sprintf($card, $job->id()), self::meta($resolved['head'])['og:image']);
+    // The structured data still names it, as the original file.
+    self::assertSame($this->imageOf($logo)['url'], self::graph($resolved['head'])['primaryimage']['contentUrl']);
+
+    // An image over 24 megapixels is never decoded (share-images "A huge
+    // image"): found, it is passed over and the page shares its card; chosen,
+    // the chain goes on to the page's own image, else the card.
+    $huge = $this->createImage('Huge', ['width' => 9000, 'height' => 9000]);
+    $page = $this->createPage(['image' => $huge->id(), 'path' => ['alias' => '/huge']]);
+    $resolved = $resolver->resolve($page);
+    self::assertMatchesRegularExpression(sprintf($card, $page->id()), self::meta($resolved['head'])['og:image']);
+    self::assertNull($resolved['image']);
+    $chosenHuge = Values::encode(['social' => ['image' => ['media' => $huge->uuid()]]]);
+    $wide = $this->createImage('Wide', ['width' => 2400, 'height' => 1600]);
+    $page = $this->createPage([
+      'image' => $wide->id(),
+      'canvas_metatag' => $chosenHuge,
+      'path' => ['alias' => '/huge-chosen'],
+    ]);
+    $resolved = $resolver->resolve($page);
+    self::assertMatchesRegularExpression(sprintf($photo, $page->id()), self::meta($resolved['head'])['og:image']);
+    self::assertSame(['entity', $this->imageOf($wide)['url']], [$resolved['image']['source'], $resolved['image']['url']]);
+    $page = $this->createPage(['canvas_metatag' => $chosenHuge, 'path' => ['alias' => '/huge-alone']]);
+    self::assertMatchesRegularExpression(sprintf($card, $page->id()), self::meta($resolver->resolve($page)['head'])['og:image']);
+
+    // A Canvas page without an image of its own: its first component image
+    // a visitor may see that is large enough, the hero over the second,
+    // made 1200 × 630. An icon and an unpublished image above it are passed
+    // over.
+    $hero = $this->createImage('Hero', ['width' => 2400, 'height' => 1600, 'alt' => 'The choir on stage']);
+    $second = $this->createImage('Second', ['width' => 2400, 'height' => 1600]);
+    $icon = $this->createImage('Icon', ['width' => 64, 'height' => 64]);
+    $hidden = $this->createImage('Hidden', ['width' => 2400, 'height' => 1600]);
+    $page = $this->createPage([
+      'path' => ['alias' => '/hero'],
+      'components' => self::components(
+        ['my-hero', ['heading' => 'Midsummer concerts', 'cta1href' => 'https://example.com']],
+        ['image', ['image' => ['target_id' => $icon->id()]]],
+        ['image', ['image' => ['target_id' => $hidden->id()]]],
+        ['image', ['image' => ['target_id' => $hero->id()]]],
+        ['image', ['image' => ['target_id' => $second->id()]]],
+      ),
+    ]);
+    // Unpublished once the page is saved: Canvas validates what it stores.
+    $hidden->setUnpublished()->save();
+    $this->forgetAccess();
+    $resolved = $resolver->resolve($page);
+    $sent = $rows($resolved['head']);
+    self::assertMatchesRegularExpression(sprintf($photo, $page->id()), $sent['og:image']);
+    self::assertSame(['image/jpeg', '1200', '630', 'The choir on stage', 'summary_large_image'], array_values(array_slice($sent, 1)));
+    self::assertSame('component', $resolved['image']['source']);
+    // It is the page's own image.
+    self::assertSame($this->imageOf($hero)['url'], self::graph($resolved['head'])['primaryimage']['contentUrl']);
+    // An Image field whose image visitors can't see: the dialog is told why
+    // the page shares something else.
+    $own = $this->createImage('Own', ['width' => 2400, 'height' => 1600]);
+    $withOwn = $this->createPage(['image' => $own->id(), 'path' => ['alias' => '/own']]);
+    self::assertArrayNotHasKey('hidden', $resolver->facts($withOwn, new CacheableMetadata())['image']);
+    $own->setUnpublished()->save();
+    $this->forgetAccess();
+    $facts = $resolver->facts(Page::load($withOwn->id()), new CacheableMetadata());
+    self::assertNull($facts['image']['image']);
+    self::assertTrue($facts['image']['hidden']);
+    // An image given only as an address is never read, nor requested.
+    $page = $this->createPage([
+      'path' => ['alias' => '/remote'],
+      'components' => self::components(['card-with-remote-image', [
+        'heading' => 'Remote',
+        'src' => 'https://cdn.example.com/photo.jpg',
+        'alt' => 'Remote',
+        'width' => 2400,
+        'height' => 1600,
+      ],
+      ]),
+    ]);
+    self::assertMatchesRegularExpression(sprintf($card, $page->id()), self::meta($resolver->resolve($page)['head'])['og:image']);
+    self::assertSame([], self::$requests);
+
+    // A chosen 150 × 150 image is sent as it is: a small card.
+    $small = $this->createImage('Small square', ['width' => 150, 'height' => 150]);
+    $page = $this->createPage([
+      'path' => ['alias' => '/small'],
+      'canvas_metatag' => Values::encode(['social' => ['image' => ['media' => $small->uuid()]]]),
+    ]);
+    $sent = $rows($resolver->resolve($page)['head']);
+    self::assertSame([$this->imageOf($small)['url'], 'image/png', '150', '150', 'summary'], [
+      $sent['og:image'],
+      $sent['og:image:type'],
+      $sent['og:image:width'],
+      $sent['og:image:height'],
+      $sent['twitter:card'],
+    ]);
+
+    // "Use this image": the site's image, made 1200 × 630, with its alt.
+    $default = $this->createImage('Default image', ['alt' => 'The hall at night']);
+    $this->config('canvas_metatag.site')
+      ->set('identity.default_image', $default->uuid())
+      ->set('identity.share_fallback', 'image')
+      ->save();
+    $page = $this->createPage(['path' => ['alias' => '/site-image']]);
+    $resolved = $resolver->resolve($page);
+    $sent = $rows($resolved['head']);
+    self::assertMatchesRegularExpression($site, $sent['og:image']);
+    self::assertSame(['image/jpeg', '1200', '630', 'The hall at night', 'summary_large_image'], array_values(array_slice($sent, 1)));
+    self::assertSame('site', $resolved['image']['source']);
+    self::assertArrayNotHasKey('primaryimage', self::graph($resolved['head']));
+    // Without its own alt text, the Site name.
+    $bare = $this->createImage('Bare default');
+    $this->config('canvas_metatag.site')->set('identity.default_image', $bare->uuid())->save();
+    self::assertSame('Example', self::meta($resolver->resolve($this->createPage(['path' => ['alias' => '/bare']]))['head'])['og:image:alt']);
+
+    // "No image": nothing, and the small card hint.
+    $this->config('canvas_metatag.site')->set('identity.share_fallback', 'none')->save();
+    $meta = self::meta($resolver->resolve($this->createPage(['path' => ['alias' => '/none']]))['head']);
+    self::assertSame([], array_filter(array_keys($meta), static fn (string $key): bool => str_starts_with($key, 'og:image')));
+    self::assertSame('summary', $meta['twitter:card']);
+
+    // A title the fonts can't draw makes no card: the site's image, when
+    // the site makes cards.
+    $this->config('canvas_metatag.site')->set('identity.share_fallback', 'card')->save();
+    $page = $this->createPage(['title' => '湖畔の夏至コンサート', 'path' => ['alias' => '/kohan']]);
+    $resolved = $resolver->resolve($page);
+    self::assertSame('site', $resolved['image']['source']);
+    self::assertMatchesRegularExpression($site, self::meta($resolved['head'])['og:image']);
+    // Without a site image: no image at all, and the small card hint.
+    $this->config('canvas_metatag.site')->set('identity.default_image', '')->save();
+    $resolved = $resolver->resolve($this->createPage(['title' => '湖畔の夏至コンサート', 'path' => ['alias' => '/kohan-plain']]));
+    $meta = self::meta($resolved['head']);
+    self::assertSame([], array_filter(array_keys($meta), static fn (string $key): bool => str_starts_with($key, 'og:image')));
+    self::assertSame('summary', $meta['twitter:card']);
+    self::assertNull($resolved['share']);
+    self::assertNull($resolved['image']);
+    $this->config('canvas_metatag.site')->set('identity.default_image', $bare->uuid())->save();
+
+    // A WebP image this GD can't read is sent as it is, with its stored
+    // size; one it reads gets its share version.
+    $uri = 'public://hall.webp';
+    file_put_contents($uri, base64_decode(self::PIXEL));
+    $file = File::create(['uri' => $uri, 'status' => 1]);
+    $file->save();
+    $webp = $this->createImage('Hall', [
+      'target_id' => $file->id(),
+      'width' => 2400,
+      'height' => 1600,
+      'alt' => 'The hall',
+    ]);
+    ShareRendererSpy::$noWebp = TRUE;
+    $sent = $rows($resolver->resolve($this->createPage(['image' => $webp->id(), 'path' => ['alias' => '/webp']]))['head']);
+    self::assertSame([$this->imageOf($webp)['url'], 'image/webp', '2400', '1600', 'The hall', 'summary_large_image'], array_values($sent));
+    ShareRendererSpy::$noWebp = FALSE;
+    $page = $this->createPage(['image' => $webp->id(), 'path' => ['alias' => '/webp-read']]);
+    self::assertMatchesRegularExpression(sprintf($photo, $page->id()), self::meta($resolver->resolve($page)['head'])['og:image']);
+
+    // Without FreeType: the original files with their stored sizes, and no
+    // card.
+    ShareRendererSpy::$unavailable = TRUE;
+    $photo1600 = $this->createImage('Wide photo', ['width' => 1600, 'height' => 900, 'alt' => 'A wide photo']);
+    $sent = $rows($resolver->resolve($this->createPage(['image' => $photo1600->id(), 'path' => ['alias' => '/plain']]))['head']);
+    $original = [$this->imageOf($photo1600)['url'], 'image/png', '1600', '900', 'A wide photo', 'summary_large_image'];
+    self::assertSame($original, array_values($sent));
+    // A wide banner (head-output "A wide banner"): as it is, and the small
+    // card hint.
+    $banner = $this->createImage('Banner', ['width' => 1200, 'height' => 150, 'alt' => 'A banner']);
+    $sent = $rows($resolver->resolve($this->createPage(['image' => $banner->id(), 'path' => ['alias' => '/banner']]))['head']);
+    self::assertSame([$this->imageOf($banner)['url'], 'image/png', '1200', '150', 'A banner', 'summary'], array_values($sent));
+    $this->config('canvas_metatag.site')->set('identity.default_image', '')->save();
+    $meta = self::meta($resolver->resolve($this->createPage(['path' => ['alias' => '/plain-none']]))['head']);
+    self::assertArrayNotHasKey('og:image', $meta);
+    self::assertSame('summary', $meta['twitter:card']);
+  }
+
+  /**
+   * What og:image:alt says.
+   *
+   * Head-output "The image's alt text says what the image shows".
+   */
+  public function testImageAlt(): void {
+    $resolver = $this->resolver();
+    $count = 0;
+    $alt = function (array $values) use ($resolver, &$count): string {
+      $page = $this->createPage($values + ['path' => ['alias' => '/page-' . ++$count]]);
+      return self::meta($resolver->resolve($page)['head'])['og:image:alt'] ?? '';
+    };
+    $choir = $this->createImage('Choir rehearsing in the old church');
+    $version = $this->createImage('Hero final v3');
+    $file = $this->createImage('IMG_2034.jpg');
+    $title = $this->createImage('Pricing for every team');
+    self::assertSame('Choir rehearsing in the old church', $alt(['image' => $choir->id()]));
+    self::assertSame('', $alt(['image' => $version->id()]));
+    self::assertSame('', $alt(['image' => $file->id()]));
+    self::assertSame('', $alt(['image' => $title->id(), 'title' => 'Pricing for every team']));
+    // Its own alt text first.
+    $described = $this->createImage('Hero final v3 copy', ['alt' => 'The choir on stage']);
+    self::assertSame('The choir on stage', $alt(['image' => $described->id()]));
+    // A card: the full og:title and the Site name.
+    self::assertSame('Pricing that grows with your team, Example', $alt([
+      'canvas_metatag' => Values::encode(['social' => ['title' => ['text' => 'Pricing that grows with your team']]]),
+    ]));
+  }
+
+  /**
+   * The page's language as og:locale, and its alternates.
+   *
+   * Head-output "og:locale names the page's language".
+   */
+  public function testLocale(): void {
+    $resolver = $this->resolver();
+    $locales = static fn (array $head): array => array_values(array_map(
+      static fn (array $row): string => $row['property'] . ' ' . $row['content'],
+      array_filter($head['meta'], static fn (array $row): bool => str_starts_with($row['property'] ?? '', 'og:locale')),
+    ));
+    $page = $this->createPage();
+    self::assertSame(['og:locale en_US'], $locales($resolver->resolve($page)['head']));
+    // In the fixed order, after og:site_name.
+    $keys = array_keys(self::meta($resolver->resolve($page)['head']));
+    self::assertSame(['og:site_name', 'og:locale', 'og:title'], array_slice($keys, array_search('og:site_name', $keys, TRUE), 3));
+
+    // A British site; a translation is an alternate, as hreflang lists it.
+    $this->config('system.date')->set('country.default', 'GB')->save();
+    $page = $this->createPage(['path' => ['alias' => '/prices']]);
+    $page->addTranslation('fr', ['title' => 'Tarifs', 'status' => TRUE])->save();
+    $page = Page::load($page->id());
+    self::assertSame(['og:locale en_GB', 'og:locale:alternate fr_FR'], $locales($resolver->resolve($page)['head']));
+    self::assertSame(['og:locale fr_FR', 'og:locale:alternate en_GB'], $locales($resolver->resolve($page->getTranslation('fr'))['head']));
+    // An unpublished translation is no alternate, as it is no hreflang link.
+    $page->getTranslation('fr')->setUnpublished()->save();
+    self::assertSame(['og:locale en_GB'], $locales($resolver->resolve(Page::load($page->id()))['head']));
+
+    // A regional language code; a language the list does not have.
+    ConfigurableLanguage::createFromLangcode('pt-br')->save();
+    ConfigurableLanguage::createFromLangcode('eo')->save();
+    $page = $this->createPage(['path' => ['alias' => '/precos'], 'langcode' => 'pt-br']);
+    self::assertSame(['og:locale pt_BR'], $locales($resolver->resolve($page)['head']));
+    $page = $this->createPage(['path' => ['alias' => '/prezoj'], 'langcode' => 'eo']);
+    self::assertSame([], $locales($resolver->resolve($page)['head']));
+
+    // Langcodes that share a locale give it once, and never the page's own
+    // (the head's meta is the headless head's too, and the coupled head keys
+    // its rows by content): on a Brazilian site "en" and "en-x-simple" are
+    // both en_US, "pt" and "pt-br" both pt_BR.
+    ConfigurableLanguage::createFromLangcode('pt')->save();
+    ConfigurableLanguage::createFromLangcode('en-x-simple')->save();
+    $this->config('system.date')->set('country.default', 'BR')->save();
+    $page = $this->createPage(['path' => ['alias' => '/plans'], 'langcode' => 'pt']);
+    foreach (['pt-br', 'en', 'en-x-simple', 'eo'] as $langcode) {
+      $page->addTranslation($langcode, ['title' => "Plans $langcode", 'status' => TRUE]);
+    }
+    $page->save();
+    $page = Page::load($page->id());
+    self::assertSame(['og:locale pt_BR', 'og:locale:alternate en_US'], $locales($resolver->resolve($page)['head']));
+    self::assertSame(['og:locale en_US', 'og:locale:alternate pt_BR'], $locales($resolver->resolve($page->getTranslation('en-x-simple'))['head']));
+  }
+
+  /**
+   * A page still named with Canvas's placeholder takes its first heading.
+   *
+   * Dynamic-values "A page still named with the placeholder takes its first
+   * heading"; head-output "A page still named with the placeholder".
+   */
+  public function testPlaceholderTitle(): void {
+    $resolver = $this->resolver();
+    $this->config('system.site')->set('name', 'Humanify Studio')->save();
+    $page = $this->createPage([
+      'title' => 'Untitled page',
+      'components' => self::components(
+        ['heading', ['text' => 'Our services', 'element' => 'h1']],
+        ['heading', ['text' => 'A second heading', 'element' => 'h2']],
+      ),
+    ]);
+    $resolved = $resolver->resolve($page);
+    self::assertSame('Our services | Humanify Studio', $resolved['head']['title']);
+    self::assertSame('Our services', self::meta($resolved['head'])['og:title']);
+    self::assertSame('Our services', $resolver->share($page, new CacheableMetadata())['card']['title'] ?? NULL);
+    // A page that is named keeps its name.
+    $named = $this->createPage([
+      'title' => 'Services',
+      'path' => ['alias' => '/named'],
+      'components' => $page->get('components')->getValue(),
+    ]);
+    self::assertSame('Services | Humanify Studio', $resolver->resolve($named)['head']['title']);
+
+    // Without a heading it stays the placeholder, with its own card.
+    $bare = $this->createPage(['title' => 'Untitled page', 'path' => ['alias' => '/untitled']]);
+    self::assertSame('Untitled page | Humanify Studio', $resolver->resolve($bare)['head']['title']);
+    self::assertSame('Untitled page', $resolver->share($bare, new CacheableMetadata())['card']['title'] ?? NULL);
+
+    // The placeholder in the page's language. Custom strings are read by a
+    // service built with the settings.
+    $this->setSetting('locale_custom_strings_fr', [
+      '' => [
+        'Untitled @singular_entity_type_label' => '@singular_entity_type_label sans titre',
+        'page' => 'Page',
+      ],
+    ]);
+    $this->container->get('kernel')->rebuildContainer();
+    $resolver = $this->resolver();
+    $french = $this->createPage([
+      'title' => 'Page sans titre',
+      'langcode' => 'fr',
+      'path' => ['alias' => '/sans-titre'],
+      'components' => self::components(['heading', ['text' => 'Nos services', 'element' => 'h1']]),
+    ]);
+    self::assertSame('Nos services | Humanify Studio', $resolver->resolve($french)['head']['title']);
+  }
+
+  /**
+   * A title over 255 characters keeps its ending.
+   *
+   * Head-output "A cut head text ends at a word".
+   */
+  public function testLongTitle(): void {
+    $resolver = $this->resolver();
+    $long = 'An unusually long evening programme of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed and first performed';
+    self::assertSame(247, mb_strlen($long));
+    $head = $resolver->resolve($this->createPage([
+      'title' => $long,
+      'canvas_metatag' => Values::encode(['title_end' => ['text' => 'Events']]),
+    ]))['head'];
+    $title = $head['title'];
+    self::assertStringEndsWith('rehearsed and first… | Events', $title);
+    // The card's alt text holds the whole title (share-images "A
+    // 247-character title").
+    self::assertSame("$long, Example", self::meta($head)['og:image:alt']);
+    self::assertLessThanOrEqual(255, mb_strlen($title));
+    // Without a space to cut at: 255 code points.
+    $title = $resolver->resolve($this->createPage(['title' => str_repeat('あ', 300), 'path' => ['alias' => '/kana']]))['head']['title'];
+    self::assertSame(str_repeat('あ', 245) . ' | Example', $title);
+
+    // A composed main part leaves out its fields before its words, and
+    // never a connector before "…".
+    $this->createArticleFields();
+    $this->createTemplate(TRUE, [
+      'title' => [
+        'parts' => [
+          ['fact' => 'title'],
+          ['text' => ' in '],
+          $this->linkTo('Byline'),
+          ['text' => ' · '],
+          $this->linkTo('When', 'date'),
+        ],
+      ],
+      'title_end' => ['text' => 'Events'],
+    ]);
+    $event = 'An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a long conversation with the audience about how new music is commissioned, rehearsed, recorded and finally performed.';
+    self::assertSame(240, mb_strlen($event));
+    $node = Node::create([
+      'type' => 'article',
+      'title' => $event,
+      'uid' => $this->author->id(),
+      'field_byline' => 'Helsinki',
+      'field_when' => '2027-06-19T16:00:00',
+    ]);
+    $node->save();
+    $title = $resolver->resolve($node)['head']['title'];
+    self::assertSame("$event | Events", $title);
+    self::assertStringNotContainsString(' in …', $title);
+    self::assertStringNotContainsString(' · …', $title);
+    // The last field goes first: the city stays where it still fits.
+    $shorter = 'An evening of chamber music, songs and readings in which every work is introduced by the musicians themselves, followed by a conversation with the audience about how new music is commissioned, rehearsed, recorded and performed.';
+    self::assertSame(227, mb_strlen($shorter));
+    $node = Node::create([
+      'type' => 'article',
+      'title' => $shorter,
+      'uid' => $this->author->id(),
+      'field_byline' => 'Helsinki',
+      'field_when' => '2027-06-19T16:00:00',
+    ]);
+    $node->save();
+    self::assertSame("$shorter in Helsinki | Events", $resolver->resolve($node)['head']['title']);
+  }
+
+  /**
+   * Descriptions derived from text are cut to its sentences.
+   *
+   * Dynamic-values "A page's and a node's own description and image".
+   */
+  public function testDerivedDescription(): void {
+    $resolver = $this->resolver();
+    $this->createArticleFields();
+    $description = function (string $body) use ($resolver): string {
+      $node = Node::create([
+        'type' => 'article',
+        'title' => 'Chair',
+        'uid' => $this->author->id(),
+        'field_body' => ['value' => "<p>$body</p>", 'format' => 'plain_text'],
+      ]);
+      $node->save();
+      return $resolver->facts($node, new CacheableMetadata())['description']['value'];
+    };
+    self::assertSame(
+      'Made to last. Solid oak, finished by hand in our workshop in Tampere, with brass fittings that age well.',
+      $description('Made to last. Solid oak, finished by hand in our workshop in Tampere, with brass fittings that age well. Each piece is numbered, signed and registered so that it can be repaired for decades.'),
+    );
+    $text = $description('Dr. Kallio leads the choir, e.g. on Fridays, when the hall is free and the doors open early for everyone who wants to listen in. Rehearsals start at 18 and run late.');
+    self::assertStringStartsWith('Dr. Kallio leads the choir, e.g. on Fridays', $text);
+    self::assertStringNotContainsString('Rehearsals', $text);
+    self::assertNotSame('Dr.', $text);
+    // The text before "e.g." fits, its sentence does not: a cut at a word,
+    // never at the abbreviation.
+    $text = $description('Dr. Kallio leads the choir, e.g. on Fridays, when the hall is free and the doors open early for everyone who wants to listen in and then stay on for coffee with the singers. Next.');
+    self::assertStringStartsWith('Dr. Kallio leads the choir, e.g. on Fridays, when', $text);
+    self::assertStringEndsWith('…', $text);
+    $sentence = rtrim(str_repeat('word ', 48)) . '.';
+    self::assertSame(240, mb_strlen($sentence));
+    $text = $description($sentence);
+    self::assertStringEndsWith('word…', $text);
+    self::assertLessThanOrEqual(160, mb_strlen($text));
+
+    // Only a long text field: its text.
+    NodeType::create(['type' => 'place', 'name' => 'Place'])->save();
+    FieldStorageConfig::create(['field_name' => 'field_hours', 'entity_type' => 'node', 'type' => 'string_long'])->save();
+    FieldConfig::create([
+      'field_name' => 'field_hours',
+      'entity_type' => 'node',
+      'bundle' => 'place',
+      'label' => 'Opening hours',
+    ])->save();
+    $hours = 'Open Monday to Friday. Closed on public holidays.';
+    $node = Node::create(['type' => 'place', 'title' => 'Shop', 'uid' => $this->author->id(), 'field_hours' => $hours]);
+    $node->save();
+    $fact = $resolver->facts($node, new CacheableMetadata())['description'];
+    self::assertSame([$hours, 'Opening hours'], [$fact['value'], $fact['via']]);
+
+    // Shown by the page's display: its text. Hidden, as an editorial note
+    // is: none, and saving the display changes the head.
+    $display = EntityViewDisplay::create([
+      'targetEntityType' => 'node',
+      'bundle' => 'place',
+      'mode' => 'default',
+      'status' => TRUE,
+    ]);
+    $display->setComponent('field_hours', ['type' => 'basic_string'])->save();
+    self::assertSame($hours, $resolver->facts($node, new CacheableMetadata())['description']['value']);
+    $display->removeComponent('field_hours')->save();
+    $cacheability = new CacheableMetadata();
+    self::assertSame('', $resolver->facts($node, $cacheability)['description']['value']);
+    self::assertContains('config:core.entity_view_display.node.place.default', $cacheability->getCacheTags());
+    // An enabled `full` display is the one a page renders with.
+    EntityViewDisplay::create(['targetEntityType' => 'node', 'bundle' => 'place', 'mode' => 'full', 'status' => TRUE])
+      ->setComponent('field_hours', ['type' => 'basic_string'])
+      ->save();
+    self::assertSame($hours, $resolver->facts($node, new CacheableMetadata())['description']['value']);
+
+    // A type whose content template renders its pages: only what the
+    // template links counts, whatever the displays hold. An internal note
+    // Field UI put in the default display is never the description.
+    FieldStorageConfig::create(['field_name' => 'field_notes', 'entity_type' => 'node', 'type' => 'string_long'])->save();
+    FieldConfig::create([
+      'field_name' => 'field_notes',
+      'entity_type' => 'node',
+      'bundle' => 'place',
+      'label' => 'Internal notes',
+    ])->save();
+    EntityViewDisplay::load('node.place.default')?->setComponent('field_notes', ['type' => 'basic_string'])->save();
+    EntityViewDisplay::load('node.place.full')?->removeComponent('field_hours')->setComponent('field_notes', ['type' => 'basic_string'])->save();
+    $notes = 'Ask Kim about the broken lock.';
+    $node = Node::create(['type' => 'place', 'title' => 'Depot', 'uid' => $this->author->id(), 'field_notes' => $notes]);
+    $node->save();
+    self::assertSame($notes, $resolver->facts($node, new CacheableMetadata())['description']['value']);
+    $heading = Component::load('sdc.canvas_test_sdc.heading');
+    \assert($heading instanceof Component);
+    $template = ContentTemplate::create([
+      'content_entity_type_id' => 'node',
+      'content_entity_type_bundle' => 'place',
+      'content_entity_type_view_mode' => 'full',
+      'component_tree' => [
+        [
+          'uuid' => '22222222-2222-4222-8222-222222222222',
+          'component_id' => 'sdc.canvas_test_sdc.heading',
+          'component_version' => $heading->getActiveVersion(),
+          'inputs' => [
+            'text' => ['sourceType' => 'entity-field', 'expression' => 'ℹ︎␜entity:node:place␝field_hours␞␟value'],
+            'element' => 'h2',
+          ],
+        ],
+      ],
+      'status' => TRUE,
+    ]);
+    $template->save();
+    $cacheability = new CacheableMetadata();
+    $fact = $resolver->facts($node, $cacheability)['description'];
+    self::assertSame('', $fact['value']);
+    // Where it would come from: the linked field, though the full display
+    // hides it.
+    self::assertSame('Opening hours', $fact['via']);
+    self::assertContains('config:canvas.content_template.node.place.full', $cacheability->getCacheTags());
+    $node->set('field_hours', $hours)->save();
+    $fact = $resolver->facts($node, new CacheableMetadata())['description'];
+    self::assertSame([$hours, 'Opening hours'], [$fact['value'], $fact['via']]);
+    // A template that links neither: none, never the display's fields.
+    $template->set('component_tree', [])->save();
+    $fact = $resolver->facts(Node::load($node->id()), new CacheableMetadata())['description'];
+    self::assertSame('', $fact['value']);
+    self::assertArrayNotHasKey('via', $fact);
+  }
+
+  /**
+   * The page node's image keeps a phone photo's upright size.
+   *
+   * Structured-data "The page node describes the page".
+   */
+  public function testUprightImage(): void {
+    $uri = 'public://phone.jpg';
+    copy(dirname(__DIR__, 3) . '/tests/fixtures/share-images/orientation-6.jpg', $uri);
+    $file = File::create(['uri' => $uri, 'status' => 1]);
+    $file->save();
+    // Stored sideways, as core measures it.
+    $media = $this->createImage('Phone photo', ['target_id' => $file->id(), 'width' => 840, 'height' => 630]);
+    $graph = self::graph($this->resolver()->resolve($this->createPage(['image' => $media->id()]))['head']);
+    self::assertSame([630, 840], [$graph['primaryimage']['width'], $graph['primaryimage']['height']]);
   }
 
 }

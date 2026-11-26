@@ -70,10 +70,24 @@ import {
   sitePaths,
   siteTexts,
   socialImage,
+  sharedImage,
+  colourWords,
+  shareSamples,
+  contrastText,
+  logoNote,
+  sampleTitle,
+  shareWarning,
+  dimensions,
+  imageNote,
+  imageSource,
+  pageTitleSource,
+  passedNote,
+  withoutImage,
   source,
   strips,
   tabOf,
   texts,
+  tidySite,
   truncate,
   unsent,
   unsentSchema,
@@ -105,7 +119,9 @@ const SITE = {
     separator: '|',
     logo: '',
     default_image: '',
-    same_as: [],
+    colour: '',
+    share_fallback: 'card' as const,
+same_as: [],
   },
   values: {
     robots: { max_image_preview: 'large' as const },
@@ -791,6 +807,24 @@ describe('reducer', () => {
     );
     expect(named.edits.site.identity.name).toBe('');
     expect(named.siteDirty).toBe(false);
+  });
+
+  it('a choice made and taken back leaves Site unchanged, state-only keys and all', () => {
+    // The server's site has the state-only country and time zone, and an
+    // identity without a key the working copy always has.
+    const { same_as: _, ...identity } = SITE.identity;
+    const site = { ...SITE, identity: identity as typeof SITE.identity, country: 'FI', timezone: 'Europe/Helsinki' };
+    const start = ready({ site });
+    const there = run(start, edit('identity.share_fallback', 'image', 'site'));
+    expect(there.siteDirty).toBe(true);
+    const back = run(there, edit('identity.share_fallback', 'card', 'site'));
+    expect(back.siteDirty).toBe(false);
+    // The working copy keeps the server's time zone: nothing pending.
+    expect(back.edits.site.timezone).toBe('Europe/Helsinki');
+    expect(pendingFor(null, 'u1', tidySite(back.server!, back.server!.site), back.edits.site)).toBeNull();
+    expect(Object.keys(pendingFor(null, 'u1', tidySite(there.server!, there.server!.site), there.edits.site)!.changes)).toEqual([
+      'identity.share_fallback',
+    ]);
   });
 
   it('reset and undo', () => {
@@ -1954,13 +1988,13 @@ describe('what previews and rows say', () => {
     expect(
       shown(run(withImage(), edit('social.image', { source: hero.source }))),
     ).toMatchObject({ image: { name: 'Field hero' }, from: 'Hero image' });
-    expect(shown(ready())).toEqual({ image: null, from: 'No image' });
+    expect(shown(ready())).toEqual({ image: null, from: 'Card' });
     expect(
       shown(
         ready({
           site: {
             ...SITE,
-            identity: { ...SITE.identity, default_image: 'uuid-site' },
+            identity: { ...SITE.identity, default_image: 'uuid-site', share_fallback: 'image' },
           },
           media: {
             'uuid-site': { name: 'Card', thumb: '/c.jpg', width: 1, height: 1, bytes: 1 },
@@ -1968,6 +2002,148 @@ describe('what previews and rows say', () => {
         }),
       ),
     ).toMatchObject({ image: { name: 'Card' }, from: 'Site default image' });
+  });
+
+  it('the image field says where the image comes from at each step of the chain', () => {
+    const site = { 'uuid-site': { name: 'Studio', thumb: '/s.jpg', width: 1200, height: 630, bytes: 1 } };
+    const choosing = (share_fallback: 'card' | 'image' | 'none', over: Partial<StatePayload> = {}) =>
+      ready({ site: { ...SITE, identity: { ...SITE.identity, default_image: 'uuid-site', share_fallback } }, media: site, ...over });
+    const line = (state: State) => imageSource(shown(state).from);
+    // The page's own image, then its first component image (the server's word).
+    expect(line(withImage({ target: target() }))).toBe('From the Image field');
+    const component = { ...image, name: 'Hero block', source: 'component' as const };
+    expect(line(ready({ resolved: { head: { title: '', meta: [], link: [], script: [] }, image: component, schema: EMPTY_SCHEMA, share: { made: 'cover', url: '/p' } } }))).toBe(
+      "From the page's first image",
+    );
+    // A found image the server passed over (too small): what is shared
+    // instead, and the image passed over to say why.
+    const head = { title: '', meta: [], link: [], script: [] };
+    const passed = shown(withImage({ target: target(), resolved: { head, image: null, schema: EMPTY_SCHEMA, share: { made: 'card', url: '/c' } } }));
+    expect(passed).toMatchObject({ image: null, from: 'Card', passed: image });
+    expect(imageNote({ passed: { ...image, width: 500, height: 300 } })).toBe(`The Image field's image is too small to share (${dimensions(500, 300)})`);
+    expect(imageNote({ passed: image }, 'Poster')).toBe("Links can't show the Poster field's image");
+    // The page's Image field holds one visitors can't see (unpublished, or
+    // not a public file): what is shared instead, and why.
+    const unpublished = ready({
+      target: target(),
+      facts: { ...payload().facts, image: { label: 'Image', kind: 'image', value: '', image: null, hidden: true } } as Record<Fact, StatePayload['facts'][Fact]>,
+    });
+    const hidden = shown(unpublished);
+    expect(hidden).toEqual({ image: null, from: 'Card', hidden: true });
+    expect(imageSource(hidden.from)).toBe('Made from the title');
+    expect(imageNote(hidden)).toBe("The Image field's image can't be shown publicly");
+    expect(imageNote({ ...hidden, unshown: true })).toBe("The chosen image can't be shown publicly");
+    // Chosen, public, but over 24 megapixels: too large, never "not public".
+    expect(imageNote({ unshown: true, chosen: { ...image, width: 9000, height: 9000 } })).toBe('The chosen image is too large to share (over 24 megapixels)');
+    expect(imageNote({ unshown: true, chosen: { ...image, width: 4000, height: 3000 } })).toBe("The chosen image can't be shown publicly");
+    expect(imageNote(shown(ready()))).toBeUndefined();
+    // Then the site's choice for pages without an image.
+    expect(line(choosing('card'))).toBe('Made from the title');
+    expect(line(choosing('image'))).toBe("The site's image");
+    expect(line(choosing('none'))).toBe('No image');
+    // A card that can't be made: the site's image, else none.
+    const unmade = { share: { missing: 'fonts' as const, theme_logo: null, svg: false, site_alt: '', host: null } };
+    expect(line(choosing('card', unmade))).toBe("The site's image");
+    expect(line(ready(unmade))).toBe('No image');
+    // A type says what its items without one share.
+    const event = ready({ target: target({ scope: 'template', label: 'Event' }) });
+    expect(withoutImage(event, 'Event')).toBe('Each event without one shares a card made from its title.');
+    expect(withoutImage(choosing('image'), 'Event')).toBe("Each event without one shares the site's image.");
+    expect(withoutImage(choosing('none'), 'Event')).toBe('Each event without one shares no image.');
+    // No plural to guess.
+    expect(withoutImage(event, 'Company')).toBe('Each company without one shares a card made from its title.');
+    // With a field its row already names: only what an item without it shares.
+    expect(withoutImage(event, 'Event', true)).toBe('An event without one shares a card made from its title.');
+    expect(withoutImage(event, 'Recipe', true)).toBe('A recipe without one shares a card made from its title.');
+  });
+
+  it('a template says what the previewed item shares when its image is passed over', () => {
+    const head = { title: '', meta: [], link: [], script: [] };
+    const card = { head, image: null, schema: EMPTY_SCHEMA, share: { made: 'card' as const, url: '/c' } };
+    const small = { ...image, width: 500, height: 300, name: 'A small test image' };
+    // By default, from the Image fact (the field the server names).
+    const byDefault = shown(
+      withImage({
+        facts: { ...payload().facts, image: { label: 'Image', kind: 'image', value: '', image: small, via: 'Image' } } as Record<Fact, StatePayload['facts'][Fact]>,
+        target: target({ scope: 'template', label: 'Article' }),
+        resolved: card,
+      }),
+    );
+    expect(byDefault).toMatchObject({ image: null, from: 'Card', passed: small });
+    expect(passedNote(byDefault.passed!, 'Image', 'Article', byDefault.from)).toBe(
+      `This article's Image is too small to share (${dimensions(500, 300)}), so it shares a card made from its title.`,
+    );
+    // Linked to a field, stored: that field, by its label.
+    const linked = shown(
+      withImage({
+        sources: [{ ...hero, image: small }],
+        target: target({ scope: 'template', label: 'Article', values: { social: { image: { source: hero.source } } } }),
+        resolved: card,
+      }),
+    );
+    expect(linked).toMatchObject({ from: 'Card', passed: small, field: 'Hero image' });
+    expect(passedNote(linked.passed!, linked.field!, 'Article', linked.from)).toBe(
+      `This article's Hero image is too small to share (${dimensions(500, 300)}), so it shares a card made from its title.`,
+    );
+    // The server shares it: nothing passed over.
+    const sharedHero = { ...card, image: { ...image, name: 'Field hero', source: 'entity' as const }, share: { made: 'cover' as const, url: '/p' } };
+    expect(
+      shown(withImage({ target: target({ scope: 'template', label: 'Article', values: { social: { image: { source: hero.source } } } }), resolved: sharedHero })),
+    ).toEqual({ image: { ...image, name: 'Field hero' }, from: 'Hero image' });
+    // What it shares instead, and why, in each case.
+    expect(passedNote({ ...image, width: 9000, height: 9000 }, 'Poster', 'Event', "Site default image")).toBe(
+      "This event's Poster is too large to share (over 24 megapixels), so it shares the site's image.",
+    );
+    expect(passedNote({ ...image, width: 0, height: 0 }, 'Poster', 'Event', 'No image')).toBe("This event's Poster can't be shared, so it shares no image.");
+  });
+
+  it("a page still named for a new page says its title comes from its first heading", () => {
+    const facts = payload().facts;
+    expect(pageTitleSource(facts)).toBe('From the page title');
+    const untitled = ready({ facts: { ...facts, title: { ...facts.title!, value: 'Help teams', placeholder: 'Untitled page' } } });
+    expect(pageTitleSource(view(untitled)!.facts)).toBe("From the page's first heading");
+    // Without a heading the title is the placeholder itself: the page title.
+    const bare = ready({ facts: { ...facts, title: { ...facts.title!, value: 'Untitled page', placeholder: 'Untitled page' } } });
+    expect(pageTitleSource(view(bare)!.facts)).toBe('From the page title');
+  });
+
+  it('the link preview shows the image the server makes for the draft', () => {
+    const resolved = (share: Resolved['share']): Resolved => ({
+      head: { title: '', meta: [], link: [], script: [] },
+      image: null,
+      schema: EMPTY_SCHEMA,
+      share,
+    });
+    const card = { made: 'card' as const, url: '/canvas-metatag/api/share-preview?entity_type=canvas_page&id=8&langcode=en&v=1' };
+    const state = ready({ resolved: resolved(card) });
+    expect(sharedImage(state, view(state)!)).toEqual({ src: card.url, width: 1200, height: 630 });
+    // Typing a title keeps the last card until the server has the change.
+    const typing = run(state, edit('social.title', t('New title')));
+    expect(sharedImage(typing, view(typing)!)).toEqual({ src: card.url, width: 1200, height: 630 });
+    // A chosen image shows at once; the server's version follows.
+    const picked = { name: 'New', thumb: '/n.jpg', url: '/n.jpg', width: 800, height: 400 };
+    const choosing = run(state, edit('social.image', { media: 'uuid-new' }));
+    expect(sharedImage(choosing, view(choosing, { 'uuid-new': picked })!)).toEqual({ src: '/n.jpg', width: 800, height: 400 });
+    // An original file is shown at its own size; no image, nothing.
+    const original = ready({ resolved: { ...resolved({ made: 'original', url: '/logo.png' }), image: { ...image, width: 400, height: 400 } } });
+    expect(sharedImage(original, view(original)!)).toEqual({ src: '/logo.png', width: 400, height: 400 });
+    const none = ready({ resolved: resolved(null) });
+    expect(sharedImage(none, view(none)!)).toBeNull();
+    // A published page with a draft that shares no image: nothing either.
+    const drafted = ready({ resolved: { ...resolved(null), share_changed: true } });
+    expect(sharedImage(drafted, view(drafted)!)).toBeNull();
+  });
+
+  it("a page's own text describes it while no description is typed", () => {
+    const state = run(
+      ready({
+        facts: { ...payload().facts, description: { label: 'Description', kind: 'text', value: 'Our studio makes things.', derived: true } },
+      }),
+      { type: 'live', live: { title: 'Pricing', description: '' } },
+    );
+    expect(view(state)!.texts.description).toBe('Our studio makes things.');
+    const typed = run(state, { type: 'live', live: { title: 'Pricing', description: 'Typed.' } });
+    expect(view(typed)!.texts.description).toBe('Typed.');
   });
 
   it('a linked image that gives nothing says so, and what is used instead', () => {
@@ -2015,6 +2191,66 @@ describe('what previews and rows say', () => {
     expect(shown(state).from).toBe('From the English version');
   });
 
+  it('Site › Sharing saves the colour and what pages without an image share, with the identity', () => {
+    const state = run(
+      ready(),
+      edit('identity.colour', '#FF6B00', 'site'),
+      edit('identity.default_image', 'uuid-site', 'site'),
+      edit('identity.share_fallback', 'image', 'site'),
+    );
+    // The body putSite() sends.
+    expect(state.edits.site.identity).toEqual({ ...SITE.identity, colour: '#FF6B00', default_image: 'uuid-site', share_fallback: 'image' });
+    expect(state.siteDirty).toBe(true);
+    // A refused choice goes once its image is chosen.
+    const refused = run(ready(), edit('identity.share_fallback', 'image', 'site'), {
+      type: 'errors',
+      scope: 'site',
+      fields: { 'identity.share_fallback': 'Choose the image to use.' },
+    });
+    expect(run(refused, edit('identity.default_image', 'uuid-site', 'site')).errors.site).toEqual({});
+    // The Logo row's note: add one; else why shared images show the
+    // initial, the SVG first (a smaller SVG would not help).
+    const logo = { own: true, theme: false, svg: false, size: { width: 512, height: 512 } };
+    expect(logoNote({ ...logo, own: false })).toBe('Add your logo. It goes on shared images and your site icon.');
+    expect(logoNote({ ...logo, own: false, theme: true })).toBeUndefined();
+    expect(logoNote(logo)).toBeUndefined();
+    expect(logoNote({ ...logo, size: { width: 5000, height: 200 } })).toBe(
+      'Shared images show your initial because your logo is over 4096 pixels. Choose a smaller version.',
+    );
+    expect(logoNote({ ...logo, svg: true })).toBe('Shared images show your initial because your logo is an SVG. Choose a PNG version.');
+    expect(logoNote({ ...logo, svg: true, size: { width: 5000, height: 200 } })).toMatch(/is an SVG\./);
+    // The page sample's title: the page's at page scope; elsewhere, and in
+    // the colour's sheet (even on a page whose title can't be drawn), a
+    // short typical one.
+    expect(sampleTitle('page', 'Our story')).toBe('Our story');
+    expect(sampleTitle('template', 'Midsummer')).toBe('About us');
+    expect(sampleTitle(undefined, undefined)).toBe('About us');
+    expect(sampleTitle('page', '湖畔の夏至コンサート', true)).toBe('About us');
+    expect(sampleTitle('page', '')).toBe('About us');
+    // A chosen image is shared whole from 200 × 200 up; skipped over 24 MP.
+    expect(shareWarning({ width: 400, height: 400 })).toBe('');
+    expect(shareWarning({ width: 500, height: 300 })).toBe('');
+    expect(shareWarning({ width: 1200, height: 150 })).toBe('Too small');
+    // A size Drupal doesn't know (a BMP is 0 × 0) is no size warning.
+    expect(shareWarning({ width: 0, height: 0 })).toBe('');
+    expect(shareWarning({ width: 9000, height: 9000 })).toBe('Too large');
+    // The home page is a sample only when the module makes its head.
+    expect(shareSamples(true)).toEqual(['home', 'page']);
+    expect(shareSamples(false)).toEqual(['page']);
+    // The colour in words: never a code outside its sheet.
+    expect(colourWords('', null)).toBe('Neutral');
+    expect(colourWords('', { image: null, picked: true })).toBe('Picked from your logo');
+    expect(colourWords('#FF6B00', { image: null, picked: true })).toBe('Your colour');
+    expect(contrastText({ image: null, colour: '#ED741D', text: '#111318', contrast: 5.62 })).toBe(
+      'Dark text on #ED741D reads at 5.6:1.',
+    );
+    // The user's own colour, shaded: said as theirs.
+    expect(contrastText({ image: null, colour: '#ED741D', text: '#111318', contrast: 5.62 }, '#ff6b00')).toBe(
+      'Your #FF6B00 is shaded to #ED741D so dark text reaches 5.6:1.',
+    );
+    expect(contrastText({ image: null, colour: '#ED741D', text: '#111318', contrast: 5.62 }, '#ED741D')).toMatch(/^Dark text on #ED741D/);
+  });
+
   it('Site "Becomes" uses the working copy of the name and the separator', () => {
     const state = run(
       ready(),
@@ -2056,10 +2292,22 @@ describe('what previews and rows say', () => {
       media: {},
       resolved,
     });
-    expect(shown(state)).toEqual({
-      image: resolved.image,
-      from: "The chosen image can't be shown publicly · using the page image",
+    expect(shown(state)).toEqual({ image: resolved.image, from: 'Image', unshown: true });
+    // On a site that makes cards, the card it shares instead.
+    const carded = withImage({
+      target: target({ values: { social: { image: { media: 'uuid-private' } } } }),
+      media: {},
+      resolved: { ...resolved, image: null, share: { made: 'card' as const, url: '/preview' } },
     });
+    expect(shown(carded)).toEqual({ image: null, from: 'Card', unshown: true });
+    expect(imageSource(shown(carded).from)).toBe('Made from the title');
+    // Nothing shared at all: no image.
+    const none = withImage({
+      target: target({ values: { social: { image: { media: 'uuid-private' } } } }),
+      media: {},
+      resolved: { ...resolved, image: null, share: null },
+    });
+    expect(shown(none)).toEqual({ image: null, from: 'No image', unshown: true });
   });
 
   it('Site "Becomes" trims the separator, as the server stores it', () => {
@@ -2252,6 +2500,8 @@ describe('fileSize()', () => {
       '1200\u00a0×\u00a0630 · 10.2 MB',
     );
     expect(imageSize({ width: 1200, height: 630 })).toBe('1200\u00a0×\u00a0630');
+    // Never "0 × 0": a size Drupal doesn't know says so.
+    expect(imageSize({ width: 0, height: 0, bytes: 2306102 })).toBe('Size unknown · 2.2 MB');
   });
 });
 

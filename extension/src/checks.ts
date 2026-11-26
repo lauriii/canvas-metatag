@@ -12,6 +12,8 @@ import {
   meter,
   NO_DESCRIPTION_SENT,
   offered,
+  SHARE_MAX_PIXELS,
+  sizeKnown,
   typeOf,
 } from './model';
 import { durationText, partNoun, plainText } from './controls';
@@ -19,6 +21,7 @@ import { dateWords, itemName } from './readback';
 import { emptyWords, linkedField, shapeNeed } from './custom/sheet';
 import type {
   FeatureFact,
+  GraphNode,
   Issue,
   Jump,
   Measurer,
@@ -27,6 +30,7 @@ import type {
   SchemaType,
   SearchFeatures,
   SeoValues,
+  ShareInfo,
   SiteSettings,
   SkippedPart,
   StatePayload,
@@ -124,6 +128,8 @@ export interface ChecksInput {
   refused?: string | null;
   /** Hand-added JSON-LD left with a problem in the sheet, not sent. */
   unsaved?: boolean;
+  /** How the site makes share images. */
+  share?: ShareInfo;
 }
 
 const GENERIC = ['home', 'homepage', 'untitled', 'page', 'new page', 'welcome'];
@@ -589,7 +595,11 @@ export function checks(input: ChecksInput): Issue[] {
       fix: suggest('description'),
     });
   } else {
-    const descriptionCut = cut('description', texts.description);
+    // Written by the module from the page's own text, cut at a sentence: not
+    // the editor's to shorten.
+    const typed = effective.description;
+    const derived = lookup.facts.description?.derived && (!typed || ('fact' in typed && typed.fact === 'description'));
+    const descriptionCut = derived ? null : cut('description', texts.description);
     if (descriptionCut) {
       issues.push({
         id: 'description-long',
@@ -716,10 +726,63 @@ export function checks(input: ChecksInput): Issue[] {
   }
 
   // Social image. `resolved` is null when there is no page to resolve for.
+  // The source is judged, saying what the module does with it: a share
+  // version cropped to 1200 × 630 or shown whole, the original file, or a
+  // card made from the title.
   if (resolved) {
     const image = resolved.image;
+    const made = resolved.share?.made;
     const at = jump('social', 'social.image');
-    if (!image) {
+    const fills = `An image of ${dimensions(1200, 630)} fills the card.`;
+    // Pages whose rich results want a real photo.
+    const kind = kindOfType(registry, resolved.schema.type);
+    const photoKind = ['Article', 'Event', 'Product', 'Recipe'].includes(kind);
+    // A chosen image over 24 megapixels is not shared at all.
+    const picked = effective.social?.image;
+    const huge = picked && 'media' in picked && image?.source !== 'override' ? lookup.media[picked.media] : undefined;
+    if (huge && huge.width * huge.height > SHARE_MAX_PIXELS) {
+      issues.push({
+        id: 'image-large',
+        severity: 'fix',
+        message: 'Use a smaller social image',
+        detail: `The chosen image is ${dimensions(huge.width, huge.height)}, over 24 megapixels: too large to share, so links show ${
+          made === 'card' ? 'a card made from the title' : image ? 'another image' : 'no image'
+        }.`,
+        jump: at,
+        fix: { label: 'Choose image', image: 'social.image' },
+      });
+    } else if (made === 'card') {
+      // A found image passed over for its size, else a photo where one counts.
+      const value = effective.social?.image;
+      const linked = value && 'source' in value ? value : undefined;
+      const found = resolve(linked ?? { fact: 'image' }, 'image', lookup).image;
+      // At template scope an image chosen here is every item's: an item that
+      // lacks one gets it in its own field.
+      const field = onPage ? undefined : linked ? rowOf(lookup, linked)?.path[0] : !value ? lookup.facts.image?.via : undefined;
+      const choose = field ? {} : { fix: { label: 'Choose image', image: 'social.image' } };
+      if (found && sizeKnown(found) && (found.width < 600 || found.height < 315)) {
+        issues.push({
+          id: 'image-small',
+          severity: 'improve',
+          message: 'Use a larger social image',
+          detail: `The image is ${dimensions(found.width, found.height)}, too small to share, so links show a card made from the title. ${fills}`,
+          jump: at,
+          ...choose,
+        });
+      } else if (photoKind) {
+        const noun = onPage ? `this ${inSentence(registry[kind]?.label ?? kind)}` : page;
+        issues.push({
+          id: 'image-card',
+          severity: 'improve',
+          message: field ? `Add a ${field} to ${noun}` : `Add a photo of ${noun}`,
+          detail: field
+            ? 'Links show a card made from the title until then.'
+            : `Links show a card made from the title. A photo of ${noun} usually gets more attention.`,
+          jump: at,
+          ...choose,
+        });
+      }
+    } else if (!image) {
       issues.push({
         id: 'image-missing',
         severity: 'improve',
@@ -729,17 +792,49 @@ export function checks(input: ChecksInput): Issue[] {
       });
     } else {
       const { width, height } = image;
-      const cropped = height > 0 && (width / height < 1.85 || width / height > 2);
+      const ratio = height > 0 ? width / height : 0;
       const small = width < 1200 || height < 630;
-      // The link preview's rule, so the two never disagree: an image that
-      // already makes a large card works, and is only good to know, in one
-      // row with its cropping.
-      if (largeCardNeeds(width, height)) {
+      if (!sizeKnown(image)) {
+        // Drupal can't read its size (a BMP): no size rows; the format row
+        // says what to change.
+      } else if (made === 'frame') {
+        issues.push({
+          id: 'image-ratio',
+          severity: 'info',
+          message: 'The social image is shown whole',
+          detail: `It is ${dimensions(width, height)}, so links show it whole on its own colours. ${fills}`,
+          jump: at,
+        });
+      } else if (made === 'cover') {
+        if (small) {
+          issues.push({
+            id: 'image-small',
+            severity: 'info',
+            message: 'The social image could be sharper',
+            detail: `It is ${dimensions(width, height)} and shared cropped to ${dimensions(1200, 630)}. An image of ${dimensions(1200, 630)} looks sharper.`,
+            jump: at,
+          });
+        } else if (ratio < 1.6 || ratio > 2.3) {
+          // Only a crop that takes a noticeable part: over about 15%.
+          issues.push({
+            id: 'image-ratio',
+            severity: 'info',
+            message: 'The social image is cropped',
+            detail: `It is ${dimensions(width, height)} and shared cropped to ${dimensions(1200, 630)} around its centre.`,
+            jump: at,
+          });
+        }
+      } else if (largeCardNeeds(width, height)) {
+        // The original file, sent as it is: a chosen image too small to make
+        // a share version of, or a site that makes none.
+        const tiny = image.source === 'override' && (width < 200 || height < 200);
         issues.push({
           id: 'image-small',
-          severity: 'improve',
+          severity: tiny ? 'fix' : 'improve',
           message: 'Use a larger social image',
-          detail: `The social image is ${dimensions(width, height)}. Most link previews show it as a small thumbnail; an image ${largeCardNeeds(width, height)} makes a large card, and ${dimensions(1200, 630)} is best.`,
+          detail: tiny
+            ? `The social image is ${dimensions(width, height)}, too small to share large: links show it as a small thumbnail. ${fills}`
+            : `The social image is ${dimensions(width, height)}. Most link previews show it as a small thumbnail; an image ${largeCardNeeds(width, height)} makes a large card, and ${dimensions(1200, 630)} is best.`,
           jump: at,
         });
       } else if (small) {
@@ -748,13 +843,11 @@ export function checks(input: ChecksInput): Issue[] {
           severity: 'info',
           message: 'The social image could be sharper',
           detail: `The social image is ${dimensions(width, height)}. It works as a large card${
-            cropped ? ', cropped' : ''
-          }; ${dimensions(1200, 630)} ${cropped ? 'fits best' : 'looks sharper'}.`,
+            ratio < 1.85 || ratio > 2 ? ', cropped' : ''
+          }; ${dimensions(1200, 630)} ${ratio < 1.85 || ratio > 2 ? 'fits best' : 'looks sharper'}.`,
           jump: at,
         });
-      }
-      // A thumbnail is square: only a large card is cropped to 1.91:1.
-      if (cropped && !small) {
+      } else if (ratio < 1.85 || ratio > 2) {
         issues.push({
           id: 'image-ratio',
           severity: 'info',
@@ -763,7 +856,8 @@ export function checks(input: ChecksInput): Issue[] {
           jump: at,
         });
       }
-      if (image.bytes > 5 * 1048576) {
+      // A share version is under 300 KB, whatever the original weighs.
+      if (image.bytes > 5 * 1048576 && made !== 'cover' && made !== 'frame') {
         issues.push({
           id: 'image-heavy',
           severity: 'info',
@@ -785,17 +879,46 @@ export function checks(input: ChecksInput): Issue[] {
           jump: at,
         });
       }
-      if (!image.alt.trim()) {
+      // What the head sends in its place: the media item's name, or the
+      // site name for the site's image (Site › Sharing's own row says so).
+      const sent = resolved.head.meta.find((row) => row.property === 'og:image:alt')?.content.trim() ?? '';
+      if (!image.alt.trim() && !(sent && image.source === 'site')) {
         issues.push({
           id: 'image-alt',
           severity: 'info',
           message: 'The social image has no alt text',
-          detail: 'People who cannot see it get no description.',
+          detail: sent
+            ? `People who cannot see it get its name, “${sent}”, instead.`
+            : 'People who cannot see it get no description.',
           jump: at,
         });
       }
     }
+    // A shared link's preview is kept by the apps it was shared in.
+    if (onPage && input.published && resolved.share_changed) {
+      issues.push({
+        id: 'share-changed',
+        severity: 'info',
+        message: 'Links already shared keep their old preview for a while',
+        detail: 'Apps that showed a link to this page keep its old title and image until they read it again.',
+      });
+    }
   }
+
+  // A page still called by Canvas's name for a new page shares under it.
+  const placeholder = lookup.facts.title?.placeholder;
+  if (onPage && placeholder) {
+    issues.push({
+      id: 'title-placeholder',
+      severity: input.published ? 'fix' : 'improve',
+      message: 'Name this page',
+      detail: `It is still called “${placeholder}”${
+        lookup.facts.title?.value !== placeholder ? ', so links use its first heading' : ''
+      }. Give it a title in Page data.`,
+    });
+  }
+
+  issues.push(...sharingRows(input, page));
 
   // The page content, read from the live preview.
   if (!facts) {
@@ -832,7 +955,10 @@ export function checks(input: ChecksInput): Issue[] {
     }
   }
 
-  issues.push(...structured(input, { page, onPage, jump, hidden, broken }));
+  // An item without the image a card stands in for is said by the social
+  // row; its structured data's empty image is not said again.
+  const carded = issues.some((issue) => issue.id === 'image-card');
+  issues.push(...structured(input, { page, onPage, jump, hidden, broken }).filter((issue) => !(carded && issue.id === 'schema-empty:image')));
 
   // Who runs the site: never counted, and only for people who can fix it.
   const gaps = input.can.site ? identityGaps(input.site, site) : [];
@@ -845,6 +971,103 @@ export function checks(input: ChecksInput): Issue[] {
     });
   }
   return issues;
+}
+
+/**
+ * The writing system of a title the bundled fonts can't draw, by name, or
+ * '' when it is none of the usual ones. The fonts draw Latin, Greek,
+ * Cyrillic, Arabic and Hebrew.
+ */
+function scriptOf(title: string): string {
+  const scripts: [RegExp, string][] = [
+    [/[\p{Script=Hiragana}\p{Script=Katakana}]/u, 'Japanese'],
+    [/\p{Script=Hangul}/u, 'Korean'],
+    [/\p{Script=Han}/u, 'Chinese'],
+    [/\p{Script=Thai}/u, 'Thai'],
+    [/\p{Script=Devanagari}/u, 'Devanagari'],
+    [/\p{Script=Bengali}/u, 'Bengali'],
+    [/\p{Script=Tamil}/u, 'Tamil'],
+    [/\p{Script=Armenian}/u, 'Armenian'],
+    [/\p{Script=Georgian}/u, 'Georgian'],
+    [/\p{Script=Ethiopic}/u, 'Ethiopic'],
+  ];
+  return scripts.find(([pattern]) => pattern.test(title))?.[1] ?? '';
+}
+
+/**
+ * What site administrators learn about shared images: why none can be made,
+ * an address visitors can't reach, an SVG logo, titles that can't be drawn,
+ * one image for every page, a site image without alt text. Never counted.
+ */
+function sharingRows(input: ChecksInput, page: string): Issue[] {
+  const { resolved, site } = input;
+  const share = input.share;
+  if (!input.can.site || !share) {
+    return [];
+  }
+  const rows: Issue[] = [];
+  const identity = site.identity;
+  const at = (field: string): Jump => ({ scope: 'site', tab: 'identity', field });
+  const siteImage = identity.share_fallback !== 'none' && identity.default_image !== '';
+  if (share.missing) {
+    rows.push({
+      id: 'share-unmade',
+      severity: 'info',
+      message: "Shared images can't be made on this server",
+      detail: `${
+        share.missing === 'fonts' ? 'Its image library has no font support' : 'Its public files are not on its own disk'
+      }, so links use ${siteImage ? "the site's image" : 'no image'}.`,
+    });
+  }
+  if (share.host) {
+    rows.push({
+      id: 'share-host',
+      severity: 'info',
+      message: "Visitors' apps can't reach shared images",
+      detail: `They are addressed at ${share.host}, where the frontend fetches Drupal. Have it fetch Drupal at its public address, or set Drupal's reverse proxy settings in settings.php.`,
+    });
+  }
+  if (!share.missing && share.svg && (identity.logo !== '' || share.theme_logo)) {
+    rows.push({
+      id: 'share-svg',
+      severity: 'info',
+      message: 'Shared images show your initial because your logo is an SVG',
+      detail: 'Choose a PNG version of the logo.',
+      jump: at('identity.logo'),
+    });
+  }
+  // The card was asked for and none could be drawn: its letters have no font.
+  const own = resolved?.image && resolved.image.source !== 'site';
+  if (!share.missing && resolved && identity.share_fallback === 'card' && !own && resolved.share?.made !== 'card' && input.texts.social_title) {
+    // Not always a script: a title of emoji the fonts don't have is another.
+    const script = scriptOf(input.texts.social_title);
+    rows.push({
+      id: 'share-script',
+      severity: 'info',
+      message: `Shared images can't be made for ${script ? `${script} titles` : 'this title'} yet`,
+      detail: `Links to ${page} use ${resolved.image ? "the site's image" : 'no image'}.`,
+    });
+  }
+  if (identity.share_fallback === 'image') {
+    rows.push({
+      id: 'share-one-picture',
+      severity: 'info',
+      message: 'Pages without an image share the same image',
+      detail: 'A card made from each page\'s title tells links apart.',
+      jump: at('identity.share_fallback'),
+      fix: { label: 'Make one from the title', site: { path: 'identity.share_fallback', value: 'card' } },
+    });
+    if (identity.default_image && !share.site_alt.trim()) {
+      rows.push({
+        id: 'share-site-alt',
+        severity: 'info',
+        message: "The site's image has no alt text",
+        detail: 'People who cannot see it get the site name instead. Add alt text to it in the media library.',
+        jump: at('identity.default_image'),
+      });
+    }
+  }
+  return rows;
 }
 
 // Structured data: the verdicts' own words (search-features), what is left
@@ -1847,3 +2070,10 @@ export function verdictText(server: StatePayload, verdict: Verdict, emptyFor?: (
 /** A feature line in words: "Merchant listing doesn't fit: a recurring price". */
 export const lineName = (label: string, words: string) =>
   words.startsWith("Doesn't fit") ? `${label} doesn't fit${words.slice(11)}` : `${label}: ${words}`;
+
+/**
+ * Whether a verdict's node is one of the module's own, by its full id: a
+ * hand-added item may end in the same fragment ("…/other#breadcrumb").
+ */
+export const isOwnNode = (nodes: GraphNode[] | undefined, id: string | null | undefined) =>
+  !!id && !!nodes?.some((node) => node.id === id && node.origin !== 'hand');

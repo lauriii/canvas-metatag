@@ -7,7 +7,8 @@ import { aiOffText, andList, currencyChoices, ownEndingNote, placesText, siteTex
 import { detailLabel } from '../custom/project';
 import type { SearchFeatures } from '../types';
 import { Field, useHeld } from './Field';
-import { ImageRow, PICKED, Thumb } from './MediaPicker';
+import { PICKED, Thumb } from './MediaPicker';
+import { Sharing } from './Sharing';
 import { Stage } from './Previews';
 import { Visibility } from './SearchTab';
 import { TitleField } from './Value';
@@ -163,20 +164,6 @@ export function SiteView() {
           />
         )}
       </Field>
-      <Field scope="site" path="identity.logo" label="Logo" group>
-        {(field) => (
-          <ImageRow
-            describedBy={field.describedBy}
-            image={image(identity.logo)}
-            noun="logo"
-            disabled={field.disabled}
-            minWidth={112}
-            chosen={identity.logo ? { media: identity.logo } : undefined}
-            onPick={(picked) => 'media' in picked && edit('identity.logo', picked.media)}
-            onClear={() => edit('identity.logo', '')}
-          />
-        )}
-      </Field>
       <Field scope="site" path="identity.same_as" label="Profiles">
         {(field) => (
           <textarea
@@ -249,26 +236,7 @@ export function SiteView() {
         )}
       </Field>
 
-      <h3 className="seo-group-title">Sharing</h3>
-      <Field
-        scope="site"
-        path="identity.default_image"
-        label="Default image"
-        group
-      >
-        {(field) => (
-          <ImageRow
-            describedBy={field.describedBy}
-            image={image(identity.default_image)}
-            noun="default image"
-            disabled={field.disabled}
-            minWidth={600}
-            chosen={identity.default_image ? { media: identity.default_image } : undefined}
-            onPick={(picked) => 'media' in picked && edit('identity.default_image', picked.media)}
-            onClear={() => edit('identity.default_image', '')}
-          />
-        )}
-      </Field>
+      <Sharing />
 
       <h3 className="seo-group-title">Prices</h3>
       <Field

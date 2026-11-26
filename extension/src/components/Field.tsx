@@ -21,7 +21,7 @@ import { useApp } from '../App';
 import { stageMatch } from '../checks';
 import { AI_SENDS, type Meter, emptyDescription, source as sourceOf } from '../model';
 import type { Issue, Scope } from '../types';
-import { Btn, SparkleIcon, reveal } from './ui';
+import { Btn, SparkleIcon, reveal, revealSpan } from './ui';
 
 /** The disclosure a field sits in: a jump opens it first. */
 export const DisclosureContext = createContext<{ open(): void } | null>(null);
@@ -62,6 +62,11 @@ export interface FieldOptions {
   shortLabel?: string;
   /** A part in its group's sheet: what the group misses, and what the page lacks, is said once for the group. */
   quiet?: boolean;
+  /**
+   * A jump shows what the field changes, above it: from the first of these
+   * elements (in order of preference) that fits with the control jumped to.
+   */
+  revealFrom?: string[];
 }
 
 export interface FieldParts {
@@ -123,7 +128,13 @@ export function useField(options: FieldOptions): FieldParts {
         return;
       }
       root.closest('.seo-disclosure-body')?.removeAttribute('data-closed');
-      reveal(root, 'center');
+      if (options.revealFrom) {
+        // The choice jumped to, and what it shows under it.
+        const control = root.querySelector('[data-reveal-end]') ?? root.querySelector('[data-focus]') ?? root;
+        revealSpan(options.revealFrom.map((selector) => root.ownerDocument.querySelector(selector)), control);
+      } else {
+        reveal(root, 'center');
+      }
       // The input itself; the label only where there is none.
       (
         document.getElementById(id) ??
@@ -454,6 +465,8 @@ export function Field(
     onSuggest?(): void;
     /** Under the guidance line: the suggestions tray. */
     after?: ReactNode;
+    /** The control shows the field's error itself, beside what it is about. */
+    errorInside?: boolean;
     children(field: FieldParts & { describedBy?: string }): ReactNode;
   },
 ) {
@@ -484,7 +497,7 @@ export function Field(
       </span>
     ) : undefined;
   let guide: ReactNode = null;
-  if (field.message) {
+  if (field.message && !props.errorInside) {
     guide = (
       <Guide id={guideId} tone="error" role="alert" count={props.quietCount ? undefined : count}>
         {field.message}

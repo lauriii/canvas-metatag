@@ -1340,6 +1340,12 @@ button.seo-feature-line:hover {
   height: 100%;
   object-fit: cover;
 }
+/* A newer image is on its way: the one shown stays, barely dimmed; the
+   next fades in over it once loaded. */
+.seo-social-image[data-pending] img {
+  opacity: 0.92;
+  transition: opacity 120ms var(--seo-ease);
+}
 /* The next image waits, unseen, until it has loaded; then it fades in. */
 .seo-social-image img:last-of-type:not([data-front]) {
   opacity: 0;
@@ -1405,12 +1411,15 @@ button.seo-feature-line:hover {
   display: flex;
 }
 /* A square thumbnail, as tall as the text beside it at its fullest: host,
-   two title lines and the description. The large card's whole-pixel height
-   is not for it. */
+   two title lines and the description. It stretches with taller text, so no
+   band is left under it. The large card's whole-pixel height is not for it.
+   A link without an image has no cell: the text alone. */
 .seo-social[data-layout="compact"] .seo-social-image {
   flex: none;
+  align-self: stretch;
   width: 96px;
-  height: 96px;
+  height: auto;
+  min-height: 96px;
   aspect-ratio: auto;
 }
 .seo-social[data-layout="compact"] .seo-social-text {
@@ -2742,6 +2751,105 @@ button.seo-row:focus-visible {
   box-shadow: 0 0 0 1px var(--gray-a3), 0 1px 2px rgba(0, 0, 40, 0.08);
 }
 
+/* ── Site › Sharing ── */
+/* The sample switch: the Segmented control Represents uses, as wide as the
+   card under it, in equal segments. In a narrow frame (200% zoom) its labels
+   wrap inside the one track, never past it: the root grows with them. */
+.seo-segmented.seo-share-switch {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  height: auto;
+  min-height: var(--seo-control-h-sm);
+  margin-bottom: 12px;
+}
+.seo-share-switch .rt-SegmentedControlItemLabel {
+  padding-block: 4px;
+  line-height: 16px;
+  text-align: center;
+  white-space: normal;
+}
+/* The colour's sheet: the card alone, as it changes. */
+.seo-share-sample {
+  overflow: hidden;
+  aspect-ratio: 1200 / 630;
+  border-radius: var(--seo-radius-card);
+  background: var(--gray-4);
+  box-shadow: 0 0 0 1px var(--gray-a4);
+}
+.seo-share-sample > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.seo-sheet .seo-share-sample + .seo-quiet {
+  margin-top: var(--seo-3);
+}
+.seo-swatch {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 8px;
+  background: var(--gray-4);
+  box-shadow: inset 0 0 0 1px var(--gray-a4);
+}
+.seo-share-fallback.rt-RadioGroupRoot {
+  gap: 12px;
+  font-size: 14px;
+}
+/* The radio is its circle, so the dialog's ring is round and clear of the
+   label; Radix's own square outline is off. */
+.seo-share-fallback .rt-BaseRadioRoot {
+  height: var(--radio-size);
+  border-radius: 50%;
+}
+.seo-share-fallback .rt-BaseRadioRoot:focus-visible::before {
+  outline: none;
+}
+/* These radios choose as focus moves: the ring stands off the circle, with a
+   gap, so a selected (solid) radio shows its focus as clearly as another. */
+.seo-share-fallback .rt-BaseRadioRoot:focus-visible {
+  box-shadow: 0 0 0 2px var(--color-background), 0 0 0 4px var(--blue-10);
+}
+/* Under its option's label: the radio's 16 px and the 8 px gap. Every child
+   of a radio, in Sharing and in the colour's sheet, starts there. */
+.seo-share-fallback-image {
+  margin: 0 0 0 24px;
+}
+/* The site's image a card choice keeps: one quiet line and its Remove. */
+.seo-share-fallback-kept {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: -6px;
+  color: var(--seo-ink-2);
+  font-size: 12px;
+  line-height: 16px;
+}
+.seo-share-colour {
+  display: grid;
+  grid-template-columns: 40px 1fr;
+  gap: 8px;
+  margin: var(--seo-3) 0 0 24px;
+}
+.seo-share-colour > input[type="color"] {
+  width: 40px;
+  height: var(--seo-control-h);
+  padding: 2px;
+  border: 0;
+  border-radius: var(--seo-radius-control);
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--seo-control-border);
+}
+.seo-share-colour > input[type="color"]:focus-visible {
+  outline: none;
+  box-shadow: var(--seo-ring);
+}
+.seo-sheet .seo-share-fallback {
+  margin-top: var(--seo-4);
+}
+
 /* ── Site groups ── */
 .seo-group-title {
   margin: var(--seo-6) 0 0 !important;
@@ -2831,14 +2939,28 @@ button.seo-row:focus-visible {
   line-height: 16px;
   font-variant-numeric: tabular-nums;
 }
+/* A file name and its size on one line: the name gives way in its middle. */
+.seo-image-name > small.seo-image-meta {
+  display: flex;
+  white-space: nowrap;
+}
+.seo-image-meta > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.seo-image-meta > span:last-child {
+  flex: none;
+}
 .seo-image-actions {
   display: flex;
   align-items: center;
   gap: 4px;
   margin-left: auto;
 }
-/* Its text, not its padding, meets the column's right edge. */
-.seo-image-actions > .seo-btn[data-variant="ghost"]:last-child {
+/* Its text, not its padding, meets the column's right edge; beside a
+   filled button, the boxes line up with the other rows' instead. */
+.seo-image-actions:not(:has(> [data-variant="soft"])) > .seo-btn[data-variant="ghost"]:last-child {
   margin-right: -8px;
 }
 .seo-thumb {
@@ -3499,6 +3621,29 @@ button.seo-row:focus-visible {
   .seo-stage {
     padding: 10px 14px 12px;
   }
+  /* The fields stay in sight: a large card stays large (what links show),
+     only narrower, so its image is shorter. */
+  .seo-social[data-layout="large"] {
+    max-width: 240px;
+  }
+  .seo-social[data-layout="large"] .seo-social-text {
+    padding: 8px 12px;
+  }
+  .seo-share-sample {
+    max-width: 268px;
+  }
+  /* A narrower card sits in the middle of its stage. The sample switch above
+     it keeps the stage's width: its labels stay on one line. */
+  .seo-social[data-layout="large"],
+  .seo-share-sample {
+    margin-inline: auto;
+  }
+  /* In the colour's sheet its controls stay beside the sample they change,
+     on the sheet's left edge with the contrast line and the radios. */
+  .seo-sheet .seo-share-sample {
+    max-width: 192px;
+    margin-inline: 0;
+  }
   .seo-stage-cap {
     margin-bottom: 8px;
   }
@@ -3521,6 +3666,40 @@ button.seo-row:focus-visible {
   .seo-tray-options {
     max-height: 60vh;
     overflow-y: auto;
+  }
+}
+
+/* The shortest frames (a 350 px window): smaller still. */
+@media (max-height: 260px) {
+  .seo-social[data-layout="large"] {
+    max-width: 176px;
+  }
+  .seo-social[data-layout="compact"] .seo-social-image {
+    width: 64px;
+    min-height: 64px;
+  }
+  .seo-share-sample {
+    max-width: 192px;
+  }
+  .seo-sheet .seo-share-sample {
+    max-width: 160px;
+  }
+}
+/* A narrow frame (200% zoom): the sample's labels take two lines at most. */
+@media (max-width: 360px) {
+  .seo-share-switch .rt-SegmentedControlItemLabel {
+    padding-inline: 6px;
+  }
+}
+/* A narrow dialog (200% zoom): a preview's caption takes two lines rather
+   than lose its last words without a sign. */
+@container seo (max-width: 360px) {
+  .seo-stage-cap {
+    height: auto;
+    min-height: 20px;
+  }
+  .seo-stage-cap-l > span:first-child {
+    white-space: normal;
   }
 }
 
@@ -3612,17 +3791,13 @@ button.seo-row:focus-visible {
   .seo-sheet .seo-body {
     padding: 4px 8px 12px;
   }
-  /* The small card's text keeps most of the width: a smaller square, at
-     the card's top. */
-  .seo-social[data-layout="compact"] {
-    align-items: flex-start;
-  }
+  /* The small card's text keeps most of the width: a narrower thumbnail,
+     as tall as the text. */
   .seo-social[data-layout="compact"] .seo-social-image {
     width: 64px;
-    height: 64px;
+    min-height: 64px;
   }
   .seo-social[data-layout="compact"] .seo-social-text {
-    align-self: stretch;
     padding: 6px 10px;
   }
   /* The whole name, on up to two lines: no hover to read the rest. */

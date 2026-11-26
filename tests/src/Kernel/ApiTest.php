@@ -13,6 +13,7 @@ use Drupal\canvas_metatag\Controller\ApiController;
 use Drupal\canvas_metatag\SchemaGraph;
 use Drupal\canvas_metatag\Values;
 use Drupal\Core\Access\CsrfRequestHeaderAccessCheck;
+use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Entity\EntityInterface;
 use Drupal\language\Entity\ConfigurableLanguage;
 use Drupal\media\Entity\Media;
@@ -278,6 +279,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'can',
       'capabilities',
       'site',
+      'share',
       'registry',
       'codes',
       'module_ids',
@@ -295,7 +297,9 @@ final class ApiTest extends CanvasKernelTestBase {
     ], array_keys($state));
     $draft = $auto_save->getAutoSaveEntityForPreview(Page::load($page->id()))->entity;
     self::assertInstanceOf(Page::class, $draft);
-    $resolved = $this->resolver()->report($draft);
+    // Read as a draft, as the editor previews it: made images at the preview
+    // address, never a public one.
+    $resolved = $this->resolver()->report($draft, TRUE);
     $expected = [
       'ui' => 'en',
       'langcode' => 'en',
@@ -311,6 +315,8 @@ final class ApiTest extends CanvasKernelTestBase {
           'separator' => '|',
           'logo' => $logo->uuid(),
           'default_image' => $hidden->uuid(),
+          'colour' => '',
+          'share_fallback' => 'card',
           'same_as' => [],
         ],
         'values' => ['robots' => ['max_image_preview' => 'large']],
@@ -382,17 +388,38 @@ final class ApiTest extends CanvasKernelTestBase {
           'bytes' => 1,
         ]),
       ],
-      'resolved' => json_decode((string) json_encode(array_diff_key($resolved, ['cacheability' => TRUE])), TRUE),
+      // How the site makes share images, for Site and the checks.
+      'share' => [
+        'missing' => NULL,
+        'theme_logo' => NULL,
+        'svg' => FALSE,
+        'site_alt' => '',
+        'home' => FALSE,
+        'host' => NULL,
+      ],
+      // The image the draft shares, previewed from the draft; the draft's
+      // title is not what links already shared show.
+      'resolved' => json_decode((string) json_encode(array_diff_key($resolved, ['cacheability' => TRUE, 'share' => TRUE]) + [
+        'share' => [
+          'made' => 'cover',
+          'url' => $this->resolver()->previewUrl($draft, $resolved['share'], new CacheableMetadata()),
+        ],
+        'share_changed' => TRUE,
+      ]), TRUE),
     ];
     foreach ($expected as $key => $value) {
       $key === 'media' ? self::assertEquals($value, $state[$key]) : self::assertSame($value, $state[$key], $key);
     }
+    // The draft's head points at the preview (without a draft, at the page's
+    // own share address, as Output shows it: below).
+    $og = static fn (array $state): string => array_column($state['resolved']['head']['meta'], 'content', 'property')['og:image'];
+    self::assertStringStartsWith('http://localhost/canvas-metatag/api/share-preview?', $og($state));
     self::assertSame(['name', 'thumb', 'width', 'height', 'bytes'], array_keys($state['media'][$picked->uuid()]));
     // Core's medium (else thumbnail) style, which may also convert the format.
     self::assertMatchesRegularExpression('#/styles/(medium|thumbnail)/public/picked\.png(\.[a-z]+)?\?itok=#', $state['media'][$picked->uuid()]['thumb']);
     self::assertStringStartsWith('/', $state['media'][$picked->uuid()]['thumb']);
     // The output is that of the draft, in the documented shape.
-    self::assertSame(['head', 'image', 'schema'], array_keys($state['resolved']));
+    self::assertSame(['head', 'image', 'schema', 'share', 'share_changed'], array_keys($state['resolved']));
     self::assertSame(['title', 'meta', 'link', 'script'], array_keys($state['resolved']['head']));
     self::assertSame('Pricing plans | Example', $state['resolved']['head']['title']);
     self::assertSame('noindex, max-image-preview:large', self::meta($state['resolved']['head'])['robots']);
@@ -477,6 +504,9 @@ final class ApiTest extends CanvasKernelTestBase {
     // translation has none of its own. (The English draft is the source
     // while there is one: it goes first.)
     $auto_save->deleteAll();
+    // Without a draft, the head shares what is live, at its public address.
+    $live = self::decodeResponse($this->request(Request::create(self::STATE . $query)));
+    self::assertMatchesRegularExpression('#^http://localhost/canvas-metatag/share/en/canvas_page/\d+/[0-9a-f]{16}\.jpg$#', $og($live));
     $items = '[{"@type": "Thing", "@id": "#a", "name": "A"}, {"@type": "Thing", "@id": "#b", "name": "B"}]';
     $english = Page::load($page->id());
     $english?->set('canvas_metatag', Values::encode(['schema' => ['custom' => $items]]))->save();
@@ -566,6 +596,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'can',
       'capabilities',
       'site',
+      'share',
       'registry',
       'codes',
       'module_ids',
@@ -853,6 +884,7 @@ final class ApiTest extends CanvasKernelTestBase {
       'can',
       'capabilities',
       'site',
+      'share',
       'registry',
       'codes',
       'module_ids',
@@ -938,6 +970,9 @@ final class ApiTest extends CanvasKernelTestBase {
         'kind' => 'robot',
         'separator' => 'ab',
         'logo' => 'nope',
+        'colour' => 'blue',
+        // There is no site image to use.
+        'share_fallback' => 'image',
         'same_as' => ['https://social.example.com/example', 'example'],
       ],
       'values' => [
@@ -962,6 +997,8 @@ final class ApiTest extends CanvasKernelTestBase {
         'identity.kind',
         'identity.separator',
         'identity.logo',
+        'identity.colour',
+        'identity.share_fallback',
         'identity.same_as.1',
       ],
       array_keys($error['fields']),
@@ -977,6 +1014,9 @@ final class ApiTest extends CanvasKernelTestBase {
       'separator' => '·',
       'logo' => $logo->uuid(),
       'default_image' => '',
+      // Exported as chosen.
+      'colour' => '#0F8A7E',
+      'share_fallback' => 'none',
       'same_as' => ['https://social.example.com/ada'],
     ];
     $values = ['robots' => ['nofollow' => TRUE], 'title_end' => ['text' => 'Example Co']];
@@ -996,6 +1036,8 @@ final class ApiTest extends CanvasKernelTestBase {
     $raw = $this->config('canvas_metatag.site')->getRawData();
     self::assertSame($identity, $raw['identity']);
     self::assertEquals($values, $raw['values']);
+    // No currency is stored as installed, without the key: nothing to export.
+    self::assertArrayNotHasKey('currency', $raw);
     $state = self::decodeResponse($this->request(Request::create(self::STATE)));
     self::assertSame([
       'identity' => $identity,

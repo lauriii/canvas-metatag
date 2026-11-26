@@ -11,9 +11,11 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../App';
 import { rankImages } from '../checks';
 import {
-  dimensions,
   imageSize,
   inSentence,
+  shareWarning,
+  sizeKnown,
+  sizeText,
   type ShownImage,
 } from '../model';
 import type { MediaItem, Value } from '../types';
@@ -58,6 +60,11 @@ export function ImageName(props: { name: string }) {
 export interface ImageRequest {
   /** Images narrower than this say "Too small". */
   minWidth: number;
+  /**
+   * A chosen image links share: judged by what sharing does with it (shared
+   * whole from 200 × 200 up, skipped over 24 megapixels), not by minWidth.
+   */
+  share?: boolean;
   /** The value stored here, when one is. */
   chosen?: Value;
   /** Template scope: the content type's image fields, as links. */
@@ -84,6 +91,14 @@ export function ImageRow(
     tag?: { text: string; look: 'linked' | 'default' | 'broken' };
     /** Instead of the image's name: why the link gives none ("Hidden from visitors for this event"). */
     state?: string;
+    /** No thumbnail: a preview above shows the picture. */
+    thumbless?: boolean;
+    /** With no image: a picture of what is used instead (a theme's logo). */
+    thumb?: string;
+    /** A last line: what is shared without an image ("Events without one share…"). */
+    note?: string;
+    /** In place of the file's size and weight: what links get ("1200 × 630"). */
+    size?: string;
     disabled?: boolean;
     onClear?(): void;
     /** Removes the link, as a box's ×. */
@@ -93,10 +108,12 @@ export function ImageRow(
   const { openSheet } = useApp();
   const button = useRef<HTMLButtonElement>(null);
   const { image, noun = 'image' } = props;
+  // A row that names where its image comes from changes only what is chosen.
+  const change = props.thumbless ? !!props.chosen : !!image;
   return (
     <div className="seo-image-row">
-      {image ? (
-        <Thumb src={image.thumb} />
+      {props.thumbless ? null : image || props.thumb ? (
+        <Thumb src={image?.thumb ?? props.thumb} />
       ) : (
         <span className="seo-thumb" data-empty="">
           <ImageIcon aria-hidden />
@@ -109,19 +126,33 @@ export function ImageRow(
             {props.tag.look === 'broken' ? <LinkBreak2Icon aria-hidden /> : props.tag.look === 'linked' ? <Link2Icon aria-hidden /> : null}
             <span dir="auto">{props.tag.text}</span>
           </span>
-          {props.state ? (
-            <div data-state="">{props.state}</div>
+          {props.state !== undefined ? (
+            // '' when the field's note says why it is empty.
+            props.state && <div data-state="">{props.state}</div>
           ) : (
             <div title={image?.name}>{image ? <ImageName name={image.name} /> : 'No image'}</div>
           )}
-          {!props.state && image && <small>{imageSize(image)}</small>}
+          {/* The preview above shows the picture, and its size where it counts. */}
+          {props.state === undefined && image && !props.thumbless && <small>{props.size ?? imageSize(image)}</small>}
+          {props.note && <small>{props.note}</small>}
         </div>
       ) : (
         <div className="seo-image-name">
           <div title={props.name ?? image?.name}>
             {props.name ?? (image ? <ImageName name={image.name} /> : 'No image')}
           </div>
-          {image && <small>{imageSize(image)}</small>}
+          {image &&
+            (props.name ? (
+              <small className="seo-image-meta">
+                <span>
+                  <ImageName name={image.name} />
+                </span>
+                <span>&nbsp;· {props.size ?? imageSize(image)}</span>
+              </small>
+            ) : (
+              <small>{props.size ?? imageSize(image)}</small>
+            ))}
+          {props.note && <small>{props.note}</small>}
         </div>
       )}
       {!props.disabled && (
@@ -130,13 +161,15 @@ export function ImageRow(
             ref={button}
             data-focus
             variant="soft"
-            aria-label={`${image ? 'Change' : 'Choose'} ${noun}`}
+            // The name starts with the words shown (Label in Name).
+            aria-label={change ? `Change ${noun}` : noun === 'image' ? 'Choose image' : `Choose image for the ${noun}`}
             aria-describedby={props.describedBy}
             onClick={() =>
               openSheet({
                 kind: 'image',
                 request: {
                   minWidth: props.minWidth,
+                  share: props.share,
                   chosen: props.chosen,
                   fields: props.fields,
                   onPick: props.onPick,
@@ -144,7 +177,7 @@ export function ImageRow(
               })
             }
           >
-            {image ? 'Change' : 'Choose image'}
+            {change ? 'Change' : 'Choose image'}
           </Btn>
           {props.onUnlink && (
             <IconBtn label={`Unlink ${noun}`} data-unlink="" onClick={() => {
@@ -270,7 +303,7 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
                   <small aria-hidden>
                     This {target ? inSentence(target.label) : 'page'}:{' '}
                     {field.image.name} ·{' '}
-                    {dimensions(field.image.width, field.image.height)}
+                    {sizeText(field.image)}
                   </small>
                 )}
               </span>
@@ -282,15 +315,15 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
       )}
       <div className="seo-tiles" aria-busy={phase === 'loading'}>
         {sorted.map((item) => {
-          const small = item.width < request.minWidth;
-          const size = dimensions(item.width, item.height);
+          const warn = request.share ? shareWarning(item) : sizeKnown(item) && item.width < request.minWidth ? 'Too small' : '';
+          const size = sizeText(item);
           return (
             <button
               key={item.uuid}
               type="button"
               className="seo-tile"
               aria-pressed={item.uuid === chosen}
-              aria-description={`${size}${small ? ', too small' : ''}`}
+              aria-description={`${size}${warn ? `, ${warn.toLowerCase()}` : ''}`}
               onClick={() => {
                 PICKED[item.uuid] = item;
                 pick({ media: item.uuid });
@@ -305,7 +338,7 @@ export function ImageSheet(props: { request: ImageRequest; onDone(): void }) {
                 )}
               </span>
               <b>{item.name}</b>
-              {small ? <small data-warn="" aria-hidden>Too small</small> : <small aria-hidden>{size}</small>}
+              {warn ? <small data-warn="" aria-hidden>{warn}</small> : <small aria-hidden>{size}</small>}
             </button>
           );
         })}

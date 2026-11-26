@@ -180,7 +180,7 @@ test('JSON-LD', async ({ visitor }) => {
 // Canvas to keep them.
 // When a Canvas release keeps them, this fails: raise the example's pins,
 // trim the recipe and this list.
-const ADAPTER_LOSES = ['og:image:width', 'og:image:height', 'og:image:alt', 'article:published_time', 'article:modified_time'];
+const ADAPTER_LOSES = ['og:image:type', 'og:image:width', 'og:image:height', 'og:image:alt', 'article:published_time', 'article:modified_time'];
 
 test('the adapter alone', async ({ visitor }, testInfo) => {
   needsHooks();

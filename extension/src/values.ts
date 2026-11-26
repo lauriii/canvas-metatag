@@ -214,19 +214,39 @@ export function sentences(text: string, room: number): string {
   if (points.length <= room) {
     return points.join('');
   }
-  const start = points.slice(0, room + 1).join('');
-  const ends = [...start.matchAll(/[.!?…。！？][\p{Pe}\p{Pf}"'»]*(?=\s)/gu)];
+  // A mark before a space ends a sentence, unless the next word starts in
+  // lower case ("e.g. on"), as ICU's rule SB8 has it (Values::SENTENCE_END).
+  const start = points.slice(0, room + 64).join('');
+  const ends = [...start.matchAll(/[.!?…。！？][\p{Pe}\p{Pf}"'»]*(?=\s(?!\s*\p{Ll}))/gu)]
+    .map((mark) => start.slice(0, mark.index! + mark[0].length))
+    .filter((sentence) => Array.from(sentence).length <= room && !TITLE.test(sentence));
   const last = ends.at(-1);
   if (last) {
-    return start.slice(0, last.index! + last[0].length);
+    return last;
   }
-  let cut = points.slice(0, Math.max(1, room - 1));
+  // Never inside a character drawn as one (Values::whole()): the cluster
+  // that holds the first code point past the cut goes whole.
+  const clusters = Array.from(
+    new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(points.slice(0, Math.max(1, room - 1) + 1).join('')),
+    ({ segment }) => segment,
+  );
+  clusters.pop();
+  const whole = clusters.join('');
+  let cut = Array.from(whole);
   const space = cut.lastIndexOf(' ');
   if (points[cut.length] !== ' ' && space > 0) {
     cut = cut.slice(0, space);
   }
-  return cut.join('').replace(/[ ,;:]+$/, '') + '…';
+  let words = cut.join('').replace(/[ ,;:]+$/, '');
+  // Never right after a title ("Dr.…").
+  if (TITLE.test(words)) {
+    words = words.replace(/\S+$/u, '').replace(/[ ,;:]+$/, '') || whole;
+  }
+  return words + '…';
 }
+
+/** A title before a name ends no sentence (Values::TITLE_ABBREVIATION). */
+const TITLE = /(?:^|\s)(?:Dr|Prof|Mr|Mrs|Ms|Mx|St|Jr|Sr)\.$/u;
 
 /**
  * A type's label inside a sentence: "Event" reads "event", while a label

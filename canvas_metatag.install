@@ -9,9 +9,13 @@ declare(strict_types=1);
 
 use Drupal\canvas\AutoSave\AutoSaveManager;
 use Drupal\canvas\Entity\ContentTemplate;
+use Drupal\canvas_metatag\PageText;
+use Drupal\canvas_metatag\Plugin\QueueWorker\PageTextIndex;
+use Drupal\canvas_metatag\ShareStore;
 use Drupal\Core\Cache\Cache;
 use Drupal\Core\Config\Entity\ConfigEntityStorageInterface;
 use Drupal\Core\Entity\ContentEntityInterface;
+use Drupal\Core\Language\LanguageInterface;
 
 /**
  * Implements hook_install().
@@ -20,6 +24,17 @@ function canvas_metatag_install(bool $is_syncing): void {
   // Core does not clear render caches on install, and the alter that removes
   // core's canonical and shortlink does not run on a render cache hit.
   Cache::invalidateTags(['rendered']);
+  // The texts pages offer as their description (PageText): the first 500
+  // pages now, the rest on cron, so that installing on a large site stays
+  // one short request. Until then a page's text may describe it although
+  // another page not yet indexed offers it too.
+  $next = 0;
+  for ($batch = 0; $batch < 20 && $next !== NULL; $batch++) {
+    $next = \Drupal::service(PageText::class)->indexFrom($next);
+  }
+  if ($next !== NULL) {
+    \Drupal::queue(PageTextIndex::QUEUE)->createItem($next);
+  }
   if (!$is_syncing && \Drupal::moduleHandler()->moduleExists('metatag')) {
     \Drupal::messenger()->addStatus(t('SEO now provides the head tags for Canvas pages and for content shown through a Canvas content template. Values from the Metatag module are no longer used there.'));
   }
@@ -35,6 +50,18 @@ function canvas_metatag_install(bool $is_syncing): void {
  * publish cannot store a setting of a module that is gone.
  */
 function canvas_metatag_uninstall(bool $is_syncing): void {
+  // A headless frontend's unreachable address (HeadlessContentController).
+  \Drupal::state()->delete('canvas_metatag.share_host');
+  // Made share images lie in the public files, where they would stay
+  // reachable without the checks that guard them (in every folder a changed
+  // hash salt left); and the page text index.
+  if (is_dir(ShareStore::ROOT)) {
+    \Drupal::service('file_system')->deleteRecursive(ShareStore::ROOT);
+  }
+  foreach (array_keys(\Drupal::languageManager()->getLanguages(LanguageInterface::STATE_ALL)) as $langcode) {
+    \Drupal::keyValue(PageText::COLLECTION . $langcode)->deleteAll();
+  }
+  \Drupal::queue(PageTextIndex::QUEUE)->deleteQueue();
   $auto_save = \Drupal::service(AutoSaveManager::class);
   $storage = \Drupal::entityTypeManager()->getStorage(ContentTemplate::ENTITY_TYPE_ID);
   assert($storage instanceof ConfigEntityStorageInterface);

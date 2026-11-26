@@ -1,7 +1,7 @@
 import { useId, useState } from 'react';
 
 import { useApp } from '../App';
-import { socialImage, texts } from '../model';
+import { dimensions, imageNote, imageSource, pageTitleSource, passedNote, socialImage, texts, unsent, withoutImage } from '../model';
 import { entriesFor, inSentence, noItemHas, sameValue } from '../values';
 import { ImageRow } from './MediaPicker';
 import { SocialPreview } from './Previews';
@@ -20,7 +20,10 @@ export function SocialTab() {
   const [suggesting, setSuggesting] = useState(false);
   const suggestId = useId();
 
-  const { image, from, state: link } = socialImage(state, view);
+  const { image, from, state: link, passed, unshown, hidden, chosen, field: passedField } = socialImage(state, view);
+  // Links get a 1200 × 630 version of it: its size, not the original's.
+  const made = server.resolved?.share?.made;
+  const size = image && !unsent(state) && (made === 'cover' || made === 'frame') ? dimensions(1200, 630) : undefined;
   // What the text fields show while nothing is stored for them.
   const unset = texts(
     { ...view.effective, social: {} },
@@ -41,9 +44,9 @@ export function SocialTab() {
   // no item to preview, by the field it would read.
   const via = view.facts.image?.via;
   const fromImage = from === 'Image' || (!page && !value && !view.lookup.resolvable && !!via);
-  // No item of the type has an image, and no site default stands in: said
-  // as its menu and Checks say it.
-  const noneHave = !page && !value && from === 'No image' && noItemHas('image', view.lookup);
+  // No item of the type has an image, and no site image stands in: said as
+  // its menu and Checks say it (the note says what they share instead).
+  const noneHave = !page && !value && (from === 'No image' || from === 'Card') && noItemHas('image', view.lookup);
   // The description follows its default, unset or stored as that default:
   // so does the social description, as Checks reads it.
   const description = view.effective.description;
@@ -110,33 +113,62 @@ export function SocialTab() {
         group
         library={library}
         source={
-          // The model's words, in the aside's family of source words.
-          from === 'Chosen here'
+          // A page's row already names where its image comes from: said once.
+          page && (!value || unshown)
+            ? null
+            : // The model's words, in the aside's family of source words.
+              from === 'Chosen here'
             ? page
               ? 'Set on this page'
               : `Set for every ${target.label}`
             : linked && !link
-              ? `From each ${target.label}`
+              ? // Said with what an item without it shares, in the note.
+                null
               : fromImage
                 ? // The Default box says "Default · from ‹via›": said once.
                   !page && !value && via
                   ? null
                   : `From the ${via ?? 'Image'} field`
-                : from
+                : imageSource(from)
         }
         resetTip="the default image"
+        // Following a field its row names, the previewed item has it: what
+        // an item without one shares, while the field is in use.
+        hint={!page && (linked || (!value && fromImage)) && !link && !passed ? withoutImage(state, target.label, true) : undefined}
         instead={
           link &&
           (fromImage
             ? `its ${via ?? 'Image'} field is used`
             : from === 'Site default image'
-              ? 'the site default image is used'
-              : 'no image is shared')
+              ? "it shares the site's image"
+              : from === 'Card'
+                ? 'it shares a card made from its title'
+                : 'it shares no image')
         }
         image={(field, row) => (
           <ImageRow
             describedBy={field.describedBy}
+            // The preview shows the picture: said here once, in words.
+            thumbless
             image={image}
+            size={size}
+            // A page with no image of its own: where its image comes from.
+            name={page && (!value || unshown) ? (fromImage ? `From the ${via ?? 'Image'} field` : imageSource(from)) : undefined}
+            note={
+              unshown || (page && !value)
+                ? // Not shared: why, once.
+                  imageNote({ passed, unshown, hidden, chosen }, via)
+                : // The previewed item's image passed over: what it shares
+                  // instead, as an item without one is told.
+                  passed
+                  ? passedNote(passed, passedField ?? via ?? 'Image', target.label, from, via)
+                  : // What every item without one shares, at rest only when
+                    // no field is followed (the item's own line says it
+                    // otherwise).
+                    !page && !value && !fromImage && !link
+                    ? withoutImage(state, target.label)
+                    : undefined
+            }
             // The link, and what it gives for the previewed item; at template
             // scope the default it follows, as a box's tag.
             tag={
@@ -151,6 +183,7 @@ export function SocialTab() {
             onUnlink={row.linked && !row.disabled ? () => row.unlink() : undefined}
             disabled={field.disabled}
             minWidth={600}
+            share
             chosen={value}
             fields={fields}
             onPick={(picked) => edit('social.image', picked)}
@@ -166,7 +199,7 @@ export function SocialTab() {
         byDefault={{ fact: 'title' }}
         oneLine
         instead="its Title is used"
-        fallback={page ? 'From the page title' : `From each ${target.label}'s title`}
+        fallback={page ? pageTitleSource(view.facts) : `From each ${inSentence(target.label)}'s title`}
         resetTip="the page title"
         placeholder={unset.social_title}
       />

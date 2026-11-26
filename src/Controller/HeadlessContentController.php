@@ -10,11 +10,14 @@ use Drupal\canvas_headless\PreviewTokenInspector;
 use Drupal\canvas_headless\Routing\CanvasContentRoute;
 use Drupal\canvas_headless\StackMiddleware\CanvasContentApiRequest;
 use Drupal\canvas_metatag\Resolver;
+use Drupal\canvas_metatag\Values;
 use Drupal\Core\Cache\CacheableJsonResponse;
+use Drupal\Core\Cache\CacheableMetadata;
 use Drupal\Core\Entity\ContentEntityInterface;
 use Drupal\Core\Logger\LoggerChannelFactoryInterface;
 use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AccountProxyInterface;
+use Drupal\Core\State\StateInterface;
 use Drupal\Core\Utility\Error;
 use Symfony\Component\HttpFoundation\Request;
 
@@ -33,6 +36,7 @@ final class HeadlessContentController {
     private readonly AutoSaveManager $autoSaveManager,
     private readonly AccountProxyInterface $currentUser,
     private readonly LoggerChannelFactoryInterface $loggerFactory,
+    private readonly StateInterface $state,
   ) {}
 
   /**
@@ -93,6 +97,9 @@ final class HeadlessContentController {
         return $response;
       }
       $resolved = $this->resolver->resolve($entity, $draft);
+      if (!$draft) {
+        $this->noteHost($request);
+      }
       // Owned: replaced wholesale. Nothing above this line changes the body.
       $data->head = $resolved['head'];
       $response->setData($data);
@@ -104,6 +111,33 @@ final class HeadlessContentController {
       Error::logException($this->loggerFactory->get('canvas_metatag'), $e);
     }
     return $response;
+  }
+
+  /**
+   * Remembers a host visitors can't reach that the frontend fetched us at.
+   *
+   * Made share images are addressed on the host the content API was asked
+   * at. An internal one (`http://cms:8080`), or http on an https site,
+   * gives the frontend's visitors images their apps can't fetch: Checks tell
+   * administrators. Written only when it changes, and only on a site whose
+   * trusted host patterns checked the host: elsewhere any visitor may send
+   * any Host. A frontend that alternates hosts rewrites it on each uncached
+   * response, which also clears the state cache: accepted, as both page
+   * caches keep these responses; Checks name the last one.
+   */
+  private function noteHost(Request $request): void {
+    if (Request::getTrustedHosts() === []) {
+      return;
+    }
+    $host = $request->getHost();
+    $public = $this->resolver->origin(new CacheableMetadata())['url'];
+    // A development copy fetches itself however it likes.
+    $unreachable = !Values::isDevelopmentHost($host)
+      && (!Values::isPublicHost($host) || ($request->getScheme() === 'http' && str_starts_with($public, 'https:')));
+    $address = $unreachable ? $request->getSchemeAndHttpHost() : NULL;
+    if ($this->state->get('canvas_metatag.share_host') !== $address) {
+      $this->state->set('canvas_metatag.share_host', $address);
+    }
   }
 
 }
