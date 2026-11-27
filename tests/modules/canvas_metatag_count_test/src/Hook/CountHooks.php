@@ -16,10 +16,12 @@ use Drupal\node\NodeInterface;
  * Counts anonymous view access checks, by node and by field.
  *
  * In the state "canvas_metatag_count_test": `node` => id => count, `field`
- * => machine name => count. Grants nothing, denies nothing. The field named
- * in the state "canvas_metatag_count_test.expires" gets an access result that
- * expires in a minute, as a value shown for a while does; the one named in
- * "canvas_metatag_count_test.varies" one that varies by user.
+ * => machine name => count. Grants nothing. The field named in the state
+ * "canvas_metatag_count_test.expires" gets an access result that expires in
+ * a minute, as a value shown for a while does; the one named in
+ * "canvas_metatag_count_test.varies" one that varies by user; anonymous
+ * visitors may not view the one named in "canvas_metatag_count_test.denied"
+ * (tagged "canvas_metatag_count_test:denied").
  */
 final class CountHooks {
 
@@ -43,6 +45,9 @@ final class CountHooks {
       $this->count('field', $field_definition->getName());
     }
     $state = \Drupal::state();
+    if ($field_definition->getName() === $state->get('canvas_metatag_count_test.denied')) {
+      return AccessResult::forbiddenIf($operation === 'view' && $account->isAnonymous())->addCacheContexts(['user.roles:anonymous'])->addCacheTags(['canvas_metatag_count_test:denied']);
+    }
     return match ($field_definition->getName()) {
       $state->get('canvas_metatag_count_test.expires') => AccessResult::neutral()->setCacheMaxAge(60),
       $state->get('canvas_metatag_count_test.varies') => AccessResult::neutral()->addCacheContexts(['user']),

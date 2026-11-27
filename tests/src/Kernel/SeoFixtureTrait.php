@@ -409,6 +409,22 @@ trait SeoFixtureTrait {
   }
 
   /**
+   * An article's own component in the template's exposed `the_body` slot.
+   *
+   * Canvas keeps a slot's content as a tree of its own in the slot's field,
+   * and merges it under the slot (ContentTemplate::getMergedComponentTree()).
+   */
+  protected static function inSlot(string $uuid, string $id, array|string $inputs = []): array {
+    // ponytail: releases without getMergedComponentTree() keep a slot's rows
+    // under the template's component. Delete this branch with Sources::tree()'s
+    // when composer.json requires the first Canvas release that has it.
+    if (!method_exists(ContentTemplate::class, 'getMergedComponentTree')) {
+      return self::placed($uuid, $id, $inputs, self::SLOTTED, 'the_body');
+    }
+    return self::placed($uuid, $id, $inputs);
+  }
+
+  /**
    * Makes the Article template expose one slot that each article fills.
    *
    * The template's component shows the article's title, and exposes its

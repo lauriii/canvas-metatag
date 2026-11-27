@@ -813,47 +813,78 @@ final class Sources {
   private function read(string|array $source, ?ContentEntityInterface $host, CacheableMetadata $cacheability, ?ContentEntityInterface $page = NULL, ?CacheableMetadata $dropped = NULL): array {
     $page ??= $host;
     \assert($page !== NULL);
+    return $this->asVisitor($page, $cacheability, static function (bool $public) use ($source, $host, $cacheability, $dropped): array {
+      try {
+        $result = PropSource::parse(is_string($source) ? ['sourceType' => 'entity-field', 'expression' => $source] : $source)->evaluate($host, FALSE);
+        self::keep($result, $public, $cacheability, $dropped);
+        return ['ok', $result->value];
+      }
+      catch (CacheableAccessDeniedHttpException $denied) {
+        self::keep($denied, $public, $cacheability);
+        return ['hidden', NULL];
+      }
+      catch (\Throwable) {
+        // An unknown field, a wrong bundle, a delta or a locked language, a
+        // malformed string: never a failed page.
+        return ['broken', NULL];
+      }
+    });
+  }
+
+  /**
+   * Runs a read by the account rule.
+   *
+   * As an anonymous visitor when anonymous visitors may view the page, else
+   * as the current user. Values (read()) and slot fields (merged()) both
+   * follow it.
+   *
+   * @param \Drupal\Core\Entity\ContentEntityInterface $page
+   *   The entity whose page shows what is read.
+   * @param \Drupal\Core\Cache\CacheableMetadata $cacheability
+   *   Gets what whether anonymous visitors may view the page depends on.
+   * @param callable(bool): T $run
+   *   What reads, given whether the page is public.
+   *
+   * @return T
+   *   What it returns.
+   *
+   * @template T
+   */
+  private function asVisitor(ContentEntityInterface $page, CacheableMetadata $cacheability, callable $run): mixed {
     $anonymous = $this->anonymousAccess($page);
     $public = $anonymous->isAllowed();
     $cacheability
       ->addCacheTags([...$anonymous->getCacheTags(), 'config:user.role.anonymous'])
       ->setCacheMaxAge(Cache::mergeMaxAges($cacheability->getCacheMaxAge(), $anonymous->getCacheMaxAge()));
-    $keep = static function (object $result, bool $shown = TRUE) use ($public, $cacheability, $dropped): void {
-      $result = CacheableMetadata::createFromObject($result);
-      if ($public) {
-        // Tags and max-age only: what an anonymous visitor may see does not
-        // vary by the user who asks.
-        $cacheability->addCacheTags($result->getCacheTags())
-          ->setCacheMaxAge(Cache::mergeMaxAges($cacheability->getCacheMaxAge(), $result->getCacheMaxAge()));
-        if ($shown) {
-          $dropped?->addCacheContexts($result->getCacheContexts());
-        }
-        return;
-      }
-      $cacheability->addCacheableDependency($result);
-    };
     if ($public) {
       $this->accountSwitcher->switchTo(new AnonymousUserSession());
     }
     try {
-      $result = PropSource::parse(is_string($source) ? ['sourceType' => 'entity-field', 'expression' => $source] : $source)->evaluate($host, FALSE);
-      $keep($result);
-      return ['ok', $result->value];
-    }
-    catch (CacheableAccessDeniedHttpException $denied) {
-      $keep($denied, FALSE);
-      return ['hidden', NULL];
-    }
-    catch (\Throwable) {
-      // An unknown field, a wrong bundle, a delta or a locked language, a
-      // malformed string: never a failed page.
-      return ['broken', NULL];
+      return $run($public);
     }
     finally {
       if ($public) {
         $this->accountSwitcher->switchBack();
       }
     }
+  }
+
+  /**
+   * Keeps what a result read by the account rule depends on.
+   *
+   * On a public page, its tags and max-age only: what an anonymous visitor
+   * may see does not vary by the user who asks. The contexts left out go to
+   * $dropped. Else all of it.
+   */
+  private static function keep(object $result, bool $public, CacheableMetadata $into, ?CacheableMetadata $dropped = NULL): void {
+    $result = CacheableMetadata::createFromObject($result);
+    if (!$public) {
+      $into->addCacheableDependency($result);
+      return;
+    }
+    $into->addCacheTags($result->getCacheTags())
+      ->setCacheMaxAge(Cache::mergeMaxAges($into->getCacheMaxAge(), $result->getCacheMaxAge()));
+    $dropped?->addCacheContexts($result->getCacheContexts());
   }
 
   /**
@@ -909,9 +940,10 @@ final class Sources {
    * The component trees that render on an entity's page, with their owners.
    *
    * What Canvas renders: a Canvas page's own tree, or a node's template tree
-   * with the node's own slot content injected as ContentTemplate::build()
-   * does it; then the page variant the entity resolves to, else the default
-   * theme's legacy page regions (CanvasPageVariant).
+   * with the node's content in each exposed slot, merged as
+   * ContentTemplate::build() does it; then the page variant the entity
+   * resolves to, else the default theme's legacy page regions
+   * (CanvasPageVariant).
    *
    * @param \Drupal\Core\Entity\ContentEntityInterface $entity
    *   A Canvas page (or its draft), or a node shown through its template.
@@ -922,7 +954,7 @@ final class Sources {
    *
    * @return list<array{list: \Drupal\canvas\Plugin\Field\FieldType\ComponentTreeItemList, owner: 'page'|'template'|'region', host: ?\Drupal\Core\Entity\ContentEntityInterface, item: list<string>, draft: string}>
    *   Each tree with its owner, the entity its fields are read from (none
-   *   for the page's chrome), the instances the node placed in its own slot
+   *   for the page's chrome), the instances the node placed in its own slots
    *   (`item`) and, for a template or a part of the chrome read from its
    *   draft, the label of what the draft is of (`draft`, else '').
    *
@@ -964,12 +996,34 @@ final class Sources {
       }
       if ($template !== NULL) {
         $cacheability->addCacheableDependency($template);
-        $list = $template->getComponentTree($entity);
+        $slots = $template->getExposedSlots();
         $own = [];
-        if ($template->getExposedSlots() !== []) {
+        if ($slots === []) {
+          // A template that exposes no slot has nothing of the node's own, and
+          // no slot access to ask.
+          $list = $template->getComponentTree($entity);
+        }
+        elseif (!method_exists($template, 'getMergedComponentTree')) {
+          // ponytail: releases without getMergedComponentTree() expose one
+          // slot, filled from the field the loader picks. Delete this branch,
+          // and SeoFixtureTrait::inSlot()'s, when composer.json requires the
+          // first Canvas release that has it.
+          $list = $template->getComponentTree($entity);
           $slot = $this->treeLoader->load($entity);
           $own = array_column($slot->getValue(), 'uuid');
-          $list->injectSubTreeItemList($template->getExposedSlots(), $slot);
+          $list->injectSubTreeItemList($slots, $slot);
+        }
+        else {
+          $list = $this->merged($template, $entity, $cacheability);
+          // Each exposed slot is filled from its own field: what the node
+          // placed in any of them is its own. A field the merge left out
+          // (empty, hidden) adds UUIDs that do not render, so marking by
+          // UUID stays right.
+          foreach (array_keys($slots) as $field) {
+            if ($entity->hasField($field)) {
+              $own = [...$own, ...array_column($entity->get($field)->getValue(), 'uuid')];
+            }
+          }
         }
         $trees[] = ['list' => $list, 'owner' => 'template', 'host' => $entity, 'item' => $own, 'draft' => $drafted];
       }
@@ -1009,6 +1063,21 @@ final class Sources {
       $trees[] = self::chrome($region->getComponentTree(), $drafted);
     }
     return $trees;
+  }
+
+  /**
+   * A template's tree with the node's content in each exposed slot.
+   *
+   * Canvas's own merge, which leaves out a slot field the viewer may not
+   * view: decided by the account rule, as for values.
+   */
+  private function merged(ContentTemplate $template, ContentEntityInterface $entity, CacheableMetadata $cacheability): ComponentTreeItemList {
+    return $this->asVisitor($entity, $cacheability, static function (bool $public) use ($template, $entity, $cacheability): ComponentTreeItemList {
+      $access = new CacheableMetadata();
+      $list = $template->getMergedComponentTree($entity, $access);
+      self::keep($access, $public, $cacheability);
+      return $list;
+    });
   }
 
   /**
