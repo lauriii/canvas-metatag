@@ -1353,9 +1353,9 @@ final class ResolverTest extends CanvasKernelTestBase {
    * Components that cannot be read cost the head nothing but their values.
    */
   public function testUnreadableComponents(): void {
-    // A template whose slot the type has no field for: Canvas cannot build
-    // the article's tree. Canvas refuses to save one, so it is stored as a
-    // template is left behind when its field is deleted: straight into the
+    // A template whose slot is keyed by a field that is not a component tree:
+    // Canvas cannot build the article's tree, and fails its page the same
+    // way. Canvas refuses to save one, so it is stored straight into the
     // active configuration.
     $template = ContentTemplate::create([
       'content_entity_type_id' => 'node',
@@ -1363,7 +1363,7 @@ final class ResolverTest extends CanvasKernelTestBase {
       'content_entity_type_view_mode' => 'full',
       'component_tree' => [self::placed(self::SLOTTED, 'sdc.canvas_test_sdc.props-slots', ['heading' => 'Article'])],
       'exposed_slots' => [
-        'content' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
+        'title' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
       ],
       'status' => TRUE,
     ]);

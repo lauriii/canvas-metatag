@@ -559,8 +559,10 @@ the site default.
 
 `Sources::tree($entity, $draft)` gives the component trees that render on
 the entity's page, as Canvas builds them: a Canvas page's own tree (owner
-`page`); a node's template tree with the node's own slot content injected by
-Canvas's `injectSubTreeItemList()` (owners `template` and `item`); then the
+`page`); a node's template tree with the node's content in each exposed slot,
+merged by Canvas's own `ContentTemplate::getMergedComponentTree()` (owners
+`template` and `item`; a slot field visitors may not view keeps the template's
+default, decided by the account rule as values are); then the
 page's chrome, the page variant `PageVariantResolver` resolves, else the
 default theme's legacy page regions (owner `region`), each with its valid
 draft in previews as `CanvasPageVariant` builds them; a disabled template is
@@ -1027,7 +1029,7 @@ loudly.
 | Response JSON `head`, `route.entity.{entityType,id,langcode}` | decorator | caught; Canvas's head is kept | `HeadlessHeadTest::testPublishedPage`, `headless.spec.ts` |
 | `FrontendUrl::fromConfig()`, `canvas_headless.settings:frontends.0.url` | `Resolver::origin()` | public base falls back to the request host | `ResolverTest::testFrontendBase` |
 | `hook_canvas_extension_info_alter`, extension `type: canvas`, `api_version: 1.0` | `canvasExtensionInfoAlter()`, `canvas_metatag.canvas_extension.yml` | the dialog does not open, or a stale build is served | every Playwright spec |
-| `ContentTemplate::getExposedSlots()` (one exposed slot, an open `@todo`), `getComponentTree($entity)`, `ComponentTreeItemList::injectSubTreeItemList()`, `ComponentTreeLoader::load()` | `Sources::tree()` | an item's own slot is missed, or the tree cannot be built (the head is built without component values, one `error`) | `SourcesTreeTest::testTree`, `ResolverTest::testUnreadableComponents` |
+| `ContentTemplate::getExposedSlots()` keyed by the `component_tree` field that backs each slot; `getMergedComponentTree($entity, $cacheability)` (Canvas 1.x after 1.13.0): a field the entity lacks or the viewer may not `view` keeps the template's default, an empty field too, else the field's own tree (root rows) replaces the slot's default, a slot emptied on purpose by its one `marker.empty_slot` row (read as the node's own instance, no value); its access check runs as the current user, switched to an anonymous visitor on a public page. On releases without it, one guarded branch (`ponytail:`, deleted when composer.json requires the first release that has it): `getComponentTree($entity)`, `ComponentTreeItemList::injectSubTreeItemList()`, `ComponentTreeLoader::load()` | `Sources::tree()` | a slot's content is missed or read from the wrong field, an item's own instances are wrong, or the tree cannot be built (the head is built without component values, one `error`) | `SourcesTreeTest::testTree`, `testExposedSlots` (also: no deprecation raised), `ResolverTest::testUnreadableComponents` |
 | `ComponentTreeItem::getComponentVersion()`, `getInputs()`, `getParentUuid()`; `Component::getSettings($version)` and its `prop_field_definitions` (`field_type`, `expression`, `field_storage_settings`, `field_instance_settings`, `cardinality`) | `Sources::instances()`, `props()` | instances are `error`, or props are read against the wrong version | `SourcesTreeTest::testVersions`, `testErrors`, `ResolverTest::testUnreadableComponents` |
 | `PropSource::parse()` of a whole stored input (static or entity-field), `evaluate($host, FALSE)` and its `EvaluationResult` cacheability | `Sources::props()` | values read nothing (`broken`) | `SourcesTreeTest::testValues`, `testGuards` |
 | The image prop's expression on a media reference, ending in `{src↠src_with_alternate_widths,alt↠alt,width↠width,height↠height}` | `Sources::props()` (rewritten to the file's URI, as a linked image is) | images give nothing | `SourcesTreeTest::testValues` |
@@ -1036,13 +1038,11 @@ loudly.
 | The block component `block.system_breadcrumb_block` | `Resolver::trail()` | no breadcrumb list | `ResolverTest::testBreadcrumb`, `testBrokenTrail`, `CoupledHeadTest::testComponents`, `HeadlessHeadTest::testBreadcrumb` |
 | The `component_tree` field type's `component_id` column | `Sources::usage()` | usage counts nothing | `SourcesTreeTest::testUsage` |
 
-Proved by contract tests only on Canvas 1.x: a component in an item's own
-slot (an exposed slot set up by config makes
-`ComponentTreeLoader::getCanvasFieldName()` throw on a real site, so only test
-articles have one) and an instance on a version that is gone (Canvas fails the
-page and will not open it in the editor). Both read as the scenarios say in
-`SourcesTreeTest` and `ResolverTest`; the dialog's `/state` listed the broken
-instance as `error` with a complete head.
+Proved by contract tests only on Canvas 1.x: components in an item's own
+slots (the farm site's templates expose none) and an instance on a version
+that is gone (Canvas fails the page and will not open it in the editor).
+Both read as the scenarios say in `SourcesTreeTest` and `ResolverTest`; the
+dialog's `/state` listed the broken instance as `error` with a complete head.
 
 ### JavaScript (all in `extension/src/host.ts`)
 
@@ -1402,7 +1402,7 @@ each row names the test that fails when it changes.
 | `InstallTest` | install, uninstall (drafts written back), reinstall, container without canvas_headless | PHPUnit (kernel) |
 | `AiControllerTest`, `AssistantTest`, `RequirementsTest`, `PromptsTest` | access, caps, mixed fields, flood, error codes, the failure record, nothing written; provider resolution, prompts from the Prompt Library with the fixed tail, routing and tags, missing prompts, guardrail stops, answer reading, timeout, output cleaning; the status report entry; install, uninstall and reinstall with prompts added in the Prompt Library, default prompts that cannot be deleted | PHPUnit (kernel, submodule) |
 | `ShippedConfigTest` (submodule) | the shipped prompt types, prompts and permission text | PHPUnit (unit) |
-| `SourcesTreeTest` (`canvas_metatag_canvas_contract`), `ComponentBudgetTest` | what renders on a page (template, an item's own slot, a page, its chrome: a variant or legacy regions, their drafts in previews, no disabled template), versions, values by the account rule, images through their file, personalization, a component that throws, a per-user value, usage; 20 instances read warm within the budget | PHPUnit (kernel) |
+| `SourcesTreeTest` (`canvas_metatag_canvas_contract`), `ComponentBudgetTest` | what renders on a page (template, an item's own slots, each from its own field, a page, its chrome: a variant or legacy regions, their drafts in previews, no disabled template), versions, values by the account rule, images through their file, personalization, a component that throws, a per-user value, usage; 20 instances read warm within the budget | PHPUnit (kernel) |
 | `ExtendMergeTest`, `ModuleIdsTest`, `CustomFillTest`, `VocabularyTest`, `VocabularyRouteTest` | added details merged per leaf with clashes and selectors, the hand-added main thing; the module id list and short ids; whole-value fills and what an empty one leaves out; the trimmed schema.org vocabulary, its command, route and status line; `ValuesTest::testSharedFixtures` and `SearchFeaturesTest::testSharedFixtures` run `tests/fixtures/custom/` and `tests/fixtures/features/` | PHPUnit (unit, kernel) |
 | `extension/src/custom/*.test.ts`, `features.test.ts` (vitest) | the same red set as the server, one text edited by Form without moving other bytes (a property test), paste clean-up, problems with their line, path and fix, the same verdicts as the server; the sheet's pure parts: Back's names and tab memory, type search and its steering, rows (numbers while typed, zone offsets, positions), the reference menu and moving an item to its own, the item list, the caret line, the vocabulary | `npm run verify` |
 | `tests/e2e/custom-form.spec.ts` | an employer rating built with the keyboard only, Form ⇄ JSON with no byte change, the sheet's levels and Back to Output, Undo of a removal, a paste in Form; axe at 600 and 350 px tall and in a narrow frame | Playwright (`coupled`) |

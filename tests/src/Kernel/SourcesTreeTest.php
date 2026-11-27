@@ -29,6 +29,7 @@ use Drupal\Tests\canvas\Traits\GenerateComponentConfigTrait;
 use Drupal\Tests\user\Traits\UserCreationTrait;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\Attributes\RequiresMethod;
 use PHPUnit\Framework\Attributes\RunTestsInSeparateProcesses;
 use Psr\Log\LoggerInterface;
 
@@ -70,6 +71,11 @@ final class SourcesTreeTest extends CanvasKernelTestBase implements LoggerInterf
   private const OTHER_CASE = '99999999-0000-4000-8000-000000000004';
   private const WELCOME_BACK = '99999999-0000-4000-8000-000000000005';
   private const BROKEN = '99999999-0000-4000-8000-000000000006';
+  private const FOOTER = 'cccccccc-0000-4000-8000-000000000002';
+  private const ASIDE = 'cccccccc-0000-4000-8000-000000000003';
+  private const IN_ASIDE = 'cccccccc-0000-4000-8000-000000000004';
+  private const BODY_DEFAULT = 'cccccccc-0000-4000-8000-000000000005';
+  private const EMPTIED = 'cccccccc-0000-4000-8000-000000000006';
   private const NO_VERSION = '77777777-0000-4000-8000-000000000001';
   private const IN_NO_VERSION = '77777777-0000-4000-8000-000000000002';
   private const NO_COMPONENT = '77777777-0000-4000-8000-000000000003';
@@ -171,7 +177,7 @@ final class SourcesTreeTest extends CanvasKernelTestBase implements LoggerInterf
   public function testTree(): void {
     $this->createSlotTemplate();
     $this->createChrome([self::breadcrumb(self::BREADCRUMB)]);
-    $video = self::placed(self::IN_SLOT, self::HEADING, ['heading' => 'Watch'], self::SLOTTED, 'the_body');
+    $video = self::inSlot(self::IN_SLOT, self::HEADING, ['heading' => 'Watch']);
     $one = Node::create(['type' => 'article', 'title' => 'One', 'status' => 1, 'field_canvas' => [$video]]);
     $one->save();
     $two = Node::create(['type' => 'article', 'title' => 'Two', 'status' => 1]);
@@ -278,6 +284,181 @@ final class SourcesTreeTest extends CanvasKernelTestBase implements LoggerInterf
     self::assertSame('template', $this->read($article, cacheability: $cacheability, draft: TRUE)[self::LINKED]['owner']);
     self::assertSame([], array_diff($auto_save->getAutoSaveEntity($template)->getCacheTags(), $cacheability->getCacheTags()));
     self::assertSame([(string) $template->label(), 'Chrome'], $labels($article));
+  }
+
+  /**
+   * Each exposed slot is read from its own field, as Canvas merges them.
+   */
+  #[RequiresMethod(ContentTemplate::class, 'getMergedComponentTree')]
+  public function testExposedSlots(): void {
+    // Deprecated Canvas methods called. Every other error, deprecation or
+    // not, goes on to the handler that was there (PHPUnit's), so a warning
+    // still fails the test.
+    $deprecations = [];
+    // The owner and slot of each instance read, by UUID; each read once.
+    $read = function (ContentEntityInterface $entity, bool $draft = FALSE, ?CacheableMetadata $cacheability = NULL) use (&$deprecations): array {
+      $previous = NULL;
+      $previous = set_error_handler(static function (int $level, string $message, string $file = '', int $line = 0) use (&$deprecations, &$previous): bool {
+        if ($level === E_USER_DEPRECATED && preg_match('/^Drupal\\\\canvas\\\\\S+::\w+\(\) is deprecated/', $message)) {
+          $deprecations[] = $message;
+          return TRUE;
+        }
+        return $previous !== NULL && (bool) $previous($level, $message, $file, $line);
+      });
+      try {
+        [$instances, $skipped] = $this->sources()->instances($this->sources()->tree($entity, $draft, $cacheability ?? new CacheableMetadata()));
+      }
+      finally {
+        restore_error_handler();
+      }
+      self::assertSame([], $skipped);
+      $owners = [];
+      foreach ($instances as $instance) {
+        self::assertArrayNotHasKey($instance['uuid'], $owners);
+        self::assertSame($entity, $instance['host']);
+        $item = $instance['item'];
+        $owners[$instance['uuid']] = [$instance['owner'], $item->getParentUuid(), $item->getSlot()];
+      }
+      ksort($owners);
+      return $owners;
+    };
+
+    // The Article template's component exposes its body and its footer; each
+    // holds a default component.
+    $template = $this->createSlotTemplate();
+    FieldStorageConfig::create(['field_name' => 'field_aside', 'entity_type' => 'node', 'type' => 'component_tree'])->save();
+    FieldConfig::create([
+      'field_name' => 'field_aside',
+      'entity_type' => 'node',
+      'bundle' => 'article',
+      'label' => 'Aside',
+    ])->save();
+    $template->setComponentTree([
+      self::placed(self::SLOTTED, 'sdc.canvas_test_sdc.props-slots', ['heading' => 'Article']),
+      self::placed(self::BODY_DEFAULT, self::HEADING, ['heading' => 'Default body'], self::SLOTTED, 'the_body'),
+      self::placed(self::FOOTER, self::HEADING, ['heading' => 'Default footer'], self::SLOTTED, 'the_footer'),
+    ])->save();
+    $both = ['field_canvas', 'field_aside'];
+    $expose = static fn (array $fields): array => array_intersect_key([
+      'field_canvas' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_body', 'label' => 'Content'],
+      'field_aside' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_footer', 'label' => 'Aside'],
+    ], array_flip($fields));
+
+    // One article fills both slots, the footer with a component that holds
+    // another; one fills neither; one empties its footer on purpose, with
+    // Canvas's empty-slot marker as the field's only root.
+    Marker::ensureComponent(Marker::EMPTY_SLOT_LOCAL_ID);
+    $full = Node::create([
+      'type' => 'article',
+      'title' => 'Full',
+      'status' => 1,
+      'field_canvas' => [self::placed(self::IN_SLOT, self::HEADING, ['heading' => 'Watch'])],
+      'field_aside' => [
+        self::placed(self::ASIDE, 'sdc.canvas_test_sdc.props-slots', ['heading' => 'Aside']),
+        self::placed(self::IN_ASIDE, self::HEADING, ['heading' => 'Related'], self::ASIDE, 'the_body'),
+      ],
+    ]);
+    $full->save();
+    $empty = Node::create(['type' => 'article', 'title' => 'Empty', 'status' => 1]);
+    $empty->save();
+    $body_only = Node::create([
+      'type' => 'article',
+      'title' => 'Body only',
+      'status' => 1,
+      'field_canvas' => [self::placed(self::IN_SLOT, self::HEADING, ['heading' => 'Watch'])],
+    ]);
+    $body_only->save();
+    $emptied = Node::create([
+      'type' => 'article',
+      'title' => 'Emptied',
+      'status' => 1,
+      'field_aside' => [self::placed(self::EMPTIED, Marker::EMPTY_SLOT_COMPONENT_ID)],
+    ]);
+    $emptied->save();
+    $filled = [
+      self::IN_SLOT => ['item', self::SLOTTED, 'the_body'],
+      self::SLOTTED => ['template', NULL, NULL],
+      self::ASIDE => ['item', self::SLOTTED, 'the_footer'],
+      self::IN_ASIDE => ['item', self::ASIDE, 'the_body'],
+    ];
+    ksort($filled);
+    $default = [
+      self::SLOTTED => ['template', NULL, NULL],
+      self::BODY_DEFAULT => ['template', self::SLOTTED, 'the_body'],
+      self::FOOTER => ['template', self::SLOTTED, 'the_footer'],
+    ];
+    ksort($default);
+    // A filled body slot replaces its default.
+    $body = [self::IN_SLOT => ['item', self::SLOTTED, 'the_body']] + $default;
+    unset($body[self::BODY_DEFAULT]);
+    ksort($body);
+    // An emptied footer: the marker, the node's own, instead of the default.
+    $marked = [self::EMPTIED => ['item', self::SLOTTED, 'the_footer']] + $default;
+    unset($marked[self::FOOTER]);
+    ksort($marked);
+
+    // A draft of the template that also exposes the footer: read in its
+    // preview only.
+    $this->container->get(AutoSaveManager::class)->saveEntity((clone $template)->set('exposed_slots', $expose($both)));
+    self::assertSame($body, $read($full));
+    self::assertSame($filled, $read($full, TRUE));
+
+    // Published: every slot from its own field, in its own slot; a slot an
+    // article left empty keeps the template's default, the others do not.
+    $template->set('exposed_slots', $expose($both))->save();
+    self::assertSame($filled, $read($full));
+    self::assertSame($default, $read($empty));
+    self::assertSame($body, $read($body_only));
+    self::assertSame($marked, $read($emptied));
+    // The marker has no props: no mapping can ask it for a value.
+    $marker = $this->read($emptied)[self::EMPTIED];
+    self::assertSame([], Component::load($marker['component'])->getSettings($marker['version'])['prop_field_definitions'] ?? []);
+
+    // A template that exposes no slot: its own tree, and no visitor's access
+    // to ask.
+    $state = $this->container->get('state');
+    $state->delete('canvas_metatag_count_test');
+    $template->set('exposed_slots', [])->save();
+    self::assertSame($default, $read($full));
+    self::assertSame([], $state->get('canvas_metatag_count_test', []));
+    $template->set('exposed_slots', $expose($both))->save();
+
+    // A slot whose field the type no longer has keeps the default. Canvas
+    // refuses to save one; it is stored as a template is left behind.
+    $gone = ['field_gone' => ['component_uuid' => self::SLOTTED, 'slot_name' => 'the_footer', 'label' => 'Gone']] + $expose(['field_canvas']);
+    $name = $template->getConfigDependencyName();
+    $this->container->get('config.storage')->write($name, ['exposed_slots' => $gone] + $this->config($name)->getRawData());
+    $this->container->get('config.factory')->reset($name);
+    $this->container->get('entity_type.manager')->getStorage('content_template')->resetCache();
+    self::assertSame($body, $read($full));
+    ContentTemplate::load($template->id())->set('exposed_slots', $expose($both))->save();
+
+    // A footer field anonymous visitors may not view: on a public article,
+    // the default footer for everyone, and the head does not vary by user;
+    // it keeps the tags and max-age of the slot fields' access.
+    $this->container->get('state')->set('canvas_metatag_count_test.denied', 'field_aside');
+    $this->container->get('state')->set('canvas_metatag_count_test.expires', 'field_canvas');
+    self::assertSame($body, $read($full));
+    $admin = $this->setUpCurrentUser([], [], TRUE);
+    $cacheability = new CacheableMetadata();
+    self::assertSame($body, $read($full, FALSE, $cacheability));
+    self::assertSame([], $cacheability->getCacheContexts());
+    self::assertContains('canvas_metatag_count_test:denied', $cacheability->getCacheTags());
+    self::assertSame(60, $cacheability->getCacheMaxAge());
+    // So does the head the administrator's request resolves.
+    $head = $this->container->get(Resolver::class)->resolve($this->container->get('entity_type.manager')->getStorage('node')->loadUnchanged($full->id()))['cacheability'];
+    self::assertSame([], array_filter($head->getCacheContexts(), static fn (string $context): bool => str_starts_with($context, 'user')));
+    self::assertContains('canvas_metatag_count_test:denied', $head->getCacheTags());
+    self::assertSame(60, $head->getCacheMaxAge());
+    // A page visitors may not view is read as its user: the administrator
+    // sees the footer, and the head varies with that.
+    $full->setUnpublished()->set('uid', $admin->id())->save();
+    $cacheability = new CacheableMetadata();
+    self::assertSame($filled, $read($full, FALSE, $cacheability));
+    self::assertContains('user.roles:anonymous', $cacheability->getCacheContexts());
+
+    // Canvas's merge, never its deprecated one.
+    self::assertSame([], $deprecations);
   }
 
   /**
@@ -568,7 +749,7 @@ final class SourcesTreeTest extends CanvasKernelTestBase implements LoggerInterf
     Node::create([
       'type' => 'article',
       'title' => 'Twice',
-      'field_canvas' => [self::placed(self::IN_SLOT, self::HEADING, ['heading' => 'One'], self::SLOTTED, 'the_body')],
+      'field_canvas' => [self::inSlot(self::IN_SLOT, self::HEADING, ['heading' => 'One'])],
       'field_aside' => [self::placed(self::LINKED, self::HEADING, ['heading' => 'Two'])],
     ])->save();
     self::assertSame(['content' => 2, 'templates' => 0], $this->sources()->usage(self::HEADING));
